@@ -24,7 +24,7 @@ gstreamer-app = "0.25"
 gstreamer-video = "0.25"
 
 # Enthält die `parse_launch`-Funktion in neueren gstreamer-rs Versionen.
-gstreamer-pbutils = "0.24"
+gstreamer-pbutils = "0.25"
 
 # Diese Crate wird oft als Hilfsbibliothek benötigt
 glib = "0.22"
