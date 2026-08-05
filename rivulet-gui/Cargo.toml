@@ -6,7 +6,7 @@ rust-version = "1.70"
 
 [dependencies]
 # GUI-Framework
-eframe = { version = "0.34.2", default-features = false, features = [
+eframe = { version = "0.35.0", default-features = false, features = [
     "accesskit",
     "default_fonts",
     "glow",
