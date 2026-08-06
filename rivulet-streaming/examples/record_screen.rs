@@ -14,27 +14,34 @@ fn main() -> anyhow::Result<()> {
         println!(
             "  [{}] {} - {}x{} @ ({}, {})",
             i,
-            monitor.name(),
-            monitor.width(),
-            monitor.height(),
-            monitor.x(),
-            monitor.y()
+            monitor.name().unwrap_or_default(),
+            monitor.width().unwrap_or(0),
+            monitor.height().unwrap_or(0),
+            monitor.x().unwrap_or(0),
+            monitor.y().unwrap_or(0)
         );
     }
 
     // Wähle primären Monitor
     let monitor = monitors
         .into_iter()
-        .find(|m| m.is_primary())
+        .find(|m| m.is_primary().unwrap_or(false))
         .or_else(|| Monitor::all().ok()?.into_iter().next())
         .ok_or_else(|| anyhow::anyhow!("No monitor found"))?;
 
-    let width = monitor.width();
-    let height = monitor.height();
+    let width = monitor.width().unwrap_or(0);
+    let height = monitor.height().unwrap_or(0);
 
-    println!("\n📹 Recording monitor: {}", monitor.name());
+    println!(
+        "\nRecording monitor: {}",
+        monitor.name().unwrap_or_default()
+    );
     println!("   Resolution: {}x{}", width, height);
-    println!("   Position: ({}, {})", monitor.x(), monitor.y());
+    println!(
+        "   Position: ({}, {})",
+        monitor.x().unwrap_or(0),
+        monitor.y().unwrap_or(0)
+    );
 
     // Erstelle Encoder
     let output_path = PathBuf::from("screen_recording.mp4");

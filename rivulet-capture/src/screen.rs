@@ -23,10 +23,15 @@ impl XCapScreenCapture {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("Monitor {} not found", display_index))?;
 
-        let width = monitor.width();
-        let height = monitor.height();
+        let width = monitor.width().context("Failed to get monitor width")?;
+        let height = monitor.height().context("Failed to get monitor height")?;
 
-        tracing::info!("Monitor: {}x{} - {}", width, height, monitor.name());
+        tracing::info!(
+            "Monitor: {}x{} - {}",
+            width,
+            height,
+            monitor.name().unwrap_or_default()
+        );
 
         Ok(Self {
             monitor,
@@ -45,12 +50,12 @@ impl XCapScreenCapture {
             .enumerate()
             .map(|(idx, m)| MonitorInfo {
                 index: idx as u32,
-                name: m.name().to_string(),
-                width: m.width(),
-                height: m.height(),
-                x: m.x(),
-                y: m.y(),
-                is_primary: m.is_primary(),
+                name: m.name().unwrap_or_default(),
+                width: m.width().unwrap_or(0),
+                height: m.height().unwrap_or(0),
+                x: m.x().unwrap_or(0),
+                y: m.y().unwrap_or(0),
+                is_primary: m.is_primary().unwrap_or(false),
             })
             .collect())
     }
