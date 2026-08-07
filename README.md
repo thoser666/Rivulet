@@ -45,6 +45,7 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 
 - **Screen Capture** - Capture your primary monitor in real-time
 - **Video Encoding** - H.264 encoding via FFmpeg
+- **Audio Capture (engine, Linux)** - Desktop sound and microphone, mixed in real time via GStreamer (48 kHz stereo, per-source volume); usable via the `rivulet-audio` crate and the `record_screen_audio` example
 - **Live Preview** - See what you're recording as you record
 - **Tab-Based Interface** - Clean, DaVinci Resolve-style UI
   - Record Tab - Main recording controls and preview
@@ -60,10 +61,9 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 
 ### 🚧 In Development (v0.2 - December 2025)
 
-- **Audio Capture**
-  - System audio (desktop sound)
-  - Microphone input
-  - Audio mixer with volume controls
+- **Audio Mixer UI**
+  - Mixer UI with volume sliders for system/mic
+  - Separate audio tracks (system/mic)
 - **Hardware Encoding**
   - NVIDIA NVENC
   - Intel QuickSync
@@ -86,9 +86,9 @@ See [Roadmap](#-roadmap) for detailed timeline.
 **Target: December 31, 2025** | **Status: In Progress**
 
 **Audio Capture**
-- [ ] System audio capture (desktop/game sound)
-- [ ] Microphone audio capture
-- [ ] Audio/video synchronization
+- [x] System audio capture (desktop/game sound)
+- [x] Microphone audio capture
+- [x] Audio/video synchronization
 - [ ] Audio mixer UI with volume sliders
 - [ ] Separate audio tracks (system/mic)
 
