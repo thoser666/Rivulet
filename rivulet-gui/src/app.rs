@@ -7,12 +7,10 @@ use rivulet_core::RivuletEngine;
 // --- Linux-spezifische Imports ---
 #[cfg(target_os = "linux")]
 use {
-    ashpd::desktop::file_chooser::{FileChooser, FileFilter},
-    ashpd::desktop::screencast::{CursorMode, Screencast, Session, Source, Stream},
-    ashpd::enumflags2::BitFlags,
-    ashpd::WindowIdentifier,
+    ashpd::desktop::screencast::{Screencast, Stream},
+    ashpd::desktop::Session,
     once_cell::sync::Lazy,
-    pipewire::{spa::param::video::VideoFormat, types::Fd},
+    pipewire::spa::utils::Fd,
     std::sync::mpsc as std_mpsc,
     tokio::runtime::Runtime,
 };
@@ -136,10 +134,10 @@ pub struct RivuletApp {
     is_recording: bool,
     #[cfg(target_os = "linux")]
     #[serde(skip)]
-    screencast: Screencast,
+    screencast: Option<Screencast>,
     #[cfg(target_os = "linux")]
     #[serde(skip)]
-    session: Option<Session<'static>>,
+    session: Option<Session<Screencast>>,
     #[cfg(target_os = "linux")]
     #[serde(skip)]
     stream: Option<Stream>,
@@ -193,7 +191,7 @@ impl Default for RivuletApp {
             #[cfg(target_os = "linux")]
             is_recording: false,
             #[cfg(target_os = "linux")]
-            screencast: Screencast::new(),
+            screencast: None,
             #[cfg(target_os = "linux")]
             session: None,
             #[cfg(target_os = "linux")]
@@ -359,8 +357,11 @@ impl RivuletApp {
 
 impl RivuletApp {
     pub fn new(cc: &eframe::CreationContext<'_>, engine: RivuletEngine) -> Self {
-        let mut app = Self::default();
-        app.engine = engine;
+        #[allow(unused_mut)]
+        let mut app = Self {
+            engine,
+            ..Default::default()
+        };
         #[cfg(target_os = "windows")]
         {
             app.refresh_capture_sources();
@@ -374,7 +375,7 @@ impl eframe::App for RivuletApp {
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         #[cfg(target_os = "windows")]
         {
             if self.is_windows_recording {
@@ -400,17 +401,17 @@ impl eframe::App for RivuletApp {
             }
         }
 
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
+        egui::Panel::top("top_panel").show(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Quit").clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             ui.heading("Welcome to Rivulet");
             ui.separator();
 
@@ -425,7 +426,7 @@ impl eframe::App for RivuletApp {
                 } else {
                     ui.horizontal(|ui| {
                         ui.label("Quelle:");
-                        egui::ComboBox::from_id_source("monitor_select")
+                        egui::ComboBox::from_id_salt("monitor_select")
                             .selected_text(
                                 self.selected_monitor_idx
                                     .and_then(|idx| self.monitors.get(idx))
@@ -451,7 +452,7 @@ impl eframe::App for RivuletApp {
                                     }
                                 }
                             });
-                        egui::ComboBox::from_id_source("window_select")
+                        egui::ComboBox::from_id_salt("window_select")
                             .selected_text(
                                 self.selected_window_idx
                                     .and_then(|idx| self.windows.get(idx))

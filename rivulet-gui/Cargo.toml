@@ -5,12 +5,14 @@ edition = "2021"
 rust-version = "1.70"
 
 [dependencies]
-# GUI-Framework
+# GUI-Framework (accesskit deaktiviert: zbus/Tokio-Konflikt auf Linux,
+# accesskit_unix verbindet sich in einem Fremd-Thread zum DBus)
 eframe = { version = "0.35.0", default-features = false, features = [
-    "accesskit",
     "default_fonts",
     "glow",
     "persistence",
+    "wayland",
+    "x11",
 ] }
 
 # Abhängigkeiten für die Rivulet-App-Logik
@@ -41,7 +43,7 @@ version = "0.30"
 
 # Linux-spezifische Abhängigkeiten
 [target.'cfg(target_os = "linux")'.dependencies]
-ashpd = { version = "0.13.10", features = ["tokio"] }
+ashpd = { version = "0.13.10", features = ["tokio", "screencast"] }
 pipewire = { version = "0.10.0", features = ["v0_3_33"] }
 
 
