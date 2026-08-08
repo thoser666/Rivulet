@@ -12,11 +12,14 @@ use {
     once_cell::sync::Lazy,
     pipewire::spa::utils::Fd,
     rivulet_audio::{AudioCapture, AudioConfig},
+    rivulet_core::AudioFrame,
     std::sync::mpsc as std_mpsc,
     std::sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc,
     },
+    std::thread,
+    std::time::Instant,
     tokio::runtime::Runtime,
 };
 
@@ -44,8 +47,7 @@ use {
     },
 };
 
-// --- Datenstruktur für rohe Frames (Windows) ---
-#[cfg(target_os = "windows")]
+// --- Datenstruktur für rohe Frames ---
 #[derive(Debug)]
 struct RawFrame {
     data: Vec<u8>,
@@ -178,6 +180,29 @@ pub struct RivuletApp {
     #[cfg(target_os = "linux")]
     mic_volume: f32,
 
+    // Linux-Screen-Recording
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    audio_rx: Option<std_mpsc::Receiver<AudioFrame>>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    monitors: Vec<xcap::Monitor>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    selected_monitor_idx: Option<usize>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    raw_rx: Option<std_mpsc::Receiver<RawFrame>>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    stop_signal: Option<Arc<AtomicBool>>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    record_started: Instant,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    record_status: Option<String>,
+
     // Windows Fields
     #[cfg(target_os = "windows")]
     #[serde(skip)]
@@ -246,6 +271,21 @@ impl Default for RivuletApp {
             system_volume: 0.8,
             #[cfg(target_os = "linux")]
             mic_volume: 1.0,
+
+            #[cfg(target_os = "linux")]
+            audio_rx: None,
+            #[cfg(target_os = "linux")]
+            monitors: Vec::new(),
+            #[cfg(target_os = "linux")]
+            selected_monitor_idx: None,
+            #[cfg(target_os = "linux")]
+            raw_rx: None,
+            #[cfg(target_os = "linux")]
+            stop_signal: None,
+            #[cfg(target_os = "linux")]
+            record_started: Instant::now(),
+            #[cfg(target_os = "linux")]
+            record_status: None,
 
             #[cfg(target_os = "windows")]
             is_windows_recording: false,
@@ -420,12 +460,15 @@ impl RivuletApp {
             }
         };
 
+        let (audio_tx, audio_rx) = std_mpsc::channel::<AudioFrame>();
         let peak = Arc::clone(&self.audio_peak);
         match audio.start(Box::new(move |frame| {
             let p = frame.data.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
             peak.store(p.to_bits(), Ordering::SeqCst);
+            let _ = audio_tx.send(frame);
         })) {
             Ok(()) => {
+                self.audio_rx = Some(audio_rx);
                 self.audio = Some(audio);
                 self.audio_preview = true;
                 self.audio_status = None;
@@ -440,8 +483,130 @@ impl RivuletApp {
         if let Some(mut audio) = self.audio.take() {
             let _ = audio.stop();
         }
+        self.audio_rx = None;
         self.audio_preview = false;
         self.audio_peak.store(0.0f32.to_bits(), Ordering::SeqCst);
+    }
+
+    fn refresh_linux_monitors(&mut self) {
+        self.monitors = xcap::Monitor::all().unwrap_or_default();
+        if self
+            .selected_monitor_idx
+            .map_or(true, |idx| idx >= self.monitors.len())
+        {
+            self.selected_monitor_idx = None;
+        }
+    }
+
+    fn start_linux_recording(&mut self) {
+        if self.is_recording {
+            return;
+        }
+        let Some(idx) = self.selected_monitor_idx else {
+            self.record_status = Some("Kein Monitor ausgewählt.".to_string());
+            return;
+        };
+        let Some(monitor) = self.monitors.get(idx).cloned() else {
+            self.record_status = Some("Ausgewählter Monitor ist ungültig.".to_string());
+            return;
+        };
+
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("MP4 Video", &["mp4"])
+            .set_file_name(format!(
+                "rivulet-recording-{}.mp4",
+                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
+            ))
+            .save_file()
+        else {
+            println!("Dateiauswahl abgebrochen.");
+            return;
+        };
+
+        if (self.capture_system || self.capture_mic) && !self.audio_preview {
+            self.start_audio_capture();
+        }
+        self.engine.set_audio_enabled(self.audio_preview);
+        self.engine.start_local_recording(path);
+
+        let (raw_tx, raw_rx) = std_mpsc::channel::<RawFrame>();
+        let stop = Arc::new(AtomicBool::new(false));
+        self.raw_rx = Some(raw_rx);
+        self.stop_signal = Some(stop.clone());
+
+        let monitor_name = monitor.name().unwrap_or_default();
+        let monitor_size = format!(
+            "{}x{}",
+            monitor.width().unwrap_or(0),
+            monitor.height().unwrap_or(0)
+        );
+
+        let fps = 30u64;
+        let frame_duration = std::time::Duration::from_millis(1000 / fps);
+        thread::spawn(move || {
+            let mut next = Instant::now();
+            while !stop.load(Ordering::SeqCst) {
+                match monitor.capture_image() {
+                    Ok(image) => {
+                        let frame = RawFrame {
+                            data: image.as_raw().to_vec(),
+                            width: image.width(),
+                            height: image.height(),
+                        };
+                        if raw_tx.send(frame).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Screen-Capture-Fehler: {e}");
+                        break;
+                    }
+                }
+                next += frame_duration;
+                let now = Instant::now();
+                if next > now {
+                    std::thread::sleep(next - now);
+                }
+            }
+        });
+
+        self.is_recording = true;
+        self.record_started = Instant::now();
+        self.record_status = None;
+        println!("Linux-Aufnahme gestartet: Monitor {monitor_name} ({monitor_size})");
+    }
+
+    fn stop_linux_recording(&mut self) {
+        if !self.is_recording {
+            return;
+        }
+        if let Some(signal) = &self.stop_signal {
+            signal.store(true, Ordering::SeqCst);
+        }
+        self.engine.stop_recording();
+        self.raw_rx = None;
+        self.stop_signal = None;
+        self.stop_audio_capture();
+        self.is_recording = false;
+        self.record_status = Some("Aufnahme gespeichert.".to_string());
+    }
+
+    fn drain_linux_frames(&mut self) {
+        if let Some(rx) = &self.raw_rx {
+            while let Ok(raw) = rx.try_recv() {
+                self.engine
+                    .process_raw_frame(&raw.data, raw.width, raw.height);
+            }
+        }
+        if let Some(rx) = &self.audio_rx {
+            if self.is_recording {
+                while let Ok(frame) = rx.try_recv() {
+                    let _ = self.engine.push_audio_frame(&frame);
+                }
+            } else {
+                while rx.try_recv().is_ok() {}
+            }
+        }
     }
 }
 
@@ -455,6 +620,10 @@ impl RivuletApp {
         #[cfg(target_os = "windows")]
         {
             app.refresh_capture_sources();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            app.refresh_linux_monitors();
         }
         app
     }
@@ -587,7 +756,74 @@ impl eframe::App for RivuletApp {
 
             #[cfg(target_os = "linux")]
             {
+                self.drain_linux_frames();
+
                 ui.add_space(10.0);
+                ui.label(egui::RichText::new("Bildschirmaufnahme").strong());
+
+                if self.is_recording {
+                    ui.horizontal(|ui| {
+                        let elapsed = self.record_started.elapsed().as_secs();
+                        ui.label(
+                            egui::RichText::new(format!("● Aufnahme läuft ({elapsed}s)"))
+                                .color(egui::Color32::LIGHT_RED),
+                        );
+                        if ui.button("⏹ Aufnahme stoppen").clicked() {
+                            self.stop_linux_recording();
+                        }
+                    });
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.label("Monitor:");
+                        egui::ComboBox::from_id_salt("linux_monitor_select")
+                            .selected_text(
+                                self.selected_monitor_idx
+                                    .and_then(|idx| self.monitors.get(idx))
+                                    .map(|m| {
+                                        format!(
+                                            "{} ({}x{})",
+                                            m.name().unwrap_or_default(),
+                                            m.width().unwrap_or(0),
+                                            m.height().unwrap_or(0)
+                                        )
+                                    })
+                                    .unwrap_or_else(|| "Monitor auswählen".to_string()),
+                            )
+                            .show_ui(ui, |ui| {
+                                for (i, m) in self.monitors.iter().enumerate() {
+                                    if ui
+                                        .selectable_label(
+                                            self.selected_monitor_idx == Some(i),
+                                            format!(
+                                                "{} ({}x{})",
+                                                m.name().unwrap_or_default(),
+                                                m.width().unwrap_or(0),
+                                                m.height().unwrap_or(0)
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.selected_monitor_idx = Some(i);
+                                    }
+                                }
+                            });
+                        if ui
+                            .button("🔄")
+                            .on_hover_text("Monitore aktualisieren")
+                            .clicked()
+                        {
+                            self.refresh_linux_monitors();
+                        }
+                    });
+                    if ui.button("⏺ Aufnahme starten").clicked() {
+                        self.start_linux_recording();
+                    }
+                }
+                if let Some(status) = &self.record_status {
+                    ui.colored_label(egui::Color32::LIGHT_BLUE, status);
+                }
+
+                ui.separator();
                 ui.label(egui::RichText::new("Audio-Mixer").strong());
 
                 ui.horizontal(|ui| {
