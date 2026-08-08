@@ -45,6 +45,7 @@ version = "0.30"
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.13.10", features = ["tokio", "screencast"] }
 pipewire = { version = "0.10.0", features = ["v0_3_33"] }
+rivulet-audio = { path = "../rivulet-audio" }
 
 
 

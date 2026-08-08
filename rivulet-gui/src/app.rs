@@ -11,7 +11,12 @@ use {
     ashpd::desktop::Session,
     once_cell::sync::Lazy,
     pipewire::spa::utils::Fd,
+    rivulet_audio::{AudioCapture, AudioConfig},
     std::sync::mpsc as std_mpsc,
+    std::sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
     tokio::runtime::Runtime,
 };
 
@@ -151,6 +156,28 @@ pub struct RivuletApp {
     #[serde(skip)]
     receiver: std_mpsc::Receiver<BackendMessage>,
 
+    // Audio-Mixer (Linux)
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    audio: Option<AudioCapture>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    audio_preview: bool,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    audio_status: Option<String>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    audio_peak: Arc<AtomicU32>,
+    #[cfg(target_os = "linux")]
+    capture_system: bool,
+    #[cfg(target_os = "linux")]
+    capture_mic: bool,
+    #[cfg(target_os = "linux")]
+    system_volume: f32,
+    #[cfg(target_os = "linux")]
+    mic_volume: f32,
+
     // Windows Fields
     #[cfg(target_os = "windows")]
     #[serde(skip)]
@@ -202,6 +229,23 @@ impl Default for RivuletApp {
             sender,
             #[cfg(target_os = "linux")]
             receiver,
+
+            #[cfg(target_os = "linux")]
+            audio: None,
+            #[cfg(target_os = "linux")]
+            audio_preview: false,
+            #[cfg(target_os = "linux")]
+            audio_status: None,
+            #[cfg(target_os = "linux")]
+            audio_peak: Arc::new(AtomicU32::new(0)),
+            #[cfg(target_os = "linux")]
+            capture_system: true,
+            #[cfg(target_os = "linux")]
+            capture_mic: true,
+            #[cfg(target_os = "linux")]
+            system_volume: 0.8,
+            #[cfg(target_os = "linux")]
+            mic_volume: 1.0,
 
             #[cfg(target_os = "windows")]
             is_windows_recording: false,
@@ -355,6 +399,52 @@ impl RivuletApp {
     }
 }
 
+#[cfg(target_os = "linux")]
+impl RivuletApp {
+    fn start_audio_capture(&mut self) {
+        self.stop_audio_capture();
+
+        let config = AudioConfig {
+            capture_system: self.capture_system,
+            capture_mic: self.capture_mic,
+            system_volume: self.system_volume,
+            mic_volume: self.mic_volume,
+            ..Default::default()
+        };
+
+        let mut audio = match AudioCapture::new(config) {
+            Ok(audio) => audio,
+            Err(e) => {
+                self.audio_status = Some(format!("Audio-Capture nicht verfügbar: {e}"));
+                return;
+            }
+        };
+
+        let peak = Arc::clone(&self.audio_peak);
+        match audio.start(Box::new(move |frame| {
+            let p = frame.data.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
+            peak.store(p.to_bits(), Ordering::SeqCst);
+        })) {
+            Ok(()) => {
+                self.audio = Some(audio);
+                self.audio_preview = true;
+                self.audio_status = None;
+            }
+            Err(e) => {
+                self.audio_status = Some(format!("Audio-Start fehlgeschlagen: {e}"));
+            }
+        }
+    }
+
+    fn stop_audio_capture(&mut self) {
+        if let Some(mut audio) = self.audio.take() {
+            let _ = audio.stop();
+        }
+        self.audio_preview = false;
+        self.audio_peak.store(0.0f32.to_bits(), Ordering::SeqCst);
+    }
+}
+
 impl RivuletApp {
     pub fn new(cc: &eframe::CreationContext<'_>, engine: RivuletEngine) -> Self {
         #[allow(unused_mut)]
@@ -497,7 +587,70 @@ impl eframe::App for RivuletApp {
 
             #[cfg(target_os = "linux")]
             {
-                // Placeholder für Linux UI Code
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new("Audio-Mixer").strong());
+
+                ui.horizontal(|ui| {
+                    if self.audio_preview {
+                        if ui.button("⏹ Audio stoppen").clicked() {
+                            self.stop_audio_capture();
+                        }
+                        ui.label(egui::RichText::new("● läuft").color(egui::Color32::LIGHT_GREEN));
+                    } else if ui.button("▶ Audio starten").clicked() {
+                        self.start_audio_capture();
+                    }
+                });
+
+                let mut sys = self.capture_system;
+                let mut mic = self.capture_mic;
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut sys, "Systemaudio");
+                    ui.checkbox(&mut mic, "Mikrofon");
+                });
+                if sys != self.capture_system || mic != self.capture_mic {
+                    self.capture_system = sys;
+                    self.capture_mic = mic;
+                    if self.audio_preview {
+                        self.start_audio_capture();
+                    }
+                }
+
+                let mut sys_vol = self.system_volume;
+                let mut mic_vol = self.mic_volume;
+                if ui
+                    .add(egui::Slider::new(&mut sys_vol, 0.0..=1.0).text("Systemaudio"))
+                    .changed()
+                {
+                    self.system_volume = sys_vol;
+                    if let Some(audio) = &self.audio {
+                        audio.set_system_volume(sys_vol);
+                    }
+                }
+                if ui
+                    .add(egui::Slider::new(&mut mic_vol, 0.0..=1.0).text("Mikrofon"))
+                    .changed()
+                {
+                    self.mic_volume = mic_vol;
+                    if let Some(audio) = &self.audio {
+                        audio.set_mic_volume(mic_vol);
+                    }
+                }
+
+                let peak = f32::from_bits(self.audio_peak.load(Ordering::SeqCst)).clamp(0.0, 1.0);
+                let db = if peak > 0.0 {
+                    20.0 * peak.log10()
+                } else {
+                    -96.0
+                };
+                ui.add(
+                    egui::ProgressBar::new(peak)
+                        .desired_width(f32::INFINITY)
+                        .text(format!("Peak: {db:.1} dB")),
+                );
+
+                if let Some(status) = &self.audio_status {
+                    ui.colored_label(egui::Color32::RED, status);
+                }
             }
 
             #[cfg(not(any(target_os = "linux", target_os = "windows")))]
