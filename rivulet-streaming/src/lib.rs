@@ -39,3 +39,19 @@ impl Default for RecordingSettings {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_recording_settings() {
+        let settings = RecordingSettings::default();
+        assert_eq!(settings.output_path, PathBuf::from("recording.mp4"));
+        assert_eq!(settings.width, 1920);
+        assert_eq!(settings.height, 1080);
+        assert_eq!(settings.fps, 30);
+        assert_eq!(settings.bitrate, 5_000_000);
+        assert_eq!(settings.codec, "h264");
+    }
+}

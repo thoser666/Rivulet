@@ -161,3 +161,28 @@ impl Drop for VideoEncoder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Diese Validierungen laufen ab, bevor FFmpeg gestartet wird,
+    // daher benötigen die Tests kein ffmpeg-Binary.
+    #[test]
+    fn rejects_zero_width() {
+        let result = VideoEncoder::new(Path::new("out.mp4"), 0, 720, 30, 1_000_000);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_zero_height() {
+        let result = VideoEncoder::new(Path::new("out.mp4"), 1280, 0, 30, 1_000_000);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_zero_fps() {
+        let result = VideoEncoder::new(Path::new("out.mp4"), 1280, 720, 0, 1_000_000);
+        assert!(result.is_err());
+    }
+}

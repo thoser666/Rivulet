@@ -23,3 +23,35 @@ impl AudioFrame {
         self.data.len() / self.channels.max(1) as usize
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_creates_frame_with_given_data() {
+        let data = vec![0.1, -0.2, 0.3, -0.4];
+        let frame = AudioFrame::new(data.clone(), 48_000, 2);
+        assert_eq!(frame.data, data);
+        assert_eq!(frame.sample_rate, 48_000);
+        assert_eq!(frame.channels, 2);
+    }
+
+    #[test]
+    fn frame_len_computes_samples_per_channel() {
+        let frame = AudioFrame::new(vec![0.0; 8], 48_000, 2);
+        assert_eq!(frame.frame_len(), 4);
+    }
+
+    #[test]
+    fn frame_len_never_divides_by_zero() {
+        let frame = AudioFrame::new(vec![0.0; 4], 48_000, 0);
+        assert_eq!(frame.frame_len(), 4);
+    }
+
+    #[test]
+    fn empty_frame_has_zero_len() {
+        let frame = AudioFrame::new(Vec::new(), 48_000, 2);
+        assert_eq!(frame.frame_len(), 0);
+    }
+}

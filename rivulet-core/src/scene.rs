@@ -14,3 +14,15 @@ impl Scene {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scene_new_creates_unique_id_and_name() {
+        let scene = Scene::new("Hauptszene".to_string());
+        assert_eq!(scene.name, "Hauptszene");
+        assert_ne!(scene.id, Uuid::nil());
+    }
+}

@@ -107,3 +107,61 @@ impl Drop for Recorder {
         let _ = self.stop();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::EncodableFrame;
+    use std::path::PathBuf;
+
+    fn make_settings() -> RecordingSettings {
+        RecordingSettings {
+            output_path: PathBuf::from("out.mp4"),
+            width: 1280,
+            height: 720,
+            fps: 30,
+            bitrate: 2_000_000,
+            codec: "h264".to_string(),
+        }
+    }
+
+    fn make_frame() -> EncodableFrame {
+        EncodableFrame {
+            data: vec![0; 100],
+            width: 1280,
+            height: 720,
+            stride: 1280 * 4,
+            timestamp: std::time::Instant::now(),
+        }
+    }
+
+    #[test]
+    fn recorder_start_send_stop_lifecycle() {
+        let mut recorder = Recorder::new(make_settings()).unwrap();
+        assert!(!recorder.is_recording());
+
+        recorder.start().unwrap();
+        assert!(recorder.is_recording());
+
+        for _ in 0..5 {
+            recorder.send_frame(make_frame()).unwrap();
+        }
+
+        recorder.stop().unwrap();
+        assert!(!recorder.is_recording());
+    }
+
+    #[test]
+    fn recorder_rejects_double_start() {
+        let mut recorder = Recorder::new(make_settings()).unwrap();
+        recorder.start().unwrap();
+        assert!(recorder.start().is_err());
+        recorder.stop().unwrap();
+    }
+
+    #[test]
+    fn stop_without_start_is_noop() {
+        let mut recorder = Recorder::new(make_settings()).unwrap();
+        assert!(recorder.stop().is_ok());
+    }
+}

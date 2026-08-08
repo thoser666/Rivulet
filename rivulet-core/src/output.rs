@@ -75,3 +75,31 @@ impl Output for FileOutput {
         &self.settings
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_output_settings() {
+        let settings = OutputSettings::default();
+        assert_eq!(settings.width, 1920);
+        assert_eq!(settings.height, 1080);
+        assert_eq!(settings.fps, 30);
+        assert_eq!(settings.bitrate, 5000);
+        assert_eq!(settings.encoder, "h264");
+    }
+
+    #[tokio::test]
+    async fn file_output_start_stop_lifecycle() {
+        let output = FileOutput::new("/tmp/example.mp4", OutputSettings::default());
+        assert!(!output.is_active());
+
+        output.start().await.unwrap();
+        assert!(output.is_active());
+
+        output.stop().await.unwrap();
+        assert!(!output.is_active());
+        assert_eq!(output.get_settings().width, 1920);
+    }
+}

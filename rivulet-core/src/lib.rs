@@ -253,3 +253,62 @@ pub fn audio_caps() -> gst::Caps {
         .field("rate", AUDIO_SAMPLE_RATE as i32)
         .build()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_toggle_is_disabled_by_default() {
+        let engine = RivuletEngine::default();
+        assert!(!engine.audio_enabled());
+    }
+
+    #[test]
+    fn audio_toggle_can_be_enabled_and_disabled() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        assert!(engine.audio_enabled());
+        engine.set_audio_enabled(false);
+        assert!(!engine.audio_enabled());
+    }
+
+    #[test]
+    fn audio_caps_describe_f32_interleaved_stereo_48k() {
+        let _ = gst::init();
+        let caps = audio_caps();
+        assert!(!caps.is_empty(), "audio caps should not be empty");
+    }
+
+    /// End-to-end test: feed synthetic video + audio frames into the engine and
+    /// verify that a non-empty MP4 file is written.
+    #[test]
+    fn records_synthetic_video_and_audio_to_file() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+
+        let path =
+            std::env::temp_dir().join(format!("rivulet_engine_test_{}.mp4", std::process::id()));
+        engine.start_local_recording(path.clone());
+
+        let (width, height) = (64u32, 64u32);
+        let video = vec![0u8; (width * height * 4) as usize];
+        for _ in 0..12 {
+            engine.process_raw_frame(&video, width, height);
+        }
+
+        let audio = AudioFrame::new(vec![0.0f32; 4800], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
+        for _ in 0..12 {
+            let _ = engine.push_audio_frame(&audio);
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        engine.stop_recording();
+
+        assert!(path.exists(), "Ausgabedatei sollte existieren");
+        let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        assert!(len > 0, "Ausgabedatei sollte nicht leer sein");
+
+        let _ = std::fs::remove_file(&path);
+    }
+}

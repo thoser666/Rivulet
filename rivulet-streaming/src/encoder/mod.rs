@@ -45,3 +45,58 @@ impl Encoder {
         self.frame_count
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::EncodableFrame;
+    use std::path::PathBuf;
+
+    fn make_settings() -> RecordingSettings {
+        RecordingSettings {
+            output_path: PathBuf::from("out.mp4"),
+            width: 1280,
+            height: 720,
+            fps: 30,
+            bitrate: 2_000_000,
+            codec: "h264".to_string(),
+        }
+    }
+
+    fn make_frame() -> EncodableFrame {
+        EncodableFrame {
+            data: vec![0; 100],
+            width: 1280,
+            height: 720,
+            stride: 1280 * 4,
+            timestamp: std::time::Instant::now(),
+        }
+    }
+
+    #[test]
+    fn encoder_rejects_zero_dimensions() {
+        let mut settings = make_settings();
+        settings.width = 0;
+        assert!(Encoder::new(settings).is_err());
+
+        let mut settings = make_settings();
+        settings.height = 0;
+        assert!(Encoder::new(settings).is_err());
+    }
+
+    #[test]
+    fn encoder_accepts_valid_settings() {
+        let encoder = Encoder::new(make_settings()).unwrap();
+        assert_eq!(encoder.frame_count(), 0);
+    }
+
+    #[test]
+    fn encoder_counts_encoded_frames() {
+        let mut encoder = Encoder::new(make_settings()).unwrap();
+        encoder.encode_frame(&make_frame()).unwrap();
+        encoder.encode_frame(&make_frame()).unwrap();
+        encoder.encode_frame(&make_frame()).unwrap();
+        assert_eq!(encoder.frame_count(), 3);
+        encoder.finalize().unwrap();
+    }
+}

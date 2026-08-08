@@ -41,3 +41,18 @@ impl CapturedFrame {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn captured_frame_stores_fields() {
+        let data = vec![0u8; 16];
+        let frame = CapturedFrame::new(data.clone(), 2, 2, 8);
+        assert_eq!(frame.data, data);
+        assert_eq!(frame.width, 2);
+        assert_eq!(frame.height, 2);
+        assert_eq!(frame.stride, 8);
+    }
+}

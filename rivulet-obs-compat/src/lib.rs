@@ -31,3 +31,15 @@ impl PluginSystem {
 
 // Placeholder für PluginManager, falls er woanders verwendet wird
 pub struct PluginManager;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_system_starts_empty() {
+        let system = PluginSystem::new();
+        assert_eq!(system.plugins.len(), 0);
+        assert_eq!(system.configs.len(), 0);
+    }
+}

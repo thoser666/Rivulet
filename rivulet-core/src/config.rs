@@ -10,3 +10,16 @@ impl Default for Config {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_points_to_output_dir() {
+        assert_eq!(
+            Config::default().output_dir,
+            std::path::PathBuf::from("./output")
+        );
+    }
+}

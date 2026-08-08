@@ -44,8 +44,10 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 ### ✅ Currently Available (v0.1)
 
 - **Screen Capture** - Capture your primary monitor in real-time
+- **Screen + Audio Recording (Linux GUI)** - Full recording flow in the GUI: monitor selection, start/stop, recording timer; system audio + microphone are captured and mixed into the MP4
 - **Video Encoding** - H.264 encoding via FFmpeg
 - **Audio Capture (engine, Linux)** - Desktop sound and microphone, mixed in real time via GStreamer (48 kHz stereo, per-source volume); usable via the `rivulet-audio` crate and the `record_screen_audio` example
+- **Audio Mixer UI (Linux GUI)** - Start/stop audio capture with live level meter (dB), per-source volume sliders for system/mic
 - **Live Preview** - See what you're recording as you record
 - **Tab-Based Interface** - Clean, DaVinci Resolve-style UI
   - Record Tab - Main recording controls and preview
@@ -61,9 +63,7 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 
 ### 🚧 In Development (v0.2 - December 2025)
 
-- **Audio Mixer UI**
-  - Mixer UI with volume sliders for system/mic
-  - Separate audio tracks (system/mic)
+- **Separate Audio Tracks** - System and microphone output as separate tracks
 - **Hardware Encoding**
   - NVIDIA NVENC
   - Intel QuickSync
@@ -89,7 +89,7 @@ See [Roadmap](#-roadmap) for detailed timeline.
 - [x] System audio capture (desktop/game sound)
 - [x] Microphone audio capture
 - [x] Audio/video synchronization
-- [ ] Audio mixer UI with volume sliders
+- [x] Audio mixer UI with volume sliders
 - [ ] Separate audio tracks (system/mic)
 
 **Performance**
@@ -216,6 +216,36 @@ See [Roadmap](#-roadmap) for detailed timeline.
 - [ ] Multi-language support
 - [ ] Chroma key (green screen)
 - [ ] Video filters & effects
+
+---
+
+## 🛠 Development
+
+### Tests
+
+Run the full test suite:
+
+```bash
+# Build tests and run them
+cargo test --workspace
+
+# Run tests for a single crate
+cargo test -p rivulet-core
+```
+
+The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4), the encoder/recorder lifecycle, and audio configuration validation. Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable.
+
+### Linting & Formatting
+
+```bash
+# Check formatting
+cargo fmt --all -- --check
+
+# Lint the whole workspace (including tests and examples)
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+> **Note:** On Linux, set `LIBCLANG_PATH` to your LLVM `lib` directory (e.g. `export LIBCLANG_PATH=/usr/lib/llvm-14/lib`) if the `clang-sys` build fails.
 
 ---
 

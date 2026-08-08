@@ -296,3 +296,36 @@ mod sys_impl {
         pub fn set_mic_volume(&self, _volume: f32) {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_config_captures_system_and_mic() {
+        let config = AudioConfig::default();
+        assert!(config.capture_system);
+        assert!(config.capture_mic);
+        assert_eq!(config.sample_rate, 48_000);
+        assert_eq!(config.channels, 2);
+        assert_eq!(config.system_volume.to_bits(), 1.0f32.to_bits());
+        assert_eq!(config.mic_volume.to_bits(), 1.0f32.to_bits());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn capture_rejects_config_without_sources() {
+        let config = AudioConfig {
+            capture_system: false,
+            capture_mic: false,
+            ..Default::default()
+        };
+        assert!(AudioCapture::new(config).is_err());
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn capture_is_not_supported_off_linux() {
+        assert!(AudioCapture::new(AudioConfig::default()).is_err());
+    }
+}
