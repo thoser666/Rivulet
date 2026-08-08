@@ -61,7 +61,7 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 - **Cross-Platform** - Windows, macOS, and Linux support (via xcap)
 - **Modern UI** - Clean interface built with egui
 
-### 🚧 In Development (v0.2 - December 2025)
+### 🚧 In Development (v0.2)
 
 - **Separate Audio Tracks** - System and microphone output as separate tracks
 - **Hardware Encoding**
@@ -78,144 +78,143 @@ See [Roadmap](#-roadmap) for detailed timeline.
 
 ## 🚀 Roadmap
 
-> **Current Version:** v0.1 (October 2025)  
-> **Next Release:** v0.2 (December 31, 2025)
+> **Ziel:** Feature-Parität mit der aktuellen OBS-Version.
+> **Strategie:** Von der stabilen Aufnahme-Basis schrittweise zu Szenen, Streaming und schließlich dem vollständigen OBS-Feature-Set.
 
-### Q4 2025 - v0.2: Audio & Performance 🔊
+### Meilenstein-Übersicht
 
-**Target: December 31, 2025** | **Status: In Progress**
+| Meilenstein | Fokus | Status |
+| --- | --- | --- |
+| M0 – Recording Foundation | Aufnahme, Encoding, Audio, GUI | ✅ Erreicht |
+| M1 – Solid Recording | Audio-Tracks, Hardware-Encoding, QoL | 🚧 In Arbeit |
+| M2 – Scenes & Composition | OBS-Kern: Szenen, Quellen, Übergänge | 📅 Geplant |
+| M3 – Streaming | RTMP, Dual Output, Plattformen | 📅 Geplant |
+| M4 – Advanced Output | Virtual Camera, Replay Buffer, Filter | 📅 Geplant |
+| M5 – Ecosystem & Parität | Plugins, Kompatibilität, Plattform-Parität | 📅 Geplant |
 
-**Audio Capture**
-- [x] System audio capture (desktop/game sound)
-- [x] Microphone audio capture
-- [x] Audio/video synchronization
-- [x] Audio mixer UI with volume sliders
-- [ ] Separate audio tracks (system/mic)
+---
+
+### ✅ M0 – Recording Foundation
+
+**Status: Erreicht**
+
+- [x] Screen-Capture (Monitor, Echtzeit)
+- [x] H.264-Video-Encoding (FFmpeg/GStreamer)
+- [x] Audio-Capture (System + Mikrofon, gemischt, 48 kHz Stereo)
+- [x] Audio/Video-Synchronisation
+- [x] Audio-Mixer-UI mit Live-Pegel-Meter und Volume-Slidern
+- [x] GUI-Aufnahme mit Monitor-Auswahl und Aufnahme-Timer (Linux)
+- [x] Grundgerüst: Engine, Recorder, Scene/Source-Modelle, Plugin-System (Stubs)
+
+---
+
+### 🚧 M1 – Solid Recording
+
+**Status: In Arbeit**
+
+**Audio**
+- [ ] Separate Audio-Tracks (System/Mikrofon)
+- [ ] Audio-Filter (Noise Suppression, Kompressor, Limiter)
+- [ ] Audio-Monitoring (Quellen-Vorschau)
 
 **Performance**
-- [ ] Hardware encoding support
-  - [ ] NVIDIA NVENC (H264/HEVC)
-  - [ ] Intel QuickSync
-  - [ ] AMD AMF
-- [ ] Auto-detect best available encoder
-- [ ] Fallback to software encoding
-- [ ] Performance metrics display
+- [ ] Hardware-Encoding (NVIDIA NVENC, Intel QuickSync, AMD AMF)
+- [ ] Auto-Detection des besten Encoders mit Fallback
+- [ ] Performance-Metriken (FPS, Encode-Last, Dateigröße)
 
 **Quality of Life**
-- [ ] Better error messages
-- [ ] Recording time display
-- [ ] FPS counter during recording
-- [ ] Estimated file size calculator
+- [ ] Hotkeys (Aufnahme, Pause, Stumm)
+- [ ] Aufnahme-Timer-Overlay und FPS-Counter
+- [ ] Region-Capture und Mehrfach-Monitor-Auswahl
+- [ ] Codec-Auswahl-UI (H264/H265/VP9)
+- [ ] Preset-Management (1080p60, 720p30, ...)
 
-**Goal:** Enable high-quality recording with audio for YouTube/Twitch content creators.
-
----
-
-### Q1 2026 - v0.3: UX & Features 🎨
-
-**Target: March 31, 2026**
-
-**User Experience**
-- [ ] Settings persistence (save/load config)
-- [ ] Keyboard shortcuts
-  - [ ] F9: Start/Stop recording
-  - [ ] F8: Pause/Resume
-  - [ ] F7: Mute microphone
-- [ ] System tray integration
-- [ ] Recording timer overlay
-- [ ] Recent recordings list
-
-**Features**
-- [ ] Monitor selection (multi-monitor support)
-- [ ] Region capture (select specific area)
-- [ ] Codec selection UI (H264/H265/VP9)
-- [ ] Audio level visualizer
-- [ ] Preset management (1080p60, 720p30, etc.)
-- [ ] Export settings presets
-
-**Developer Experience**
-- [ ] Update check system
-- [ ] Crash reporting (opt-in)
-- [ ] Beta testing program
-- [ ] Documentation website
-
-**Goal:** Feature-complete recording software with polished, professional UX.
+**Ziel:** Hochwertiges Recording mit Audio als solide Basis für Scenes & Streaming.
 
 ---
 
-### Q2 2026 - v0.5: Streaming 📡
+### 🎨 M2 – Scenes & Composition
 
-**Target: June 30, 2026**
+**Status: Geplant**
 
-**Streaming Core**
-- [ ] RTMP client implementation
-- [ ] Stream health monitoring
-- [ ] Adaptive bitrate
-- [ ] Stream presets (Twitch, YouTube, Facebook)
-- [ ] Network statistics display
+Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 
-**Advanced Features**
-- [ ] Dual output (record + stream simultaneously)
-- [ ] Basic overlays (text, images, webcam)
-- [ ] Scene management (basic)
-- [ ] Transition effects
-- [ ] Stream delay/buffer
+- [ ] Szenen-Verwaltung (mehrere Szenen, Umschalten)
+- [ ] Quellen (Display, Fenster, Bild, Text, Webcam, Stummschaltung)
+- [ ] Quellen-Komposition (Ebenen, Position, Skalierung, Zuschneiden)
+- [ ] Übergänge (Fade, Cut, Stinger)
+- [ ] Overlays (Bild-in-Bild, Banner)
+- [ ] Chroma Key / Green Screen
+- [ ] Studio-Modus (Vorschau/Programm)
 
-**Integrations**
-- [ ] Twitch integration (OAuth, chat)
-- [ ] YouTube Live integration
-- [ ] Custom RTMP server support
-- [ ] Stream key management
-
-**Goal:** Enable live streaming to major platforms.
+**Ziel:** Der komponierbare Arbeitsbereich, den OBS-Nutzer erwarten.
 
 ---
 
-### Q3 2026 - v1.0: Production Release 🚀
+### 📡 M3 – Streaming
 
-**Target: September 30, 2026**
+**Status: Geplant**
 
-**Advanced Features**
-- [ ] Multi-scene management
-- [ ] Advanced overlays & scenes
-- [ ] Source composition (layers)
-- [ ] Audio filters (noise suppression, compressor)
-- [ ] Multi-track audio export
-- [ ] Replay buffer
-- [ ] Instant replay
+- [ ] RTMP-Client-Implementierung
+- [ ] Dual Output (Stream + Aufnahme parallel)
+- [ ] Stream-Health und Netzwerk-Statistiken
+- [ ] Adaptive Bitrate
+- [ ] Plattform-Integrationen (Twitch, YouTube Live, Facebook)
+- [ ] Stream-Key-Management und Stream-Presets
+- [ ] Custom-RTMP-Server-Support
 
-**Production Ready**
-- [ ] Auto-update system
-- [ ] Professional QA testing
-- [ ] Complete documentation
-- [ ] Video tutorials
-- [ ] Community Discord/Forum
-- [ ] Support ticketing system
+**Ziel:** Live-Streaming zu den gängigen Plattformen.
 
-**Polish**
+---
+
+### 🎥 M4 – Advanced Output & Capture
+
+**Status: Geplant**
+
+- [ ] Virtual Camera Output
+- [ ] Replay Buffer / Instant Replay
+- [ ] Browser Sources (CEF-Integration)
+- [ ] Multi-Track-Audio-Export
+- [ ] Video-Filter & Effekte
+- [ ] Cloud-Integration (Cloud-Aufnahmen)
+
+**Ziel:** Die erweiterten Ausgabe- und Produktions-Features von OBS.
+
+---
+
+### 🔌 M5 – Ecosystem & Plattform-Parität
+
+**Status: Geplant**
+
+- [ ] Plugin-System (native Rust-Plugins)
+- [ ] OBS-Plugin-Kompatibilitätsschicht
+- [ ] Mobile Companion App (Remote Control)
+- [ ] Windows/macOS-Feature-Parität (aktuell vollständig nur auf Linux)
 - [ ] Installer (Windows MSI, macOS DMG, Linux AppImage)
-- [ ] Code signing (Windows/macOS)
-- [ ] Telemetry (opt-in, privacy-first)
-- [ ] Marketing website
-- [ ] Press kit
+- [ ] Code-Signing und Auto-Update
+- [ ] Telemetrie (opt-in, datenschutzfreundlich)
+- [ ] Multi-Language-Support
 
-**Goal:** Public launch - Production-ready OBS alternative for content creators.
+**Ziel:** Vollständige OBS-Feature-Parität über alle Plattformen.
 
 ---
 
-### Future (v2.0+) 🔮
+### 🎯 Feature-Paritäts-Checkliste (gegenüber OBS)
 
-**Advanced Features**
-- [ ] Virtual camera output
-- [ ] Browser sources (CEF integration)
-- [ ] Plugin system (native Rust plugins)
-- [ ] OBS plugin compatibility layer
-- [ ] Cloud integration (cloud recordings)
-- [ ] Mobile companion app (remote control)
-- [ ] AI features (auto-framing, noise removal)
-- [ ] Multi-language support
-- [ ] Chroma key (green screen)
-- [ ] Video filters & effects
+| OBS-Kategorie | Status |
+| --- | --- |
+| Capture-Quellen (Display, Fenster, Webcam) | Teilweise (Display/Fenster) |
+| Szenen & Übergänge | Offen |
+| Audio-Mixer (Quellen, Tracks, Filter) | Teilweise (Mixer, gemischt) |
+| Recording & Encoding | Teilweise (H.264-Software) |
+| Streaming (RTMP, Plattformen) | Offen |
+| Virtual Camera | Offen |
+| Replay Buffer | Offen |
+| Browser Sources | Offen |
+| Studio-Modus & Hotkeys | Offen |
+| Plugin-Ökosystem & OBS-Kompatibilität | Offen |
+| Multi-Track-Audio | Offen |
+| Plattform-Parität (Windows/macOS) | Offen |
 
 ---
 
