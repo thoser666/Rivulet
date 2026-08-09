@@ -1,0 +1,127 @@
+name: Release
+
+# Baut die Release-Binaries als GitHub-Action-Artifacts, sobald ein neues
+# Feature (Conventional Commit "feat:..." / "feat(...):...") auf den
+# develop-Branch gepusht wird. Gemergte Dependabot-Pullrequests lösen den
+# Build nicht aus.
+
+on:
+  push:
+    branches: [ develop ]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ################################################################
+  # PRÜFUNG: Feature-Commit? (schließt Dependabot aus)
+  ################################################################
+  check:
+    name: Check for feature push
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.detect.outputs.should_release }}
+    steps:
+      - name: Detect feature commit
+        id: detect
+        env:
+          ACTOR: ${{ github.actor }}
+          COMMITS: ${{ toJson(github.event.commits) }}
+        run: |
+          SHOULD_RELEASE="false"
+
+          # Gemergte Dependabot-PRs nie bauen (weder über den Actor noch über
+          # den Autor der gepushten Commits).
+          if [[ "$ACTOR" == "dependabot[bot]" || "$ACTOR" == "dependabot-preview[bot]" ]]; then
+            echo "Push stammt von Dependabot - Release-Build wird übersprungen."
+            echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if echo "$COMMITS" | jq -r '.[] | .author.name' | grep -q "dependabot"; then
+            echo "Push enthält Dependabot-Commits - Release-Build wird übersprungen."
+            echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Feature-Erkennung: mindestens ein Commit muss nach der
+          # Conventional-Commits-Konvention mit "feat" beginnen.
+          if echo "$COMMITS" | jq -r '.[].message' | grep -qE '^feat(\(.*\))?:'; then
+            SHOULD_RELEASE="true"
+            echo "Feature-Commit gefunden - Release-Build wird ausgelöst."
+          else
+            echo "Kein Feature-Commit im Push - Release-Build wird übersprungen."
+          fi
+
+          echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
+
+  ################################################################
+  # RELEASE BINARIES (nur bei Feature-Push)
+  ################################################################
+  build:
+    name: Build Release Binaries (${{ matrix.artifact_name }})
+    needs: check
+    if: ${{ needs.check.outputs.should_release == 'true' }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: rivulet-linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: rivulet-windows-x86_64.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: rivulet-macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: rivulet-macos-aarch64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux release dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libxcb1-dev libgstreamer1.0-dev libglib2.0-dev
+
+      - name: Install Windows release dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install msys2 --params "/NoUpdate /InstallDir:C:/msys64"
+          C:/msys64/usr/bin/bash -lc "pacman -S --noconfirm mingw-w64-x86_64-pkg-config"
+          echo "C:/msys64/mingw64/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          choco install gstreamer --version=1.24.11
+          choco install gstreamer-devel --version=1.24.11
+          echo "PKG_CONFIG_PATH=C:\gstreamer\1.0\msvc_x86_64\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install macOS release dependencies
+        if: runner.os == 'macOS'
+        run: brew install gstreamer
+
+      - name: Build release binary
+        run: cargo build --release --package rivulet-gui --target ${{ matrix.target }}
+
+      - name: Strip binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: strip target/${{ matrix.target }}/release/rivulet-gui
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: target/${{ matrix.target }}/release/rivulet-gui*

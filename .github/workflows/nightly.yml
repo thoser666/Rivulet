@@ -1,0 +1,139 @@
+name: Nightly
+
+# Täglicher Verifikations-Build. Läuft unabhängig von Commits; gemergte
+# Dependabot-Pullrequests lösen ihn nicht aus (durch den Actor-Guard unten
+# zusätzlich abgesichert).
+
+on:
+  schedule:
+    # Täglich um 02:17 UTC
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ################################################################
+  # LINTS & FORMATTING (läuft nur auf Linux)
+  ################################################################
+  lints:
+    name: Lints (Fmt & Clippy)
+    runs-on: ubuntu-latest
+    if: ${{ github.actor != 'dependabot[bot]' && github.actor != 'dependabot-preview[bot]' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install GStreamer dependencies for clippy
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            gstreamer1.0-tools \
+            libglib2.0-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  ################################################################
+  # BUILD & TEST MATRIX (läuft auf allen 3 Plattformen)
+  ################################################################
+  build_and_test:
+    name: Build & Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    if: ${{ github.actor != 'dependabot[bot]' && github.actor != 'dependabot-preview[bot]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies (if applicable)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libssl-dev \
+            libdbus-1-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            gstreamer1.0-tools \
+            libglib2.0-dev
+
+      - name: Install Windows dependencies (if applicable)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install msys2 --params "/NoUpdate /InstallDir:C:/msys64"
+          C:/msys64/usr/bin/bash -lc "pacman -S --noconfirm mingw-w64-x86_64-pkg-config"
+          echo "C:/msys64/mingw64/bin" >> $env:GITHUB_PATH
+          choco install gstreamer --version=1.24.11
+          choco install gstreamer-devel --version=1.24.11
+          $GSTREAMER_ROOT = $env:GSTREAMER_1_0_ROOT_MSVC_X86_64
+          $PKG_PATH = Join-Path $GSTREAMER_ROOT "lib\pkgconfig"
+          echo "Setting PKG_CONFIG_PATH to $PKG_PATH"
+          echo "PKG_CONFIG_PATH=$PKG_PATH" >> $env:GITHUB_ENV
+
+      - name: Install macOS dependencies (if applicable)
+        if: runner.os == 'macOS'
+        run: |
+          brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build
+        run: cargo build --workspace --verbose
+
+      - name: Test
+        run: cargo test --workspace --verbose
