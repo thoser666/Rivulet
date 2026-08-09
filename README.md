@@ -48,6 +48,7 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 - **Video Encoding** - H.264 encoding via FFmpeg
 - **Audio Capture (engine, Linux)** - Desktop sound and microphone, mixed in real time via GStreamer (48 kHz stereo, per-source volume); usable via the `rivulet-audio` crate and the `record_screen_audio` example
 - **Audio Mixer UI (Linux GUI)** - Start/stop audio capture with live level meter (dB), per-source volume sliders for system/mic
+- **Separate Audio Tracks** - System and microphone output as separate tracks in the MP4 (via the "Getrennte Tracks" option, Linux GUI); engine API `push_audio_track(frame, AudioTrack)`
 - **Live Preview** - See what you're recording as you record
 - **Tab-Based Interface** - Clean, DaVinci Resolve-style UI
   - Record Tab - Main recording controls and preview
@@ -63,7 +64,6 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 
 ### 🚧 In Development (v0.2)
 
-- **Separate Audio Tracks** - System and microphone output as separate tracks
 - **Hardware Encoding**
   - NVIDIA NVENC
   - Intel QuickSync
@@ -113,7 +113,7 @@ See [Roadmap](#-roadmap) for detailed timeline.
 **Status: In Arbeit**
 
 **Audio**
-- [ ] Separate Audio-Tracks (System/Mikrofon)
+- [x] Separate Audio-Tracks (System/Mikrofon)
 - [ ] Audio-Filter (Noise Suppression, Kompressor, Limiter)
 - [ ] Audio-Monitoring (Quellen-Vorschau)
 
@@ -205,7 +205,7 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 | --- | --- |
 | Capture-Quellen (Display, Fenster, Webcam) | Teilweise (Display/Fenster) |
 | Szenen & Übergänge | Offen |
-| Audio-Mixer (Quellen, Tracks, Filter) | Teilweise (Mixer, gemischt) |
+| Audio-Mixer (Quellen, Tracks, Filter) | Teilweise (Mixer, Separate Tracks) |
 | Recording & Encoding | Teilweise (H.264-Software) |
 | Streaming (RTMP, Plattformen) | Offen |
 | Virtual Camera | Offen |
@@ -213,7 +213,7 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 | Browser Sources | Offen |
 | Studio-Modus & Hotkeys | Offen |
 | Plugin-Ökosystem & OBS-Kompatibilität | Offen |
-| Multi-Track-Audio | Offen |
+| Multi-Track-Audio | Teilweise (2 Tracks) |
 | Plattform-Parität (Windows/macOS) | Offen |
 
 ---
@@ -232,7 +232,7 @@ cargo test --workspace
 cargo test -p rivulet-core
 ```
 
-The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4), the encoder/recorder lifecycle, and audio configuration validation. Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable.
+The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4, including separate audio tracks verified via the GStreamer Discoverer), the encoder/recorder lifecycle, and audio configuration validation. Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable.
 
 ### Linting & Formatting
 

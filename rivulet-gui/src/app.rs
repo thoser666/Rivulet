@@ -12,7 +12,7 @@ use {
     once_cell::sync::Lazy,
     pipewire::spa::utils::Fd,
     rivulet_audio::{AudioCapture, AudioConfig},
-    rivulet_core::AudioFrame,
+    rivulet_core::{AudioFrame, AudioTrack},
     std::sync::mpsc as std_mpsc,
     std::sync::{
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -176,6 +176,8 @@ pub struct RivuletApp {
     #[cfg(target_os = "linux")]
     capture_mic: bool,
     #[cfg(target_os = "linux")]
+    separate_tracks: bool,
+    #[cfg(target_os = "linux")]
     system_volume: f32,
     #[cfg(target_os = "linux")]
     mic_volume: f32,
@@ -184,6 +186,12 @@ pub struct RivuletApp {
     #[cfg(target_os = "linux")]
     #[serde(skip)]
     audio_rx: Option<std_mpsc::Receiver<AudioFrame>>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    audio_system_rx: Option<std_mpsc::Receiver<AudioFrame>>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    audio_mic_rx: Option<std_mpsc::Receiver<AudioFrame>>,
     #[cfg(target_os = "linux")]
     #[serde(skip)]
     monitors: Vec<xcap::Monitor>,
@@ -268,12 +276,18 @@ impl Default for RivuletApp {
             #[cfg(target_os = "linux")]
             capture_mic: true,
             #[cfg(target_os = "linux")]
+            separate_tracks: false,
+            #[cfg(target_os = "linux")]
             system_volume: 0.8,
             #[cfg(target_os = "linux")]
             mic_volume: 1.0,
 
             #[cfg(target_os = "linux")]
             audio_rx: None,
+            #[cfg(target_os = "linux")]
+            audio_system_rx: None,
+            #[cfg(target_os = "linux")]
+            audio_mic_rx: None,
             #[cfg(target_os = "linux")]
             monitors: Vec::new(),
             #[cfg(target_os = "linux")]
@@ -449,6 +463,7 @@ impl RivuletApp {
             capture_mic: self.capture_mic,
             system_volume: self.system_volume,
             mic_volume: self.mic_volume,
+            separate_tracks: self.separate_tracks,
             ..Default::default()
         };
 
@@ -460,21 +475,50 @@ impl RivuletApp {
             }
         };
 
-        let (audio_tx, audio_rx) = std_mpsc::channel::<AudioFrame>();
         let peak = Arc::clone(&self.audio_peak);
-        match audio.start(Box::new(move |frame| {
-            let p = frame.data.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
-            peak.store(p.to_bits(), Ordering::SeqCst);
-            let _ = audio_tx.send(frame);
-        })) {
-            Ok(()) => {
-                self.audio_rx = Some(audio_rx);
-                self.audio = Some(audio);
-                self.audio_preview = true;
-                self.audio_status = None;
+        if self.separate_tracks {
+            let (sys_tx, sys_rx) = std_mpsc::channel::<AudioFrame>();
+            let (mic_tx, mic_rx) = std_mpsc::channel::<AudioFrame>();
+            let sys_peak = Arc::clone(&peak);
+            let mic_peak = Arc::clone(&peak);
+            let sys_cb = move |frame: AudioFrame| {
+                let p = frame.data.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
+                sys_peak.store(p.to_bits(), Ordering::SeqCst);
+                let _ = sys_tx.send(frame);
+            };
+            let mic_cb = move |frame: AudioFrame| {
+                let p = frame.data.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
+                mic_peak.store(p.to_bits(), Ordering::SeqCst);
+                let _ = mic_tx.send(frame);
+            };
+            match audio.start_separated(Box::new(sys_cb), Box::new(mic_cb)) {
+                Ok(()) => {
+                    self.audio_system_rx = Some(sys_rx);
+                    self.audio_mic_rx = Some(mic_rx);
+                    self.audio = Some(audio);
+                    self.audio_preview = true;
+                    self.audio_status = None;
+                }
+                Err(e) => {
+                    self.audio_status = Some(format!("Audio-Start fehlgeschlagen: {e}"));
+                }
             }
-            Err(e) => {
-                self.audio_status = Some(format!("Audio-Start fehlgeschlagen: {e}"));
+        } else {
+            let (audio_tx, audio_rx) = std_mpsc::channel::<AudioFrame>();
+            match audio.start(Box::new(move |frame| {
+                let p = frame.data.iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
+                peak.store(p.to_bits(), Ordering::SeqCst);
+                let _ = audio_tx.send(frame);
+            })) {
+                Ok(()) => {
+                    self.audio_rx = Some(audio_rx);
+                    self.audio = Some(audio);
+                    self.audio_preview = true;
+                    self.audio_status = None;
+                }
+                Err(e) => {
+                    self.audio_status = Some(format!("Audio-Start fehlgeschlagen: {e}"));
+                }
             }
         }
     }
@@ -484,6 +528,8 @@ impl RivuletApp {
             let _ = audio.stop();
         }
         self.audio_rx = None;
+        self.audio_system_rx = None;
+        self.audio_mic_rx = None;
         self.audio_preview = false;
         self.audio_peak.store(0.0f32.to_bits(), Ordering::SeqCst);
     }
@@ -527,6 +573,14 @@ impl RivuletApp {
             self.start_audio_capture();
         }
         self.engine.set_audio_enabled(self.audio_preview);
+        self.engine
+            .set_separate_audio_tracks(self.separate_tracks && self.audio_preview);
+        if self.engine.separate_audio_tracks() {
+            self.engine
+                .set_audio_track_enabled(rivulet_core::AudioTrack::System, self.capture_system);
+            self.engine
+                .set_audio_track_enabled(rivulet_core::AudioTrack::Microphone, self.capture_mic);
+        }
         self.engine.start_local_recording(path);
 
         let (raw_tx, raw_rx) = std_mpsc::channel::<RawFrame>();
@@ -598,7 +652,27 @@ impl RivuletApp {
                     .process_raw_frame(&raw.data, raw.width, raw.height);
             }
         }
-        if let Some(rx) = &self.audio_rx {
+        if self.separate_tracks && self.audio_preview {
+            if self.is_recording {
+                if let Some(rx) = &self.audio_system_rx {
+                    while let Ok(frame) = rx.try_recv() {
+                        let _ = self.engine.push_audio_track(&frame, AudioTrack::System);
+                    }
+                }
+                if let Some(rx) = &self.audio_mic_rx {
+                    while let Ok(frame) = rx.try_recv() {
+                        let _ = self.engine.push_audio_track(&frame, AudioTrack::Microphone);
+                    }
+                }
+            } else {
+                if let Some(rx) = &self.audio_system_rx {
+                    while rx.try_recv().is_ok() {}
+                }
+                if let Some(rx) = &self.audio_mic_rx {
+                    while rx.try_recv().is_ok() {}
+                }
+            }
+        } else if let Some(rx) = &self.audio_rx {
             if self.is_recording {
                 while let Ok(frame) = rx.try_recv() {
                     let _ = self.engine.push_audio_frame(&frame);
@@ -839,13 +913,22 @@ impl eframe::App for RivuletApp {
 
                 let mut sys = self.capture_system;
                 let mut mic = self.capture_mic;
+                let mut separate = self.separate_tracks;
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut sys, "Systemaudio");
                     ui.checkbox(&mut mic, "Mikrofon");
+                    ui.separator();
+                    ui.checkbox(&mut separate, "Getrennte Tracks");
                 });
                 if sys != self.capture_system || mic != self.capture_mic {
                     self.capture_system = sys;
                     self.capture_mic = mic;
+                    if self.audio_preview {
+                        self.start_audio_capture();
+                    }
+                }
+                if separate != self.separate_tracks {
+                    self.separate_tracks = separate;
                     if self.audio_preview {
                         self.start_audio_capture();
                     }

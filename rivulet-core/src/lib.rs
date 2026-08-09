@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use gst::prelude::*;
 
 pub mod audio;
-pub use audio::AudioFrame;
+pub use audio::{AudioFrame, AudioTrack};
 
 // GStreamer-Initialisierung
 static GSTREAMER_INIT: Lazy<()> = Lazy::new(|| {
@@ -24,7 +24,12 @@ pub struct RivuletEngine {
     pipeline: Option<gst::Pipeline>,
     appsrc: Option<gst_app::AppSrc>,
     audio_appsrc: Option<gst_app::AppSrc>,
+    audio_appsrc_sys: Option<gst_app::AppSrc>,
+    audio_appsrc_mic: Option<gst_app::AppSrc>,
     audio_enabled: bool,
+    separate_audio_tracks: bool,
+    audio_sys_enabled: bool,
+    audio_mic_enabled: bool,
     is_recording: bool,
     output_path: Option<PathBuf>,
 }
@@ -36,7 +41,12 @@ impl Default for RivuletEngine {
             pipeline: None,
             appsrc: None,
             audio_appsrc: None,
+            audio_appsrc_sys: None,
+            audio_appsrc_mic: None,
             audio_enabled: false,
+            separate_audio_tracks: false,
+            audio_sys_enabled: true,
+            audio_mic_enabled: true,
             is_recording: false,
             output_path: None,
         }
@@ -60,10 +70,25 @@ impl RivuletEngine {
             "appsrc name=rivulet_src ! videoconvert ! x264enc tune=zerolatency ! queue ! mux. "
                 .to_string();
         if self.audio_enabled {
-            pipeline_str.push_str(
-                "appsrc name=audio_src format=time is-live=true do-timestamp=true \
-                 ! audioconvert ! audioresample ! avenc_aac ! queue ! mux. ",
-            );
+            if self.separate_audio_tracks {
+                if self.audio_sys_enabled {
+                    pipeline_str.push_str(
+                        "appsrc name=audio_src_sys format=time is-live=true do-timestamp=true \
+                         ! audioconvert ! audioresample ! avenc_aac ! queue ! mux. ",
+                    );
+                }
+                if self.audio_mic_enabled {
+                    pipeline_str.push_str(
+                        "appsrc name=audio_src_mic format=time is-live=true do-timestamp=true \
+                         ! audioconvert ! audioresample ! avenc_aac ! queue ! mux. ",
+                    );
+                }
+            } else {
+                pipeline_str.push_str(
+                    "appsrc name=audio_src format=time is-live=true do-timestamp=true \
+                     ! audioconvert ! audioresample ! avenc_aac ! queue ! mux. ",
+                );
+            }
         }
         pipeline_str.push_str(&format!(
             "mp4mux name=mux ! filesink location=\"{}\"",
@@ -97,16 +122,38 @@ impl RivuletEngine {
         appsrc.set_property("do-timestamp", true);
 
         if self.audio_enabled {
-            let audio_appsrc = pipeline
-                .by_name("audio_src")
-                .unwrap()
-                .downcast::<gst_app::AppSrc>()
-                .unwrap();
-            audio_appsrc.set_caps(Some(&audio_caps()));
-            audio_appsrc.set_property("format", gst::Format::Time);
-            audio_appsrc.set_property("is-live", true);
-            audio_appsrc.set_property("do-timestamp", true);
-            self.audio_appsrc = Some(audio_appsrc);
+            if self.separate_audio_tracks {
+                let mut track_srcs: Vec<(&str, &mut Option<gst_app::AppSrc>)> = Vec::new();
+                if self.audio_sys_enabled {
+                    track_srcs.push(("audio_src_sys", &mut self.audio_appsrc_sys));
+                }
+                if self.audio_mic_enabled {
+                    track_srcs.push(("audio_src_mic", &mut self.audio_appsrc_mic));
+                }
+                for (name, slot) in track_srcs {
+                    let app = pipeline
+                        .by_name(name)
+                        .unwrap()
+                        .downcast::<gst_app::AppSrc>()
+                        .unwrap();
+                    app.set_caps(Some(&audio_caps()));
+                    app.set_property("format", gst::Format::Time);
+                    app.set_property("is-live", true);
+                    app.set_property("do-timestamp", true);
+                    *slot = Some(app);
+                }
+            } else {
+                let audio_appsrc = pipeline
+                    .by_name("audio_src")
+                    .unwrap()
+                    .downcast::<gst_app::AppSrc>()
+                    .unwrap();
+                audio_appsrc.set_caps(Some(&audio_caps()));
+                audio_appsrc.set_property("format", gst::Format::Time);
+                audio_appsrc.set_property("is-live", true);
+                audio_appsrc.set_property("do-timestamp", true);
+                self.audio_appsrc = Some(audio_appsrc);
+            }
         }
 
         if pipeline.set_state(gst::State::Playing).is_err() {
@@ -130,9 +177,44 @@ impl RivuletEngine {
         self.audio_enabled
     }
 
+    /// Enable or disable separate audio tracks.
+    ///
+    /// When enabled, system audio and microphone frames must be pushed through
+    /// [`RivuletEngine::push_audio_track`]; they will be stored in distinct
+    /// tracks of the output file. When disabled (default) the frames are mixed
+    /// into a single track via [`RivuletEngine::push_audio_frame`].
+    ///
+    /// Must be called before recording starts.
+    pub fn set_separate_audio_tracks(&mut self, enabled: bool) {
+        self.separate_audio_tracks = enabled;
+    }
+
+    pub fn separate_audio_tracks(&self) -> bool {
+        self.separate_audio_tracks
+    }
+
+    /// Enable or disable a single audio track when recording separate tracks.
+    ///
+    /// A disabled track is not built into the recording pipeline at all, so it
+    /// is safe to keep separate tracks enabled even when only one source is
+    /// active. Must be called before recording starts.
+    pub fn set_audio_track_enabled(&mut self, track: AudioTrack, enabled: bool) {
+        match track {
+            AudioTrack::System => self.audio_sys_enabled = enabled,
+            AudioTrack::Microphone => self.audio_mic_enabled = enabled,
+        }
+    }
+
+    pub fn audio_track_enabled(&self, track: AudioTrack) -> bool {
+        match track {
+            AudioTrack::System => self.audio_sys_enabled,
+            AudioTrack::Microphone => self.audio_mic_enabled,
+        }
+    }
+
     /// Push a mixed PCM frame into the recording pipeline.
     pub fn push_audio_frame(&mut self, frame: &AudioFrame) -> anyhow::Result<()> {
-        if !self.audio_enabled {
+        if !self.audio_enabled || self.separate_audio_tracks {
             return Ok(());
         }
         if frame.data.is_empty() {
@@ -147,25 +229,38 @@ impl RivuletEngine {
             anyhow::bail!("Audio input is not enabled");
         };
 
-        let bytes_len = frame.data.len() * std::mem::size_of::<f32>();
-        let mut buffer = gst::Buffer::with_size(bytes_len)?;
-        {
-            let buffer_ref = buffer
-                .get_mut()
-                .ok_or_else(|| anyhow::anyhow!("Failed to get writable audio buffer"))?;
-            let mut map = buffer_ref
-                .map_writable()
-                .map_err(|_| anyhow::anyhow!("Failed to map audio buffer writable"))?;
-            let dst = map.as_mut_slice();
-            for (i, sample) in frame.data.iter().enumerate() {
-                let bytes = sample.to_ne_bytes();
-                let off = i * 4;
-                dst[off..off + 4].copy_from_slice(&bytes);
-            }
+        push_pcm_buffer(appsrc, frame)
+    }
+
+    /// Push a PCM frame belonging to the given audio track into the pipeline.
+    ///
+    /// Only valid when separate audio tracks are enabled; otherwise the frame
+    /// is ignored.
+    pub fn push_audio_track(
+        &mut self,
+        frame: &AudioFrame,
+        track: AudioTrack,
+    ) -> anyhow::Result<()> {
+        if !self.audio_enabled || !self.separate_audio_tracks {
+            return Ok(());
+        }
+        if frame.data.is_empty() {
+            return Ok(());
         }
 
-        appsrc.push_buffer(buffer)?;
-        Ok(())
+        if self.pipeline.is_none() {
+            anyhow::bail!("Pipeline is not running");
+        }
+
+        let appsrc = match track {
+            AudioTrack::System => self.audio_appsrc_sys.as_ref(),
+            AudioTrack::Microphone => self.audio_appsrc_mic.as_ref(),
+        };
+        let Some(appsrc) = appsrc else {
+            return Ok(());
+        };
+
+        push_pcm_buffer(appsrc, frame)
     }
 
     pub fn start_local_recording(&mut self, path: PathBuf) {
@@ -189,6 +284,12 @@ impl RivuletEngine {
         if let Some(appsrc) = self.audio_appsrc.as_ref() {
             let _ = appsrc.end_of_stream();
         }
+        if let Some(appsrc) = self.audio_appsrc_sys.as_ref() {
+            let _ = appsrc.end_of_stream();
+        }
+        if let Some(appsrc) = self.audio_appsrc_mic.as_ref() {
+            let _ = appsrc.end_of_stream();
+        }
 
         // Auf EOS warten, damit der Muxer die Datei (moov-Atom) finalisiert,
         // bevor die Pipeline auf Null gesetzt wird.
@@ -209,6 +310,8 @@ impl RivuletEngine {
 
         self.appsrc = None;
         self.audio_appsrc = None;
+        self.audio_appsrc_sys = None;
+        self.audio_appsrc_mic = None;
         self.output_path = None;
         self.is_recording = false;
         println!("[Engine] Aufnahme gestoppt und Datei gespeichert.");
@@ -254,9 +357,34 @@ pub fn audio_caps() -> gst::Caps {
         .build()
 }
 
+/// Copy an [`AudioFrame`] into a writable GStreamer buffer and push it into
+/// the given appsrc.
+fn push_pcm_buffer(appsrc: &gst_app::AppSrc, frame: &AudioFrame) -> anyhow::Result<()> {
+    let bytes_len = frame.data.len() * std::mem::size_of::<f32>();
+    let mut buffer = gst::Buffer::with_size(bytes_len)?;
+    {
+        let buffer_ref = buffer
+            .get_mut()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get writable audio buffer"))?;
+        let mut map = buffer_ref
+            .map_writable()
+            .map_err(|_| anyhow::anyhow!("Failed to map audio buffer writable"))?;
+        let dst = map.as_mut_slice();
+        for (i, sample) in frame.data.iter().enumerate() {
+            let bytes = sample.to_ne_bytes();
+            let off = i * 4;
+            dst[off..off + 4].copy_from_slice(&bytes);
+        }
+    }
+
+    appsrc.push_buffer(buffer)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gstreamer_pbutils as gst_pbutils;
 
     #[test]
     fn audio_toggle_is_disabled_by_default() {
@@ -271,6 +399,16 @@ mod tests {
         assert!(engine.audio_enabled());
         engine.set_audio_enabled(false);
         assert!(!engine.audio_enabled());
+    }
+
+    #[test]
+    fn audio_tracks_are_enabled_by_default_and_toggleable() {
+        let mut engine = RivuletEngine::default();
+        assert!(engine.audio_track_enabled(AudioTrack::System));
+        assert!(engine.audio_track_enabled(AudioTrack::Microphone));
+        engine.set_audio_track_enabled(AudioTrack::Microphone, false);
+        assert!(engine.audio_track_enabled(AudioTrack::System));
+        assert!(!engine.audio_track_enabled(AudioTrack::Microphone));
     }
 
     #[test]
@@ -308,6 +446,114 @@ mod tests {
         assert!(path.exists(), "Ausgabedatei sollte existieren");
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         assert!(len > 0, "Ausgabedatei sollte nicht leer sein");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// End-to-end test for separate audio tracks: both tracks are pushed into
+    /// the engine and the resulting file must contain two audio streams.
+    #[test]
+    fn records_separate_audio_tracks_into_two_streams() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+
+        let path = std::env::temp_dir().join(format!(
+            "rivulet_separate_tracks_{}.mp4",
+            std::process::id()
+        ));
+        engine.start_local_recording(path.clone());
+
+        let (width, height) = (64u32, 64u32);
+        let video = vec![0u8; (width * height * 4) as usize];
+        for _ in 0..12 {
+            engine.process_raw_frame(&video, width, height);
+        }
+
+        let audio = AudioFrame::new(vec![0.0f32; 4800], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
+        for _ in 0..12 {
+            let _ = engine.push_audio_track(&audio, AudioTrack::System);
+            let _ = engine.push_audio_track(&audio, AudioTrack::Microphone);
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        engine.stop_recording();
+
+        assert!(path.exists(), "Ausgabedatei sollte existieren");
+        let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        assert!(len > 0, "Ausgabedatei sollte nicht leer sein");
+
+        let uri = format!("file://{}", path.display());
+        let discoverer = gst_pbutils::Discoverer::new(gst::ClockTime::from_seconds(5))
+            .expect("Discoverer sollte erstellt werden können");
+        let info = discoverer
+            .discover_uri(&uri)
+            .expect("Datei sollte lesbar sein");
+        let audio_streams = info.audio_streams();
+        assert_eq!(
+            audio_streams.len(),
+            2,
+            "Es sollten zwei Audio-Streams vorhanden sein, gefunden: {}",
+            audio_streams.len()
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Frames pushed for a specific track are ignored while separate tracks are
+    /// disabled.
+    #[test]
+    fn track_frames_are_ignored_in_mixed_mode() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+
+        let frame = AudioFrame::new(vec![0.0f32; 8], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
+        let result = engine.push_audio_track(&frame, AudioTrack::System);
+        assert!(result.is_ok(), "push_audio_track sollte kein Fehler sein");
+    }
+
+    /// End-to-end test for separate audio tracks with only one active source:
+    /// the engine still must write a valid file when one track is disabled.
+    #[test]
+    fn records_separate_audio_tracks_with_single_source() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+        engine.set_audio_track_enabled(AudioTrack::Microphone, false);
+
+        let path =
+            std::env::temp_dir().join(format!("rivulet_single_track_{}.mp4", std::process::id()));
+        engine.start_local_recording(path.clone());
+
+        let (width, height) = (64u32, 64u32);
+        let video = vec![0u8; (width * height * 4) as usize];
+        for _ in 0..12 {
+            engine.process_raw_frame(&video, width, height);
+        }
+
+        let audio = AudioFrame::new(vec![0.0f32; 4800], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
+        for _ in 0..12 {
+            let _ = engine.push_audio_track(&audio, AudioTrack::System);
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        engine.stop_recording();
+
+        assert!(path.exists(), "Ausgabedatei sollte existieren");
+        let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        assert!(len > 0, "Ausgabedatei sollte nicht leer sein");
+
+        let uri = format!("file://{}", path.display());
+        let discoverer = gst_pbutils::Discoverer::new(gst::ClockTime::from_seconds(5))
+            .expect("Discoverer sollte erstellt werden können");
+        let info = discoverer
+            .discover_uri(&uri)
+            .expect("Datei sollte lesbar sein");
+        assert_eq!(
+            info.audio_streams().len(),
+            1,
+            "Es sollte ein Audio-Stream vorhanden sein"
+        );
 
         let _ = std::fs::remove_file(&path);
     }

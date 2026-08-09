@@ -16,6 +16,9 @@ pub struct AudioConfig {
     pub sample_rate: u32,
     /// Output channel count.
     pub channels: u16,
+    /// Deliver system and microphone audio as separate streams instead of a
+    /// single mixed stream. Use [`AudioCapture::start_separated`] then.
+    pub separate_tracks: bool,
 }
 
 impl Default for AudioConfig {
@@ -27,6 +30,7 @@ impl Default for AudioConfig {
             mic_volume: 1.0,
             sample_rate: 48_000,
             channels: 2,
+            separate_tracks: false,
         }
     }
 }
@@ -54,6 +58,18 @@ impl AudioCapture {
     /// Start capturing and deliver mixed frames to `on_frame`.
     pub fn start(&mut self, on_frame: AudioFrameCallback) -> Result<()> {
         self.inner.start(on_frame)
+    }
+
+    /// Start capturing and deliver system and microphone frames separately.
+    ///
+    /// Only valid when [`AudioConfig::separate_tracks`] is enabled; otherwise
+    /// an error is returned.
+    pub fn start_separated(
+        &mut self,
+        system_cb: AudioFrameCallback,
+        mic_cb: AudioFrameCallback,
+    ) -> Result<()> {
+        self.inner.start_separated(system_cb, mic_cb)
     }
 
     /// Stop capturing and join the capture thread.
@@ -89,7 +105,9 @@ mod sys_impl {
     pub struct AudioCaptureInner {
         config: AudioConfig,
         pipeline: gst::Pipeline,
-        appsink: gst_app::AppSink,
+        appsink: Option<gst_app::AppSink>,
+        appsink_sys: Option<gst_app::AppSink>,
+        appsink_mic: Option<gst_app::AppSink>,
         sys_vol: Option<gst::Element>,
         mic_vol: Option<gst::Element>,
         running: Arc<AtomicBool>,
@@ -100,44 +118,67 @@ mod sys_impl {
         pub fn new(config: &AudioConfig) -> Result<Self> {
             let _ = gst::init();
 
-            let mut pipeline_str = String::new();
-            let mut inputs = 0usize;
+            let caps_filter = format!(
+                "capsfilter caps=\"audio/x-raw,format=F32LE,layout=interleaved,channels={},rate={}\"",
+                config.channels, config.sample_rate
+            );
 
-            if config.capture_system {
+            let system_src = if config.capture_system {
                 let device = system_device_name();
                 let device_attr = match &device {
                     Some(d) if !d.is_empty() => format!(" device=\"{}\"", d),
                     _ => String::new(),
                 };
-                pipeline_str.push_str(&format!(
-                    "pulsesrc name=sys_in{} do-timestamp=true \
-                     ! volume name=sys_vol \
-                     ! audioconvert ! audioresample \
-                     ! capsfilter caps=\"audio/x-raw,format=F32LE,layout=interleaved,channels={},rate={}\" \
-                     ! queue ! adder. ",
-                    device_attr, config.channels, config.sample_rate
-                ));
-                inputs += 1;
-            }
+                Some(format!(
+                    "pulsesrc name=sys_in{} do-timestamp=true",
+                    device_attr
+                ))
+            } else {
+                None
+            };
+            let mic_src = if config.capture_mic {
+                Some("pulsesrc name=mic_in do-timestamp=true".to_string())
+            } else {
+                None
+            };
 
-            if config.capture_mic {
-                pipeline_str.push_str(&format!(
-                    "pulsesrc name=mic_in do-timestamp=true \
-                     ! volume name=mic_vol \
-                     ! audioconvert ! audioresample \
-                     ! capsfilter caps=\"audio/x-raw,format=F32LE,layout=interleaved,channels={},rate={}\" \
-                     ! queue ! adder. ",
-                    config.channels, config.sample_rate
-                ));
-                inputs += 1;
-            }
-
-            if inputs == 0 {
+            if system_src.is_none() && mic_src.is_none() {
                 anyhow::bail!("No audio input sources enabled");
             }
 
-            pipeline_str
-                .push_str("adder name=adder ! appsink name=out_sink emit-signals=false sync=false");
+            let mut pipeline_str = String::new();
+            if config.separate_tracks {
+                if let Some(src) = &system_src {
+                    pipeline_str.push_str(&format!(
+                        "{} ! volume name=sys_vol ! audioconvert ! audioresample \
+                         ! {} ! queue ! appsink name=sys_sink emit-signals=false sync=false ",
+                        src, caps_filter
+                    ));
+                }
+                if let Some(src) = &mic_src {
+                    pipeline_str.push_str(&format!(
+                        "{} ! volume name=mic_vol ! audioconvert ! audioresample \
+                         ! {} ! queue ! appsink name=mic_sink emit-signals=false sync=false ",
+                        src, caps_filter
+                    ));
+                }
+            } else {
+                for (i, src) in [system_src.as_ref(), mic_src.as_ref()]
+                    .into_iter()
+                    .flatten()
+                    .enumerate()
+                {
+                    let vol = if i == 0 { "sys_vol" } else { "mic_vol" };
+                    pipeline_str.push_str(&format!(
+                        "{} ! volume name={} ! audioconvert ! audioresample \
+                         ! {} ! queue ! adder. ",
+                        src, vol, caps_filter
+                    ));
+                }
+                pipeline_str.push_str(
+                    "adder name=adder ! appsink name=out_sink emit-signals=false sync=false",
+                );
+            }
 
             let pipeline = gst::parse::launch(&pipeline_str)
                 .map_err(|e| anyhow::anyhow!("Failed to build audio pipeline: {}", e))?
@@ -154,16 +195,30 @@ mod sys_impl {
                 v.set_property("volume", config.mic_volume as f64);
             }
 
-            let appsink = pipeline
-                .by_name("out_sink")
-                .ok_or_else(|| anyhow::anyhow!("Missing appsink in audio pipeline"))?
-                .downcast::<gst_app::AppSink>()
-                .expect("element is an appsink");
+            let (appsink, appsink_sys, appsink_mic) = if config.separate_tracks {
+                (
+                    None,
+                    if config.capture_system {
+                        Some(lookup_appsink(&pipeline, "sys_sink")?)
+                    } else {
+                        None
+                    },
+                    if config.capture_mic {
+                        Some(lookup_appsink(&pipeline, "mic_sink")?)
+                    } else {
+                        None
+                    },
+                )
+            } else {
+                (Some(lookup_appsink(&pipeline, "out_sink")?), None, None)
+            };
 
             Ok(Self {
                 config: config.clone(),
                 pipeline,
                 appsink,
+                appsink_sys,
+                appsink_mic,
                 sys_vol,
                 mic_vol,
                 running: Arc::new(AtomicBool::new(false)),
@@ -172,6 +227,9 @@ mod sys_impl {
         }
 
         pub fn start(&mut self, on_frame: AudioFrameCallback) -> Result<()> {
+            if self.config.separate_tracks {
+                anyhow::bail!("Separate audio tracks are enabled; use start_separated()");
+            }
             if self.running.load(Ordering::SeqCst) {
                 return Ok(());
             }
@@ -179,7 +237,7 @@ mod sys_impl {
 
             self.pipeline.set_state(gst::State::Playing)?;
 
-            let appsink = self.appsink.clone();
+            let appsink = self.appsink.clone().expect("mixed appsink present");
             let running = Arc::clone(&self.running);
             let sample_rate = self.config.sample_rate;
             let channels = self.config.channels;
@@ -187,29 +245,59 @@ mod sys_impl {
 
             let handle = thread::spawn(move || {
                 while running.load(Ordering::SeqCst) {
-                    let sample = appsink.try_pull_sample(Some(gst::ClockTime::from_mseconds(200)));
-                    if let Some(sample) = sample {
-                        let Some(buffer) = sample.buffer() else {
-                            continue;
-                        };
-                        let Ok(map) = buffer.map_readable() else {
-                            continue;
-                        };
-                        let bytes = map.as_slice();
-                        let count = bytes.len() / 4;
-                        let mut data = Vec::with_capacity(count);
-                        for i in 0..count {
-                            let off = i * 4;
-                            data.push(f32::from_ne_bytes([
-                                bytes[off],
-                                bytes[off + 1],
-                                bytes[off + 2],
-                                bytes[off + 3],
-                            ]));
-                        }
-                        let frame = AudioFrame::new(data, sample_rate, channels);
+                    if let Some(frame) = pull_frame(&appsink, sample_rate, channels) {
                         if let Ok(mut cb) = callback.lock() {
                             cb(frame);
+                        }
+                    }
+                }
+            });
+
+            self.thread = Some(handle);
+            Ok(())
+        }
+
+        pub fn start_separated(
+            &mut self,
+            system_cb: AudioFrameCallback,
+            mic_cb: AudioFrameCallback,
+        ) -> Result<()> {
+            if !self.config.separate_tracks {
+                anyhow::bail!("Separate audio tracks are disabled; use start()");
+            }
+            if self.running.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+            self.running.store(true, Ordering::SeqCst);
+
+            self.pipeline.set_state(gst::State::Playing)?;
+
+            let sys_sink = self.appsink_sys.clone();
+            let mic_sink = self.appsink_mic.clone();
+            if sys_sink.is_none() && mic_sink.is_none() {
+                anyhow::bail!("No audio input sources enabled");
+            }
+
+            let running = Arc::clone(&self.running);
+            let sample_rate = self.config.sample_rate;
+            let channels = self.config.channels;
+            let sys_callback = Arc::new(Mutex::new(system_cb));
+            let mic_callback = Arc::new(Mutex::new(mic_cb));
+
+            let handle = thread::spawn(move || {
+                while running.load(Ordering::SeqCst) {
+                    if let Some(sink) = &sys_sink {
+                        if let Some(frame) = pull_frame(sink, sample_rate, channels) {
+                            if let Ok(mut cb) = sys_callback.lock() {
+                                cb(frame);
+                            }
+                        }
+                    }
+                    if let Some(sink) = &mic_sink {
+                        if let Some(frame) = pull_frame(sink, sample_rate, channels) {
+                            if let Ok(mut cb) = mic_callback.lock() {
+                                cb(frame);
+                            }
                         }
                     }
                 }
@@ -264,6 +352,41 @@ mod sys_impl {
         }
         Some(format!("{}.monitor", sink))
     }
+
+    /// Look up an appsink element by name in the freshly parsed pipeline.
+    fn lookup_appsink(pipeline: &gst::Pipeline, name: &str) -> Result<gst_app::AppSink> {
+        pipeline
+            .by_name(name)
+            .ok_or_else(|| anyhow::anyhow!("Missing appsink '{}' in audio pipeline", name))?
+            .downcast::<gst_app::AppSink>()
+            .map_err(|_| anyhow::anyhow!("Element '{}' is not an appsink", name))
+    }
+
+    /// Pull a single sample from the appsink and convert it into an
+    /// [`AudioFrame`]. Returns `None` when no sample is available within the
+    /// timeout.
+    fn pull_frame(
+        appsink: &gst_app::AppSink,
+        sample_rate: u32,
+        channels: u16,
+    ) -> Option<AudioFrame> {
+        let sample = appsink.try_pull_sample(Some(gst::ClockTime::from_mseconds(100)))?;
+        let buffer = sample.buffer()?;
+        let map = buffer.map_readable().ok()?;
+        let bytes = map.as_slice();
+        let count = bytes.len() / 4;
+        let mut data = Vec::with_capacity(count);
+        for i in 0..count {
+            let off = i * 4;
+            data.push(f32::from_ne_bytes([
+                bytes[off],
+                bytes[off + 1],
+                bytes[off + 2],
+                bytes[off + 3],
+            ]));
+        }
+        Some(AudioFrame::new(data, sample_rate, channels))
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -280,6 +403,14 @@ mod sys_impl {
         }
 
         pub fn start(&mut self, _on_frame: AudioFrameCallback) -> Result<()> {
+            anyhow::bail!("Audio capture is currently only supported on Linux")
+        }
+
+        pub fn start_separated(
+            &mut self,
+            _system_cb: AudioFrameCallback,
+            _mic_cb: AudioFrameCallback,
+        ) -> Result<()> {
             anyhow::bail!("Audio capture is currently only supported on Linux")
         }
 
@@ -312,6 +443,11 @@ mod tests {
         assert_eq!(config.mic_volume.to_bits(), 1.0f32.to_bits());
     }
 
+    #[test]
+    fn default_config_uses_mixed_tracks() {
+        assert!(!AudioConfig::default().separate_tracks);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn capture_rejects_config_without_sources() {
@@ -321,6 +457,37 @@ mod tests {
             ..Default::default()
         };
         assert!(AudioCapture::new(config).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn separate_tracks_config_builds_pipeline() {
+        let config = AudioConfig {
+            separate_tracks: true,
+            ..Default::default()
+        };
+        assert!(AudioCapture::new(config).is_ok());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn separate_tracks_rejects_single_mixed_start() {
+        let config = AudioConfig {
+            separate_tracks: true,
+            ..Default::default()
+        };
+        let mut audio = AudioCapture::new(config).expect("pipeline builds");
+        assert!(audio.start(Box::new(|_| {})).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mixed_config_rejects_separated_start() {
+        let config = AudioConfig::default();
+        let mut audio = AudioCapture::new(config).expect("pipeline builds");
+        assert!(audio
+            .start_separated(Box::new(|_| {}), Box::new(|_| {}))
+            .is_err());
     }
 
     #[cfg(not(target_os = "linux"))]

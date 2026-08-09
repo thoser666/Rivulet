@@ -1,3 +1,16 @@
+/// Identifies which input channel an [`AudioFrame`] belongs to.
+///
+/// Used when recording separate audio tracks so that the system audio and the
+/// microphone are stored in distinct tracks of the output file instead of
+/// being mixed together.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioTrack {
+    /// The system/desktop audio ("what you hear").
+    System,
+    /// The microphone input.
+    Microphone,
+}
+
 /// Interleaved PCM audio data produced by an audio capture source.
 ///
 /// Samples are `f32` in the range `[-1.0, 1.0]` and interleaved by channel
@@ -53,5 +66,12 @@ mod tests {
     fn empty_frame_has_zero_len() {
         let frame = AudioFrame::new(Vec::new(), 48_000, 2);
         assert_eq!(frame.frame_len(), 0);
+    }
+
+    #[test]
+    fn audio_track_variants_are_distinct() {
+        assert_ne!(AudioTrack::System, AudioTrack::Microphone);
+        assert_eq!(AudioTrack::System, AudioTrack::System);
+        assert_eq!(AudioTrack::Microphone, AudioTrack::Microphone);
     }
 }
