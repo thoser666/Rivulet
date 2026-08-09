@@ -1,9 +1,12 @@
-name: Release
+name: Release (Alpha)
 
-# Baut die Release-Binaries als GitHub-Action-Artifacts, sobald ein neues
-# Feature (Conventional Commit "feat:..." / "feat(...):...") auf den
-# develop-Branch gepusht wird. Gemergte Dependabot-Pullrequests lösen den
-# Build nicht aus.
+# ALPHA-KANAL: Baut die Release-Binaries als GitHub-Action-Artifacts, sobald
+# ein neues Feature (Conventional Commit "feat:..." / "feat(...):...") auf den
+# develop-Branch gepusht wird. Jeder Feature-Push erzeugt ein untagiertes
+# Alpha-Artefakt. Gemergte Dependabot-Pullrequests lösen den Build nicht aus.
+#
+# Für die höheren Reifegrade (Beta/RC/Stable) siehe den tag-basierten
+# Release-Pfad in ci.yml ("refs/tags/v*").
 
 on:
   push:
@@ -58,10 +61,10 @@ jobs:
           echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
 
   ################################################################
-  # RELEASE BINARIES (nur bei Feature-Push)
+  # ALPHA BINARIES (nur bei Feature-Push)
   ################################################################
   build:
-    name: Build Release Binaries (${{ matrix.artifact_name }})
+    name: Build Alpha Binaries (${{ matrix.artifact_name }})
     needs: check
     if: ${{ needs.check.outputs.should_release == 'true' }}
     runs-on: ${{ matrix.os }}
@@ -71,16 +74,16 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact_name: rivulet-linux-x86_64
+            artifact_name: rivulet-linux-x86_64-alpha
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: rivulet-windows-x86_64.exe
+            artifact_name: rivulet-windows-x86_64-alpha.exe
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact_name: rivulet-macos-x86_64
+            artifact_name: rivulet-macos-x86_64-alpha
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact_name: rivulet-macos-aarch64
+            artifact_name: rivulet-macos-aarch64-alpha
 
     steps:
       - name: Checkout repository
