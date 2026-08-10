@@ -124,7 +124,14 @@ jobs:
           if (-not $gstRoot) { $gstRoot = "C:\gstreamer\1.0\msvc_x86_64\" }
           $gstBin = Join-Path $gstRoot "bin"
           $pkgPath = Join-Path $gstRoot "lib\pkgconfig"
+          $gstPlugins = Join-Path $gstRoot "lib\gstreamer-1.0"
+          $gstScanner = Join-Path $gstRoot "libexec\gstreamer-1.0\gst-plugin-scanner.exe"
           echo "PKG_CONFIG_PATH=$pkgPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GSTREAMER_1_0_ROOT_MSVC_X86_64=$gstRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GST_PLUGIN_SYSTEM_PATH=$gstPlugins" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GST_PLUGIN_PATH=$gstPlugins" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GST_PLUGIN_SCANNER=$gstScanner" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GST_REGISTRY=$env:TEMP\gst-registry.bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo $gstBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install macOS release dependencies
