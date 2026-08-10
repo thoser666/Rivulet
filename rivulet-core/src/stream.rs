@@ -166,4 +166,40 @@ mod tests {
         assert_eq!(StreamPlatform::YouTube.label(), "YouTube");
         assert_eq!(StreamPlatform::Custom.label(), "Custom");
     }
+
+    #[test]
+    fn is_rtmps_distinguishes_encrypted_and_plain() {
+        assert!(
+            StreamSettings::custom("rtmps://host/app", "k").is_rtmps(),
+            "rtmps:// muss als verschlüsselt erkannt werden"
+        );
+        assert!(
+            !StreamSettings::custom("rtmp://host/app", "k").is_rtmps(),
+            "rtmp:// darf nicht als verschlüsselt gelten"
+        );
+    }
+
+    #[test]
+    fn settings_keep_platform_and_parts() {
+        let s = StreamSettings::new(StreamPlatform::Kick, "rtmps://host/app", "key");
+        assert_eq!(s.platform, StreamPlatform::Kick);
+        assert_eq!(s.ingest_url, "rtmps://host/app");
+        assert_eq!(s.stream_key, "key");
+        assert_eq!(s.location(), "rtmps://host/app/key");
+    }
+
+    #[test]
+    fn location_joins_with_single_separator_even_with_missing_key() {
+        let s = StreamSettings::new(StreamPlatform::Custom, "rtmps://host/app", "");
+        assert_eq!(s.location(), "rtmps://host/app");
+    }
+
+    #[test]
+    fn keys_are_not_mangled_by_location_builder() {
+        let s = StreamSettings::twitch("live_123456-ab-cd.ef");
+        assert_eq!(
+            s.location(),
+            "rtmps://live.twitch.tv/app/live_123456-ab-cd.ef"
+        );
+    }
 }

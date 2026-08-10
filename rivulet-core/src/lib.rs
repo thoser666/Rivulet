@@ -633,6 +633,92 @@ mod tests {
         assert!(!engine.is_streaming());
     }
 
+    /// Stream settings can be configured and cleared again.
+    #[test]
+    fn stream_settings_can_be_cleared() {
+        let mut engine = RivuletEngine::default();
+        engine.set_stream_settings(Some(StreamSettings::twitch("k")));
+        assert!(engine.is_streaming());
+        engine.set_stream_settings(None);
+        assert!(!engine.is_streaming());
+    }
+
+    /// The streaming pipeline contains no audio branch when audio is disabled.
+    #[test]
+    fn streaming_pipeline_without_audio_has_no_audio_branch() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(false);
+        engine.set_stream_settings(Some(StreamSettings::youtube("k1")));
+
+        let pipeline_str = engine.build_streaming_pipeline_str();
+        assert!(!pipeline_str.contains("audio_src"), "{}", pipeline_str);
+        gst::parse::launch(&pipeline_str).expect("Video-Only-Streaming-Pipeline sollte parsen");
+    }
+
+    /// The streaming pipeline mixes audio into a single track by default and
+    /// accepts a plain (unencrypted) custom RTMP ingest URL.
+    #[test]
+    fn streaming_pipeline_mixes_audio_and_accepts_plain_rtmp() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_stream_settings(Some(StreamSettings::custom("rtmp://localhost/live", "k")));
+
+        let pipeline_str = engine.build_streaming_pipeline_str();
+        assert!(pipeline_str.contains("name=audio_src "), "{}", pipeline_str);
+        assert!(!pipeline_str.contains("audio_src_sys"), "{}", pipeline_str);
+        assert!(pipeline_str.contains("rtmp://localhost/live/k"));
+        gst::parse::launch(&pipeline_str).expect("Custom-RTMP-Pipeline sollte parsen");
+    }
+
+    /// While streaming, mixed audio frames are routed into the pipeline even
+    /// when separate tracks are enabled, while `push_audio_track` is ignored.
+    #[test]
+    fn streaming_mode_routes_audio_to_mixed_sink() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+        engine.set_stream_settings(Some(StreamSettings::twitch("k")));
+
+        let frame = AudioFrame::new(vec![0.0f32; 8], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
+
+        // Must NOT be silently ignored: it has to reach the pipeline check.
+        let result = engine.push_audio_frame(&frame);
+        assert!(
+            result.is_err(),
+            "Gemischtes Audio muss im Streaming-Modus geroutet werden"
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Pipeline is not running"),
+            "Es sollte an der Pipeline-Prüfung scheitern, da keine Pipeline läuft"
+        );
+
+        // push_audio_track is ignored while streaming (FLV supports one track).
+        assert!(
+            engine.push_audio_track(&frame, AudioTrack::System).is_ok(),
+            "push_audio_track muss im Streaming-Modus ignoriert werden"
+        );
+    }
+
+    /// In non-streaming recording mode mixed frames are ignored while separate
+    /// tracks are enabled (unchanged behaviour preserved by the streaming guard).
+    #[test]
+    fn recording_mode_keeps_track_routing_guards() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+
+        let frame = AudioFrame::new(vec![0.0f32; 8], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
+        assert!(
+            engine.push_audio_frame(&frame).is_ok(),
+            "Gemischte Frames müssen bei separaten Tracks ignoriert werden"
+        );
+    }
+
     /// End-to-end test for separate audio tracks with only one active source:
     /// the engine still must write a valid file when one track is disabled.
     #[test]
