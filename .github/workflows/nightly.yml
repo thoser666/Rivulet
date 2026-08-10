@@ -98,7 +98,9 @@ jobs:
             gstreamer1.0-plugins-ugly \
             gstreamer1.0-libav \
             gstreamer1.0-tools \
-            libglib2.0-dev
+            libglib2.0-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev
 
       - name: Install Windows dependencies (if applicable)
         if: runner.os == 'Windows'
@@ -107,8 +109,8 @@ jobs:
           choco install msys2 --params "/NoUpdate /InstallDir:C:/msys64"
           C:/msys64/usr/bin/bash -lc "pacman -S --noconfirm mingw-w64-x86_64-pkg-config"
           echo "C:/msys64/mingw64/bin" >> $env:GITHUB_PATH
-          choco install gstreamer --version=1.24.11
-          choco install gstreamer-devel --version=1.24.11
+          choco install gstreamer --version=1.24.13
+          choco install gstreamer-devel --version=1.24.13
           $GSTREAMER_ROOT = $env:GSTREAMER_1_0_ROOT_MSVC_X86_64
           $PKG_PATH = Join-Path $GSTREAMER_ROOT "lib\pkgconfig"
           echo "Setting PKG_CONFIG_PATH to $PKG_PATH"
