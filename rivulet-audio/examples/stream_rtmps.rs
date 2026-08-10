@@ -11,6 +11,8 @@
 //! - `RIVULET_STREAM_KEY`     = the stream key from the platform dashboard
 //!   (required)
 //! - `RIVULET_STREAM_SECS`    = stream duration in seconds (default: 10)
+//! - `RIVULET_STREAM_RECORD_PATH` = optional local MP4 path; when set the
+//!   engine records and streams simultaneously (dual output)
 //!
 //! Kick uses a streamer-specific AWS IVS ingest endpoint, e.g.
 //! `rtmps://<id>.global-contribute.live-video.net/app` - set it via
@@ -86,6 +88,18 @@ fn main() -> anyhow::Result<()> {
     engine.set_audio_enabled(true);
     engine.set_stream_settings(Some(settings));
 
+    // Optional local recording while streaming (dual output).
+    let mut record_path = None;
+    if let Ok(path) = std::env::var("RIVULET_STREAM_RECORD_PATH") {
+        let path = std::path::PathBuf::from(path);
+        engine.start_local_recording(path.clone());
+        record_path = Some(path);
+        println!(
+            "Dual output: recording locally to {}",
+            record_path.as_ref().unwrap().display()
+        );
+    }
+
     // 2. Build the audio capture (system audio + microphone, mixed).
     let audio_config = AudioConfig {
         capture_system: true,
@@ -138,6 +152,9 @@ fn main() -> anyhow::Result<()> {
     println!("Stream complete.");
     println!("  Video frames: {}", frame_count);
     println!("  Audio frames: {}", audio_frames);
+    if let Some(path) = record_path {
+        println!("  Local recording: {}", path.display());
+    }
 
     Ok(())
 }

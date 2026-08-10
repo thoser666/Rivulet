@@ -65,16 +65,25 @@ impl RivuletEngine {
     }
 
     /// Configure the RTMP/RTMPS stream output. When set, the engine streams to
-    /// the given ingest URL instead of writing a local file.
+    /// the given ingest URL. If a local recording is started at the same time
+    /// (via [`RivuletEngine::start_local_recording`]) the engine runs in dual
+    /// output mode and records and streams simultaneously.
     ///
     /// Must be called before recording starts.
     pub fn set_stream_settings(&mut self, settings: Option<StreamSettings>) {
         self.stream_settings = settings;
     }
 
-    /// Whether the engine is configured to stream (instead of recording).
+    /// Whether the engine is configured to stream.
     pub fn is_streaming(&self) -> bool {
         self.stream_settings.is_some()
+    }
+
+    /// Whether the engine records and streams at the same time (dual output).
+    /// This is the case when both stream settings and a local output path are
+    /// configured.
+    pub fn is_dual_output(&self) -> bool {
+        self.is_streaming() && self.output_path.is_some()
     }
 
     fn video_branch_str(&self) -> String {
@@ -140,8 +149,57 @@ impl RivuletEngine {
         s
     }
 
+    /// Build a pipeline that records locally **and** streams at the same time.
+    ///
+    /// Video and audio are encoded once and split via `tee` into two branches,
+    /// one feeding the MP4 muxer (local file) and one feeding the FLV muxer
+    /// (RTMP/RTMPS sink). Audio is always mixed into a single track because FLV
+    /// only supports one audio track.
+    fn build_dual_output_pipeline_str(&self) -> String {
+        let stream_location = self
+            .stream_settings
+            .as_ref()
+            .expect("Stream-Settings müssen gesetzt sein")
+            .location();
+        let path = self
+            .output_path
+            .as_ref()
+            .expect("Ausgabepfad muss gesetzt sein");
+        let location = path.to_str().expect("Dateipfad ist ungültig.");
+        println!(
+            "[Engine] Initialisiere Dual-Output-Pipeline (Aufnahme + Stream nach {})",
+            stream_location
+        );
+
+        let mut s = String::new();
+        s.push_str(
+            "appsrc name=rivulet_src ! videoconvert ! x264enc tune=zerolatency \
+             ! tee name=video_tee ! queue ! mux_rec. \
+             video_tee. ! queue ! mux_stream. ",
+        );
+        if self.audio_enabled {
+            s.push_str(
+                "appsrc name=audio_src format=time is-live=true do-timestamp=true \
+                 ! audioconvert ! audioresample ! avenc_aac ! tee name=audio_tee \
+                 ! queue ! mux_rec. \
+                 audio_tee. ! queue ! mux_stream. ",
+            );
+        }
+        s.push_str(&format!(
+            "mp4mux name=mux_rec ! filesink location=\"{}\" ",
+            location
+        ));
+        s.push_str(&format!(
+            "flvmux name=mux_stream streamable=true ! rtmp2sink location=\"{}\"",
+            stream_location
+        ));
+        s
+    }
+
     fn initialize_and_start_pipeline(&mut self, width: u32, height: u32) {
-        let pipeline_str = if self.is_streaming() {
+        let pipeline_str = if self.is_dual_output() {
+            self.build_dual_output_pipeline_str()
+        } else if self.is_streaming() {
             self.build_streaming_pipeline_str()
         } else {
             let Some(path) = self.output_path.as_ref() else {
@@ -221,7 +279,9 @@ impl RivuletEngine {
 
         self.pipeline = Some(pipeline);
         self.appsrc = Some(appsrc);
-        if self.is_streaming() {
+        if self.is_dual_output() {
+            println!("[Engine] Dual-Output-Pipeline läuft.");
+        } else if self.is_streaming() {
             println!("[Engine] Streaming-Pipeline läuft.");
         } else {
             println!("[Engine] Aufnahme-Pipeline läuft.");
@@ -325,6 +385,10 @@ impl RivuletEngine {
         push_pcm_buffer(appsrc, frame)
     }
 
+    /// Start writing the video/audio frames to a local MP4 file.
+    ///
+    /// When stream settings are configured as well ([`RivuletEngine::set_stream_settings`]),
+    /// the engine records and streams simultaneously (dual output).
     pub fn start_local_recording(&mut self, path: PathBuf) {
         if self.is_recording {
             return;
@@ -716,6 +780,128 @@ mod tests {
         assert!(
             engine.push_audio_frame(&frame).is_ok(),
             "Gemischte Frames müssen bei separaten Tracks ignoriert werden"
+        );
+    }
+
+    /// Dual output is active when both stream settings and a local output path
+    /// are configured, and streaming alone is not enough.
+    #[test]
+    fn dual_output_detected_when_stream_and_path_configured() {
+        let mut engine = RivuletEngine::default();
+        engine.set_stream_settings(Some(StreamSettings::twitch("k")));
+        assert!(
+            !engine.is_dual_output(),
+            "nur Streaming ist kein Dual Output"
+        );
+
+        let path = std::env::temp_dir().join("rivulet_dual_detect.mp4");
+        engine.start_local_recording(path);
+        assert!(engine.is_dual_output(), "Stream + Aufnahme = Dual Output");
+
+        engine.set_stream_settings(None);
+        assert!(
+            !engine.is_dual_output(),
+            "nur Aufnahme ist kein Dual Output"
+        );
+    }
+
+    /// The dual output pipeline parses and contains both sinks: the MP4 file
+    /// sink and the RTMPS stream sink, split via tee.
+    #[test]
+    fn dual_output_pipeline_str_parses_with_both_sinks() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_stream_settings(Some(StreamSettings::twitch("dualkey")));
+
+        let path = std::env::temp_dir().join("rivulet_dual_parse.mp4");
+        engine.start_local_recording(path.clone());
+
+        let pipeline_str = engine.build_dual_output_pipeline_str();
+        assert!(pipeline_str.contains("name=video_tee"), "{}", pipeline_str);
+        assert!(pipeline_str.contains("mp4mux name=mux_rec"));
+        assert!(pipeline_str.contains("flvmux name=mux_stream streamable=true"));
+        assert!(pipeline_str.contains(&format!("filesink location=\"{}\"", path.display())));
+        assert!(pipeline_str.contains("rtmp2sink location=\"rtmps://live.twitch.tv/app/dualkey\""));
+
+        let pipeline = gst::parse::launch(&pipeline_str)
+            .expect("Dual-Output-Pipeline sollte parsen")
+            .downcast::<gst::Pipeline>()
+            .unwrap();
+        assert!(pipeline.by_name("rivulet_src").is_some());
+        assert!(pipeline.by_name("mux_rec").is_some());
+        assert!(pipeline.by_name("mux_stream").is_some());
+    }
+
+    /// In dual output mode the audio is always mixed into a single track, even
+    /// when separate tracks are enabled, because FLV only supports one track.
+    #[test]
+    fn dual_output_pipeline_mixes_audio_despite_separate_tracks() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+        engine.set_stream_settings(Some(StreamSettings::youtube("k1")));
+
+        let path = std::env::temp_dir().join("rivulet_dual_mix.mp4");
+        engine.start_local_recording(path);
+
+        let pipeline_str = engine.build_dual_output_pipeline_str();
+        assert!(pipeline_str.contains("name=audio_src "), "{}", pipeline_str);
+        assert!(!pipeline_str.contains("audio_src_sys"), "{}", pipeline_str);
+        assert!(!pipeline_str.contains("audio_src_mic"), "{}", pipeline_str);
+        assert!(pipeline_str.contains("name=audio_tee"));
+    }
+
+    /// A video-only dual output pipeline (audio disabled) still parses.
+    #[test]
+    fn dual_output_pipeline_without_audio_parses() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(false);
+        engine.set_stream_settings(Some(StreamSettings::custom("rtmp://localhost/live", "k")));
+
+        let path = std::env::temp_dir().join("rivulet_dual_video_only.mp4");
+        engine.start_local_recording(path);
+
+        let pipeline_str = engine.build_dual_output_pipeline_str();
+        assert!(!pipeline_str.contains("audio_src"), "{}", pipeline_str);
+        gst::parse::launch(&pipeline_str).expect("Video-Only-Dual-Output-Pipeline sollte parsen");
+    }
+
+    /// In dual output mode mixed audio frames are routed into the pipeline even
+    /// when separate tracks are enabled, while `push_audio_track` is ignored.
+    #[test]
+    fn dual_output_routes_audio_to_mixed_sink() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+        engine.set_stream_settings(Some(StreamSettings::twitch("k")));
+
+        let path = std::env::temp_dir().join("rivulet_dual_routing.mp4");
+        engine.start_local_recording(path);
+        assert!(engine.is_dual_output());
+
+        let frame = AudioFrame::new(vec![0.0f32; 8], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
+
+        // Must NOT be silently ignored: it has to reach the pipeline check.
+        let result = engine.push_audio_frame(&frame);
+        assert!(
+            result.is_err(),
+            "Gemischtes Audio muss im Dual-Output-Modus geroutet werden"
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Pipeline is not running"),
+            "Es sollte an der Pipeline-Prüfung scheitern, da keine Pipeline läuft"
+        );
+
+        // push_audio_track is ignored in dual output mode.
+        assert!(
+            engine.push_audio_track(&frame, AudioTrack::System).is_ok(),
+            "push_audio_track muss im Dual-Output-Modus ignoriert werden"
         );
     }
 
