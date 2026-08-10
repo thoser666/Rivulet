@@ -86,6 +86,12 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
             return Ok(());
         }
 
+        // KORREKTUR: width/height vor dem Buffer-Zugriff holen, da der
+        // FrameBuffer den Frame mutable borgt und danach keine weiteren
+        // (immutable) Zugriffe auf den Frame mehr erlaubt sind.
+        let width = frame.width();
+        let height = frame.height();
+
         // Hole den Frame-Puffer
         let mut frame_buffer = frame.buffer()?;
 
@@ -94,8 +100,8 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
 
         let raw_frame = RawFrame {
             data,
-            width: frame.width(),
-            height: frame.height(),
+            width,
+            height,
         };
 
         if self.frame_sender.send(raw_frame).is_err() {
