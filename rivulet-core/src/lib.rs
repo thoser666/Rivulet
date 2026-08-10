@@ -11,6 +11,9 @@ use gst::prelude::*;
 pub mod audio;
 pub use audio::{AudioFrame, AudioTrack};
 
+pub mod stream;
+pub use stream::{StreamPlatform, StreamSettings};
+
 // GStreamer-Initialisierung
 static GSTREAMER_INIT: Lazy<()> = Lazy::new(|| {
     gst::init().expect("GStreamer-Initialisierung fehlgeschlagen.");
@@ -32,6 +35,7 @@ pub struct RivuletEngine {
     audio_mic_enabled: bool,
     is_recording: bool,
     output_path: Option<PathBuf>,
+    stream_settings: Option<StreamSettings>,
 }
 
 impl Default for RivuletEngine {
@@ -49,6 +53,7 @@ impl Default for RivuletEngine {
             audio_mic_enabled: true,
             is_recording: false,
             output_path: None,
+            stream_settings: None,
         }
     }
 }
@@ -59,41 +64,93 @@ impl RivuletEngine {
         Self::default()
     }
 
-    fn initialize_and_start_pipeline(&mut self, width: u32, height: u32) {
-        let Some(path) = self.output_path.as_ref() else {
-            return;
-        };
-        let location = path.to_str().expect("Dateipfad ist ungültig.");
-        println!("[Engine] Initialisiere Aufnahme-Pipeline für: {}", location);
+    /// Configure the RTMP/RTMPS stream output. When set, the engine streams to
+    /// the given ingest URL instead of writing a local file.
+    ///
+    /// Must be called before recording starts.
+    pub fn set_stream_settings(&mut self, settings: Option<StreamSettings>) {
+        self.stream_settings = settings;
+    }
 
-        let mut pipeline_str =
-            "appsrc name=rivulet_src ! videoconvert ! x264enc tune=zerolatency ! queue ! mux. "
-                .to_string();
-        if self.audio_enabled {
-            if self.separate_audio_tracks {
-                if self.audio_sys_enabled {
-                    pipeline_str.push_str(
-                        "appsrc name=audio_src_sys format=time is-live=true do-timestamp=true \
-                         ! audioconvert ! audioresample ! avenc_aac ! queue ! mux. ",
-                    );
-                }
-                if self.audio_mic_enabled {
-                    pipeline_str.push_str(
-                        "appsrc name=audio_src_mic format=time is-live=true do-timestamp=true \
-                         ! audioconvert ! audioresample ! avenc_aac ! queue ! mux. ",
-                    );
-                }
-            } else {
-                pipeline_str.push_str(
-                    "appsrc name=audio_src format=time is-live=true do-timestamp=true \
+    /// Whether the engine is configured to stream (instead of recording).
+    pub fn is_streaming(&self) -> bool {
+        self.stream_settings.is_some()
+    }
+
+    fn video_branch_str(&self) -> String {
+        "appsrc name=rivulet_src ! videoconvert ! x264enc tune=zerolatency ! queue ! mux. "
+            .to_string()
+    }
+
+    /// Build the audio branch of the pipeline. With `force_mixed` the sources
+    /// are mixed into a single track regardless of `separate_audio_tracks`; the
+    /// FLV muxer used for streaming only supports a single audio track.
+    fn audio_branch_str(&self, force_mixed: bool) -> String {
+        if !self.audio_enabled {
+            return String::new();
+        }
+        if self.separate_audio_tracks && !force_mixed {
+            let mut s = String::new();
+            if self.audio_sys_enabled {
+                s.push_str(
+                    "appsrc name=audio_src_sys format=time is-live=true do-timestamp=true \
                      ! audioconvert ! audioresample ! avenc_aac ! queue ! mux. ",
                 );
             }
+            if self.audio_mic_enabled {
+                s.push_str(
+                    "appsrc name=audio_src_mic format=time is-live=true do-timestamp=true \
+                     ! audioconvert ! audioresample ! avenc_aac ! queue ! mux. ",
+                );
+            }
+            s
+        } else {
+            "appsrc name=audio_src format=time is-live=true do-timestamp=true \
+             ! audioconvert ! audioresample ! avenc_aac ! queue ! mux. "
+                .to_string()
         }
-        pipeline_str.push_str(&format!(
+    }
+
+    fn build_recording_pipeline_str(&self, location: &str) -> String {
+        let mut s = self.video_branch_str();
+        s.push_str(&self.audio_branch_str(false));
+        s.push_str(&format!(
             "mp4mux name=mux ! filesink location=\"{}\"",
             location
         ));
+        s
+    }
+
+    fn build_streaming_pipeline_str(&self) -> String {
+        let location = self
+            .stream_settings
+            .as_ref()
+            .expect("Stream-Settings müssen gesetzt sein")
+            .location();
+        println!(
+            "[Engine] Initialisiere Streaming-Pipeline für: {}",
+            location
+        );
+        let mut s = self.video_branch_str();
+        s.push_str(&self.audio_branch_str(true));
+        s.push_str(&format!(
+            "flvmux name=mux streamable=true ! rtmp2sink location=\"{}\"",
+            location
+        ));
+        s
+    }
+
+    fn initialize_and_start_pipeline(&mut self, width: u32, height: u32) {
+        let pipeline_str = if self.is_streaming() {
+            self.build_streaming_pipeline_str()
+        } else {
+            let Some(path) = self.output_path.as_ref() else {
+                return;
+            };
+            let location = path.to_str().expect("Dateipfad ist ungültig.");
+            println!("[Engine] Initialisiere Aufnahme-Pipeline für: {}", location);
+            self.build_recording_pipeline_str(location)
+        };
 
         // KORREKTUR: Die `parse_launch`-Funktion kommt aus `gstreamer` (Modul `gst::parse`).
         // In v0.24 können wir `gst::parse::launch(&str)` verwenden; bei Bedarf gäbe es auch `launch_full` mit Context/Flags.
@@ -122,7 +179,8 @@ impl RivuletEngine {
         appsrc.set_property("do-timestamp", true);
 
         if self.audio_enabled {
-            if self.separate_audio_tracks {
+            let separate = self.separate_audio_tracks && !self.is_streaming();
+            if separate {
                 let mut track_srcs: Vec<(&str, &mut Option<gst_app::AppSrc>)> = Vec::new();
                 if self.audio_sys_enabled {
                     track_srcs.push(("audio_src_sys", &mut self.audio_appsrc_sys));
@@ -163,7 +221,11 @@ impl RivuletEngine {
 
         self.pipeline = Some(pipeline);
         self.appsrc = Some(appsrc);
-        println!("[Engine] Aufnahme-Pipeline läuft.");
+        if self.is_streaming() {
+            println!("[Engine] Streaming-Pipeline läuft.");
+        } else {
+            println!("[Engine] Aufnahme-Pipeline läuft.");
+        }
     }
 
     /// Enable or disable the audio input branch of the recording pipeline.
@@ -214,7 +276,7 @@ impl RivuletEngine {
 
     /// Push a mixed PCM frame into the recording pipeline.
     pub fn push_audio_frame(&mut self, frame: &AudioFrame) -> anyhow::Result<()> {
-        if !self.audio_enabled || self.separate_audio_tracks {
+        if !self.audio_enabled || (self.separate_audio_tracks && !self.is_streaming()) {
             return Ok(());
         }
         if frame.data.is_empty() {
@@ -241,7 +303,7 @@ impl RivuletEngine {
         frame: &AudioFrame,
         track: AudioTrack,
     ) -> anyhow::Result<()> {
-        if !self.audio_enabled || !self.separate_audio_tracks {
+        if !self.audio_enabled || !self.separate_audio_tracks || self.is_streaming() {
             return Ok(());
         }
         if frame.data.is_empty() {
@@ -510,6 +572,65 @@ mod tests {
         let frame = AudioFrame::new(vec![0.0f32; 8], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
         let result = engine.push_audio_track(&frame, AudioTrack::System);
         assert!(result.is_ok(), "push_audio_track sollte kein Fehler sein");
+    }
+
+    /// The streaming pipeline parses and uses an RTMPS ingest URL.
+    #[test]
+    fn streaming_pipeline_str_parses_and_uses_rtmps_location() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_stream_settings(Some(StreamSettings::twitch("testkey123")));
+        assert!(engine.is_streaming());
+
+        let pipeline_str = engine.build_streaming_pipeline_str();
+        assert!(pipeline_str.contains("rtmps://live.twitch.tv/app/testkey123"));
+        let pipeline = gst::parse::launch(&pipeline_str)
+            .expect("Streaming-Pipeline sollte parsen")
+            .downcast::<gst::Pipeline>()
+            .unwrap();
+        assert!(pipeline.by_name("rivulet_src").is_some());
+        assert!(pipeline.by_name("mux").is_some());
+    }
+
+    /// The streaming pipeline forces a single mixed audio track even when
+    /// separate tracks are enabled, because FLV only supports one audio track.
+    #[test]
+    fn streaming_pipeline_mixes_audio_despite_separate_tracks() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+        engine.set_stream_settings(Some(StreamSettings::youtube("k1")));
+
+        let pipeline_str = engine.build_streaming_pipeline_str();
+        assert!(pipeline_str.contains("name=audio_src "), "{}", pipeline_str);
+        assert!(
+            !pipeline_str.contains("audio_src_sys"),
+            "separate Sinks sollten im Streaming-Modus nicht gebaut werden"
+        );
+        assert!(!pipeline_str.contains("audio_src_mic"));
+        assert!(pipeline_str.contains("flvmux name=mux streamable=true"));
+    }
+
+    /// The recording pipeline still keeps separate audio tracks when enabled.
+    #[test]
+    fn recording_pipeline_keeps_separate_tracks() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out.mp4");
+        assert!(pipeline_str.contains("name=audio_src_sys"));
+        assert!(pipeline_str.contains("name=audio_src_mic"));
+        assert!(pipeline_str.contains("mp4mux name=mux"));
+    }
+
+    /// Without stream settings the engine is not configured for streaming.
+    #[test]
+    fn engine_is_not_streaming_by_default() {
+        let engine = RivuletEngine::default();
+        assert!(!engine.is_streaming());
     }
 
     /// End-to-end test for separate audio tracks with only one active source:

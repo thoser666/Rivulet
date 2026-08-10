@@ -49,6 +49,7 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 - **Audio Capture (engine, Linux)** - Desktop sound and microphone, mixed in real time via GStreamer (48 kHz stereo, per-source volume); usable via the `rivulet-audio` crate and the `record_screen_audio` example
 - **Audio Mixer UI (Linux GUI)** - Start/stop audio capture with live level meter (dB), per-source volume sliders for system/mic
 - **Separate Audio Tracks** - System and microphone output as separate tracks in the MP4 (via the "Getrennte Tracks" option, Linux GUI); engine API `push_audio_track(frame, AudioTrack)`
+- **RTMPS Streaming** - Live to Twitch, Kick, YouTube or any custom RTMP/RTMPS ingest (H.264+AAC over FLV); `StreamSettings` presets + `set_stream_settings` engine API; example `stream_rtmps`
 - **Live Preview** - See what you're recording as you record
 - **Tab-Based Interface** - Clean, DaVinci Resolve-style UI
   - Record Tab - Main recording controls and preview
@@ -88,7 +89,7 @@ See [Roadmap](#-roadmap) for detailed timeline.
 | M0 – Recording Foundation | Aufnahme, Encoding, Audio, GUI | ✅ Erreicht |
 | M1 – Solid Recording | Audio-Tracks, Hardware-Encoding, QoL | 🚧 In Arbeit |
 | M2 – Scenes & Composition | OBS-Kern: Szenen, Quellen, Übergänge | 📅 Geplant |
-| M3 – Streaming | RTMP, Dual Output, Plattformen | 📅 Geplant |
+| M3 – Streaming | RTMP, Dual Output, Plattformen | 🚧 In Arbeit |
 | M4 – Advanced Output | Virtual Camera, Replay Buffer, Filter | 📅 Geplant |
 | M5 – Ecosystem & Parität | Plugins, Kompatibilität, Plattform-Parität | 📅 Geplant |
 
@@ -153,15 +154,16 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 
 ### 📡 M3 – Streaming
 
-**Status: Geplant**
+**Status: In Arbeit**
 
-- [ ] RTMP-Client-Implementierung
+- [x] RTMP/RTMPS-Client-Implementierung (H.264+AAC, FLV-Muxing)
+- [x] TLS-verschlüsseltes Streaming (RTMPS) mit Zertifikats-Validierung
 - [ ] Dual Output (Stream + Aufnahme parallel)
 - [ ] Stream-Health und Netzwerk-Statistiken
 - [ ] Adaptive Bitrate
-- [ ] Plattform-Integrationen (Twitch, YouTube Live, Facebook)
+- [x] Plattform-Integrationen (Twitch, Kick, YouTube via RTMPS; Custom)
 - [ ] Stream-Key-Management und Stream-Presets
-- [ ] Custom-RTMP-Server-Support
+- [x] Custom-RTMP-Server-Support (beliebige `rtmp://`/`rtmps://`-URL)
 
 **Ziel:** Live-Streaming zu den gängigen Plattformen.
 
@@ -207,7 +209,7 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 | Szenen & Übergänge | Offen |
 | Audio-Mixer (Quellen, Tracks, Filter) | Teilweise (Mixer, Separate Tracks) |
 | Recording & Encoding | Teilweise (H.264-Software) |
-| Streaming (RTMP, Plattformen) | Offen |
+| Streaming (RTMP, Plattformen) | Teilweise (RTMPS Twitch/Kick/YouTube) |
 | Virtual Camera | Offen |
 | Replay Buffer | Offen |
 | Browser Sources | Offen |
