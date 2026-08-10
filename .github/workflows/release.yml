@@ -112,9 +112,20 @@ jobs:
           choco install msys2 --params "/NoUpdate /InstallDir:C:/msys64"
           C:/msys64/usr/bin/bash -lc "pacman -S --noconfirm mingw-w64-x86_64-pkg-config"
           echo "C:/msys64/mingw64/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          choco install gstreamer --version=1.24.13
-          choco install gstreamer-devel --version=1.24.13
-          echo "PKG_CONFIG_PATH=C:\gstreamer\1.0\msvc_x86_64\lib\pkgconfig" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $version = "1.24.13"
+          $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$version/msvc"
+          $runtimeMsi = Join-Path $env:TEMP "gstreamer-runtime-$version.msi"
+          $develMsi = Join-Path $env:TEMP "gstreamer-devel-$version.msi"
+          Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi
+          Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi
+          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart" -Wait
+          $gstRoot = [System.Environment]::GetEnvironmentVariable("GSTREAMER_1_0_ROOT_MSVC_X86_64", "Machine")
+          if (-not $gstRoot) { $gstRoot = "C:\gstreamer\1.0\msvc_x86_64\" }
+          $gstBin = Join-Path $gstRoot "bin"
+          $pkgPath = Join-Path $gstRoot "lib\pkgconfig"
+          echo "PKG_CONFIG_PATH=$pkgPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo $gstBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install macOS release dependencies
         if: runner.os == 'macOS'
