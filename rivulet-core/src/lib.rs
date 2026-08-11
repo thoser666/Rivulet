@@ -521,6 +521,14 @@ mod tests {
     use super::*;
     use gstreamer_pbutils as gst_pbutils;
 
+    /// Build a valid `file://` URI from a filesystem path. On Windows the path
+    /// uses backslashes, which are invalid in a URI; they are converted to
+    /// forward slashes (`C:\Users\...` -> `file:///C:/Users/...`).
+    fn file_uri(path: &std::path::Path) -> String {
+        let s = path.to_str().expect("Pfad muss UTF-8 sein");
+        format!("file:///{}", s.replace('\\', "/"))
+    }
+
     #[test]
     fn audio_toggle_is_disabled_by_default() {
         let engine = RivuletEngine::default();
@@ -551,6 +559,18 @@ mod tests {
         let _ = gst::init();
         let caps = audio_caps();
         assert!(!caps.is_empty(), "audio caps should not be empty");
+    }
+
+    #[test]
+    fn escape_location_doubles_backslashes() {
+        let escaped = RivuletEngine::escape_location("C:\\Users\\Temp\\out.mp4");
+        assert_eq!(escaped, "C:\\\\Users\\\\Temp\\\\out.mp4");
+    }
+
+    #[test]
+    fn file_uri_converts_backslashes_to_forward_slashes() {
+        let uri = file_uri(std::path::Path::new("C:\\Users\\Temp\\out.mp4"));
+        assert_eq!(uri, "file:///C:/Users/Temp/out.mp4");
     }
 
     /// End-to-end test: feed synthetic video + audio frames into the engine and
@@ -618,7 +638,7 @@ mod tests {
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         assert!(len > 0, "Ausgabedatei sollte nicht leer sein");
 
-        let uri = format!("file://{}", path.display());
+        let uri = file_uri(&path);
         let discoverer = gst_pbutils::Discoverer::new(gst::ClockTime::from_seconds(5))
             .expect("Discoverer sollte erstellt werden können");
         let info = discoverer
@@ -830,7 +850,8 @@ mod tests {
         assert!(pipeline_str.contains("name=video_tee"), "{}", pipeline_str);
         assert!(pipeline_str.contains("mp4mux name=mux_rec"));
         assert!(pipeline_str.contains("flvmux name=mux_stream streamable=true"));
-        assert!(pipeline_str.contains(&format!("filesink location=\"{}\"", path.display())));
+        let escaped = path.display().to_string().replace('\\', "\\\\");
+        assert!(pipeline_str.contains(&format!("filesink location=\"{}\"", escaped)));
         assert!(pipeline_str.contains("rtmp2sink location=\"rtmps://live.twitch.tv/app/dualkey\""));
 
         let pipeline = gst::parse::launch(&pipeline_str)
@@ -945,7 +966,7 @@ mod tests {
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         assert!(len > 0, "Ausgabedatei sollte nicht leer sein");
 
-        let uri = format!("file://{}", path.display());
+        let uri = file_uri(&path);
         let discoverer = gst_pbutils::Discoverer::new(gst::ClockTime::from_seconds(5))
             .expect("Discoverer sollte erstellt werden können");
         let info = discoverer
