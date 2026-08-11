@@ -136,10 +136,24 @@ jobs:
         shell: pwsh
         run: |
           gst-inspect-1.0.exe --version
-          foreach ($el in @("appsrc","videoconvert","x264enc","flvmux","rtmp2sink","mp4mux","avenc_aac","filesink","tee","queue")) {
-            gst-inspect-1.0.exe $el > $null 2>&1
-            Write-Host "$el -> $LASTEXITCODE"
+          Write-Host "GST_PLUGIN_PATH=$env:GST_PLUGIN_PATH"
+          Write-Host "GST_PLUGIN_SYSTEM_PATH=$env:GST_PLUGIN_SYSTEM_PATH"
+          Write-Host "GST_PLUGIN_SCANNER=$env:GST_PLUGIN_SCANNER"
+          foreach ($p in @("gstx264.dll","gstlibav.dll","gstcoreelements.dll","gstflv.dll")) {
+            $candidate = Join-Path $env:GST_PLUGIN_PATH $p
+            Write-Host "$p exists -> $(Test-Path $candidate)"
           }
+          foreach ($el in @("appsrc","videoconvert","x264enc","flvmux","rtmp2sink","mp4mux","avenc_aac","filesink","tee","queue")) {
+            $out = gst-inspect-1.0.exe $el 2>&1 | Out-String
+            Write-Host "$el -> $LASTEXITCODE"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host $out
+            }
+          }
+          Write-Host "=== GST_DEBUG plugin loading (x264enc) ==="
+          $env:GST_DEBUG = "GST_PLUGIN_LOADING:6"
+          $dbg = gst-inspect-1.0.exe x264enc 2>&1 | Out-String
+          Write-Host $dbg
 
       - name: Install macOS dependencies (if applicable)
         if: runner.os == 'macOS'
