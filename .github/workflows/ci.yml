@@ -119,8 +119,8 @@ jobs:
           $develMsi = Join-Path $env:TEMP "gstreamer-devel-$version.msi"
           Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi
           Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi
-          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart" -Wait
-          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
 
           # 4. Setze Pfade für alle folgenden Schritte. Der Installer registriert
           # die Wurzel in der Maschinen-Umgebungsvariable; als Fallback dient der
@@ -159,10 +159,6 @@ jobs:
               Write-Host $out
             }
           }
-          Write-Host "=== GST_DEBUG plugin loading (x264enc) ==="
-          $env:GST_DEBUG = "GST_PLUGIN_LOADING:6"
-          $dbg = gst-inspect-1.0.exe x264enc 2>&1 | Out-String
-          Write-Host $dbg
 
       # --- macOS Abhängigkeiten installieren ---
       - name: Install macOS dependencies (if applicable)
@@ -252,8 +248,8 @@ jobs:
           $develMsi = Join-Path $env:TEMP "gstreamer-devel-$version.msi"
           Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi
           Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi
-          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart" -Wait
-          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
           $gstRoot = [System.Environment]::GetEnvironmentVariable("GSTREAMER_1_0_ROOT_MSVC_X86_64", "Machine")
           if (-not $gstRoot) { $gstRoot = "C:\gstreamer\1.0\msvc_x86_64\" }
           $gstBin = Join-Path $gstRoot "bin"
