@@ -36,11 +36,16 @@ impl Recorder {
         let settings = self.settings.clone();
         let is_recording = Arc::clone(&self.is_recording);
 
+        // Flag VOR dem Spawn setzen: Der Thread prueft sofort seine
+        // Laufbedingung; wird das Flag erst nach dem Spawn gesetzt, kann
+        // der Thread auf CI die Schleife ueberspringen, den Receiver
+        // droppen und send_frame schlaegt mit "Disconnected" fehl.
+        self.is_recording.store(true, Ordering::SeqCst);
+
         // Encoder-Thread starten
         let handle = thread::spawn(move || Self::encoder_thread_fn(rx, settings, is_recording));
 
         self.encoder_thread = Some(handle);
-        self.is_recording.store(true, Ordering::SeqCst);
 
         println!("Recording started: {:?}", self.settings.output_path);
         Ok(())

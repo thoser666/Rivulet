@@ -86,6 +86,14 @@ impl RivuletEngine {
         self.is_streaming() && self.output_path.is_some()
     }
 
+    /// Escape a location string for embedding into a `parse_launch` pipeline
+    /// description. GStreamer treats `\` as an escape character in quoted
+    /// property values; on Windows paths like `C:\Users\...` would otherwise be
+    /// silently mangled (e.g. `C:UsersRUNNER~1...`).
+    fn escape_location(location: &str) -> String {
+        location.replace('\\', "\\\\")
+    }
+
     fn video_branch_str(&self) -> String {
         "appsrc name=rivulet_src ! videoconvert ! x264enc tune=zerolatency ! queue ! mux. "
             .to_string()
@@ -123,9 +131,10 @@ impl RivuletEngine {
     fn build_recording_pipeline_str(&self, location: &str) -> String {
         let mut s = self.video_branch_str();
         s.push_str(&self.audio_branch_str(false));
+        let escaped = Self::escape_location(location);
         s.push_str(&format!(
             "mp4mux name=mux ! filesink location=\"{}\"",
-            location
+            escaped
         ));
         s
     }
@@ -187,7 +196,7 @@ impl RivuletEngine {
         }
         s.push_str(&format!(
             "mp4mux name=mux_rec ! filesink location=\"{}\" ",
-            location
+            Self::escape_location(location)
         ));
         s.push_str(&format!(
             "flvmux name=mux_stream streamable=true ! rtmp2sink location=\"{}\"",
