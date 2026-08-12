@@ -51,6 +51,7 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 - **Separate Audio Tracks** - System and microphone output as separate tracks in the MP4 (via the "Getrennte Tracks" option, Linux GUI); engine API `push_audio_track(frame, AudioTrack)`
 - **RTMPS Streaming** - Live to Twitch, Kick, YouTube or any custom RTMP/RTMPS ingest (H.264+AAC over FLV); `StreamSettings` presets + `set_stream_settings` engine API; example `stream_rtmps`
 - **Dual Output** - Record locally and stream simultaneously; once encoded, split via `tee` into the MP4 file and the FLV/RTMPS sink (enabled by configuring both a local recording and stream settings)
+- **Stream Health & Network Stats** - Live status (`Connecting`/`Good`/`Warning`/`Poor`) with sent/dropped frame counters, bitrate (kbps) and FPS over a sliding window; derived from drop ratio (>5% Poor, >1% Warning), throughput collapse and stalls; engine API `stream_stats()`, polled in `stream_rtmps`
 - **Live Preview** - See what you're recording as you record
 - **Tab-Based Interface** - Clean, DaVinci Resolve-style UI
   - Record Tab - Main recording controls and preview
@@ -160,7 +161,7 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 - [x] RTMP/RTMPS-Client-Implementierung (H.264+AAC, FLV-Muxing)
 - [x] TLS-verschlüsseltes Streaming (RTMPS) mit Zertifikats-Validierung
 - [x] Dual Output (Stream + Aufnahme parallel; einmal codiert, per `tee` aufgeteilt)
-- [ ] Stream-Health und Netzwerk-Statistiken
+- [x] Stream-Health und Netzwerk-Statistiken (Status via Drop-Ratio/Throughput, `stream_stats()`-API)
 - [ ] Adaptive Bitrate
 - [x] Plattform-Integrationen (Twitch, Kick, YouTube via RTMPS; Custom)
 - [ ] Stream-Key-Management und Stream-Presets

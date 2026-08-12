@@ -11,6 +11,9 @@ use gst::prelude::*;
 pub mod audio;
 pub use audio::{AudioFrame, AudioTrack};
 
+pub mod health;
+pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
+
 pub mod stream;
 pub use stream::{StreamPlatform, StreamSettings};
 
@@ -36,6 +39,9 @@ pub struct RivuletEngine {
     is_recording: bool,
     output_path: Option<PathBuf>,
     stream_settings: Option<StreamSettings>,
+    /// Tracks stream health while a streaming pipeline is active. Always
+    /// `None` for plain local recordings.
+    stream_health: Option<StreamHealthMonitor>,
 }
 
 impl Default for RivuletEngine {
@@ -54,6 +60,7 @@ impl Default for RivuletEngine {
             is_recording: false,
             output_path: None,
             stream_settings: None,
+            stream_health: None,
         }
     }
 }
@@ -405,6 +412,13 @@ impl RivuletEngine {
         println!("[Engine] Aufnahme vorbereitet für: {:?}", path);
         self.output_path = Some(path);
         self.is_recording = true;
+
+        // Stream-Health-Monitoring initialisieren, sobald ein Stream-Ziel
+        // (nur Stream oder Dual Output) konfiguriert ist. Defaults passen zur
+        // Engine-Encoding-Konfiguration (30 FPS, 5000 kbit/s).
+        if self.is_streaming() {
+            self.stream_health = Some(StreamHealthMonitor::new(5000.0, 30.0));
+        }
     }
 
     pub fn stop_recording(&mut self) {
@@ -448,6 +462,7 @@ impl RivuletEngine {
         self.audio_appsrc_sys = None;
         self.audio_appsrc_mic = None;
         self.output_path = None;
+        self.stream_health = None;
         self.is_recording = false;
         println!("[Engine] Aufnahme gestoppt und Datei gespeichert.");
     }
@@ -471,14 +486,35 @@ impl RivuletEngine {
                 map.as_mut_slice().copy_from_slice(frame_data);
             }
 
-            if let Err(err) = appsrc.push_buffer(buffer) {
-                eprintln!(
-                    "[Engine] Fehler beim Senden des Frames in die Pipeline: {:?}",
-                    err
-                );
-                self.stop_recording();
+            match appsrc.push_buffer(buffer) {
+                Ok(_flow) => {
+                    if let Some(health) = self.stream_health.as_mut() {
+                        health.record_frame_sent(frame_data.len());
+                    }
+                }
+                Err(err) => {
+                    if let Some(health) = self.stream_health.as_mut() {
+                        health.record_frame_dropped();
+                    }
+                    eprintln!(
+                        "[Engine] Fehler beim Senden des Frames in die Pipeline: {:?}",
+                        err
+                    );
+                    self.stop_recording();
+                }
             }
         }
+    }
+
+    /// Current stream health statistics, if a streaming pipeline is active.
+    ///
+    /// Returns [`StreamStats::offline`] when the engine is not streaming (only
+    /// local recording or nothing).
+    pub fn stream_stats(&mut self) -> StreamStats {
+        self.stream_health
+            .as_mut()
+            .map(StreamHealthMonitor::stats)
+            .unwrap_or_else(StreamStats::offline)
     }
 }
 
@@ -977,6 +1013,70 @@ mod tests {
             1,
             "Es sollte ein Audio-Stream vorhanden sein"
         );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Without streaming configuration the health API reports an offline
+    /// stream, independent of any local recording activity.
+    #[test]
+    fn stream_stats_offline_without_streaming() {
+        let mut engine = RivuletEngine::default();
+        let stats = engine.stream_stats();
+        assert_eq!(stats.status, StreamHealthStatus::Offline);
+        assert_eq!(stats.frames_sent, 0);
+        assert_eq!(stats.dropped_ratio, 0.0);
+    }
+
+    /// After configuring a stream, health starts in the Connecting state until
+    /// the first frame has actually been pushed through the pipeline.
+    #[test]
+    fn stream_stats_connecting_after_stream_start() {
+        let mut engine = RivuletEngine::default();
+        engine.set_stream_settings(Some(StreamSettings::twitch("k")));
+        let path = std::env::temp_dir().join("rivulet_stream_health.mp4");
+        engine.start_local_recording(path.clone());
+
+        let stats = engine.stream_stats();
+        assert_eq!(stats.status, StreamHealthStatus::Connecting);
+        assert_eq!(stats.frames_sent, 0);
+        engine.stop_recording();
+    }
+
+    /// Pushing frames through the streaming pipeline records them in the
+    /// health monitor; the counters must be reset when a new recording starts.
+    #[test]
+    fn stream_stats_tracks_frames_through_pipeline() {
+        let mut engine = RivuletEngine::default();
+        engine.set_stream_settings(Some(StreamSettings::twitch("k")));
+        let path = std::env::temp_dir().join("rivulet_stream_health_frames.mp4");
+        engine.start_local_recording(path.clone());
+
+        let (width, height) = (64u32, 64u32);
+        let video = vec![0u8; (width * height * 4) as usize];
+        for _ in 0..15 {
+            engine.process_raw_frame(&video, width, height);
+        }
+
+        let stats = engine.stream_stats();
+        assert!(
+            stats.frames_sent > 0,
+            "Frames müssen im Health-Monitor gezählt werden"
+        );
+        assert!(
+            stats.bytes_sent > 0,
+            "Bytes müssen im Health-Monitor gezählt werden"
+        );
+        engine.stop_recording();
+
+        // A fresh recording restarts health tracking from zero.
+        engine.start_local_recording(path.clone());
+        let reset = engine.stream_stats();
+        assert_eq!(
+            reset.frames_sent, 0,
+            "Neustart muss die Zähler zurücksetzen"
+        );
+        engine.stop_recording();
 
         let _ = std::fs::remove_file(&path);
     }
