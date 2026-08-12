@@ -401,6 +401,28 @@ impl RivuletEngine {
         push_pcm_buffer(appsrc, frame)
     }
 
+    /// Start streaming to the configured ingest without a local recording.
+    ///
+    /// Equivalent to [`RivuletEngine::start_local_recording`] with no output
+    /// path: it arms the engine so the streaming pipeline is built as soon as
+    /// the first video frame arrives. Stream settings must be configured first
+    /// via [`RivuletEngine::set_stream_settings`].
+    pub fn start_streaming(&mut self) {
+        if self.is_recording {
+            return;
+        }
+        if self.stream_settings.is_none() {
+            eprintln!("[Engine] Keine Stream-Ziele konfiguriert.");
+            return;
+        }
+        println!("[Engine] Streaming vorbereitet.");
+        self.is_recording = true;
+
+        // Stream-Health-Monitoring initialisieren. Defaults passen zur
+        // Engine-Encoding-Konfiguration (30 FPS, 5000 kbit/s).
+        self.stream_health = Some(StreamHealthMonitor::new(5000.0, 30.0));
+    }
+
     /// Start writing the video/audio frames to a local MP4 file.
     ///
     /// When stream settings are configured as well ([`RivuletEngine::set_stream_settings`]),
@@ -1026,6 +1048,19 @@ mod tests {
         assert_eq!(stats.status, StreamHealthStatus::Offline);
         assert_eq!(stats.frames_sent, 0);
         assert_eq!(stats.dropped_ratio, 0.0);
+    }
+
+    /// `start_streaming` arms the engine for pure streaming; the health monitor
+    /// is created immediately and reports Connecting until frames flow.
+    #[test]
+    fn start_streaming_creates_health_monitor() {
+        let mut engine = RivuletEngine::default();
+        engine.set_stream_settings(Some(StreamSettings::twitch("k")));
+        engine.start_streaming();
+
+        let stats = engine.stream_stats();
+        assert_eq!(stats.status, StreamHealthStatus::Connecting);
+        engine.stop_recording();
     }
 
     /// After configuring a stream, health starts in the Connecting state until

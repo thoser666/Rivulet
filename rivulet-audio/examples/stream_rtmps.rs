@@ -98,6 +98,8 @@ fn main() -> anyhow::Result<()> {
             "Dual output: recording locally to {}",
             record_path.as_ref().unwrap().display()
         );
+    } else {
+        engine.start_streaming();
     }
 
     // 2. Build the audio capture (system audio + microphone, mixed).
