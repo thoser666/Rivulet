@@ -1,6 +1,6 @@
 [package]
 name = "rivulet-capture"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 description = "Screen and window capture for Rivulet"
 
