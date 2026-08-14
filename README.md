@@ -44,6 +44,7 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 ### ✅ Currently Available (v0.1)
 
 - **Screen Capture** - Capture your primary monitor in real-time
+- **Window Capture** - Capture a single application window (games, etc.) in addition to full monitors, with a window picker in the GUI (Linux & Windows)
 - **Screen + Audio Recording (Linux GUI)** - Full recording flow in the GUI: monitor selection, start/stop, recording timer; system audio + microphone are captured and mixed into the MP4
 - **Video Encoding** - H.264 encoding via GStreamer (`x264enc`, low-latency tuning)
 - **Audio Capture (engine, Linux)** - Desktop sound and microphone, mixed in real time via GStreamer (48 kHz stereo, per-source volume); usable via the `rivulet-audio` crate and the `record_screen_audio` example
@@ -143,7 +144,8 @@ See [Roadmap](#-roadmap) for detailed timeline.
 Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 
 - [ ] Szenen-Verwaltung (mehrere Szenen, Umschalten)
-- [ ] Quellen (Display, Fenster, Bild, Text, Webcam, Stummschaltung)
+- [x] Quellen — Fenster-Capture (Monitor + einzelne Fenster, Linux & Windows)
+- [ ] Quellen (Bild, Text, Webcam, Stummschaltung)
 - [ ] Quellen-Komposition (Ebenen, Position, Skalierung, Zuschneiden)
 - [ ] Übergänge (Fade, Cut, Stinger)
 - [ ] Overlays (Bild-in-Bild, Banner)
@@ -207,7 +209,7 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 
 | OBS-Kategorie | Status |
 | --- | --- |
-| Capture-Quellen (Display, Fenster, Webcam) | Teilweise (Display/Fenster) |
+| Capture-Quellen (Display, Fenster, Webcam) | Teilweise (Display + Fenster) |
 | Szenen & Übergänge | Offen |
 | Audio-Mixer (Quellen, Tracks, Filter) | Teilweise (Mixer, Separate Tracks) |
 | Recording & Encoding | Teilweise (H.264-Software) |
