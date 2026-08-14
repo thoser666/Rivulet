@@ -11,6 +11,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# MSI akzeptiert nur numerische Versionen "x.x.x.x". Aus einer Pre-Release-
+# Version (z.B. "0.2.0-alpha.1") wird "0.2.0.1" (letzte Komponente = Alpha-Nr.),
+# aus einer stabilen Version "0.2.0" wird "0.2.0.0".
+$msiVersion = $Version
+if ($msiVersion -match "^(?<base>\d+\.\d+\.\d+)(?:-(?:alpha|beta|rc)\.(?<pre>\d+))?$") {
+  $msiVersion = "$($Matches['base']).$($Matches['pre'] ?? '0')"
+} elseif ($msiVersion -match "^(?<base>\d+\.\d+\.\d+)$") {
+  $msiVersion = "$($Matches['base']).0"
+} else {
+  Write-Host "WARNUNG: Nicht parsebare Version '$Version', nutze 0.0.0.0" -ForegroundColor Yellow
+  $msiVersion = "0.0.0.0"
+}
+Write-Host "MSI-Version: $msiVersion (aus $Version)"
+
 $wxs = Join-Path $PSScriptRoot "rivulet.wxs"
 $bundle = Join-Path $Staging "bundle"
 if (-not (Test-Path $bundle)) { throw "Bundle-Verzeichnis fehlt: $bundle (zuerst build-portable.ps1 ausführen)" }
@@ -41,11 +55,11 @@ $mainObj = Join-Path $Staging "rivulet.wixobj"
 $harvestObj = Join-Path $Staging "rivulet.harvest.wixobj"
 
 Write-Host "candle: $wxs"
-& candle.exe $wxs "-dProductVersion=$Version" "-dBundleDir=$bundle" -ext WixUIExtension -out $mainObj
+& candle.exe $wxs "-dProductVersion=$msiVersion" "-dBundleDir=$bundle" -ext WixUIExtension -out $mainObj
 if ($LASTEXITCODE -ne 0) { throw "candle.exe fehlgeschlagen (Produkt)" }
 
 Write-Host "candle: $harvestXml"
-& candle.exe $harvestXml "-dProductVersion=$Version" "-dBundleDir=$bundle" -ext WixUIExtension -out $harvestObj
+& candle.exe $harvestXml "-dProductVersion=$msiVersion" "-dBundleDir=$bundle" -ext WixUIExtension -out $harvestObj
 if ($LASTEXITCODE -ne 0) { throw "candle.exe fehlgeschlagen (Harvest)" }
 
 $lightOut = Join-Path $Staging "rivulet.msi"
