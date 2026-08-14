@@ -46,6 +46,7 @@ Write-Host "Harvesting Bundle: $bundle"
 $harvestExclude = @("*.wixobj", "*.wixpdb", "rivulet.harvest.wxs", "*.msi", "*.msi.clean", "*.zip")
 & heat.exe dir $bundle -cg ProductComponents -dr INSTALLFOLDER `
   -srd -sfrag -sreg -gg -var var.BundleDir `
+  -arch x64 `
   -out $harvestXml `
   -exclude ($harvestExclude -join ";")
 if ($LASTEXITCODE -ne 0) { throw "heat.exe fehlgeschlagen" }
