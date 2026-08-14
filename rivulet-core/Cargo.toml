@@ -1,4 +1,3 @@
-[package]
 name = "rivulet-core"
 version.workspace = true
 edition = "2021"

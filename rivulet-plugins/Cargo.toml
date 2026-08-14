@@ -1,4 +1,3 @@
-[package]
 name = "rivulet-plugins"
 version.workspace = true
 edition = "2021"

@@ -1,4 +1,3 @@
-[package]
 name = "rivulet-capture"
 version.workspace = true
 edition = "2021"

@@ -1,4 +1,3 @@
-[package]
 name = "rivulet-audio"
 version.workspace = true
 edition = "2021"
