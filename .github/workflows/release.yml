@@ -13,6 +13,9 @@ name: Release (Alpha)
 on:
   push:
     branches: [ develop ]
+  # Manuelles Auslösen eines Alpha-Releases (z.B. nach CI-Reparaturen, wenn
+  # kein neuer Feature-Commit ansteht).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -37,6 +40,13 @@ jobs:
           COMMITS: ${{ toJson(github.event.commits) }}
         run: |
           SHOULD_RELEASE="false"
+
+          # Manuelle Auslösung (workflow_dispatch): immer bauen.
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "Manuelle Auslösung - Release-Build wird ausgeführt."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # Gemergte Dependabot-PRs nie bauen (weder über den Actor noch über
           # den Autor der gepushten Commits).
