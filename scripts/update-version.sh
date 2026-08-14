@@ -36,12 +36,13 @@ fi
 # Sicherstellen, dass alle Crates die Workspace-Version verwenden.
 # Nur die Version im [package]-Abschnitt ersetzen (Dependency-Versionen wie
 # "windows-capture = { version = ... }" oder "version = "2.0.0"" unter
-# [target.'...'.dependencies] dürfen nicht angetastet werden).
+# [target.'...'.dependencies] dürfen nicht angetastet werden). Wichtig: die
+# [package]-Zeile selbst muss erhalten bleiben (kein `next` im awk!).
 for manifest in rivulet-*/Cargo.toml; do
   tmp="${manifest}.tmp"
   awk '
-    /^\[package\]/ { in_package = 1; next }
-    /^\[/ { in_package = 0 }
+    /^\[package\]/ { in_package = 1 }
+    /^\[/ && $0 != "[package]" { in_package = 0 }
     in_package && /^version = / {
       sub(/^version = ".*"/, "version.workspace = true")
     }

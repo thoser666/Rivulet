@@ -1,3 +1,4 @@
+[package]
 name = "rivulet-streaming"
 version.workspace = true
 edition = "2021"

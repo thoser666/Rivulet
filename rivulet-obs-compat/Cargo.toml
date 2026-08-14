@@ -1,3 +1,4 @@
+[package]
 name = "rivulet-obs-compat"
 version.workspace = true
 edition = "2021"
