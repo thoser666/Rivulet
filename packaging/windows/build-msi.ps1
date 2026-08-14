@@ -36,18 +36,16 @@ $harvestExclude = @("*.wixobj", "*.wixpdb", "rivulet.harvest.wxs", "*.msi", "*.m
   -exclude ($harvestExclude -join ";")
 if ($LASTEXITCODE -ne 0) { throw "heat.exe fehlgeschlagen" }
 
-# WiX-Binary setzen: Version und Bundle-Pfad übergeben.
-$define = "ProductVersion=$Version;BundleDir=$bundle"
-
+# WiX-Binary setzen: Version und Bundle-Pfad als separate Preprocessor-Defines.
 $mainObj = Join-Path $Staging "rivulet.wixobj"
 $harvestObj = Join-Path $Staging "rivulet.harvest.wixobj"
 
 Write-Host "candle: $wxs"
-& candle.exe $wxs -d$define -ext WixUIExtension -out $mainObj
+& candle.exe $wxs "-dProductVersion=$Version" "-dBundleDir=$bundle" -ext WixUIExtension -out $mainObj
 if ($LASTEXITCODE -ne 0) { throw "candle.exe fehlgeschlagen (Produkt)" }
 
 Write-Host "candle: $harvestXml"
-& candle.exe $harvestXml -d$define -ext WixUIExtension -out $harvestObj
+& candle.exe $harvestXml "-dProductVersion=$Version" "-dBundleDir=$bundle" -ext WixUIExtension -out $harvestObj
 if ($LASTEXITCODE -ne 0) { throw "candle.exe fehlgeschlagen (Harvest)" }
 
 $lightOut = Join-Path $Staging "rivulet.msi"

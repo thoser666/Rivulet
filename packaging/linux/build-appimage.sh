@@ -31,7 +31,7 @@ Comment=Modern Screen Recording & Streaming Software
 Exec=rivulet-gui
 Icon=rivulet
 Terminal=false
-Categories=AudioVideo;Recorder;Streaming;
+Categories=AudioVideo;Recorder;
 EOF
 
 if [[ -f "packaging/rivulet.png" ]]; then
@@ -73,9 +73,11 @@ mkdir -p "$APPDIR/usr/share/applications"
 cp "$APPDIR/rivulet.desktop" "$APPDIR/usr/share/applications/rivulet.desktop"
 
 export ARCH="$APPIMAGE_ARCH"
-if "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$OUT" 2>/dev/null; then
+# appimagetool ist selbst ein AppImage und benötigt FUSE; in CI/Containern ist
+# libfuse2 meist nicht installiert -> immer --appimage-extract-and-run nutzen.
+if "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$OUT"; then
   echo "AppImage erstellt: $OUT"
 else
-  "$APPIMAGETOOL" "$APPDIR" "$OUT"
-  echo "AppImage erstellt (ohne Extract-Run): $OUT"
+  echo "appimagetool (extract-and-run) fehlgeschlagen." >&2
+  exit 1
 fi
