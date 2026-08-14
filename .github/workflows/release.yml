@@ -88,7 +88,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -151,7 +151,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           ref: ${{ needs.version.outputs.tag }}
@@ -207,7 +207,9 @@ jobs:
 
       - name: Install macOS release dependencies
         if: runner.os == 'macOS'
-        run: brew install gstreamer
+        run: |
+          brew untap aws/tap 2>/dev/null || true
+          brew install gstreamer
 
       - name: Build release binary
         run: cargo build --release --package rivulet-gui --target ${{ matrix.target }}
@@ -301,7 +303,7 @@ jobs:
           xcrun stapler staple "staging/rivulet-macos-aarch64.dmg"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact_name }}
           path: |
@@ -324,7 +326,7 @@ jobs:
       contents: write
     steps:
       - name: Download all release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: release-assets
           merge-multiple: true

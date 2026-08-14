@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -68,7 +68,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -167,10 +167,12 @@ jobs:
       - name: Install macOS dependencies (if applicable)
         if: runner.os == 'macOS'
         run: |
+          # Vorinstalliertes, untrusted "aws/tap" entfernen (Tap-Trust-Warnung).
+          brew untap aws/tap 2>/dev/null || true
           brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
 
       - name: Cache dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
@@ -216,7 +218,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -272,7 +274,9 @@ jobs:
 
       - name: Install macOS release dependencies
         if: runner.os == 'macOS'
-        run: brew install gstreamer
+        run: |
+          brew untap aws/tap 2>/dev/null || true
+          brew install gstreamer
 
       - name: Build release binary
         run: cargo build --release --package rivulet-gui --target ${{ matrix.target }}
@@ -366,7 +370,7 @@ jobs:
           xcrun stapler staple "staging/rivulet-macos-aarch64.dmg"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact_name }}-${{ env.RELEASE_VERSION }}
           path: |
@@ -389,7 +393,7 @@ jobs:
       contents: write
     steps:
       - name: Download all release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: release-assets
           merge-multiple: true
