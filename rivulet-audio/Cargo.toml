@@ -1,8 +1,22 @@
 [package]
 name = "rivulet-audio"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
+description = "System and microphone audio capture for Rivulet"
 
 [dependencies]
 rivulet-core = { path = "../rivulet-core" }
 anyhow = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gstreamer = "0.25"
+gstreamer-app = "0.25"
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+xcap = { workspace = true }
+
+[[example]]
+name = "record_screen_audio"
+path = "examples/record_screen_audio.rs"

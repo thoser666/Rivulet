@@ -1,0 +1,177 @@
+name: Nightly
+
+# Täglicher Verifikations-Build. Läuft unabhängig von Commits; gemergte
+# Dependabot-Pullrequests lösen ihn nicht aus (durch den Actor-Guard unten
+# zusätzlich abgesichert).
+
+on:
+  schedule:
+    # Täglich um 02:17 UTC
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ################################################################
+  # LINTS & FORMATTING (läuft nur auf Linux)
+  ################################################################
+  lints:
+    name: Lints (Fmt & Clippy)
+    runs-on: ubuntu-latest
+    if: ${{ github.actor != 'dependabot[bot]' && github.actor != 'dependabot-preview[bot]' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install GStreamer dependencies for clippy
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            gstreamer1.0-tools \
+            libglib2.0-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  ################################################################
+  # BUILD & TEST MATRIX (läuft auf allen 3 Plattformen)
+  ################################################################
+  build_and_test:
+    name: Build & Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    if: ${{ github.actor != 'dependabot[bot]' && github.actor != 'dependabot-preview[bot]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies (if applicable)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libssl-dev \
+            libdbus-1-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            gstreamer1.0-tools \
+            libglib2.0-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev
+
+      - name: Install Windows dependencies (if applicable)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install msys2 --params "/NoUpdate /InstallDir:C:/msys64"
+          C:/msys64/usr/bin/bash -lc "pacman -S --noconfirm mingw-w64-x86_64-pkg-config"
+          echo "C:/msys64/mingw64/bin" >> $env:GITHUB_PATH
+          $version = "1.24.13"
+          $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$version/msvc"
+          $runtimeMsi = Join-Path $env:TEMP "gstreamer-runtime-$version.msi"
+          $develMsi = Join-Path $env:TEMP "gstreamer-devel-$version.msi"
+          Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi
+          Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi
+          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
+          $gstRoot = [System.Environment]::GetEnvironmentVariable("GSTREAMER_1_0_ROOT_MSVC_X86_64", "Machine")
+          if (-not $gstRoot) { $gstRoot = "C:\gstreamer\1.0\msvc_x86_64\" }
+          $gstBin = Join-Path $gstRoot "bin"
+          $pkgPath = Join-Path $gstRoot "lib\pkgconfig"
+          $gstPlugins = Join-Path $gstRoot "lib\gstreamer-1.0"
+          $gstScanner = Join-Path $gstRoot "libexec\gstreamer-1.0\gst-plugin-scanner.exe"
+          echo "PKG_CONFIG_PATH=$pkgPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GSTREAMER_1_0_ROOT_MSVC_X86_64=$gstRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GST_PLUGIN_SYSTEM_PATH=$gstPlugins" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GST_PLUGIN_PATH=$gstPlugins" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GST_PLUGIN_SCANNER=$gstScanner" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GST_REGISTRY=$env:TEMP\gst-registry.bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo $gstBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Verify GStreamer plugins (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          gst-inspect-1.0.exe --version
+          Write-Host "GST_PLUGIN_PATH=$env:GST_PLUGIN_PATH"
+          Write-Host "GST_PLUGIN_SYSTEM_PATH=$env:GST_PLUGIN_SYSTEM_PATH"
+          Write-Host "GST_PLUGIN_SCANNER=$env:GST_PLUGIN_SCANNER"
+          foreach ($p in @("gstx264.dll","gstlibav.dll","gstcoreelements.dll","gstflv.dll")) {
+            $candidate = Join-Path $env:GST_PLUGIN_PATH $p
+            Write-Host "$p exists -> $(Test-Path $candidate)"
+          }
+          foreach ($el in @("appsrc","videoconvert","x264enc","flvmux","rtmp2sink","mp4mux","avenc_aac","filesink","tee","queue")) {
+            $out = gst-inspect-1.0.exe $el 2>&1 | Out-String
+            Write-Host "$el -> $LASTEXITCODE"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host $out
+            }
+          }
+
+      - name: Install macOS dependencies (if applicable)
+        if: runner.os == 'macOS'
+        run: |
+          brew untap aws/tap 2>/dev/null || true
+          brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
+
+      - name: Cache dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build
+        run: cargo build --workspace --verbose
+
+      - name: Test
+        run: cargo test --workspace --verbose

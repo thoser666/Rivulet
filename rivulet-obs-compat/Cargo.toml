@@ -1,12 +1,18 @@
 [package]
 name = "rivulet-obs-compat"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
+description = "OBS Studio plugin compatibility layer for Rivulet"
 
 [dependencies]
 rivulet-core = { path = "../rivulet-core" }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
-libloading = "0.8"
+serde = { workspace = true }
+libloading = "0.9"
+libc = "0.2"
 walkdir = "2.4"
+
+[build-dependencies]
+cc = "1.0"

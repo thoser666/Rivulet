@@ -1,7 +1,81 @@
-/target
-/Cargo.lock
+# FFmpeg binaries (users should install locally)
+ffmpeg/
+ffmpeg.exe
+ffplay.exe
+ffprobe.exe
+*.dll
+
+# Rust build artifacts
+target/
+Cargo.lock
+
+# Debug artifacts
 **/*.rs.bk
 *.pdb
-.DS_Store
+
+# IDE / Editors
 .idea/
+.vscode/
 *.swp
+*.swo
+*~
+*.iml
+.DS_Store
+
+# RustRover
+.fleet/
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Recordings / Test files
+*.mp4
+*.mkv
+*.avi
+*.webm
+*.mov
+*.flv
+*_recording.mp4
+recording.mp4
+test_output.mp4
+screen_recording.mp4
+
+# Audio files
+*.mp3
+*.wav
+*.aac
+*.flac
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+~*
+
+# Build scripts
+*.exe
+!target/release/*.exe
+
+# Test data
+test_data/
+samples/
+
+# Documentation build
+book/
+docs/_build/
+
+# Coverage
+*.profraw
+*.profdata
+coverage/
+
+# Benchmark results
+bench/
+
+# Environment
+.env
+.env.local

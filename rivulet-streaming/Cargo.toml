@@ -1,8 +1,23 @@
 [package]
 name = "rivulet-streaming"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 
 [dependencies]
-rivulet-core = { path = "../rivulet-core" }
-anyhow = { workspace = true }
+anyhow = "1.0"
+crossbeam-channel = "0.5"
+
+[dev-dependencies]
+xcap = "0.9.4"
+
+[[example]]
+name = "test_encoder"
+path = "examples/test_encoder.rs"
+
+[[example]]
+name = "record_screen"
+path = "examples/record_screen.rs"
+
+[[example]]
+name = "list_monitors"
+path = "examples/list_monitors.rs"

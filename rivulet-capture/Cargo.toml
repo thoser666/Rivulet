@@ -1,8 +1,16 @@
 [package]
 name = "rivulet-capture"
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
+description = "Screen and window capture for Rivulet"
 
 [dependencies]
 rivulet-core = { path = "../rivulet-core" }
+tokio = { workspace = true }
 anyhow = { workspace = true }
+tracing = { workspace = true }
+xcap = { workspace = true }
+image = "0.25"
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
