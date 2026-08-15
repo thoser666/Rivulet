@@ -1,12 +1,25 @@
 # Changelog
 
+## [0.2.3-alpha.1] - 2026-08-15
+- fix(ci): Win64-Markierung auf geharvesteten MSI-Komponenten
+
 ## [0.2.2-alpha.1] - 2026-08-14
+
 - fix(ci): 64-Bit-Markierung im MSI-Harvest (ICE80)
+
 - chore(ci): GitHub-Actions-Warnungen beheben
+
+
 
 ## [0.2.1-alpha.1] - 2026-08-14
 
+
+
 - fix(ci): MSI-Version in numerisches Format konvertieren
+
+
+
+
 
 
 
@@ -14,7 +27,15 @@
 
 
 
+
+
+
+
 - feat(ci): Manuelle Alpha-Release-Auslösung per workflow_dispatch
+
+
+
+
 
 
 
@@ -26,7 +47,23 @@
 
 
 
+
+
+
+
+
+
+
+
 ## [0.1.0-alpha.1] - 2026-08-14
+
+
+
+
+
+
+
+
 
 
 
@@ -50,7 +87,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## [0.0.0-alpha.1] - 2026-08-14
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
