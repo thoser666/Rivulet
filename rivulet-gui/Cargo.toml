@@ -7,7 +7,7 @@ rust-version = "1.70"
 [dependencies]
 # GUI-Framework (accesskit deaktiviert: zbus/Tokio-Konflikt auf Linux,
 # accesskit_unix verbindet sich in einem Fremd-Thread zum DBus)
-eframe = { version = "0.35.0", default-features = false, features = [
+eframe = { version = "0.36.1", default-features = false, features = [
     "default_fonts",
     "glow",
     "persistence",
