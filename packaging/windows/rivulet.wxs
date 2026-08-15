@@ -15,7 +15,7 @@
            Version="$(var.ProductVersion)"
            Manufacturer="Rivulet"
            UpgradeCode="A5C1E5E8-7A3B-4C9D-B6E2-9F1D4C7A8B90">
-    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" />
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
 
     <MajorUpgrade DowngradeErrorMessage="Eine neuere Version von Rivulet ist bereits installiert." />
     <MediaTemplate EmbedCab="yes" />
