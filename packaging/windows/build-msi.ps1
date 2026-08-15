@@ -51,6 +51,14 @@ $harvestExclude = @("*.wixobj", "*.wixpdb", "rivulet.harvest.wxs", "*.msi", "*.m
   -exclude ($harvestExclude -join ";")
 if ($LASTEXITCODE -ne 0) { throw "heat.exe fehlgeschlagen" }
 
+# heat v3 markiert Komponenten nicht zuverlässig als 64-Bit, obwohl das
+# Produkt nach ProgramFiles64Folder installiert (sonst ICE80 beim light-Lauf).
+# Daher Win64="yes" auf allen geharvesteten Komponenten nachtragen.
+$harvestContent = Get-Content $harvestXml -Raw
+$harvestContent = $harvestContent -replace '<Component ', '<Component Win64="yes" '
+Set-Content -Path $harvestXml -Value $harvestContent -NoNewline -Encoding UTF8
+Write-Host "Win64='yes' auf allen geharvesteten Komponenten gesetzt."
+
 # WiX-Binary setzen: Version und Bundle-Pfad als separate Preprocessor-Defines.
 $mainObj = Join-Path $Staging "rivulet.wixobj"
 $harvestObj = Join-Path $Staging "rivulet.harvest.wixobj"
