@@ -1,9 +1,11 @@
 name: Release (Alpha)
 
-# ALPHA-KANAL: Baut die Release-Binaries als GitHub-Action-Artifacts, sobald
-# ein neues Feature (Conventional Commit "feat:..." / "feat(...):...") auf den
-# develop-Branch gepusht wird. Jeder Feature-Push erzeugt ein untagiertes
-# Alpha-Artefakt. Gemergte Dependabot-Pullrequests lösen den Build nicht aus.
+# ALPHA-KANAL: Baut die Release-Binaries, sobald ein neues Feature
+# (Conventional Commit "feat:..." / "feat(...):...") auf den develop-Branch
+# gepusht wird. Jeder Feature-Push erzeugt ein versioniertes Alpha-Release
+# (Tag vX.Y.Z-alpha.N) inkl. installierbarer Pakete (Portable/MSI, AppImage,
+# DMG) und formellem GitHub-Release. Gemergte Dependabot-Pullrequests lösen
+# den Build nicht aus.
 #
 # Für die höheren Reifegrade (Beta/RC/Stable) siehe den tag-basierten
 # Release-Pfad in ci.yml ("refs/tags/v*").
@@ -11,6 +13,9 @@ name: Release (Alpha)
 on:
   push:
     branches: [ develop ]
+  # Manuelles Auslösen eines Alpha-Releases (z.B. nach CI-Reparaturen, wenn
+  # kein neuer Feature-Commit ansteht).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -35,6 +40,13 @@ jobs:
           COMMITS: ${{ toJson(github.event.commits) }}
         run: |
           SHOULD_RELEASE="false"
+
+          # Manuelle Auslösung (workflow_dispatch): immer bauen.
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "Manuelle Auslösung - Release-Build wird ausgeführt."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # Gemergte Dependabot-PRs nie bauen (weder über den Actor noch über
           # den Autor der gepushten Commits).
@@ -61,13 +73,68 @@ jobs:
           echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
 
   ################################################################
-  # ALPHA BINARIES (nur bei Feature-Push)
+  # VERSIONIERUNG & TAGGING: bestimmt die nächste Version, bumped
+  # Cargo.toml + CHANGELOG, committet beides und setzt den Alpha-Tag.
+  ################################################################
+  version:
+    name: Determine version & tag
+    needs: check
+    if: ${{ needs.check.outputs.should_release == 'true' }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Compute version and tag
+        id: bump
+        run: |
+          NEXT="$(bash scripts/release-version.sh)"
+          # Nächste freie Alpha-Nummer für die Basisversion bestimmen.
+          COUNT="$(git tag -l "v${NEXT}-alpha.*" | wc -l)"
+          COUNT=$((COUNT + 1))
+          VERSION="${NEXT}-alpha.${COUNT}"
+          TAG="v${VERSION}"
+          echo "Nächste Version: $VERSION (Tag: $TAG)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          # Cargo.toml + CHANGELOG aktualisieren und committen.
+          bash scripts/update-version.sh "$VERSION"
+          bash scripts/update-changelog.sh "$VERSION"
+
+          git add Cargo.toml rivulet-*/Cargo.toml CHANGELOG.md
+          git commit -m "chore(release): prepare $TAG"
+          git push origin develop
+
+          # Tag setzen und pushen.
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+          echo "Release-Tag $TAG gesetzt und gepusht."
+
+  ################################################################
+  # ALPHA BINARIES + PAKETE (nur bei Feature-Push)
   ################################################################
   build:
     name: Build Alpha Binaries (${{ matrix.artifact_name }})
-    needs: check
+    needs: [check, version]
     if: ${{ needs.check.outputs.should_release == 'true' }}
     runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
     strategy:
       fail-fast: false
       matrix:
@@ -77,14 +144,18 @@ jobs:
             artifact_name: rivulet-linux-x86_64-alpha
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: rivulet-windows-x86_64-alpha.exe
+            artifact_name: rivulet-windows-x86_64-alpha
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: rivulet-macos-aarch64-alpha
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.version.outputs.tag }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -118,8 +189,8 @@ jobs:
           $develMsi = Join-Path $env:TEMP "gstreamer-devel-$version.msi"
           Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi
           Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi
-          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart" -Wait
-          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
           $gstRoot = [System.Environment]::GetEnvironmentVariable("GSTREAMER_1_0_ROOT_MSVC_X86_64", "Machine")
           if (-not $gstRoot) { $gstRoot = "C:\gstreamer\1.0\msvc_x86_64\" }
           $gstBin = Join-Path $gstRoot "bin"
@@ -136,17 +207,136 @@ jobs:
 
       - name: Install macOS release dependencies
         if: runner.os == 'macOS'
-        run: brew install gstreamer
+        run: |
+          brew untap aws/tap 2>/dev/null || true
+          brew install gstreamer
 
       - name: Build release binary
         run: cargo build --release --package rivulet-gui --target ${{ matrix.target }}
 
-      - name: Strip binary (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: strip target/${{ matrix.target }}/release/rivulet-gui
+      # ------------------------------------------------------------------
+      # PACKAGING (pro Plattform)
+      # ------------------------------------------------------------------
+      - name: Stage binary (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/rivulet-gui staging/
+          strip staging/rivulet-gui
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Stage binary (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/rivulet-gui staging/
+          strip staging/rivulet-gui
+
+      - name: Stage binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/rivulet-gui.exe" staging/rivulet-gui.exe -Force
+
+      - name: Build AppImage (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          bash packaging/linux/build-appimage.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-linux-x86_64.AppImage"
+
+      - name: Build DMG (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bash packaging/macos/build-dmg.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-macos-aarch64.dmg"
+
+      - name: Build portable ZIP + MSI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pwsh packaging/windows/build-portable.ps1 -Staging "$(pwd)/staging" -OutFile "$(pwd)/staging/rivulet-windows-x86_64-portable.zip"
+          pwsh packaging/windows/build-msi.ps1 -Version "$env:RELEASE_VERSION" -Staging "$(pwd)/staging" -OutFile "$(pwd)/staging/rivulet-windows-x86_64.msi"
+
+      # ------------------------------------------------------------------
+      # CODE SIGNING (nur wenn die Secrets hinterlegt sind)
+      # ------------------------------------------------------------------
+      - name: Sign Windows binaries (if credentials configured)
+        if: runner.os == 'Windows' && (env.WINDOWS_CERT_BASE64 != '' && env.WINDOWS_CERT_PASSWORD != '')
+        shell: pwsh
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $certPath = Join-Path $env:TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+          Get-ChildItem -Path staging -Include *.exe,*.dll -Recurse | ForEach-Object {
+            & signtool sign /f $certPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Signierung fehlgeschlagen: $($_.Name)" }
+          }
+
+      - name: Sign macOS app (if credentials configured)
+        if: runner.os == 'macOS' && (env.MACOS_CERT_BASE64 != '' && env.MACOS_CERT_PASSWORD != '' && env.APPLE_ID != '')
+        shell: bash
+        env:
+          MACOS_CERT_BASE64: ${{ secrets.MACOS_CERT_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          KEYCHAIN="release.keychain"
+          echo "$MACOS_CERT_BASE64" | base64 -d > /tmp/cert.p12
+          security create-keychain -p temp "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p temp "$KEYCHAIN"
+          security import /tmp/cert.p12 -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k temp "$KEYCHAIN"
+          codesign --force --options runtime --sign "Developer ID Application" \
+            --timestamp "staging/Rivulet.app"
+          # DMG nach dem Signing bauen (Codesign vor hdiutil).
+          bash packaging/macos/build-dmg.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-macos-aarch64.dmg"
+          # Notarisierung + Stapelung.
+          xcrun notarytool submit "staging/rivulet-macos-aarch64.dmg" \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "staging/rivulet-macos-aarch64.dmg"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact_name }}
-          path: target/${{ matrix.target }}/release/rivulet-gui*
+          path: |
+            staging/rivulet-gui
+            staging/rivulet-gui.exe
+            staging/rivulet-linux-x86_64.AppImage
+            staging/rivulet-macos-aarch64.dmg
+            staging/rivulet-windows-x86_64-portable.zip
+            staging/rivulet-windows-x86_64.msi
+
+  ################################################################
+  # FORMALES GITHUB RELEASE (Alpha)
+  ################################################################
+  github_release:
+    name: Create Alpha GitHub Release
+    needs: [check, version, build]
+    if: ${{ needs.check.outputs.should_release == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: Rivulet ${{ needs.version.outputs.version }}
+          files: release-assets/*
+          generate_release_notes: true
+          prerelease: true
+          draft: false

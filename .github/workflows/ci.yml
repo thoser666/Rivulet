@@ -3,6 +3,9 @@ name: CI
 on:
   push:
     branches: [ "**" ]
+    # Tags v* triggern den Beta/RC/Stable-Release-Pfad (build_release +
+    # github_release) sowie einen Verifikations-Build.
+    tags: [ "v*" ]
   pull_request:
 
 permissions:
@@ -20,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -65,7 +68,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -119,8 +122,8 @@ jobs:
           $develMsi = Join-Path $env:TEMP "gstreamer-devel-$version.msi"
           Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi
           Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi
-          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart" -Wait
-          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
 
           # 4. Setze Pfade für alle folgenden Schritte. Der Installer registriert
           # die Wurzel in der Maschinen-Umgebungsvariable; als Fallback dient der
@@ -145,19 +148,31 @@ jobs:
         shell: pwsh
         run: |
           gst-inspect-1.0.exe --version
+          Write-Host "GST_PLUGIN_PATH=$env:GST_PLUGIN_PATH"
+          Write-Host "GST_PLUGIN_SYSTEM_PATH=$env:GST_PLUGIN_SYSTEM_PATH"
+          Write-Host "GST_PLUGIN_SCANNER=$env:GST_PLUGIN_SCANNER"
+          foreach ($p in @("gstx264.dll","gstlibav.dll","gstcoreelements.dll","gstflv.dll")) {
+            $candidate = Join-Path $env:GST_PLUGIN_PATH $p
+            Write-Host "$p exists -> $(Test-Path $candidate)"
+          }
           foreach ($el in @("appsrc","videoconvert","x264enc","flvmux","rtmp2sink","mp4mux","avenc_aac","filesink","tee","queue")) {
-            gst-inspect-1.0.exe $el > $null 2>&1
+            $out = gst-inspect-1.0.exe $el 2>&1 | Out-String
             Write-Host "$el -> $LASTEXITCODE"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host $out
+            }
           }
 
       # --- macOS Abhängigkeiten installieren ---
       - name: Install macOS dependencies (if applicable)
         if: runner.os == 'macOS'
         run: |
+          # Vorinstalliertes, untrusted "aws/tap" entfernen (Tap-Trust-Warnung).
+          brew untap aws/tap 2>/dev/null || true
           brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
 
       - name: Cache dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
@@ -179,10 +194,12 @@ jobs:
   # BETA/RC/STABLE RELEASE BUILDS (tag-basiert, refs/tags/v*)
   # Erzeugt versionierte Release-Binaries für jeden Release-Tag
   # (z.B. v0.1.0-beta.1, v0.1.0-rc.1, v1.0.0).
+  # Hinweis: Alpha-Tags (vX.Y.Z-alpha.*) werden hier übersprungen, weil der
+  # Alpha-Kanal in release.yml bereits vollständige Releases erzeugt.
   ################################################################
   build_release:
     name: Build Beta/RC/Stable Binaries
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, 'alpha')
     needs: build_and_test
     runs-on: ${{ matrix.os }}
     strategy:
@@ -201,7 +218,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -238,46 +255,145 @@ jobs:
           $develMsi = Join-Path $env:TEMP "gstreamer-devel-$version.msi"
           Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi
           Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi
-          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart" -Wait
-          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
           $gstRoot = [System.Environment]::GetEnvironmentVariable("GSTREAMER_1_0_ROOT_MSVC_X86_64", "Machine")
           if (-not $gstRoot) { $gstRoot = "C:\gstreamer\1.0\msvc_x86_64\" }
           $gstBin = Join-Path $gstRoot "bin"
           $pkgPath = Join-Path $gstRoot "lib\pkgconfig"
+          $gstPlugins = Join-Path $gstRoot "lib\gstreamer-1.0"
+          $gstScanner = Join-Path $gstRoot "libexec\gstreamer-1.0\gst-plugin-scanner.exe"
           echo "PKG_CONFIG_PATH=$pkgPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GSTREAMER_1_0_ROOT_MSVC_X86_64=$gstRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GST_PLUGIN_SYSTEM_PATH=$gstPlugins" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GST_PLUGIN_PATH=$gstPlugins" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GST_PLUGIN_SCANNER=$gstScanner" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "GST_REGISTRY=$env:TEMP\gst-registry.bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo $gstBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         shell: pwsh
 
       - name: Install macOS release dependencies
         if: runner.os == 'macOS'
-        run: brew install gstreamer
+        run: |
+          brew untap aws/tap 2>/dev/null || true
+          brew install gstreamer
 
       - name: Build release binary
         run: cargo build --release --package rivulet-gui --target ${{ matrix.target }}
 
-      - name: Strip binary (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: strip target/${{ matrix.target }}/release/rivulet-gui
+      # ------------------------------------------------------------------
+      # PACKAGING (pro Plattform)
+      # ------------------------------------------------------------------
+      - name: Stage binary (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/rivulet-gui staging/
+          strip staging/rivulet-gui
+
+      - name: Stage binary (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/rivulet-gui staging/
+          strip staging/rivulet-gui
+
+      - name: Stage binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/rivulet-gui.exe" staging/rivulet-gui.exe -Force
+
+      - name: Build AppImage (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          bash packaging/linux/build-appimage.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-linux-x86_64.AppImage"
+
+      - name: Build DMG (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bash packaging/macos/build-dmg.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-macos-aarch64.dmg"
+
+      - name: Build portable ZIP + MSI (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pwsh packaging/windows/build-portable.ps1 -Staging "$(pwd)/staging" -OutFile "$(pwd)/staging/rivulet-windows-x86_64-portable.zip"
+          pwsh packaging/windows/build-msi.ps1 -Version "$env:RELEASE_VERSION" -Staging "$(pwd)/staging" -OutFile "$(pwd)/staging/rivulet-windows-x86_64.msi"
+
+      # ------------------------------------------------------------------
+      # CODE SIGNING (nur wenn die Secrets hinterlegt sind)
+      # ------------------------------------------------------------------
+      - name: Sign Windows binaries (if credentials configured)
+        if: runner.os == 'Windows' && (env.WINDOWS_CERT_BASE64 != '' && env.WINDOWS_CERT_PASSWORD != '')
+        shell: pwsh
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $certPath = Join-Path $env:TEMP "cert.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+          Get-ChildItem -Path staging -Include *.exe,*.dll -Recurse | ForEach-Object {
+            & signtool sign /f $certPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Signierung fehlgeschlagen: $($_.Name)" }
+          }
+
+      - name: Sign macOS app (if credentials configured)
+        if: runner.os == 'macOS' && (env.MACOS_CERT_BASE64 != '' && env.MACOS_CERT_PASSWORD != '' && env.APPLE_ID != '')
+        shell: bash
+        env:
+          MACOS_CERT_BASE64: ${{ secrets.MACOS_CERT_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          KEYCHAIN="release.keychain"
+          echo "$MACOS_CERT_BASE64" | base64 -d > /tmp/cert.p12
+          security create-keychain -p temp "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p temp "$KEYCHAIN"
+          security import /tmp/cert.p12 -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k temp "$KEYCHAIN"
+          codesign --force --options runtime --sign "Developer ID Application" \
+            --timestamp "staging/Rivulet.app"
+          # DMG nach dem Signing bauen (Codesign vor hdiutil).
+          bash packaging/macos/build-dmg.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-macos-aarch64.dmg"
+          # Notarisierung + Stapelung.
+          xcrun notarytool submit "staging/rivulet-macos-aarch64.dmg" \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "staging/rivulet-macos-aarch64.dmg"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact_name }}-${{ env.RELEASE_VERSION }}
-          path: target/${{ matrix.target }}/release/rivulet-gui*
+          path: |
+            staging/rivulet-gui
+            staging/rivulet-gui.exe
+            staging/rivulet-linux-x86_64.AppImage
+            staging/rivulet-macos-aarch64.dmg
+            staging/rivulet-windows-x86_64-portable.zip
+            staging/rivulet-windows-x86_64.msi
 
   ################################################################
   # FORMALES GITHUB RELEASE (für Beta/RC/Stable-Tags)
   ################################################################
   github_release:
     name: Create GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, 'alpha')
     needs: build_release
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Download all release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: release-assets
           merge-multiple: true

@@ -26,7 +26,7 @@ jobs:
     if: ${{ github.actor != 'dependabot[bot]' && github.actor != 'dependabot-preview[bot]' }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -71,7 +71,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -115,8 +115,8 @@ jobs:
           $develMsi = Join-Path $env:TEMP "gstreamer-devel-$version.msi"
           Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi
           Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi
-          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart" -Wait
-          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
+          Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
           $gstRoot = [System.Environment]::GetEnvironmentVariable("GSTREAMER_1_0_ROOT_MSVC_X86_64", "Machine")
           if (-not $gstRoot) { $gstRoot = "C:\gstreamer\1.0\msvc_x86_64\" }
           $gstBin = Join-Path $gstRoot "bin"
@@ -136,18 +136,29 @@ jobs:
         shell: pwsh
         run: |
           gst-inspect-1.0.exe --version
+          Write-Host "GST_PLUGIN_PATH=$env:GST_PLUGIN_PATH"
+          Write-Host "GST_PLUGIN_SYSTEM_PATH=$env:GST_PLUGIN_SYSTEM_PATH"
+          Write-Host "GST_PLUGIN_SCANNER=$env:GST_PLUGIN_SCANNER"
+          foreach ($p in @("gstx264.dll","gstlibav.dll","gstcoreelements.dll","gstflv.dll")) {
+            $candidate = Join-Path $env:GST_PLUGIN_PATH $p
+            Write-Host "$p exists -> $(Test-Path $candidate)"
+          }
           foreach ($el in @("appsrc","videoconvert","x264enc","flvmux","rtmp2sink","mp4mux","avenc_aac","filesink","tee","queue")) {
-            gst-inspect-1.0.exe $el > $null 2>&1
+            $out = gst-inspect-1.0.exe $el 2>&1 | Out-String
             Write-Host "$el -> $LASTEXITCODE"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host $out
+            }
           }
 
       - name: Install macOS dependencies (if applicable)
         if: runner.os == 'macOS'
         run: |
+          brew untap aws/tap 2>/dev/null || true
           brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
 
       - name: Cache dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/

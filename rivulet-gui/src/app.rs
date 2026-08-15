@@ -206,6 +206,12 @@ pub struct RivuletApp {
     selected_monitor_idx: Option<usize>,
     #[cfg(target_os = "linux")]
     #[serde(skip)]
+    windows: Vec<xcap::Window>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    selected_window_idx: Option<usize>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
     raw_rx: Option<std_mpsc::Receiver<RawFrame>>,
     #[cfg(target_os = "linux")]
     #[serde(skip)]
@@ -298,6 +304,10 @@ impl Default for RivuletApp {
             monitors: Vec::new(),
             #[cfg(target_os = "linux")]
             selected_monitor_idx: None,
+            #[cfg(target_os = "linux")]
+            windows: Vec::new(),
+            #[cfg(target_os = "linux")]
+            selected_window_idx: None,
             #[cfg(target_os = "linux")]
             raw_rx: None,
             #[cfg(target_os = "linux")]
@@ -540,7 +550,7 @@ impl RivuletApp {
         self.audio_peak.store(0.0f32.to_bits(), Ordering::SeqCst);
     }
 
-    fn refresh_linux_monitors(&mut self) {
+    fn refresh_linux_sources(&mut self) {
         self.monitors = xcap::Monitor::all().unwrap_or_default();
         if self
             .selected_monitor_idx
@@ -548,18 +558,50 @@ impl RivuletApp {
         {
             self.selected_monitor_idx = None;
         }
+
+        // Fenster mit leerem Titel ignorieren (Portal-Background etc.).
+        self.windows = xcap::Window::all()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|w| !w.title().unwrap_or_default().trim().is_empty())
+            .collect();
+        if self
+            .selected_window_idx
+            .map_or(true, |idx| idx >= self.windows.len())
+        {
+            self.selected_window_idx = None;
+        }
     }
 
     fn start_linux_recording(&mut self) {
         if self.is_recording {
             return;
         }
-        let Some(idx) = self.selected_monitor_idx else {
-            self.record_status = Some("Kein Monitor ausgewählt.".to_string());
-            return;
-        };
-        let Some(monitor) = self.monitors.get(idx).cloned() else {
-            self.record_status = Some("Ausgewählter Monitor ist ungültig.".to_string());
+
+        // Capture-Quelle: Fenster hat Vorrang vor Monitor.
+        enum Source {
+            Monitor(xcap::Monitor),
+            Window(xcap::Window),
+        }
+
+        let source = if let Some(idx) = self.selected_window_idx {
+            match self.windows.get(idx).cloned() {
+                Some(w) => Source::Window(w),
+                None => {
+                    self.record_status = Some("Ausgewähltes Fenster ist ungültig.".to_string());
+                    return;
+                }
+            }
+        } else if let Some(idx) = self.selected_monitor_idx {
+            match self.monitors.get(idx).cloned() {
+                Some(m) => Source::Monitor(m),
+                None => {
+                    self.record_status = Some("Ausgewählter Monitor ist ungültig.".to_string());
+                    return;
+                }
+            }
+        } else {
+            self.record_status = Some("Keine Aufnahmequelle ausgewählt.".to_string());
             return;
         };
 
@@ -594,19 +636,31 @@ impl RivuletApp {
         self.raw_rx = Some(raw_rx);
         self.stop_signal = Some(stop.clone());
 
-        let monitor_name = monitor.name().unwrap_or_default();
-        let monitor_size = format!(
-            "{}x{}",
-            monitor.width().unwrap_or(0),
-            monitor.height().unwrap_or(0)
-        );
+        let source_desc = match &source {
+            Source::Monitor(m) => format!(
+                "Monitor {} ({}x{})",
+                m.name().unwrap_or_default(),
+                m.width().unwrap_or(0),
+                m.height().unwrap_or(0)
+            ),
+            Source::Window(w) => format!(
+                "Fenster \"{}\" ({}x{})",
+                w.title().unwrap_or_default(),
+                w.width().unwrap_or(0),
+                w.height().unwrap_or(0)
+            ),
+        };
 
         let fps = 30u64;
         let frame_duration = std::time::Duration::from_millis(1000 / fps);
         thread::spawn(move || {
             let mut next = Instant::now();
             while !stop.load(Ordering::SeqCst) {
-                match monitor.capture_image() {
+                let result = match &source {
+                    Source::Monitor(m) => m.capture_image(),
+                    Source::Window(w) => w.capture_image(),
+                };
+                match result {
                     Ok(image) => {
                         let frame = RawFrame {
                             data: image.as_raw().to_vec(),
@@ -618,7 +672,9 @@ impl RivuletApp {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Screen-Capture-Fehler: {e}");
+                        // Fenster wurde minimiert/geschlossen oder nicht mehr
+                        // zeichenbar -> Aufnahme robust beenden statt crashen.
+                        eprintln!("Capture-Fehler: {e}");
                         break;
                     }
                 }
@@ -633,7 +689,7 @@ impl RivuletApp {
         self.is_recording = true;
         self.record_started = Instant::now();
         self.record_status = None;
-        println!("Linux-Aufnahme gestartet: Monitor {monitor_name} ({monitor_size})");
+        println!("Linux-Aufnahme gestartet: {source_desc}");
     }
 
     fn stop_linux_recording(&mut self) {
@@ -703,7 +759,7 @@ impl RivuletApp {
         }
         #[cfg(target_os = "linux")]
         {
-            app.refresh_linux_monitors();
+            app.refresh_linux_sources();
         }
         app
     }
@@ -854,7 +910,7 @@ impl eframe::App for RivuletApp {
                     });
                 } else {
                     ui.horizontal(|ui| {
-                        ui.label("Monitor:");
+                        ui.label("Quelle:");
                         egui::ComboBox::from_id_salt("linux_monitor_select")
                             .selected_text(
                                 self.selected_monitor_idx
@@ -884,18 +940,57 @@ impl eframe::App for RivuletApp {
                                         .clicked()
                                     {
                                         self.selected_monitor_idx = Some(i);
+                                        self.selected_window_idx = None;
+                                    }
+                                }
+                            });
+                        egui::ComboBox::from_id_salt("linux_window_select")
+                            .selected_text(
+                                self.selected_window_idx
+                                    .and_then(|idx| self.windows.get(idx))
+                                    .map(|w| {
+                                        format!(
+                                            "\"{}\" ({}x{})",
+                                            w.title().unwrap_or_default(),
+                                            w.width().unwrap_or(0),
+                                            w.height().unwrap_or(0)
+                                        )
+                                    })
+                                    .unwrap_or_else(|| "Fenster auswählen".to_string()),
+                            )
+                            .show_ui(ui, |ui| {
+                                for (i, w) in self.windows.iter().enumerate() {
+                                    if ui
+                                        .selectable_label(
+                                            self.selected_window_idx == Some(i),
+                                            format!(
+                                                "\"{}\" ({}x{})",
+                                                w.title().unwrap_or_default(),
+                                                w.width().unwrap_or(0),
+                                                w.height().unwrap_or(0)
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.selected_window_idx = Some(i);
+                                        self.selected_monitor_idx = None;
                                     }
                                 }
                             });
                         if ui
                             .button("🔄")
-                            .on_hover_text("Monitore aktualisieren")
+                            .on_hover_text("Quellen aktualisieren")
                             .clicked()
                         {
-                            self.refresh_linux_monitors();
+                            self.refresh_linux_sources();
                         }
                     });
-                    if ui.button("⏺ Aufnahme starten").clicked() {
+                    let source_selected =
+                        self.selected_monitor_idx.is_some() || self.selected_window_idx.is_some();
+                    if ui
+                        .add_enabled(source_selected, egui::Button::new("⏺ Aufnahme starten"))
+                        .clicked()
+                    {
                         self.start_linux_recording();
                     }
                 }

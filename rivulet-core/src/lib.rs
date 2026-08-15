@@ -11,6 +11,9 @@ use gst::prelude::*;
 pub mod audio;
 pub use audio::{AudioFrame, AudioTrack};
 
+pub mod health;
+pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
+
 pub mod stream;
 pub use stream::{StreamPlatform, StreamSettings};
 
@@ -36,6 +39,9 @@ pub struct RivuletEngine {
     is_recording: bool,
     output_path: Option<PathBuf>,
     stream_settings: Option<StreamSettings>,
+    /// Tracks stream health while a streaming pipeline is active. Always
+    /// `None` for plain local recordings.
+    stream_health: Option<StreamHealthMonitor>,
 }
 
 impl Default for RivuletEngine {
@@ -54,6 +60,7 @@ impl Default for RivuletEngine {
             is_recording: false,
             output_path: None,
             stream_settings: None,
+            stream_health: None,
         }
     }
 }
@@ -84,6 +91,14 @@ impl RivuletEngine {
     /// configured.
     pub fn is_dual_output(&self) -> bool {
         self.is_streaming() && self.output_path.is_some()
+    }
+
+    /// Escape a location string for embedding into a `parse_launch` pipeline
+    /// description. GStreamer treats `\` as an escape character in quoted
+    /// property values; on Windows paths like `C:\Users\...` would otherwise be
+    /// silently mangled (e.g. `C:UsersRUNNER~1...`).
+    fn escape_location(location: &str) -> String {
+        location.replace('\\', "\\\\")
     }
 
     fn video_branch_str(&self) -> String {
@@ -123,9 +138,10 @@ impl RivuletEngine {
     fn build_recording_pipeline_str(&self, location: &str) -> String {
         let mut s = self.video_branch_str();
         s.push_str(&self.audio_branch_str(false));
+        let escaped = Self::escape_location(location);
         s.push_str(&format!(
             "mp4mux name=mux ! filesink location=\"{}\"",
-            location
+            escaped
         ));
         s
     }
@@ -187,7 +203,7 @@ impl RivuletEngine {
         }
         s.push_str(&format!(
             "mp4mux name=mux_rec ! filesink location=\"{}\" ",
-            location
+            Self::escape_location(location)
         ));
         s.push_str(&format!(
             "flvmux name=mux_stream streamable=true ! rtmp2sink location=\"{}\"",
@@ -385,6 +401,28 @@ impl RivuletEngine {
         push_pcm_buffer(appsrc, frame)
     }
 
+    /// Start streaming to the configured ingest without a local recording.
+    ///
+    /// Equivalent to [`RivuletEngine::start_local_recording`] with no output
+    /// path: it arms the engine so the streaming pipeline is built as soon as
+    /// the first video frame arrives. Stream settings must be configured first
+    /// via [`RivuletEngine::set_stream_settings`].
+    pub fn start_streaming(&mut self) {
+        if self.is_recording {
+            return;
+        }
+        if self.stream_settings.is_none() {
+            eprintln!("[Engine] Keine Stream-Ziele konfiguriert.");
+            return;
+        }
+        println!("[Engine] Streaming vorbereitet.");
+        self.is_recording = true;
+
+        // Stream-Health-Monitoring initialisieren. Defaults passen zur
+        // Engine-Encoding-Konfiguration (30 FPS, 5000 kbit/s).
+        self.stream_health = Some(StreamHealthMonitor::new(5000.0, 30.0));
+    }
+
     /// Start writing the video/audio frames to a local MP4 file.
     ///
     /// When stream settings are configured as well ([`RivuletEngine::set_stream_settings`]),
@@ -396,6 +434,13 @@ impl RivuletEngine {
         println!("[Engine] Aufnahme vorbereitet für: {:?}", path);
         self.output_path = Some(path);
         self.is_recording = true;
+
+        // Stream-Health-Monitoring initialisieren, sobald ein Stream-Ziel
+        // (nur Stream oder Dual Output) konfiguriert ist. Defaults passen zur
+        // Engine-Encoding-Konfiguration (30 FPS, 5000 kbit/s).
+        if self.is_streaming() {
+            self.stream_health = Some(StreamHealthMonitor::new(5000.0, 30.0));
+        }
     }
 
     pub fn stop_recording(&mut self) {
@@ -439,6 +484,7 @@ impl RivuletEngine {
         self.audio_appsrc_sys = None;
         self.audio_appsrc_mic = None;
         self.output_path = None;
+        self.stream_health = None;
         self.is_recording = false;
         println!("[Engine] Aufnahme gestoppt und Datei gespeichert.");
     }
@@ -462,14 +508,35 @@ impl RivuletEngine {
                 map.as_mut_slice().copy_from_slice(frame_data);
             }
 
-            if let Err(err) = appsrc.push_buffer(buffer) {
-                eprintln!(
-                    "[Engine] Fehler beim Senden des Frames in die Pipeline: {:?}",
-                    err
-                );
-                self.stop_recording();
+            match appsrc.push_buffer(buffer) {
+                Ok(_flow) => {
+                    if let Some(health) = self.stream_health.as_mut() {
+                        health.record_frame_sent(frame_data.len());
+                    }
+                }
+                Err(err) => {
+                    if let Some(health) = self.stream_health.as_mut() {
+                        health.record_frame_dropped();
+                    }
+                    eprintln!(
+                        "[Engine] Fehler beim Senden des Frames in die Pipeline: {:?}",
+                        err
+                    );
+                    self.stop_recording();
+                }
             }
         }
+    }
+
+    /// Current stream health statistics, if a streaming pipeline is active.
+    ///
+    /// Returns [`StreamStats::offline`] when the engine is not streaming (only
+    /// local recording or nothing).
+    pub fn stream_stats(&mut self) -> StreamStats {
+        self.stream_health
+            .as_mut()
+            .map(StreamHealthMonitor::stats)
+            .unwrap_or_else(StreamStats::offline)
     }
 }
 
@@ -512,6 +579,14 @@ mod tests {
     use super::*;
     use gstreamer_pbutils as gst_pbutils;
 
+    /// Build a valid `file://` URI from a filesystem path. On Windows the path
+    /// uses backslashes, which are invalid in a URI; they are converted to
+    /// forward slashes (`C:\Users\...` -> `file:///C:/Users/...`).
+    fn file_uri(path: &std::path::Path) -> String {
+        let s = path.to_str().expect("Pfad muss UTF-8 sein");
+        format!("file:///{}", s.replace('\\', "/"))
+    }
+
     #[test]
     fn audio_toggle_is_disabled_by_default() {
         let engine = RivuletEngine::default();
@@ -542,6 +617,18 @@ mod tests {
         let _ = gst::init();
         let caps = audio_caps();
         assert!(!caps.is_empty(), "audio caps should not be empty");
+    }
+
+    #[test]
+    fn escape_location_doubles_backslashes() {
+        let escaped = RivuletEngine::escape_location("C:\\Users\\Temp\\out.mp4");
+        assert_eq!(escaped, "C:\\\\Users\\\\Temp\\\\out.mp4");
+    }
+
+    #[test]
+    fn file_uri_converts_backslashes_to_forward_slashes() {
+        let uri = file_uri(std::path::Path::new("C:\\Users\\Temp\\out.mp4"));
+        assert_eq!(uri, "file:///C:/Users/Temp/out.mp4");
     }
 
     /// End-to-end test: feed synthetic video + audio frames into the engine and
@@ -609,7 +696,7 @@ mod tests {
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         assert!(len > 0, "Ausgabedatei sollte nicht leer sein");
 
-        let uri = format!("file://{}", path.display());
+        let uri = file_uri(&path);
         let discoverer = gst_pbutils::Discoverer::new(gst::ClockTime::from_seconds(5))
             .expect("Discoverer sollte erstellt werden können");
         let info = discoverer
@@ -821,7 +908,8 @@ mod tests {
         assert!(pipeline_str.contains("name=video_tee"), "{}", pipeline_str);
         assert!(pipeline_str.contains("mp4mux name=mux_rec"));
         assert!(pipeline_str.contains("flvmux name=mux_stream streamable=true"));
-        assert!(pipeline_str.contains(&format!("filesink location=\"{}\"", path.display())));
+        let escaped = path.display().to_string().replace('\\', "\\\\");
+        assert!(pipeline_str.contains(&format!("filesink location=\"{}\"", escaped)));
         assert!(pipeline_str.contains("rtmp2sink location=\"rtmps://live.twitch.tv/app/dualkey\""));
 
         let pipeline = gst::parse::launch(&pipeline_str)
@@ -936,7 +1024,7 @@ mod tests {
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         assert!(len > 0, "Ausgabedatei sollte nicht leer sein");
 
-        let uri = format!("file://{}", path.display());
+        let uri = file_uri(&path);
         let discoverer = gst_pbutils::Discoverer::new(gst::ClockTime::from_seconds(5))
             .expect("Discoverer sollte erstellt werden können");
         let info = discoverer
@@ -947,6 +1035,83 @@ mod tests {
             1,
             "Es sollte ein Audio-Stream vorhanden sein"
         );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Without streaming configuration the health API reports an offline
+    /// stream, independent of any local recording activity.
+    #[test]
+    fn stream_stats_offline_without_streaming() {
+        let mut engine = RivuletEngine::default();
+        let stats = engine.stream_stats();
+        assert_eq!(stats.status, StreamHealthStatus::Offline);
+        assert_eq!(stats.frames_sent, 0);
+        assert_eq!(stats.dropped_ratio, 0.0);
+    }
+
+    /// `start_streaming` arms the engine for pure streaming; the health monitor
+    /// is created immediately and reports Connecting until frames flow.
+    #[test]
+    fn start_streaming_creates_health_monitor() {
+        let mut engine = RivuletEngine::default();
+        engine.set_stream_settings(Some(StreamSettings::twitch("k")));
+        engine.start_streaming();
+
+        let stats = engine.stream_stats();
+        assert_eq!(stats.status, StreamHealthStatus::Connecting);
+        engine.stop_recording();
+    }
+
+    /// After configuring a stream, health starts in the Connecting state until
+    /// the first frame has actually been pushed through the pipeline.
+    #[test]
+    fn stream_stats_connecting_after_stream_start() {
+        let mut engine = RivuletEngine::default();
+        engine.set_stream_settings(Some(StreamSettings::twitch("k")));
+        let path = std::env::temp_dir().join("rivulet_stream_health.mp4");
+        engine.start_local_recording(path.clone());
+
+        let stats = engine.stream_stats();
+        assert_eq!(stats.status, StreamHealthStatus::Connecting);
+        assert_eq!(stats.frames_sent, 0);
+        engine.stop_recording();
+    }
+
+    /// Pushing frames through the streaming pipeline records them in the
+    /// health monitor; the counters must be reset when a new recording starts.
+    #[test]
+    fn stream_stats_tracks_frames_through_pipeline() {
+        let mut engine = RivuletEngine::default();
+        engine.set_stream_settings(Some(StreamSettings::twitch("k")));
+        let path = std::env::temp_dir().join("rivulet_stream_health_frames.mp4");
+        engine.start_local_recording(path.clone());
+
+        let (width, height) = (64u32, 64u32);
+        let video = vec![0u8; (width * height * 4) as usize];
+        for _ in 0..15 {
+            engine.process_raw_frame(&video, width, height);
+        }
+
+        let stats = engine.stream_stats();
+        assert!(
+            stats.frames_sent > 0,
+            "Frames müssen im Health-Monitor gezählt werden"
+        );
+        assert!(
+            stats.bytes_sent > 0,
+            "Bytes müssen im Health-Monitor gezählt werden"
+        );
+        engine.stop_recording();
+
+        // A fresh recording restarts health tracking from zero.
+        engine.start_local_recording(path.clone());
+        let reset = engine.stream_stats();
+        assert_eq!(
+            reset.frames_sent, 0,
+            "Neustart muss die Zähler zurücksetzen"
+        );
+        engine.stop_recording();
 
         let _ = std::fs::remove_file(&path);
     }

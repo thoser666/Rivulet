@@ -98,6 +98,8 @@ fn main() -> anyhow::Result<()> {
             "Dual output: recording locally to {}",
             record_path.as_ref().unwrap().display()
         );
+    } else {
+        engine.start_streaming();
     }
 
     // 2. Build the audio capture (system audio + microphone, mixed).
@@ -121,6 +123,7 @@ fn main() -> anyhow::Result<()> {
     let frame_duration = Duration::from_millis(1000 / fps as u64);
     let mut frame_count = 0u64;
     let mut audio_frames = 0u64;
+    let mut last_health_print = Instant::now();
 
     while start.elapsed().as_secs() < stream_secs {
         let frame_start = Instant::now();
@@ -137,6 +140,21 @@ fn main() -> anyhow::Result<()> {
             audio_frames += 1;
         }
 
+        // Print live stream health every two seconds.
+        if last_health_print.elapsed() >= Duration::from_secs(2) {
+            let stats = engine.stream_stats();
+            println!(
+                "[health] {:?} | {:.0} kbps | {:.1} fps | {} sent / {} dropped ({:.1}%)",
+                stats.status,
+                stats.kbps,
+                stats.fps,
+                stats.frames_sent,
+                stats.frames_dropped,
+                stats.dropped_ratio * 100.0
+            );
+            last_health_print = Instant::now();
+        }
+
         frame_count += 1;
 
         let frame_time = frame_start.elapsed();
@@ -149,9 +167,14 @@ fn main() -> anyhow::Result<()> {
     engine.stop_recording();
     audio.stop()?;
 
+    let final_stats = engine.stream_stats();
     println!("Stream complete.");
     println!("  Video frames: {}", frame_count);
     println!("  Audio frames: {}", audio_frames);
+    println!(
+        "  Final health: {:?} ({} sent / {} dropped)",
+        final_stats.status, final_stats.frames_sent, final_stats.frames_dropped
+    );
     if let Some(path) = record_path {
         println!("  Local recording: {}", path.display());
     }

@@ -12,7 +12,7 @@
 
 *A complete Rust reimplementation of OBS Studio - built for performance, safety, and reliability*
 
-[Features](#-features) • [Installation](#-installation) • [Roadmap](#-roadmap) • [Contributing](#-contributing)
+[Features](#-features) • [Installation](#-installation) • [Roadmap](#-roadmap) • [Releases](#-releases) • [Contributing](#-contributing)
 
 ![Rivulet Screenshot](docs/screenshot.png)
 <!-- Add screenshot later -->
@@ -44,13 +44,15 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 ### ✅ Currently Available (v0.1)
 
 - **Screen Capture** - Capture your primary monitor in real-time
+- **Window Capture** - Capture a single application window (games, etc.) in addition to full monitors, with a window picker in the GUI (Linux & Windows)
 - **Screen + Audio Recording (Linux GUI)** - Full recording flow in the GUI: monitor selection, start/stop, recording timer; system audio + microphone are captured and mixed into the MP4
-- **Video Encoding** - H.264 encoding via FFmpeg
+- **Video Encoding** - H.264 encoding via GStreamer (`x264enc`, low-latency tuning)
 - **Audio Capture (engine, Linux)** - Desktop sound and microphone, mixed in real time via GStreamer (48 kHz stereo, per-source volume); usable via the `rivulet-audio` crate and the `record_screen_audio` example
 - **Audio Mixer UI (Linux GUI)** - Start/stop audio capture with live level meter (dB), per-source volume sliders for system/mic
 - **Separate Audio Tracks** - System and microphone output as separate tracks in the MP4 (via the "Getrennte Tracks" option, Linux GUI); engine API `push_audio_track(frame, AudioTrack)`
-- **RTMPS Streaming** - Live to Twitch, Kick, YouTube or any custom RTMP/RTMPS ingest (H.264+AAC over FLV); `StreamSettings` presets + `set_stream_settings` engine API; example `stream_rtmps`
+- **RTMPS Streaming** - Live to Twitch, Kick, YouTube or any custom RTMP/RTMPS ingest (H.264+AAC over FLV); `StreamSettings` presets, engine APIs `set_stream_settings` + `start_streaming` (pure stream) or `start_local_recording` (dual output); example `stream_rtmps`
 - **Dual Output** - Record locally and stream simultaneously; once encoded, split via `tee` into the MP4 file and the FLV/RTMPS sink (enabled by configuring both a local recording and stream settings)
+- **Stream Health & Network Stats** - Live status (`Connecting`/`Good`/`Warning`/`Poor`) with sent/dropped frame counters, bitrate (kbps) and FPS over a sliding window; derived from drop ratio (>5% Poor, >1% Warning), throughput collapse and stalls; engine API `stream_stats()`, polled in `stream_rtmps`
 - **Live Preview** - See what you're recording as you record
 - **Tab-Based Interface** - Clean, DaVinci Resolve-style UI
   - Record Tab - Main recording controls and preview
@@ -142,7 +144,8 @@ See [Roadmap](#-roadmap) for detailed timeline.
 Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 
 - [ ] Szenen-Verwaltung (mehrere Szenen, Umschalten)
-- [ ] Quellen (Display, Fenster, Bild, Text, Webcam, Stummschaltung)
+- [x] Quellen — Fenster-Capture (Monitor + einzelne Fenster, Linux & Windows)
+- [ ] Quellen (Bild, Text, Webcam, Stummschaltung)
 - [ ] Quellen-Komposition (Ebenen, Position, Skalierung, Zuschneiden)
 - [ ] Übergänge (Fade, Cut, Stinger)
 - [ ] Overlays (Bild-in-Bild, Banner)
@@ -160,7 +163,7 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 - [x] RTMP/RTMPS-Client-Implementierung (H.264+AAC, FLV-Muxing)
 - [x] TLS-verschlüsseltes Streaming (RTMPS) mit Zertifikats-Validierung
 - [x] Dual Output (Stream + Aufnahme parallel; einmal codiert, per `tee` aufgeteilt)
-- [ ] Stream-Health und Netzwerk-Statistiken
+- [x] Stream-Health und Netzwerk-Statistiken (Status via Drop-Ratio/Throughput, `stream_stats()`-API)
 - [ ] Adaptive Bitrate
 - [x] Plattform-Integrationen (Twitch, Kick, YouTube via RTMPS; Custom)
 - [ ] Stream-Key-Management und Stream-Presets
@@ -193,8 +196,8 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 - [ ] OBS-Plugin-Kompatibilitätsschicht
 - [ ] Mobile Companion App (Remote Control)
 - [ ] Windows/macOS-Feature-Parität (aktuell vollständig nur auf Linux)
-- [ ] Installer (Windows MSI, macOS DMG, Linux AppImage)
-- [ ] Code-Signing und Auto-Update
+- [x] Installer (Windows MSI, macOS DMG, Linux AppImage) — automatisiert in CI
+- [ ] Code-Signing und Auto-Update (Signing-Automatik vorhanden, Secrets nötig)
 - [ ] Telemetrie (opt-in, datenschutzfreundlich)
 - [ ] Multi-Language-Support
 
@@ -206,7 +209,7 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 
 | OBS-Kategorie | Status |
 | --- | --- |
-| Capture-Quellen (Display, Fenster, Webcam) | Teilweise (Display/Fenster) |
+| Capture-Quellen (Display, Fenster, Webcam) | Teilweise (Display + Fenster) |
 | Szenen & Übergänge | Offen |
 | Audio-Mixer (Quellen, Tracks, Filter) | Teilweise (Mixer, Separate Tracks) |
 | Recording & Encoding | Teilweise (H.264-Software) |
@@ -218,6 +221,48 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 | Plugin-Ökosystem & OBS-Kompatibilität | Offen |
 | Multi-Track-Audio | Teilweise (2 Tracks) |
 | Plattform-Parität (Windows/macOS) | Offen |
+
+---
+
+## 📺 Streaming-Beispiel
+
+Das Beispiel `stream_rtmps` (`rivulet-audio`) erfasst den Bildschirm samt
+gemischtem System-/Mikrofon-Audio und streamt live per RTMPS zu Twitch, Kick,
+YouTube oder einem beliebigen RTMP-Server:
+
+```bash
+cd rivulet-audio
+
+# Twitch (default) oder YouTube
+RIVULET_STREAM_KEY="dein-stream-key" \
+RIVULET_STREAM_SECS=60 \
+cargo run --example stream_rtmps
+
+# Kick benötigt den IVS-Ingest-Endpoint
+RIVULET_STREAM_URL="rtmps://<id>.global-contribute.live-video.net/app" \
+RIVULET_STREAM_PLATFORM=kick \
+RIVULET_STREAM_KEY="dein-stream-key" \
+cargo run --example stream_rtmps
+
+# Beliebiger RTMP/RTMPS-Server (z.B. lokal)
+RIVULET_STREAM_URL="rtmp://127.0.0.1:1935/live" \
+RIVULET_STREAM_PLATFORM=custom \
+RIVULET_STREAM_KEY="test" \
+cargo run --example stream_rtmps
+```
+
+**Umgebungsvariablen:**
+
+| Variable | Bedeutung | Pflicht |
+| --- | --- | --- |
+| `RIVULET_STREAM_KEY` | Stream-Key aus dem Plattform-Dashboard | Ja |
+| `RIVULET_STREAM_PLATFORM` | `twitch` (Default) · `kick` · `youtube` · `custom` | Nein |
+| `RIVULET_STREAM_URL` | Ingest-URL (für `custom` und `kick`) | je nach Plattform |
+| `RIVULET_STREAM_SECS` | Stream-Dauer in Sekunden (Default: 10) | Nein |
+| `RIVULET_STREAM_RECORD_PATH` | Optionaler MP4-Pfad für parallele Aufnahme (Dual Output) | Nein |
+
+Alle zwei Sekunden gibt das Beispiel den Live-Health-Status aus, z. B.
+`[health] Good | 2500 kbps | 30.0 fps | 120 sent / 0 dropped`.
 
 ---
 
@@ -235,7 +280,7 @@ cargo test --workspace
 cargo test -p rivulet-core
 ```
 
-The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4, including separate audio tracks verified via the GStreamer Discoverer), the encoder/recorder lifecycle, and audio configuration validation. Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable.
+The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4, including separate audio tracks verified via the GStreamer Discoverer), the streaming pipelines (RTMPS/dual output parse and route audio correctly), stream health tracking (status derivation from drop ratio, bitrate/FPS collapse and stalls) and the encoder/recorder lifecycle. Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable.
 
 ### Linting & Formatting
 
@@ -255,7 +300,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ### Prerequisites
 
-**FFmpeg** must be installed and available in PATH:
+**GStreamer** (Core + `gst-plugins-good`/`gst-plugins-bad`/`gst-plugins-ugly` + `gst-libav`) wird von der Engine für Encoding, Audio-Mixing und Streaming (H.264 + AAC) benötigt.
+
+**FFmpeg** wird nur noch vom Legacy-Encoder in `rivulet-streaming` verwendet und muss verfügbar sein, wenn dieser Pfad genutzt wird:
 
 #### Windows
 ```powershell
@@ -263,3 +310,48 @@ cargo clippy --workspace --all-targets -- -D warnings
 choco install ffmpeg
 
 # Or download from: https://ffmpeg.org/download.html
+```
+
+---
+
+## 📦 Releases
+
+Releases werden vollständig automatisiert über GitHub Actions erzeugt:
+
+### Alpha-Kanal (`release.yml`)
+
+Jeder Push mit einem `feat:`-Commit (Conventional Commits) auf `develop` erzeugt
+ein neues Alpha-Release:
+
+1. **Versionierung**: Die nächste Version wird per SemVer aus den Commits seit
+   dem letzten Tag berechnet (`scripts/release-version.sh`), plus `-alpha.N`
+   (N = nächste freie Nummer). `Cargo.toml` und `CHANGELOG.md` werden gebumpt
+   und als `chore(release): prepare vX.Y.Z-alpha.N` committet.
+2. **Tag**: `vX.Y.Z-alpha.N` wird gesetzt und gepusht.
+3. **Binaries**: Drei Plattformen (Linux x86_64, Windows x86_64, macOS
+   aarch64) bauen Release-Binaries aus dem Tag.
+4. **Pakete**:
+   - Linux: AppImage (`packaging/linux/build-appimage.sh`)
+   - Windows: Portable-ZIP + MSI (`packaging/windows/`) — GStreamer-Runtime wird
+     mitgeliefert, sodass das Bundle ohne GStreamer-Installation läuft
+   - macOS: DMG (`packaging/macos/build-dmg.sh`)
+5. **Release**: Ein formelles GitHub-Release (Pre-Release) mit allen Artefakten
+   wird erstellt.
+
+Dependabot-Pushes werden übersprungen (kein Release-Build für gemergte
+Bot-PRs).
+
+### Beta/RC/Stable-Kanal (`ci.yml`)
+
+Ein manuell gesetzter Tag `vX.Y.Z` (ohne `-alpha.*`) baut dieselben Pakete und
+veröffentlicht ein GitHub-Release. Tags mit `-beta.*`/`-rc.*` werden als
+Pre-Release markiert, stabile Tags als vollständiges Release.
+
+### Code-Signing
+
+- **Windows**: `signtool` signiert die Binary (nur wenn `WINDOWS_CERT_BASE64`
+  und `WINDOWS_CERT_PASSWORD` als Secrets hinterlegt sind).
+- **macOS**: `codesign` + Notarisierung via `notarytool` (nur wenn die Secrets
+  `MACOS_CERT_BASE64`, `MACOS_CERT_PASSWORD`, `APPLE_ID`, `APPLE_APP_PASSWORD`
+  und `APPLE_TEAM_ID` hinterlegt sind).
+- Ohne Secrets werden unsignierte Pakete gebaut (Standard).
