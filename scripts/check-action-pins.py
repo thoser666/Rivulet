@@ -13,14 +13,32 @@ Exit codes: non-zero when any pin is *outdated within its major* or cannot be
 resolved. A *newer major* is reported but does not fail unless you pass
 `--fail-on-major`.
 
+Output modes (the exit code is the same regardless of mode):
+
+- (default)      one human-readable line per action, plus a summary on stderr.
+- `--json`       a single JSON document on stdout (machine-readable).
+- `--comment`    a compact Markdown notification suitable for a GitHub issue,
+                 PR comment, or the GitHub Actions step summary.
+
 Usage:
-    scripts/check-action-pins.py [--fail-on-major]
+    scripts/check-action-pins.py [--fail-on-major] [--json | --comment]
 """
 
+import json
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+# Emoji/Unicode in the --comment output must survive non-UTF-8 consoles (e.g.
+# cp1252 on Windows); reconfiguring stdout/stderr to UTF-8 is a no-op on Linux.
+for _stream in (sys.stdout, sys.stderr):
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if _reconfigure is not None:
+        try:
+            _reconfigure(encoding="utf-8")
+        except (ValueError, OSError):
+            pass
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -84,12 +102,18 @@ def stable_tags(repo):
 
 
 def check_action(action, sha, version):
-    """Return ``(statuses, message)``.
+    """Return a JSON-serializable dict describing the pin's status.
 
-    ``statuses`` is a subset of ``{"ok", "outdated", "major", "error"}``; an
-    action can be both ``outdated`` (within its major) and ``major`` (a newer
+    ``statuses`` is a list drawn from ``{"ok", "outdated", "major", "error"}``;
+    an action can be both ``outdated`` (within its major) and ``major`` (a newer
     major exists).
     """
+    result = {
+        "action": action,
+        "pinned_version": version,
+        "pinned_sha": sha,
+    }
+
     ref_kind = None
     try:
         resolve_ref(action, f"refs/tags/{version}")
@@ -103,32 +127,57 @@ def check_action(action, sha, version):
         except RuntimeError:
             pass
     if ref_kind is None:
-        return {"error"}, f"{action}@{version}: ref does not resolve to a tag or branch"
+        result.update(
+            kind="unknown",
+            statuses=["error"],
+            message=f"{action}@{version}: ref does not resolve to a tag or branch",
+        )
+        return result
 
     if ref_kind == "branch":
         tip = resolve_ref(action, f"refs/heads/{version}")
+        result.update(kind="branch", branch_tip=tip)
         if tip == sha:
-            return {"ok"}, f"{action}@{version} is current (branch tip {sha})"
-        return {"outdated"}, f"{action}@{version}: branch tip is {tip}, pinned {sha}"
+            result.update(
+                statuses=["ok"],
+                message=f"{action}@{version} is current (branch tip {sha})",
+            )
+        else:
+            result.update(
+                statuses=["outdated"],
+                message=f"{action}@{version}: branch tip is {tip}, pinned {sha}",
+            )
+        return result
 
     tags = stable_tags(action)
     if not tags:
-        return {"error"}, f"{action}: no stable semver tags found"
+        result.update(kind="tag", statuses=["error"], message=f"{action}: no stable semver tags found")
+        return result
     pinned = SEMVER_RE.match(version)
     if not pinned:
-        return {"error"}, f"{action}: pinned version {version!r} is not semver"
+        result.update(
+            kind="tag",
+            statuses=["error"],
+            message=f"{action}: pinned version {version!r} is not semver",
+        )
+        return result
     pinned_key = (int(pinned.group(1)), int(pinned.group(2)), int(pinned.group(3)))
 
     in_major = [tag for tag in tags if tag[0][0] == pinned_key[0]]
     if not in_major:
-        return {"error"}, f"{action}: no tags for major v{pinned_key[0]}"
+        result.update(
+            kind="tag",
+            statuses=["error"],
+            message=f"{action}: no tags for major v{pinned_key[0]}",
+        )
+        return result
     major_key, major_name, major_sha = max(in_major)
     overall_key, overall_name, overall_sha = max(tags)
 
-    statuses = {"ok"}
+    statuses = ["ok"]
     parts = []
     if major_sha != sha:
-        statuses = {"outdated"}
+        statuses = ["outdated"]
         parts.append(
             f"outdated in v{pinned_key[0]}: pinned {version} ({sha}), "
             f"latest {major_name} ({major_sha})"
@@ -136,44 +185,127 @@ def check_action(action, sha, version):
     else:
         parts.append(f"current in v{pinned_key[0]} ({major_name})")
     if overall_key[0] > pinned_key[0]:
-        statuses.add("major")
+        statuses.append("major")
         parts.append(f"newer major available: {overall_name} ({overall_sha})")
 
-    return statuses, f"{action}: " + "; ".join(parts)
+    result.update(
+        kind="tag",
+        statuses=statuses,
+        message=f"{action}: " + "; ".join(parts),
+        latest_in_major={"version": major_name, "sha": major_sha},
+        latest_overall={"version": overall_name, "sha": overall_sha},
+    )
+    return result
+
+
+def summarize(results):
+    return {
+        "total": len(results),
+        "current": sum(1 for r in results if r["statuses"] == ["ok"]),
+        "outdated": sum(1 for r in results if "outdated" in r["statuses"]),
+        "major": sum(1 for r in results if "major" in r["statuses"]),
+        "errors": sum(1 for r in results if "error" in r["statuses"]),
+    }
+
+
+def short_status(result):
+    """Compact human label for the comment table."""
+    parts = []
+    if "error" in result["statuses"]:
+        parts.append("unresolvable")
+    if "outdated" in result["statuses"] and result.get("latest_in_major"):
+        parts.append(f"outdated (latest `{result['latest_in_major']['version']}`)")
+    if "major" in result["statuses"] and result.get("latest_overall"):
+        parts.append(f"newer major `{result['latest_overall']['version']}`")
+    return ", ".join(parts)
+
+
+def render_comment(results, summary):
+    """Return a compact Markdown notification for an issue/PR/step summary."""
+    if summary["outdated"] == 0 and summary["major"] == 0 and summary["errors"] == 0:
+        return f"✅ All {summary['total']} action pins are current.\n"
+
+    lines = [
+        "## ⚠️ Action pins need attention",
+        "",
+        (
+            f"**{summary['outdated']} outdated within major · "
+            f"{summary['major']} newer major · {summary['errors']} errors** "
+            f"(of {summary['total']})"
+        ),
+        "",
+        "| Action | Pinned | Status |",
+        "| --- | --- | --- |",
+    ]
+    for result in results:
+        if result["statuses"] != ["ok"]:
+            lines.append(
+                f"| `{result['action']}` | `{result['pinned_version']}` | "
+                f"{short_status(result)} |"
+            )
+    return "\n".join(lines) + "\n"
 
 
 def main():
+    args = sys.argv[1:]
+    if "--help" in args or "-h" in args:
+        print(__doc__.strip())
+        return 0
+
     pins = parse_workflows()
     if not pins:
         sys.exit("no third-party action pins found in .github/workflows")
-    fail_on_major = "--fail-on-major" in sys.argv[1:]
 
-    outdated = []
-    major = []
-    errors = []
+    fail_on_major = "--fail-on-major" in args
+    as_json = "--json" in args
+    as_comment = "--comment" in args or "--github-comment" in args
+
+    results = []
     for action in sorted(pins):
         sha, version, _ = pins[action]
         try:
-            statuses, message = check_action(action, sha, version)
+            results.append(check_action(action, sha, version))
         except RuntimeError as exc:
-            print(f"ERROR {exc}", file=sys.stderr)
-            errors.append(action)
-            continue
-        print(message)
-        if "outdated" in statuses:
-            outdated.append(action)
-        if "major" in statuses:
-            major.append(action)
-        if "error" in statuses:
-            errors.append(action)
+            results.append(
+                {
+                    "action": action,
+                    "pinned_version": version,
+                    "pinned_sha": sha,
+                    "kind": "unknown",
+                    "statuses": ["error"],
+                    "message": f"ERROR {exc}",
+                }
+            )
 
-    print(
-        f"\nSummary: {len(outdated)} outdated within major, "
-        f"{len(major)} with newer major available, {len(errors)} errors",
-        file=sys.stderr,
-    )
+    summary = summarize(results)
+    outdated = summary["outdated"]
+    major = summary["major"]
+    errored = summary["errors"]
+    failed = bool(errored or outdated or (major if fail_on_major else 0))
 
-    failed = bool(errors or outdated or (major if fail_on_major else []))
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "ok": not failed,
+                    "fail_on_major": fail_on_major,
+                    "summary": summary,
+                    "actions": results,
+                },
+                indent=2,
+            )
+        )
+    elif as_comment:
+        print(render_comment(results, summary))
+    else:
+        for result in results:
+            print(result["message"])
+        print(
+            f"\nSummary: {outdated} outdated within major, "
+            f"{major} with newer major available, {errored} errors",
+            file=sys.stderr,
+        )
+
     return 1 if failed else 0
 
 

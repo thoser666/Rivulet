@@ -29,7 +29,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Compare pinned SHAs against upstream tags/branches
-        run: python3 scripts/check-action-pins.py
+        run: |
+          # Write a compact Markdown notification to the run's step summary so
+          # stale pins are visible even when the job only "fails red".
+          set -o pipefail
+          python3 scripts/check-action-pins.py --comment | tee -a "$GITHUB_STEP_SUMMARY"
 
   ################################################################
   # LINTS & FORMATTING (runs only on Linux)

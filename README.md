@@ -401,7 +401,9 @@ once the required checks (including the pinning tests) pass; this needs
 "Allow auto-merge" and branch protection enabled in the repo settings. A
 daily nightly job (`scripts/check-action-pins.py`) also compares every pinned
 SHA against upstream — failing on missed same-major updates and reporting
-newer majors (`--fail-on-major` makes those fatal).
+newer majors (`--fail-on-major` makes those fatal). `--json` gives a
+machine-readable result and `--comment` a compact Markdown notification,
+published to the nightly run's step summary.
 
 ### Assets
 

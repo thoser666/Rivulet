@@ -189,10 +189,22 @@ fn stale_pin_checker_is_wired_up() {
         checker.contains("--fail-on-major"),
         "check-action-pins.py must offer --fail-on-major to make major gaps fatal"
     );
+    assert!(
+        checker.contains("--json") && checker.contains("json.dumps"),
+        "check-action-pins.py must offer a --json machine-readable mode"
+    );
+    assert!(
+        checker.contains("--comment") && checker.contains("render_comment"),
+        "check-action-pins.py must offer a --comment Markdown notification mode"
+    );
     let nightly = read(".github/workflows/nightly.yml");
     assert!(
         nightly.contains("check-action-pins.py"),
         "the nightly workflow must run the stale-pin checker daily"
+    );
+    assert!(
+        nightly.contains("GITHUB_STEP_SUMMARY"),
+        "the nightly workflow must publish the comment to the step summary"
     );
 }
 

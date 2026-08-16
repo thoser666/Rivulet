@@ -79,5 +79,7 @@ repository is not configured yet.
 - `scripts/check-action-pins.py` — compares every pinned SHA against upstream
   (run daily by the nightly workflow): fails on same-major updates we have not
   taken, and reports newer majors (use `--fail-on-major` to make those fatal).
+  `--json` emits a machine-readable result; `--comment` emits a compact Markdown
+  notification that the nightly workflow publishes to the run's step summary.
 - `.github/dependabot.yml` — the `github-actions` entry that proposes the
   updates in the first place.
