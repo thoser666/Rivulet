@@ -388,6 +388,9 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+The CI also runs [actionlint](https://github.com/rhysd/actionlint) to lint the
+GitHub Actions workflow files.
+
 > **Note:** On Linux, set `LIBCLANG_PATH` to your LLVM `lib` directory (e.g. `export LIBCLANG_PATH=/usr/lib/llvm-14/lib`) if the `clang-sys` build fails.
 
 ---
