@@ -9,6 +9,10 @@
 //! roughly 50% load, while 40 ms per frame already overloads the encoder
 //! (>100%). Like the stream-health monitor, all rates are computed over a
 //! sliding time window so short bursts average out.
+//!
+//! The time source is injectable so tests can simulate elapsed time
+//! deterministically instead of relying on wall-clock sleeps (which are flaky
+//! on loaded CI runners).
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -33,11 +37,14 @@ pub struct RecordingMetrics {
 pub struct RecordingStatsMonitor {
     /// Length of the sliding window in seconds.
     window_secs: f64,
-    start: Instant,
     frames_captured: u64,
     file_size_bytes: u64,
-    /// Sliding window samples `(timestamp, frames, encode_time_secs)`.
-    window: VecDeque<(Instant, u64, f64)>,
+    /// Sliding window samples `(elapsed_secs, frames, encode_time_secs)` where
+    /// the elapsed value is the clock reading at the time the sample was added.
+    window: VecDeque<(f64, u64, f64)>,
+    /// Clock source returning seconds since the monitor was created. Defaults
+    /// to wall-clock; tests inject a deterministic clock.
+    clock: Box<dyn Fn() -> f64 + Send + Sync>,
 }
 
 impl RecordingStatsMonitor {
@@ -49,12 +56,26 @@ impl RecordingStatsMonitor {
     /// Like [`Self::new`], but with a custom sliding-window length. A shorter
     /// window reacts faster but is noisier; used by tests and embedded setups.
     pub fn with_window(window_secs: f64) -> Self {
+        let start = Instant::now();
         Self {
             window_secs,
-            start: Instant::now(),
             frames_captured: 0,
             file_size_bytes: 0,
             window: VecDeque::new(),
+            clock: Box::new(move || start.elapsed().as_secs_f64()),
+        }
+    }
+
+    /// Create a monitor with an injected clock (tests only). The clock returns
+    /// seconds since the monitor was created.
+    #[cfg(test)]
+    fn with_clock(window_secs: f64, clock: impl Fn() -> f64 + Send + Sync + 'static) -> Self {
+        Self {
+            window_secs,
+            frames_captured: 0,
+            file_size_bytes: 0,
+            window: VecDeque::new(),
+            clock: Box::new(clock),
         }
     }
 
@@ -65,7 +86,7 @@ impl RecordingStatsMonitor {
     /// known; the encoder load then stays at zero.
     pub fn record_frame(&mut self, encode_time_secs: f64) {
         self.frames_captured += 1;
-        self.window.push_back((Instant::now(), 1, encode_time_secs));
+        self.window.push_back(((self.clock)(), 1, encode_time_secs));
         self.prune_window();
     }
 
@@ -77,7 +98,7 @@ impl RecordingStatsMonitor {
     pub fn record_encode_time(&mut self, encode_time_secs: f64) {
         match self.window.back_mut() {
             Some((_, _, encode)) => *encode += encode_time_secs,
-            None => self.window.push_back((Instant::now(), 0, encode_time_secs)),
+            None => self.window.push_back(((self.clock)(), 0, encode_time_secs)),
         }
         self.prune_window();
     }
@@ -89,7 +110,8 @@ impl RecordingStatsMonitor {
 
     /// Reset all counters (e.g. when a new recording starts).
     pub fn reset(&mut self) {
-        *self = Self::with_window(self.window_secs);
+        let window_secs = self.window_secs;
+        *self = Self::with_window(window_secs);
     }
 
     /// Current performance metrics.
@@ -98,7 +120,7 @@ impl RecordingStatsMonitor {
     /// state even if no frames were pushed recently.
     pub fn stats(&mut self) -> RecordingMetrics {
         self.prune_window();
-        let uptime_secs = self.start.elapsed().as_secs();
+        let uptime_secs = (self.clock)() as u64;
         let (elapsed, frames, encode_secs) = self.window_bounds();
         let fps = if elapsed > 0.0 {
             frames as f64 / elapsed
@@ -121,8 +143,9 @@ impl RecordingStatsMonitor {
 
     /// Drop window samples older than `window_secs`.
     fn prune_window(&mut self) {
+        let now = (self.clock)();
         while let Some((t, _, _)) = self.window.front() {
-            if t.elapsed().as_secs_f64() > self.window_secs {
+            if now - *t > self.window_secs {
                 self.window.pop_front();
             } else {
                 break;
@@ -140,10 +163,10 @@ impl RecordingStatsMonitor {
             return (0.0, 0, 0.0);
         }
         let first = self.window.front().unwrap().0;
-        let elapsed = first.elapsed().as_secs_f64();
+        let elapsed = ((self.clock)() - first).max(1e-9);
         let frames = self.window.iter().map(|s| s.1).sum();
         let encode = self.window.iter().map(|s| s.2).sum();
-        (elapsed.max(1e-9), frames, encode)
+        (elapsed, frames, encode)
     }
 }
 
@@ -156,8 +179,28 @@ impl Default for RecordingStatsMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
-    use std::time::Duration;
+    use std::sync::{Arc, Mutex};
+
+    /// A manual clock the tests can advance by a fixed number of seconds.
+    #[derive(Clone, Default)]
+    struct TestClock {
+        elapsed: Arc<Mutex<f64>>,
+    }
+
+    impl TestClock {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        fn advance(&self, secs: f64) {
+            *self.elapsed.lock().unwrap() += secs;
+        }
+
+        fn closure(&self) -> impl Fn() -> f64 + Send + Sync + 'static {
+            let elapsed = Arc::clone(&self.elapsed);
+            move || *elapsed.lock().unwrap()
+        }
+    }
 
     #[test]
     fn fresh_monitor_reports_zero_metrics() {
@@ -172,26 +215,28 @@ mod tests {
 
     #[test]
     fn frames_accumulate_and_fps_is_estimated() {
-        let mut m = RecordingStatsMonitor::with_window(5.0);
+        let clock = TestClock::new();
+        let mut m = RecordingStatsMonitor::with_clock(5.0, clock.closure());
         for _ in 0..30 {
             m.record_frame(0.0);
-            thread::sleep(Duration::from_millis(33));
+            clock.advance(1.0 / 30.0);
         }
         let s = m.stats();
         assert!(s.frames_captured >= 30);
         assert!(s.fps > 0.0, "fps should be positive");
-        // ~30 frames over ~1s, generous tolerance for scheduling jitter.
+        // 30 frames over exactly 1s -> ~30 FPS.
         assert!(s.fps > 20.0 && s.fps < 40.0, "fps = {}", s.fps);
     }
 
     #[test]
     fn encode_load_reflects_frame_budget() {
-        let mut m = RecordingStatsMonitor::with_window(5.0);
+        let clock = TestClock::new();
+        let mut m = RecordingStatsMonitor::with_clock(5.0, clock.closure());
         // 20 frames, 40 ms apart, each consuming 20 ms of encode time:
         // encoder busy exactly half the time -> ~50% load.
         for _ in 0..20 {
             m.record_frame(0.020);
-            thread::sleep(Duration::from_millis(40));
+            clock.advance(0.040);
         }
         let s = m.stats();
         assert!(
@@ -203,11 +248,12 @@ mod tests {
 
     #[test]
     fn encode_load_exceeds_100_when_overloaded() {
-        let mut m = RecordingStatsMonitor::with_window(5.0);
+        let clock = TestClock::new();
+        let mut m = RecordingStatsMonitor::with_clock(5.0, clock.closure());
         // Encoder consumes more than the frame period -> clearly overloaded.
         for _ in 0..20 {
             m.record_frame(0.050);
-            thread::sleep(Duration::from_millis(30));
+            clock.advance(0.030);
         }
         let s = m.stats();
         assert!(
@@ -219,10 +265,11 @@ mod tests {
 
     #[test]
     fn encode_load_is_zero_without_encode_times() {
-        let mut m = RecordingStatsMonitor::with_window(5.0);
+        let clock = TestClock::new();
+        let mut m = RecordingStatsMonitor::with_clock(5.0, clock.closure());
         for _ in 0..10 {
             m.record_frame(0.0);
-            thread::sleep(Duration::from_millis(20));
+            clock.advance(0.020);
         }
         let s = m.stats();
         assert!(s.fps > 0.0);
@@ -262,12 +309,13 @@ mod tests {
 
     #[test]
     fn stalled_recording_drops_fps_to_zero() {
-        let mut m = RecordingStatsMonitor::with_window(0.2);
+        let clock = TestClock::new();
+        let mut m = RecordingStatsMonitor::with_clock(0.2, clock.closure());
         for _ in 0..30 {
             m.record_frame(0.001);
         }
         assert!(m.stats().fps > 0.0);
-        thread::sleep(Duration::from_millis(300));
+        clock.advance(0.3);
         let s = m.stats();
         assert_eq!(s.fps, 0.0);
         assert_eq!(s.encode_load_percent, 0.0);
