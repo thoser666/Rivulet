@@ -1,11 +1,24 @@
 # Changelog
 
+## [0.3.0-alpha.1] - 2026-08-16
+- feat(core): Hardware-Video-Encoding (NVENC/QuickSync/AMF) mit Auto-Detection
+- chore(deps): update eframe requirement from 0.35.0 to 0.36.1
+
 ## [0.2.4-alpha.1] - 2026-08-15
+
 - fix(ci): MSI-Paket als x64-Plattform deklarieren (ICE80)
+
+
 
 ## [0.2.3-alpha.1] - 2026-08-15
 
+
+
 - fix(ci): Win64-Markierung auf geharvesteten MSI-Komponenten
+
+
+
+
 
 
 
@@ -13,11 +26,27 @@
 
 
 
+
+
+
+
 - fix(ci): 64-Bit-Markierung im MSI-Harvest (ICE80)
 
 
 
+
+
+
+
 - chore(ci): GitHub-Actions-Warnungen beheben
+
+
+
+
+
+
+
+
 
 
 
@@ -33,7 +62,31 @@
 
 
 
+
+
+
+
+
+
+
+
 - fix(ci): MSI-Version in numerisches Format konvertieren
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -65,7 +118,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - feat(ci): Manuelle Alpha-Release-Auslösung per workflow_dispatch
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -113,7 +198,71 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## [0.1.0-alpha.1] - 2026-08-14
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -209,7 +358,135 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## [0.0.0-alpha.1] - 2026-08-14
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
