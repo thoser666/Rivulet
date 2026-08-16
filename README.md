@@ -23,7 +23,7 @@
 
 ## 🎯 Vision
 
-Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, providing all the features streamers and content creators need while leveraging Rust's safety and performance guarantees.
+Rivulet ist **kein OBS-Klon, sondern eine embeddbare, deterministische Recording- & Streaming-Engine in Rust mit moderner GUI.** Sie liefert OBS-Kernfeatures (Capture, Encoding, Audio, Streaming, Dual Output) und nutzt gleichzeitig die architektonischen Lücken von OBS als eigene Stärken: Automation statt Interaktion, Bibliothek statt Monolith, moderner Render-Pfad statt Legacy, stabiles Plugin-ABI statt C-DLLs.
 
 ### Why Rust?
 - 🔒 **Memory Safety** - No segfaults, no data races
@@ -31,17 +31,29 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 - 🛡️ **Reliability** - Catch bugs at compile time
 - 🌍 **Cross-Platform** - Write once, run everywhere
 
+### 🧭 Positionierung: OBS-Schwächen als Rivulet-Stärken
+
+| OBS-Stärke | OBS-Schwäche | Rivulet-Antwort |
+| --- | --- | --- |
+| Mächtiges, ausgereiftes Feature-Set | Interaktiv-first: keine Headless-/CI-/Render-Farm-Nutzung, schlecht automatisierbar | Deterministische Pipeline, Headless-CLI, testbare Engine (M6) |
+| Monolithische App + libobs | `libobs` ist keine saubere Library-API; Einbettung in Produkte ist Krampf | `rivulet-core` als normale, semver-stabile Crate (M7) |
+| Plugin-Ökosystem | C/C++-Plugins gegen libobs-ABI, versionssensitiv, können App crashen | WASM-Plugin-Runtime + temporärer OBS-Compat-Mode (M5) |
+| Leistungsfähiger Renderer | OpenGL/D3D-Legacy, schwer modernisierbar | WebGPU/Zero-Copy von Grund auf (M8) |
+| Streaming-Basis | Kern RTMP/FLV, Low-Latency-Protokolle frickelig | WebRTC/WHIP & SRT/RIST als First-Class (M3) |
+| Windows-first | Plattform-Parität ungleich (macOS/Linux schwächer) | Parität als Release-Blocker, nicht Afterthought (M5) |
+
 ### Long-term Goals (v1.0+)
-- **Feature Parity** with OBS Studio
-- **Plugin Compatibility** with existing OBS plugins
+- **Feature Parity** mit OBS Studio (Kern-Features)
+- **Temporäre OBS-Plugin-Kompatibilität** als Brücke, langfristig **WASM-Plugin-Ökosystem**
 - **Modern Architecture** - Clean, maintainable codebase
+- **Deterministic & Embeddable** - Engine als Bibliothek, Headless nutzbar, CI-tauglich
 - **Active Community** - Open development, regular updates
 
 ---
 
 ## ✨ Features
 
-### ✅ Currently Available (v0.1)
+### ✅ Currently Available (v0.2)
 
 - **Screen Capture** - Capture your primary monitor in real-time
 - **Window Capture** - Capture a single application window (games, etc.) in addition to full monitors, with a window picker in the GUI (Linux & Windows)
@@ -75,8 +87,8 @@ See [Roadmap](#-roadmap) for detailed timeline.
 
 ## 🚀 Roadmap
 
-> **Ziel:** Feature-Parität mit der aktuellen OBS-Version.
-> **Strategie:** Von der stabilen Aufnahme-Basis schrittweise zu Szenen, Streaming und schließlich dem vollständigen OBS-Feature-Set.
+> **Ziel:** OBS-Kern-Parität *und* die architektonischen Stärken, die OBS nicht bieten kann (Determinismus, Einbettbarkeit, Modernität).
+> **Strategie:** Erst die stabile, embeddbare Engine, dann Szenen & Streaming, dann die Differenzierungs-Features (M6–M8) als Produkt-Identität.
 
 ### Meilenstein-Übersicht
 
@@ -85,9 +97,12 @@ See [Roadmap](#-roadmap) for detailed timeline.
 | M0 – Recording Foundation | Aufnahme, Encoding, Audio, GUI | ✅ Erreicht |
 | M1 – Solid Recording | Audio-Tracks, Hardware-Encoding, QoL | 🚧 In Arbeit |
 | M2 – Scenes & Composition | OBS-Kern: Szenen, Quellen, Übergänge | 📅 Geplant |
-| M3 – Streaming | RTMP, Dual Output, Plattformen | 🚧 In Arbeit |
+| M3 – Streaming | RTMP/RTMPS, Dual Output, WebRTC/SRT | 🚧 In Arbeit |
 | M4 – Advanced Output | Virtual Camera, Replay Buffer, Filter | 📅 Geplant |
-| M5 – Ecosystem & Parität | Plugins, Kompatibilität, Plattform-Parität | 📅 Geplant |
+| M5 – Ecosystem & Parität | WASM-Plugins, OBS-Compat, Plattform-Parität | 📅 Geplant |
+| M6 – Automation & Determinism | Headless, CI-Rendering, reproduzierbare Pipeline | 📅 Geplant |
+| M7 – Embeddable Engine | Stabile `rivulet-core`-API, Doku, Tooling | 📅 Geplant |
+| M8 – Modern Architecture | WebGPU-Renderer, Zero-Copy, Leichtgewicht | 📅 Geplant |
 
 ---
 
@@ -161,8 +176,10 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 - [x] Plattform-Integrationen (Twitch, Kick, YouTube via RTMPS; Custom)
 - [ ] Stream-Key-Management und Stream-Presets
 - [x] Custom-RTMP-Server-Support (beliebige `rtmp://`/`rtmps://`-URL)
+- [ ] **WebRTC/WHIP** als First-Class-Protokoll (ultra-low-latency, SFU-kompatibel)
+- [ ] **SRT/RIST** für professionelle Contribution/Relay
 
-**Ziel:** Live-Streaming zu den gängigen Plattformen.
+**Ziel:** Live-Streaming zu den gängigen Plattformen *und* Low-Latency-Protokolle als native Bürger statt RTMP-Legacy.
 
 ---
 
@@ -186,15 +203,64 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 **Status: Geplant**
 
 - [ ] Plugin-System (native Rust-Plugins)
-- [ ] OBS-Plugin-Kompatibilitätsschicht
+- [ ] **WASM-Plugin-Runtime** (stabiles ABI, sandboxed: Plugins können die App nie crashen; langfristiges Ziel-Plugin-Modell)
+- [ ] **OBS-Plugin-Kompatibilitätsschicht** — *temporäre Brücke*: opt-in "Compatibility Mode" (explizit als unsafe markiert), lädt native libobs-Plugins (Encoder/Filter/Quellen ohne UI); UI-Plugins (Qt) out of scope; Ziel ist der Übergang zum WASM-Plugin-System
 - [ ] Mobile Companion App (Remote Control)
-- [ ] Windows/macOS-Feature-Parität (aktuell vollständig nur auf Linux)
+- [ ] **Windows/macOS-Feature-Parität** (aktuell Linux-first; Fenster-Capture Windows vorhanden, macOS noch offen) — als Release-Blocker, nicht Afterthought
 - [x] Installer (Windows MSI, macOS DMG, Linux AppImage) — automatisiert in CI
 - [ ] Code-Signing und Auto-Update (Signing-Automatik vorhanden, Secrets nötig)
 - [ ] Telemetrie (opt-in, datenschutzfreundlich)
 - [ ] Multi-Language-Support
 
-**Ziel:** Vollständige OBS-Feature-Parität über alle Plattformen.
+**Ziel:** OBS-Kern-Parität über alle Plattformen, mit einem Plugin-Modell, das OBS strukturell überlegen ist (WASM statt C-ABI), plus OBS-Compat als Übergangs-Brücke.
+
+---
+
+### 🤖 M6 – Automation & Determinism ("Render-First")
+
+**Status: Geplant**
+
+*Die Differenzierungs-Säule Nr. 1: OBS ist interaktiv-first, Rivulet ist deterministisch.*
+
+- [ ] Deterministische Pipeline (steuerbare Engine-Clock, reproduzierbare Ausgabe aus denselben Eingaben)
+- [ ] Headless-CLI: Aufnahme/Rendering ohne GUI (`rivulet record ...`), als Binary und Bibliothek nutzbar
+- [ ] CI-taugliches Rendering: Video aus Code generieren (Remotion-Ansatz, nativ in Rust) — z. B. Batch-Erstellung, Tests, Screenshots pro Frame
+- [ ] Pipeline-Inspektor/Diagnose-Tooling (analog `gst-inspect`, `gst-launch`), eingebettet in die Engine
+- [ ] Deterministische Tests als First-Class-Bürger (Golden-Frame-Tests, exakte PTS/DTS-Verifikation)
+
+**Ziel:** "Video aus Code" und reproduzierbare Aufnahme-Pipelines — der Grund, warum ein Entwickler/Team OBS nicht verwenden *kann*, Rivulet aber schon.
+
+---
+
+### 📦 M7 – Embeddable Engine & API
+
+**Status: Geplant**
+
+*Differenzierungs-Säule Nr. 2: `rivulet-core` ist eine normale Bibliothek, nicht ein Monolith mit API-Nachrüstung.*
+
+- [ ] Stabilisierte Public API von `rivulet-core` (semver 1.0, `#![warn(missing_docs)]`, Kabelbaum-Typen)
+- [ ] Umfassende API-Doku + Beispiele (Aufnahme, Streaming, Dual Output, Encoder-Auswahl, Frame-Stream)
+- [ ] In-Prozess-Aufnahme-API: Recording-Feature in jede Rust-App einbetten (Audio-/Video-Capture, Encoding, Datei/Stream)
+- [ ] Feature-Detection und Runtime-Diagnose als API (`detect_available_encoders()`, Encoder-Fallback)
+- [ ] Abstraktion von Capture-Backends (xcap, PipeWire, Metal/WGC) hinter stabilen Traits
+
+**Ziel:** "Recording, das man in sein Produkt einbettet" — der Anwendungsfall, für den OBS architektonisch nicht gebaut ist.
+
+---
+
+### ⚡ M8 – Modern Architecture
+
+**Status: Geplant**
+
+*Differenzierungs-Säule Nr. 3: von Grund auf moderner Render-Pfad statt OpenGL/D3D-Legacy.*
+
+- [ ] WebGPU-Renderer (wgpu) für Preview, Composite und Effekte
+- [ ] Compute-basierte Video-/Audio-Filter (Chroma Key, Skalierung, Filter) statt CPU/Shader-Legacy
+- [ ] Zero-Copy-/GPUDirect-Capture-Pfade (DMA-BUF, WGC/NVENC-Direct, Metal IO)
+- [ ] Leistungs- und Footprint-Metriken (Idle-CPU/RAM, Laptop-Battery) als CI-Checks
+- [ ] Modernes UI-Fundament (egui) konsistent über alle Plattformen
+
+**Ziel:** Leichtgewichtig und zukunftsfähig — dort technisch vorne, wo OBS nachrüsten muss.
 
 ---
 
