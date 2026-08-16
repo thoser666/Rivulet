@@ -467,3 +467,7 @@ working for forks and for the unsigned development builds.
   - `APPLE_TEAM_ID` — Apple Developer Team ID.
 
 Add the secrets under **Settings → Secrets and variables → Actions**.
+
+The signing scripts are smoke-tested on every push with a self-signed
+certificate (`.github/workflows/signing-e2e.yml`, no secrets required), so the
+automation is verified even before real certificates are configured.

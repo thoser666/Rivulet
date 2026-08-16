@@ -116,3 +116,43 @@ fn macos_app_is_built_before_it_is_signed() {
         assert!(app < sign, "{name}: app bundle must exist before signing");
     }
 }
+
+#[test]
+fn signing_e2e_smoke_tests_are_wired_up() {
+    let workflow = read(".github/workflows/signing-e2e.yml");
+    assert!(
+        workflow.contains("packaging/windows/test-signing.ps1"),
+        "e2e workflow must smoke-test the Windows signer"
+    );
+    assert!(
+        workflow.contains("packaging/macos/test-signing.sh"),
+        "e2e workflow must smoke-test the macOS signer"
+    );
+
+    let windows = read("packaging/windows/test-signing.ps1");
+    assert!(
+        windows.contains("New-SelfSignedCertificate"),
+        "Windows smoke test must generate a self-signed cert"
+    );
+    assert!(
+        windows.contains("signtool verify"),
+        "Windows smoke test must verify the signature"
+    );
+
+    let macos = read("packaging/macos/test-signing.sh");
+    assert!(
+        macos.contains("openssl req"),
+        "macOS smoke test must generate a self-signed cert"
+    );
+    assert!(
+        macos.contains("codesign --verify"),
+        "macOS smoke test must verify the signature"
+    );
+
+    // The codesign step is shared between the release path and the test.
+    let codesign_app = read("packaging/macos/codesign-app.sh");
+    assert!(
+        codesign_app.contains("MACOS_SIGN_IDENTITY"),
+        "codesign-app.sh must allow an overridable identity"
+    );
+}
