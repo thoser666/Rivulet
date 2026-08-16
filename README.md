@@ -391,6 +391,18 @@ The CI also runs [actionlint](https://github.com/rhysd/actionlint) to lint the
 GitHub Actions workflow files and [ShellCheck](https://www.shellcheck.net/) on
 the macOS packaging scripts.
 
+### Assets
+
+The README thumbnail (`docs/thumbnail.png`) and the Linux AppImage icon
+(`packaging/rivulet.png`) are generated from the logo by
+`scripts/generate-assets.sh` (requires ImageMagick). Re-running the script
+reproduces the committed files byte-for-byte, so any branding change is a single
+command:
+
+```bash
+scripts/generate-assets.sh
+```
+
 > **Note:** On Linux, set `LIBCLANG_PATH` to your LLVM `lib` directory (e.g. `export LIBCLANG_PATH=/usr/lib/llvm-14/lib`) if the `clang-sys` build fails.
 
 ---
