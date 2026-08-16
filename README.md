@@ -393,11 +393,11 @@ the macOS packaging scripts.
 
 ### Assets
 
-The README thumbnail (`docs/thumbnail.png`) and the Linux AppImage icon
-(`packaging/rivulet.png`) are generated from the logo by
-`scripts/generate-assets.sh` (requires ImageMagick). Re-running the script
-reproduces the committed files byte-for-byte, so any branding change is a single
-command:
+The README thumbnail (`docs/thumbnail.png`), the Linux AppImage icon
+(`packaging/rivulet.png`) and the macOS app icon (`packaging/rivulet.icns`) are
+generated from the logo by `scripts/generate-assets.sh` (requires ImageMagick
+and Python 3). Re-running the script reproduces the committed files
+byte-for-byte, so any branding change is a single command:
 
 ```bash
 scripts/generate-assets.sh

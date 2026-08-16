@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Generates the app thumbnail and the Linux AppImage icon from the Rivulet logo.
+# Generates the app thumbnail and the app icons from the Rivulet logo.
 #
-# Requirements: ImageMagick 6.9+ / 7 (`magick`, or ImageMagick's `convert`).
+# Requirements: ImageMagick 6.9+ / 7 (`magick`, or ImageMagick's `convert`)
+# and Python 3 (to pack the macOS .icns container).
 #
 # Outputs (relative to the repository root):
 #   docs/thumbnail.png      1280x720 brand thumbnail (README hero image)
-#   packaging/rivulet.png   512x512 transparent app icon
+#   packaging/rivulet.png   512x512 transparent Linux AppImage icon
+#   packaging/rivulet.icns  macOS app icon (16..1024 px, PNG-based)
 #
 # The output is deterministic: re-running the script reproduces the committed
 # assets byte-for-byte. Override the fonts via RIVULET_FONT_BOLD and
@@ -20,6 +22,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOGO="$REPO_ROOT/rivulet-gui/assets/rivulet_logo.jpg"
 THUMBNAIL="$REPO_ROOT/docs/thumbnail.png"
 ICON="$REPO_ROOT/packaging/rivulet.png"
+ICNS="$REPO_ROOT/packaging/rivulet.icns"
 
 # Rivulet brand colors (from the logo).
 NAVY="#0B2545"
@@ -33,6 +36,21 @@ elif command -v convert >/dev/null 2>&1 && convert -version 2>/dev/null | grep -
   MAGICK=convert
 else
   echo "error: ImageMagick (magick) is required to generate the assets." >&2
+  exit 1
+fi
+
+# Pick a working Python 3 interpreter. On Windows, `python3` can be the
+# Microsoft Store alias, which prints an error but still exits 0, so probe
+# with a real import instead of trusting `command -v`.
+PYTHON=""
+for candidate in python3 python; do
+  if "$candidate" -c 'import sys; sys.stdout.write("ok")' 2>/dev/null | grep -q '^ok$'; then
+    PYTHON="$candidate"
+    break
+  fi
+done
+if [[ -z "$PYTHON" ]]; then
+  echo "error: a working Python 3 interpreter is required to generate the macOS icon." >&2
   exit 1
 fi
 
@@ -85,6 +103,32 @@ SYMBOL="$WORK/rivulet_symbol.png"
 "$MAGICK" "$SYMBOL" -resize '448x448>' -gravity center -background none -extent 512x512 \
   "${STRIP[@]}" "$ICON"
 
+# 4. macOS app icon (.icns). The ICNS container stores one PNG per supported
+#    size; the type codes mirror `iconutil`'s output (ic11..ic14 are the @2x
+#    "retina" variants of the base sizes).
+SQUARE="$WORK/rivulet_square.png"
+"$MAGICK" "$SYMBOL" -resize '1024x1024>' -gravity center -background none \
+  -extent 1024x1024 "${STRIP[@]}" "$SQUARE"
+
+ICONSET="$WORK/iconset"
+mkdir -p "$ICONSET"
+for size in 16 32 64 128 256 512 1024; do
+  "$MAGICK" "$SQUARE" -resize "${size}x${size}" "${STRIP[@]}" "$ICONSET/icon_${size}.png"
+done
+
+"$PYTHON" "$SCRIPT_DIR/png2icns.py" "$ICNS" \
+  "icp4=$ICONSET/icon_16.png" \
+  "icp5=$ICONSET/icon_32.png" \
+  "ic07=$ICONSET/icon_128.png" \
+  "ic08=$ICONSET/icon_256.png" \
+  "ic09=$ICONSET/icon_512.png" \
+  "ic10=$ICONSET/icon_1024.png" \
+  "ic11=$ICONSET/icon_32.png" \
+  "ic12=$ICONSET/icon_64.png" \
+  "ic13=$ICONSET/icon_256.png" \
+  "ic14=$ICONSET/icon_512.png"
+
 echo "Generated:"
 echo "  $THUMBNAIL"
 echo "  $ICON"
+echo "  $ICNS"
