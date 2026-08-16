@@ -115,3 +115,25 @@ fn dependabot_updates_pinned_github_actions() {
         "the github-actions entry must have a weekly schedule"
     );
 }
+
+#[test]
+fn action_pin_reference_doc_is_in_sync() {
+    // `docs/ci-action-pins.md` is the human-readable map from SHA to upstream
+    // version used when reviewing Dependabot PRs. It must stay in lockstep with
+    // the reviewed pins enforced here, so each (SHA, version) pair has to be
+    // listed together on a single table row.
+    let doc = read("docs/ci-action-pins.md");
+    for (action, version) in PINNED_ACTIONS {
+        let sha = action
+            .split_once('@')
+            .map(|(_, sha)| sha)
+            .expect("pinned action must carry a SHA");
+        let on_one_row = doc
+            .lines()
+            .any(|line| line.contains(sha) && line.contains(version));
+        assert!(
+            on_one_row,
+            "docs/ci-action-pins.md must map {action} to {version} on a single row"
+        );
+    }
+}

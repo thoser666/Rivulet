@@ -392,7 +392,9 @@ GitHub Actions workflow files and [ShellCheck](https://www.shellcheck.net/) on
 the macOS packaging scripts. All third-party GitHub Actions are pinned to a
 full commit SHA (with the upstream version in a trailing comment) so a
 repointed tag or branch cannot swap in a malicious commit;
-`rivulet-core/tests/ci_pinning.rs` enforces this.
+`rivulet-core/tests/ci_pinning.rs` enforces this and
+[`docs/ci-action-pins.md`](docs/ci-action-pins.md) maps each pin to its
+upstream version for reviewing Dependabot updates.
 
 ### Assets
 
