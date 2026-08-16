@@ -762,6 +762,16 @@ impl RivuletApp {
         self.locale.tr_fmt(key, args)
     }
 
+    /// Live performance metrics line for the recording UI
+    /// (FPS, encoder load, output file size).
+    fn metrics_line(&mut self) -> String {
+        let m = self.engine.recording_stats();
+        let fps = format!("{:.1}", m.fps);
+        let load = format!("{:.0}%", m.encode_load_percent);
+        let size = format_bytes(m.file_size_bytes);
+        self.tr_fmt("recording_metrics", &[fps, load, size])
+    }
+
     pub fn new(cc: &eframe::CreationContext<'_>, engine: RivuletEngine) -> Self {
         #[allow(unused_mut)]
         let mut app = Self {
@@ -843,6 +853,7 @@ impl eframe::App for RivuletApp {
                     if ui.button("⏹ Stop Recording").clicked() {
                         self.stop_windows_recording();
                     }
+                    ui.label(self.metrics_line());
                 } else {
                     ui.horizontal(|ui| {
                         ui.label(self.tr("source"));
@@ -942,6 +953,7 @@ impl eframe::App for RivuletApp {
                             self.stop_linux_recording();
                         }
                     });
+                    ui.label(self.metrics_line());
                 } else {
                     ui.horizontal(|ui| {
                         ui.label(self.tr("source"));
@@ -1134,5 +1146,22 @@ impl eframe::App for RivuletApp {
                 });
             });
         });
+    }
+}
+
+/// Format a byte count for display (B, KB, MB, GB).
+fn format_bytes(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let bytes = bytes as f64;
+    if bytes >= GB {
+        format!("{:.2} GB", bytes / GB)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes / MB)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes / KB)
+    } else {
+        format!("{bytes:.0} B")
     }
 }

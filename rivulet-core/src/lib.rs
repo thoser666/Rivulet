@@ -4,7 +4,10 @@ use gstreamer as gst;
 use gstreamer_app as gst_app;
 use gstreamer_video as gst_video;
 use once_cell::sync::Lazy;
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
 // Important: The prelude is still needed for methods like .set_state(), .by_name(), etc.
 use gst::prelude::*;
 
@@ -16,6 +19,9 @@ pub use encoder::{best_encoder, detect_available_encoders, VideoEncoder};
 
 pub mod health;
 pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
+
+pub mod metrics;
+pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 
 pub mod stream;
 pub use stream::{StreamPlatform, StreamSettings};
@@ -53,6 +59,10 @@ pub struct RivuletEngine {
     /// Tracks stream health while a streaming pipeline is active. Always
     /// `None` for plain local recordings.
     stream_health: Option<StreamHealthMonitor>,
+    /// Tracks recording performance (FPS, encoder load, file size). Wrapped in
+    /// an `Arc<Mutex<..>>` so GStreamer pad probes running on the streaming
+    /// thread can update it while the app thread reads it.
+    recording_metrics: Option<Arc<Mutex<RecordingStatsMonitor>>>,
 }
 
 impl Default for RivuletEngine {
@@ -74,6 +84,7 @@ impl Default for RivuletEngine {
             video_encoder: best_encoder(),
             encoder_bitrate_kbps: 5_000,
             stream_health: None,
+            recording_metrics: None,
         }
     }
 }
@@ -184,7 +195,7 @@ impl RivuletEngine {
         s.push_str(&self.audio_branch_str(false));
         let escaped = Self::escape_location(location);
         s.push_str(&format!(
-            "mp4mux name=mux ! filesink location=\"{}\"",
+            "mp4mux name=mux ! filesink name=file_sink location=\"{}\"",
             escaped
         ));
         s
@@ -244,7 +255,7 @@ impl RivuletEngine {
             );
         }
         s.push_str(&format!(
-            "mp4mux name=mux_rec ! filesink location=\"{}\" ",
+            "mp4mux name=mux_rec ! filesink name=file_sink location=\"{}\" ",
             Self::escape_location(location)
         ));
         s.push_str(&format!(
@@ -355,12 +366,87 @@ impl RivuletEngine {
 
         self.pipeline = Some(pipeline);
         self.appsrc = Some(appsrc);
+        self.install_performance_probes();
         if self.is_dual_output() {
             println!("[Engine] Dual-output pipeline running.");
         } else if self.is_streaming() {
             println!("[Engine] Streaming pipeline running.");
         } else {
             println!("[Engine] Recording pipeline running.");
+        }
+    }
+
+    /// Attach pad probes that feed the recording performance metrics.
+    ///
+    /// - The encoder sink/src pads measure the per-frame encode duration.
+    ///   Arrival timestamps are paired with the matching output buffer by its
+    ///   PTS, so B-frame reordering does not distort the measurement.
+    /// - The filesink sink pad counts the bytes written to the output file.
+    ///
+    /// The probes run on the GStreamer streaming thread and only write to the
+    /// shared `Arc<Mutex<RecordingStatsMonitor>>`; the app thread reads it
+    /// through [`RivuletEngine::recording_stats`].
+    fn install_performance_probes(&mut self) {
+        let Some(metrics) = self.recording_metrics.clone() else {
+            return;
+        };
+        let Some(pipeline) = self.pipeline.as_ref() else {
+            return;
+        };
+
+        // Per-frame encode duration, paired by buffer PTS.
+        if let Some(encoder) = pipeline.by_name("video_enc") {
+            let entries: Arc<Mutex<HashMap<u64, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
+            if let Some(sink_pad) = encoder.static_pad("sink") {
+                let entries = Arc::clone(&entries);
+                sink_pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, info| {
+                    let Some(pts) = info.buffer().and_then(|b| b.pts()) else {
+                        return gst::PadProbeReturn::Ok;
+                    };
+                    let mut map = entries.lock().unwrap_or_else(|e| e.into_inner());
+                    // Cap the map so a stalled pipeline cannot leak memory.
+                    if map.len() < 256 {
+                        map.insert(pts.nseconds(), Instant::now());
+                    }
+                    gst::PadProbeReturn::Ok
+                });
+            }
+            if let Some(src_pad) = encoder.static_pad("src") {
+                let entries = Arc::clone(&entries);
+                let metrics = Arc::clone(&metrics);
+                src_pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, info| {
+                    let Some(pts) = info.buffer().and_then(|b| b.pts()) else {
+                        return gst::PadProbeReturn::Ok;
+                    };
+                    let duration = entries
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&pts.nseconds())
+                        .map(|entered| entered.elapsed().as_secs_f64());
+                    if let Some(duration) = duration {
+                        metrics
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .record_encode_time(duration);
+                    }
+                    gst::PadProbeReturn::Ok
+                });
+            }
+        }
+
+        // Bytes written to the local output file.
+        if let Some(file_sink) = pipeline.by_name("file_sink") {
+            if let Some(sink_pad) = file_sink.static_pad("sink") {
+                sink_pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, info| {
+                    if let Some(buffer) = info.buffer() {
+                        metrics
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .add_file_bytes(buffer.size() as u64);
+                    }
+                    gst::PadProbeReturn::Ok
+                });
+            }
         }
     }
 
@@ -502,6 +588,8 @@ impl RivuletEngine {
         // Initialize the stream health monitor. Defaults match the
         // engine encoding configuration (30 FPS, 5000 kbit/s).
         self.stream_health = Some(StreamHealthMonitor::new(5000.0, 30.0));
+        // Track performance metrics for the active stream.
+        self.recording_metrics = Some(Arc::new(Mutex::new(RecordingStatsMonitor::new())));
     }
 
     /// Start writing the video/audio frames to a local MP4 file.
@@ -522,6 +610,10 @@ impl RivuletEngine {
         if self.is_streaming() {
             self.stream_health = Some(StreamHealthMonitor::new(5000.0, 30.0));
         }
+        // Track performance metrics (FPS, encoder load, file size) for the
+        // recording. The file-size probe only attaches when the pipeline
+        // actually contains a filesink (local or dual-output recordings).
+        self.recording_metrics = Some(Arc::new(Mutex::new(RecordingStatsMonitor::new())));
     }
 
     pub fn stop_recording(&mut self) {
@@ -566,6 +658,7 @@ impl RivuletEngine {
         self.audio_appsrc_mic = None;
         self.output_path = None;
         self.stream_health = None;
+        self.recording_metrics = None;
         self.is_recording = false;
         println!("[Engine] Recording stopped and file saved.");
     }
@@ -591,6 +684,12 @@ impl RivuletEngine {
 
             match appsrc.push_buffer(buffer) {
                 Ok(_flow) => {
+                    if let Some(metrics) = self.recording_metrics.as_ref() {
+                        metrics
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .record_frame(0.0);
+                    }
                     if let Some(health) = self.stream_health.as_mut() {
                         health.record_frame_sent(frame_data.len());
                     }
@@ -615,6 +714,16 @@ impl RivuletEngine {
             .as_mut()
             .map(StreamHealthMonitor::stats)
             .unwrap_or_else(StreamStats::offline)
+    }
+
+    /// Current recording performance metrics (FPS, encoder load, file size).
+    ///
+    /// Returns defaulted (zero) metrics when no recording or stream is active.
+    pub fn recording_stats(&mut self) -> RecordingMetrics {
+        self.recording_metrics
+            .as_ref()
+            .map(|m| m.lock().unwrap_or_else(|e| e.into_inner()).stats())
+            .unwrap_or_default()
     }
 }
 
@@ -987,7 +1096,11 @@ mod tests {
         assert!(pipeline_str.contains("mp4mux name=mux_rec"));
         assert!(pipeline_str.contains("flvmux name=mux_stream streamable=true"));
         let escaped = path.display().to_string().replace('\\', "\\\\");
-        assert!(pipeline_str.contains(&format!("filesink location=\"{}\"", escaped)));
+        assert!(
+            pipeline_str.contains(&format!("filesink name=file_sink location=\"{}\"", escaped)),
+            "{}",
+            pipeline_str
+        );
         assert!(pipeline_str.contains("rtmp2sink location=\"rtmps://live.twitch.tv/app/dualkey\""));
 
         let pipeline = gst::parse::launch(&pipeline_str)
@@ -1219,8 +1332,9 @@ mod tests {
 
         let pipeline_str = engine.build_recording_pipeline_str("/tmp/enc.mp4");
         assert!(
-            pipeline_str
-                .contains("video/x-raw,format=I420 ! x264enc bitrate=6000 tune=zerolatency"),
+            pipeline_str.contains(
+                "video/x-raw,format=I420 ! x264enc name=video_enc bitrate=6000 tune=zerolatency"
+            ),
             "{}",
             pipeline_str
         );
@@ -1237,8 +1351,9 @@ mod tests {
 
         let pipeline_str = engine.build_streaming_pipeline_str();
         assert!(
-            pipeline_str
-                .contains("video/x-raw,format=I420 ! x264enc bitrate=5000 tune=zerolatency"),
+            pipeline_str.contains(
+                "video/x-raw,format=I420 ! x264enc name=video_enc bitrate=5000 tune=zerolatency"
+            ),
             "{}",
             pipeline_str
         );
@@ -1257,8 +1372,9 @@ mod tests {
 
         let pipeline_str = engine.build_dual_output_pipeline_str();
         assert!(
-            pipeline_str
-                .contains("video/x-raw,format=I420 ! x264enc bitrate=5000 tune=zerolatency"),
+            pipeline_str.contains(
+                "video/x-raw,format=I420 ! x264enc name=video_enc bitrate=5000 tune=zerolatency"
+            ),
             "{}",
             pipeline_str
         );
@@ -1295,6 +1411,52 @@ mod tests {
             path.exists() && std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > 0,
             "NVENC recording should produce a non-empty file"
         );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The engine reports live performance metrics (FPS, encoder load, output
+    /// file size) while a recording is running.
+    #[test]
+    fn recording_metrics_report_fps_and_file_size() {
+        let mut engine = RivuletEngine::default();
+
+        let path =
+            std::env::temp_dir().join(format!("rivulet_metrics_test_{}.mp4", std::process::id()));
+        engine.start_local_recording(path.clone());
+
+        let (width, height) = (320u32, 240u32);
+        let video = vec![0u8; (width * height * 4) as usize];
+        for _ in 0..30 {
+            engine.process_raw_frame(&video, width, height);
+            std::thread::sleep(std::time::Duration::from_millis(33));
+        }
+
+        // Give the pipeline time to flush muxed data to the filesink.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        let metrics = engine.recording_stats();
+        assert!(
+            metrics.frames_captured >= 30,
+            "frames_captured = {}",
+            metrics.frames_captured
+        );
+        assert!(
+            metrics.fps > 0.0 && metrics.fps < 45.0,
+            "fps = {}",
+            metrics.fps
+        );
+        assert!(
+            metrics.file_size_bytes > 0,
+            "file_size_bytes = {}",
+            metrics.file_size_bytes
+        );
+        assert!(
+            metrics.encode_load_percent >= 0.0,
+            "encode_load_percent = {}",
+            metrics.encode_load_percent
+        );
+
+        engine.stop_recording();
         let _ = std::fs::remove_file(&path);
     }
 }

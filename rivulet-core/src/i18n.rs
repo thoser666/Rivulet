@@ -123,6 +123,7 @@ impl Locale {
                 ("start_recording", "Start recording"),
                 ("stop_recording", "Stop recording"),
                 ("recording_in_progress", "Recording in progress ({0}s)"),
+                ("recording_metrics", "FPS {0} · Encoder load {1} · File {2}"),
                 ("recording_saved", "Recording saved."),
                 ("no_source_selected", "No capture source selected."),
                 ("invalid_source", "Invalid selected source."),
@@ -157,6 +158,10 @@ impl Locale {
                 ("start_recording", "Aufnahme starten"),
                 ("stop_recording", "Aufnahme stoppen"),
                 ("recording_in_progress", "Aufnahme läuft ({0}s)"),
+                (
+                    "recording_metrics",
+                    "FPS {0} · Encoder-Last {1} · Datei {2}",
+                ),
                 ("recording_saved", "Aufnahme gespeichert."),
                 ("no_source_selected", "Keine Aufnahmequelle ausgewählt."),
                 ("invalid_source", "Ausgewählte Quelle ist ungültig."),
@@ -239,6 +244,15 @@ mod tests {
         assert_eq!(de, "Aufnahme läuft (7s)");
         let missing = Locale::En.tr_fmt("does_not_exist", &["x".to_string()]);
         assert_eq!(missing, "does_not_exist");
+    }
+
+    #[test]
+    fn formatted_metrics_translate_in_both_locales() {
+        let args = ["29.8".to_string(), "41%".to_string(), "12.4 MB".to_string()];
+        let en = Locale::En.tr_fmt("recording_metrics", &args);
+        assert_eq!(en, "FPS 29.8 · Encoder load 41% · File 12.4 MB");
+        let de = Locale::De.tr_fmt("recording_metrics", &args);
+        assert_eq!(de, "FPS 29.8 · Encoder-Last 41% · Datei 12.4 MB");
     }
 
     #[test]

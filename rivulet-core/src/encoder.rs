@@ -73,9 +73,11 @@ impl VideoEncoder {
     /// Build the `parse_launch` fragment for this encoder with the given target
     /// bitrate in kbit/s.
     ///
-    /// Only the `bitrate` property is guaranteed to exist on every supported
-    /// element; encoder-specific tuning properties are added individually so a
-    /// missing property can never break the whole pipeline.
+    /// The element is always named `video_enc` so the engine can attach
+    /// performance probes to it. Only the `bitrate` property is guaranteed to
+    /// exist on every supported element; encoder-specific tuning properties are
+    /// added individually so a missing property can never break the whole
+    /// pipeline.
     pub fn branch_fragment(&self, bitrate_kbps: u32) -> String {
         let mut props = format!("bitrate={}", bitrate_kbps);
         match self {
@@ -83,7 +85,7 @@ impl VideoEncoder {
             Self::Nvenc => props.push_str(" zerolatency=true"),
             Self::QuickSync | Self::Amf => {}
         }
-        format!("{} {}", self.element_name(), props)
+        format!("{} name=video_enc {}", self.element_name(), props)
     }
 }
 
@@ -201,8 +203,23 @@ mod tests {
             let frag = enc.branch_fragment(5000);
             assert_eq!(
                 frag,
-                format!("{} bitrate=5000", enc.element_name()),
+                format!("{} name=video_enc bitrate=5000", enc.element_name()),
                 "{frag}"
+            );
+        }
+    }
+
+    #[test]
+    fn fragment_names_the_encoder_element() {
+        for enc in [
+            VideoEncoder::Nvenc,
+            VideoEncoder::QuickSync,
+            VideoEncoder::Amf,
+            VideoEncoder::Software,
+        ] {
+            assert!(
+                enc.branch_fragment(5000).contains("name=video_enc"),
+                "encoder must be nameable for performance probes"
             );
         }
     }
