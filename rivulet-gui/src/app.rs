@@ -2,9 +2,9 @@
 #![allow(unused_imports, dead_code, unused_variables)]
 
 use eframe::egui;
-use rivulet_core::RivuletEngine;
+use rivulet_core::{Locale, RivuletEngine};
 
-// --- Linux-spezifische Imports ---
+// --- Linux-specific imports ---
 #[cfg(target_os = "linux")]
 use {
     ashpd::desktop::screencast::{Screencast, Stream},
@@ -23,7 +23,7 @@ use {
     tokio::runtime::Runtime,
 };
 
-// --- Windows-Imports (für windows-capture v1.5.0) ---
+// --- Windows imports (for windows-capture v1.5.0) ---
 #[cfg(target_os = "windows")]
 use {
     rfd,
@@ -34,7 +34,7 @@ use {
     },
     std::thread,
     windows_capture::{
-        // Importiere nur verfügbare Typen aus capture
+        // Import only the types that are available from capture
         capture::{Context, GraphicsCaptureApiHandler},
         frame::{Frame, FrameBuffer},
         graphics_capture_api::InternalCaptureControl,
@@ -47,7 +47,7 @@ use {
     },
 };
 
-// --- Datenstruktur für rohe Frames ---
+// --- Data structure for raw frames ---
 #[derive(Debug)]
 struct RawFrame {
     data: Vec<u8>,
@@ -55,7 +55,7 @@ struct RawFrame {
     height: u32,
 }
 
-// --- Windows Handler-Struktur ---
+// --- Windows handler struct ---
 #[cfg(target_os = "windows")]
 struct CaptureHandler {
     frame_sender: Sender<RawFrame>,
@@ -81,21 +81,21 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
         if self.stop_signal.load(Ordering::SeqCst) {
-            println!("Stopp-Signal empfangen, beende Aufnahme.");
+            println!("Stop signal received, ending recording.");
             capture_control.stop();
             return Ok(());
         }
 
-        // KORREKTUR: width/height vor dem Buffer-Zugriff holen, da der
-        // FrameBuffer den Frame mutable borgt und danach keine weiteren
-        // (immutable) Zugriffe auf den Frame mehr erlaubt sind.
+        // FIX: read width/height before accessing the buffer, because the
+        // FrameBuffer borrows the frame mutably and no further (immutable)
+        // accesses to the frame are allowed afterwards.
         let width = frame.width();
         let height = frame.height();
 
-        // Hole den Frame-Puffer
+        // Get the frame buffer
         let mut frame_buffer = frame.buffer()?;
 
-        // KORREKTUR: Zugriff auf den Raw Buffer via .as_raw_buffer()
+        // FIX: access the raw buffer via .as_raw_buffer()
         let data = frame_buffer.as_raw_buffer().to_vec();
 
         let raw_frame = RawFrame {
@@ -105,7 +105,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         };
 
         if self.frame_sender.send(raw_frame).is_err() {
-            println!("GUI-Kanal geschlossen, beende Aufnahme.");
+            println!("GUI channel closed, ending recording.");
             capture_control.stop();
         }
 
@@ -113,13 +113,13 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
     }
 
     fn on_closed(&mut self) -> Result<(), Self::Error> {
-        println!("Aufnahmesession wurde vom System beendet.");
+        println!("Recording session was ended by the system.");
         self.stop_signal.store(true, Ordering::SeqCst);
         Ok(())
     }
 }
 
-// --- Linux-spezifische Typen ---
+// --- Linux-specific types ---
 #[cfg(target_os = "linux")]
 static TOKIO_RT: Lazy<Runtime> = Lazy::new(|| tokio::runtime::Runtime::new().unwrap());
 
@@ -131,12 +131,15 @@ enum BackendMessage {
     Error(anyhow::Error),
 }
 
-/// Die Hauptanwendungsstruktur.
+/// The main application structure.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct RivuletApp {
     #[serde(skip)]
     engine: RivuletEngine,
+
+    /// User interface language. Persisted across sessions.
+    locale: Locale,
 
     // Linux Fields
     #[cfg(target_os = "linux")]
@@ -164,7 +167,7 @@ pub struct RivuletApp {
     #[serde(skip)]
     receiver: std_mpsc::Receiver<BackendMessage>,
 
-    // Audio-Mixer (Linux)
+    // Audio mixer (Linux)
     #[cfg(target_os = "linux")]
     #[serde(skip)]
     audio: Option<AudioCapture>,
@@ -188,7 +191,7 @@ pub struct RivuletApp {
     #[cfg(target_os = "linux")]
     mic_volume: f32,
 
-    // Linux-Screen-Recording
+    // Linux screen recording
     #[cfg(target_os = "linux")]
     #[serde(skip)]
     audio_rx: Option<std_mpsc::Receiver<AudioFrame>>,
@@ -257,6 +260,7 @@ impl Default for RivuletApp {
 
         Self {
             engine: Default::default(),
+            locale: Locale::default(),
 
             #[cfg(target_os = "linux")]
             is_previewing: false,
@@ -337,7 +341,7 @@ impl Default for RivuletApp {
     }
 }
 
-// --- Implementierung der Windows-Logik ---
+// --- Windows logic implementation ---
 #[cfg(target_os = "windows")]
 impl RivuletApp {
     fn refresh_capture_sources(&mut self) {
@@ -347,7 +351,7 @@ impl RivuletApp {
             .unwrap_or_default()
             .into_iter()
             .filter(|w| {
-                // KORREKTUR: Filtern nach Titel (is_capturable entfernt)
+                // FIX: filter by title (is_capturable removed)
                 !w.title().unwrap_or_default().is_empty()
             })
             .collect();
@@ -366,14 +370,14 @@ impl RivuletApp {
             .save_file();
 
         let Some(path) = file_path else {
-            println!("Dateiauswahl abgebrochen.");
+            println!("File selection cancelled.");
             return;
         };
 
-        // Bestimme die Capture-Quelle (Monitor oder Fenster) und starte entsprechend
+        // Determine the capture source (monitor or window) and start accordingly
         if let Some(idx) = self.selected_monitor_idx {
             let Some(monitor) = self.monitors.get(idx).cloned() else {
-                self.last_error = Some("Ausgewählte Quelle ist ungültig.".to_string());
+                self.last_error = Some(self.tr("invalid_source").to_string());
                 return;
             };
 
@@ -401,19 +405,19 @@ impl RivuletApp {
                     ColorFormat::Rgba8,
                     flags,
                 );
-                println!("Starte Aufnahme-Thread (Monitor)...");
+                println!("Starting capture thread (Monitor)...");
                 if let Err(e) = CaptureHandler::start(settings) {
-                    if !e.to_string().contains("Benutzer gestoppt")
-                        && !e.to_string().contains("GUI-Kanal geschlossen")
+                    if !e.to_string().contains("user stopped")
+                        && !e.to_string().contains("GUI channel closed")
                     {
-                        eprintln!("Fehler im Aufnahme-Thread: {}", e);
+                        eprintln!("Error in capture thread: {}", e);
                     }
                 }
-                println!("Aufnahme-Thread beendet.");
+                println!("Capture thread stopped.");
             });
         } else if let Some(idx) = self.selected_window_idx {
             let Some(window) = self.windows.get(idx).cloned() else {
-                self.last_error = Some("Ausgewählte Quelle ist ungültig.".to_string());
+                self.last_error = Some(self.tr("invalid_source").to_string());
                 return;
             };
 
@@ -441,24 +445,24 @@ impl RivuletApp {
                     ColorFormat::Rgba8,
                     flags,
                 );
-                println!("Starte Aufnahme-Thread (Fenster)...");
+                println!("Starting capture thread (Window)...");
                 if let Err(e) = CaptureHandler::start(settings) {
-                    if !e.to_string().contains("Benutzer gestoppt")
-                        && !e.to_string().contains("GUI-Kanal geschlossen")
+                    if !e.to_string().contains("user stopped")
+                        && !e.to_string().contains("GUI channel closed")
                     {
-                        eprintln!("Fehler im Aufnahme-Thread: {}", e);
+                        eprintln!("Error in capture thread: {}", e);
                     }
                 }
-                println!("Aufnahme-Thread beendet.");
+                println!("Capture thread stopped.");
             });
         } else {
-            self.last_error = Some("Keine Aufnahmequelle ausgewählt.".to_string());
+            self.last_error = Some(self.tr("no_source_selected").to_string());
             return;
         }
     }
 
     fn stop_windows_recording(&mut self) {
-        println!("Sende Stopp-Signal.");
+        println!("Sending stop signal.");
         if let Some(signal) = &self.stop_signal {
             signal.store(true, Ordering::SeqCst);
         }
@@ -486,7 +490,8 @@ impl RivuletApp {
         let mut audio = match AudioCapture::new(config) {
             Ok(audio) => audio,
             Err(e) => {
-                self.audio_status = Some(format!("Audio-Capture nicht verfügbar: {e}"));
+                self.audio_status =
+                    Some(self.tr_fmt("audio_capture_unavailable", &[e.to_string()]));
                 return;
             }
         };
@@ -516,7 +521,7 @@ impl RivuletApp {
                     self.audio_status = None;
                 }
                 Err(e) => {
-                    self.audio_status = Some(format!("Audio-Start fehlgeschlagen: {e}"));
+                    self.audio_status = Some(self.tr_fmt("audio_start_failed", &[e.to_string()]));
                 }
             }
         } else {
@@ -533,7 +538,7 @@ impl RivuletApp {
                     self.audio_status = None;
                 }
                 Err(e) => {
-                    self.audio_status = Some(format!("Audio-Start fehlgeschlagen: {e}"));
+                    self.audio_status = Some(self.tr_fmt("audio_start_failed", &[e.to_string()]));
                 }
             }
         }
@@ -559,7 +564,7 @@ impl RivuletApp {
             self.selected_monitor_idx = None;
         }
 
-        // Fenster mit leerem Titel ignorieren (Portal-Background etc.).
+        // Ignore windows with an empty title (portal backgrounds etc.).
         self.windows = xcap::Window::all()
             .unwrap_or_default()
             .into_iter()
@@ -578,7 +583,7 @@ impl RivuletApp {
             return;
         }
 
-        // Capture-Quelle: Fenster hat Vorrang vor Monitor.
+        // Capture source: window takes precedence over monitor.
         enum Source {
             Monitor(xcap::Monitor),
             Window(xcap::Window),
@@ -588,7 +593,7 @@ impl RivuletApp {
             match self.windows.get(idx).cloned() {
                 Some(w) => Source::Window(w),
                 None => {
-                    self.record_status = Some("Ausgewähltes Fenster ist ungültig.".to_string());
+                    self.record_status = Some(self.tr("invalid_window").to_string());
                     return;
                 }
             }
@@ -596,12 +601,12 @@ impl RivuletApp {
             match self.monitors.get(idx).cloned() {
                 Some(m) => Source::Monitor(m),
                 None => {
-                    self.record_status = Some("Ausgewählter Monitor ist ungültig.".to_string());
+                    self.record_status = Some(self.tr("invalid_monitor").to_string());
                     return;
                 }
             }
         } else {
-            self.record_status = Some("Keine Aufnahmequelle ausgewählt.".to_string());
+            self.record_status = Some(self.tr("no_source_selected").to_string());
             return;
         };
 
@@ -613,7 +618,7 @@ impl RivuletApp {
             ))
             .save_file()
         else {
-            println!("Dateiauswahl abgebrochen.");
+            println!("File selection cancelled.");
             return;
         };
 
@@ -644,7 +649,7 @@ impl RivuletApp {
                 m.height().unwrap_or(0)
             ),
             Source::Window(w) => format!(
-                "Fenster \"{}\" ({}x{})",
+                "Window \"{}\" ({}x{})",
                 w.title().unwrap_or_default(),
                 w.width().unwrap_or(0),
                 w.height().unwrap_or(0)
@@ -672,9 +677,9 @@ impl RivuletApp {
                         }
                     }
                     Err(e) => {
-                        // Fenster wurde minimiert/geschlossen oder nicht mehr
-                        // zeichenbar -> Aufnahme robust beenden statt crashen.
-                        eprintln!("Capture-Fehler: {e}");
+                        // The window was minimized/closed or is no longer
+                        // drawable -> end recording gracefully instead of crashing.
+                        eprintln!("Capture error: {e}");
                         break;
                     }
                 }
@@ -689,7 +694,7 @@ impl RivuletApp {
         self.is_recording = true;
         self.record_started = Instant::now();
         self.record_status = None;
-        println!("Linux-Aufnahme gestartet: {source_desc}");
+        println!("Linux recording started: {source_desc}");
     }
 
     fn stop_linux_recording(&mut self) {
@@ -704,7 +709,7 @@ impl RivuletApp {
         self.stop_signal = None;
         self.stop_audio_capture();
         self.is_recording = false;
-        self.record_status = Some("Aufnahme gespeichert.".to_string());
+        self.record_status = Some(self.tr("recording_saved").to_string());
     }
 
     fn drain_linux_frames(&mut self) {
@@ -747,6 +752,16 @@ impl RivuletApp {
 }
 
 impl RivuletApp {
+    /// Translate a UI string into the currently selected locale.
+    fn tr<'a>(&self, key: &'a str) -> &'a str {
+        self.locale.tr(key)
+    }
+
+    /// Translate a UI string and substitute positional placeholders.
+    fn tr_fmt(&self, key: &str, args: &[String]) -> String {
+        self.locale.tr_fmt(key, args)
+    }
+
     pub fn new(cc: &eframe::CreationContext<'_>, engine: RivuletEngine) -> Self {
         #[allow(unused_mut)]
         let mut app = Self {
@@ -778,7 +793,7 @@ impl eframe::App for RivuletApp {
                     if self.frame_receiver.as_ref().unwrap().try_recv().is_err() {
                         if let Some(signal) = &self.stop_signal {
                             if !signal.load(Ordering::SeqCst) {
-                                println!("Aufnahme unerwartet beendet.");
+                                println!("Recording ended unexpectedly.");
                                 self.stop_windows_recording();
                             }
                         }
@@ -803,6 +818,16 @@ impl eframe::App for RivuletApp {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
+                ui.menu_button(self.tr("language"), |ui| {
+                    for locale in Locale::all() {
+                        if ui
+                            .selectable_label(self.locale == *locale, locale.name())
+                            .clicked()
+                        {
+                            self.locale = *locale;
+                        }
+                    }
+                });
             });
         });
 
@@ -813,23 +838,24 @@ impl eframe::App for RivuletApp {
             #[cfg(target_os = "windows")]
             {
                 ui.add_space(10.0);
-                ui.label(egui::RichText::new("Windows Screen Recording").strong());
+                ui.label(egui::RichText::new(self.tr("windows_screen_recording")).strong());
                 if self.is_windows_recording {
                     if ui.button("⏹ Stop Recording").clicked() {
                         self.stop_windows_recording();
                     }
                 } else {
                     ui.horizontal(|ui| {
-                        ui.label("Quelle:");
+                        ui.label(self.tr("source"));
                         egui::ComboBox::from_id_salt("monitor_select")
                             .selected_text(
                                 self.selected_monitor_idx
                                     .and_then(|idx| self.monitors.get(idx))
                                     .map(|m| {
-                                        m.name()
-                                            .unwrap_or_else(|_| "Unbekannter Monitor".to_string())
+                                        m.name().unwrap_or_else(|_| {
+                                            self.tr("unknown_monitor").to_string()
+                                        })
                                     })
-                                    .unwrap_or_else(|| "Monitor auswählen".to_string()),
+                                    .unwrap_or_else(|| self.tr("select_monitor").to_string()),
                             )
                             .show_ui(ui, |ui| {
                                 for (i, monitor) in self.monitors.iter().enumerate() {
@@ -837,7 +863,7 @@ impl eframe::App for RivuletApp {
                                         .selectable_label(
                                             self.selected_monitor_idx == Some(i),
                                             monitor.name().unwrap_or_else(|_| {
-                                                "Unbekannter Monitor".to_string()
+                                                self.tr("unknown_monitor").to_string()
                                             }),
                                         )
                                         .clicked()
@@ -852,7 +878,7 @@ impl eframe::App for RivuletApp {
                                 self.selected_window_idx
                                     .and_then(|idx| self.windows.get(idx))
                                     .map(|w| w.title().unwrap_or_default())
-                                    .unwrap_or_else(|| "Fenster auswählen".to_string()),
+                                    .unwrap_or_else(|| self.tr("select_window").to_string()),
                             )
                             .show_ui(ui, |ui| {
                                 for (i, window) in self.windows.iter().enumerate() {
@@ -870,7 +896,7 @@ impl eframe::App for RivuletApp {
                             });
                         if ui
                             .button("🔄")
-                            .on_hover_text("Quellen aktualisieren")
+                            .on_hover_text(self.tr("refresh_sources"))
                             .clicked()
                         {
                             self.refresh_capture_sources();
@@ -879,7 +905,10 @@ impl eframe::App for RivuletApp {
                     let source_selected =
                         self.selected_monitor_idx.is_some() || self.selected_window_idx.is_some();
                     if ui
-                        .add_enabled(source_selected, egui::Button::new("⏺ Start Recording"))
+                        .add_enabled(
+                            source_selected,
+                            egui::Button::new(format!("⏺ {}", self.tr("start_recording"))),
+                        )
                         .clicked()
                     {
                         self.start_windows_recording();
@@ -895,22 +924,27 @@ impl eframe::App for RivuletApp {
                 self.drain_linux_frames();
 
                 ui.add_space(10.0);
-                ui.label(egui::RichText::new("Bildschirmaufnahme").strong());
+                ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
 
                 if self.is_recording {
                     ui.horizontal(|ui| {
                         let elapsed = self.record_started.elapsed().as_secs();
                         ui.label(
-                            egui::RichText::new(format!("● Aufnahme läuft ({elapsed}s)"))
-                                .color(egui::Color32::LIGHT_RED),
+                            egui::RichText::new(
+                                self.tr_fmt("recording_in_progress", &[elapsed.to_string()]),
+                            )
+                            .color(egui::Color32::LIGHT_RED),
                         );
-                        if ui.button("⏹ Aufnahme stoppen").clicked() {
+                        if ui
+                            .button(format!("⏹ {}", self.tr("stop_recording")))
+                            .clicked()
+                        {
                             self.stop_linux_recording();
                         }
                     });
                 } else {
                     ui.horizontal(|ui| {
-                        ui.label("Quelle:");
+                        ui.label(self.tr("source"));
                         egui::ComboBox::from_id_salt("linux_monitor_select")
                             .selected_text(
                                 self.selected_monitor_idx
@@ -923,7 +957,7 @@ impl eframe::App for RivuletApp {
                                             m.height().unwrap_or(0)
                                         )
                                     })
-                                    .unwrap_or_else(|| "Monitor auswählen".to_string()),
+                                    .unwrap_or_else(|| self.tr("select_monitor").to_string()),
                             )
                             .show_ui(ui, |ui| {
                                 for (i, m) in self.monitors.iter().enumerate() {
@@ -956,7 +990,7 @@ impl eframe::App for RivuletApp {
                                             w.height().unwrap_or(0)
                                         )
                                     })
-                                    .unwrap_or_else(|| "Fenster auswählen".to_string()),
+                                    .unwrap_or_else(|| self.tr("select_window").to_string()),
                             )
                             .show_ui(ui, |ui| {
                                 for (i, w) in self.windows.iter().enumerate() {
@@ -979,7 +1013,7 @@ impl eframe::App for RivuletApp {
                             });
                         if ui
                             .button("🔄")
-                            .on_hover_text("Quellen aktualisieren")
+                            .on_hover_text(self.tr("refresh_sources"))
                             .clicked()
                         {
                             self.refresh_linux_sources();
@@ -988,7 +1022,10 @@ impl eframe::App for RivuletApp {
                     let source_selected =
                         self.selected_monitor_idx.is_some() || self.selected_window_idx.is_some();
                     if ui
-                        .add_enabled(source_selected, egui::Button::new("⏺ Aufnahme starten"))
+                        .add_enabled(
+                            source_selected,
+                            egui::Button::new(format!("⏺ {}", self.tr("start_recording"))),
+                        )
                         .clicked()
                     {
                         self.start_linux_recording();
@@ -999,15 +1036,18 @@ impl eframe::App for RivuletApp {
                 }
 
                 ui.separator();
-                ui.label(egui::RichText::new("Audio-Mixer").strong());
+                ui.label(egui::RichText::new(self.tr("audio_mixer")).strong());
 
                 ui.horizontal(|ui| {
                     if self.audio_preview {
-                        if ui.button("⏹ Audio stoppen").clicked() {
+                        if ui.button(format!("⏹ {}", self.tr("stop_audio"))).clicked() {
                             self.stop_audio_capture();
                         }
-                        ui.label(egui::RichText::new("● läuft").color(egui::Color32::LIGHT_GREEN));
-                    } else if ui.button("▶ Audio starten").clicked() {
+                        ui.label(
+                            egui::RichText::new(format!("● {}", self.tr("running")))
+                                .color(egui::Color32::LIGHT_GREEN),
+                        );
+                    } else if ui.button(format!("▶ {}", self.tr("start_audio"))).clicked() {
                         self.start_audio_capture();
                     }
                 });
@@ -1016,10 +1056,10 @@ impl eframe::App for RivuletApp {
                 let mut mic = self.capture_mic;
                 let mut separate = self.separate_tracks;
                 ui.horizontal(|ui| {
-                    ui.checkbox(&mut sys, "Systemaudio");
-                    ui.checkbox(&mut mic, "Mikrofon");
+                    ui.checkbox(&mut sys, self.tr("system_audio"));
+                    ui.checkbox(&mut mic, self.tr("microphone"));
                     ui.separator();
-                    ui.checkbox(&mut separate, "Getrennte Tracks");
+                    ui.checkbox(&mut separate, self.tr("separate_tracks"));
                 });
                 if sys != self.capture_system || mic != self.capture_mic {
                     self.capture_system = sys;
@@ -1038,7 +1078,7 @@ impl eframe::App for RivuletApp {
                 let mut sys_vol = self.system_volume;
                 let mut mic_vol = self.mic_volume;
                 if ui
-                    .add(egui::Slider::new(&mut sys_vol, 0.0..=1.0).text("Systemaudio"))
+                    .add(egui::Slider::new(&mut sys_vol, 0.0..=1.0).text(self.tr("system_audio")))
                     .changed()
                 {
                     self.system_volume = sys_vol;
@@ -1047,7 +1087,7 @@ impl eframe::App for RivuletApp {
                     }
                 }
                 if ui
-                    .add(egui::Slider::new(&mut mic_vol, 0.0..=1.0).text("Mikrofon"))
+                    .add(egui::Slider::new(&mut mic_vol, 0.0..=1.0).text(self.tr("microphone")))
                     .changed()
                 {
                     self.mic_volume = mic_vol;
@@ -1065,7 +1105,7 @@ impl eframe::App for RivuletApp {
                 ui.add(
                     egui::ProgressBar::new(peak)
                         .desired_width(f32::INFINITY)
-                        .text(format!("Peak: {db:.1} dB")),
+                        .text(self.tr_fmt("peak", &[format!("{db:.1}")])),
                 );
 
                 if let Some(status) = &self.audio_status {

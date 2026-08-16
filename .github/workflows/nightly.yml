@@ -1,12 +1,12 @@
 name: Nightly
 
-# Täglicher Verifikations-Build. Läuft unabhängig von Commits; gemergte
-# Dependabot-Pullrequests lösen ihn nicht aus (durch den Actor-Guard unten
-# zusätzlich abgesichert).
+# Daily verification build. Runs independently of commits; merged
+# Dependabot pull requests do not trigger it (additionally guarded by the
+# actor guard below).
 
 on:
   schedule:
-    # Täglich um 02:17 UTC
+    # Daily at 02:17 UTC
     - cron: "17 2 * * *"
   workflow_dispatch:
 
@@ -18,7 +18,7 @@ env:
 
 jobs:
   ################################################################
-  # LINTS & FORMATTING (läuft nur auf Linux)
+  # LINTS & FORMATTING (runs only on Linux)
   ################################################################
   lints:
     name: Lints (Fmt & Clippy)
@@ -58,7 +58,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   ################################################################
-  # BUILD & TEST MATRIX (läuft auf allen 3 Plattformen)
+  # BUILD & TEST MATRIX (runs on all 3 platforms)
   ################################################################
   build_and_test:
     name: Build & Test on ${{ matrix.os }}

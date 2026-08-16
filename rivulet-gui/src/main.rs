@@ -5,7 +5,7 @@ mod app;
 use crate::app::RivuletApp;
 use eframe::egui::{self, IconData};
 use rivulet_core::RivuletEngine;
-// Tokio wird hier nicht mehr benötigt, aber wir lassen es für potenzielle andere Aufgaben.
+// Tokio is no longer required here, but we keep it for potential future tasks.
 use tokio::runtime::Runtime;
 
 fn main() -> Result<(), eframe::Error> {
@@ -31,7 +31,7 @@ fn run_native(app_name: &str, engine: RivuletEngine) -> Result<(), eframe::Error
         app_name,
         native_options,
         Box::new(|cc| {
-            // Der Aufruf ist wieder einfach, die App verwaltet ihre Kommunikation intern.
+            // The call is simple again; the app manages its own communication internally.
             let app = RivuletApp::new(cc, engine);
             Ok(Box::new(app))
         }),

@@ -22,7 +22,7 @@ fn main() -> anyhow::Result<()> {
         );
     }
 
-    // Wähle primären Monitor
+    // Select the primary monitor
     let monitor = monitors
         .into_iter()
         .find(|m| m.is_primary().unwrap_or(false))
@@ -43,7 +43,7 @@ fn main() -> anyhow::Result<()> {
         monitor.y().unwrap_or(0)
     );
 
-    // Erstelle Encoder
+    // Create the encoder
     let output_path = PathBuf::from("screen_recording.mp4");
     let fps = 30;
     let duration_secs = 5;

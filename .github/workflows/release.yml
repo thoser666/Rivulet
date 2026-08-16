@@ -1,20 +1,20 @@
 name: Release (Alpha)
 
-# ALPHA-KANAL: Baut die Release-Binaries, sobald ein neues Feature
-# (Conventional Commit "feat:..." / "feat(...):...") auf den develop-Branch
-# gepusht wird. Jeder Feature-Push erzeugt ein versioniertes Alpha-Release
-# (Tag vX.Y.Z-alpha.N) inkl. installierbarer Pakete (Portable/MSI, AppImage,
-# DMG) und formellem GitHub-Release. Gemergte Dependabot-Pullrequests lösen
-# den Build nicht aus.
+# ALPHA CHANNEL: Builds the release binaries as soon as a new feature
+# (Conventional Commit "feat:..." / "feat(...):...") is pushed to the develop
+# branch. Every feature push produces a versioned alpha release
+# (tag vX.Y.Z-alpha.N) including installable packages (portable/MSI, AppImage,
+# DMG) and a formal GitHub release. Merged Dependabot pull requests do not
+# trigger the build.
 #
-# Für die höheren Reifegrade (Beta/RC/Stable) siehe den tag-basierten
-# Release-Pfad in ci.yml ("refs/tags/v*").
+# For the higher maturity levels (beta/rc/stable) see the tag-based release
+# path in ci.yml ("refs/tags/v*").
 
 on:
   push:
     branches: [ develop ]
-  # Manuelles Auslösen eines Alpha-Releases (z.B. nach CI-Reparaturen, wenn
-  # kein neuer Feature-Commit ansteht).
+  # Manually trigger an alpha release (e.g. after CI repairs, when
+  # no new feature commit is pending).
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,7 @@ env:
 
 jobs:
   ################################################################
-  # PRÜFUNG: Feature-Commit? (schließt Dependabot aus)
+  # CHECK: feature commit? (excludes Dependabot)
   ################################################################
   check:
     name: Check for feature push
@@ -41,40 +41,40 @@ jobs:
         run: |
           SHOULD_RELEASE="false"
 
-          # Manuelle Auslösung (workflow_dispatch): immer bauen.
+          # Manual trigger (workflow_dispatch): always build.
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "Manuelle Auslösung - Release-Build wird ausgeführt."
+            echo "Manual trigger - release build will run."
             echo "should_release=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # Gemergte Dependabot-PRs nie bauen (weder über den Actor noch über
-          # den Autor der gepushten Commits).
+          # Never build merged Dependabot PRs (neither by actor nor by
+          # the author of the pushed commits).
           if [[ "$ACTOR" == "dependabot[bot]" || "$ACTOR" == "dependabot-preview[bot]" ]]; then
-            echo "Push stammt von Dependabot - Release-Build wird übersprungen."
+            echo "Push comes from Dependabot - release build will be skipped."
             echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if echo "$COMMITS" | jq -r '.[] | .author.name' | grep -q "dependabot"; then
-            echo "Push enthält Dependabot-Commits - Release-Build wird übersprungen."
+            echo "Push contains Dependabot commits - release build will be skipped."
             echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # Feature-Erkennung: mindestens ein Commit muss nach der
-          # Conventional-Commits-Konvention mit "feat" beginnen.
+          # Feature detection: at least one commit must start with "feat"
+          # according to the Conventional Commits convention.
           if echo "$COMMITS" | jq -r '.[].message' | grep -qE '^feat(\(.*\))?:'; then
             SHOULD_RELEASE="true"
-            echo "Feature-Commit gefunden - Release-Build wird ausgelöst."
+            echo "Feature commit found - release build will run."
           else
-            echo "Kein Feature-Commit im Push - Release-Build wird übersprungen."
+            echo "No feature commit in the push - release build will be skipped."
           fi
 
           echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
 
   ################################################################
-  # VERSIONIERUNG & TAGGING: bestimmt die nächste Version, bumped
-  # Cargo.toml + CHANGELOG, committet beides und setzt den Alpha-Tag.
+  # VERSIONING & TAGGING: determines the next version, bumps
+  # Cargo.toml + CHANGELOG, commits both, and sets the alpha tag.
   ################################################################
   version:
     name: Determine version & tag
@@ -102,16 +102,16 @@ jobs:
         id: bump
         run: |
           NEXT="$(bash scripts/release-version.sh)"
-          # Nächste freie Alpha-Nummer für die Basisversion bestimmen.
+          # Determine the next free alpha number for the base version.
           COUNT="$(git tag -l "v${NEXT}-alpha.*" | wc -l)"
           COUNT=$((COUNT + 1))
           VERSION="${NEXT}-alpha.${COUNT}"
           TAG="v${VERSION}"
-          echo "Nächste Version: $VERSION (Tag: $TAG)"
+          echo "Next version: $VERSION (tag: $TAG)"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-          # Cargo.toml + CHANGELOG aktualisieren und committen.
+          # Update Cargo.toml + CHANGELOG and commit them.
           bash scripts/update-version.sh "$VERSION"
           bash scripts/update-changelog.sh "$VERSION"
 
@@ -119,14 +119,14 @@ jobs:
           git commit -m "chore(release): prepare $TAG"
           git push origin develop
 
-          # Tag setzen und pushen.
+          # Set and push the tag.
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"
 
-          echo "Release-Tag $TAG gesetzt und gepusht."
+          echo "Release tag $TAG set and pushed."
 
   ################################################################
-  # ALPHA BINARIES + PAKETE (nur bei Feature-Push)
+  # ALPHA BINARIES + PACKAGES (only on feature push)
   ################################################################
   build:
     name: Build Alpha Binaries (${{ matrix.artifact_name }})
@@ -215,7 +215,7 @@ jobs:
         run: cargo build --release --package rivulet-gui --target ${{ matrix.target }}
 
       # ------------------------------------------------------------------
-      # PACKAGING (pro Plattform)
+      # PACKAGING (per platform)
       # ------------------------------------------------------------------
       - name: Stage binary (Linux)
         if: runner.os == 'Linux'
@@ -260,7 +260,7 @@ jobs:
           pwsh packaging/windows/build-msi.ps1 -Version "$env:RELEASE_VERSION" -Staging "$(pwd)/staging" -OutFile "$(pwd)/staging/rivulet-windows-x86_64.msi"
 
       # ------------------------------------------------------------------
-      # CODE SIGNING (nur wenn die Secrets hinterlegt sind)
+      # CODE SIGNING (only if the secrets are configured)
       # ------------------------------------------------------------------
       - name: Sign Windows binaries (if credentials configured)
         if: runner.os == 'Windows' && (env.WINDOWS_CERT_BASE64 != '' && env.WINDOWS_CERT_PASSWORD != '')
@@ -273,7 +273,7 @@ jobs:
           [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
           Get-ChildItem -Path staging -Include *.exe,*.dll -Recurse | ForEach-Object {
             & signtool sign /f $certPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $_.FullName
-            if ($LASTEXITCODE -ne 0) { throw "Signierung fehlgeschlagen: $($_.Name)" }
+            if ($LASTEXITCODE -ne 0) { throw "Signing failed: $($_.Name)" }
           }
 
       - name: Sign macOS app (if credentials configured)
@@ -295,9 +295,9 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k temp "$KEYCHAIN"
           codesign --force --options runtime --sign "Developer ID Application" \
             --timestamp "staging/Rivulet.app"
-          # DMG nach dem Signing bauen (Codesign vor hdiutil).
+          # Build the DMG after signing (codesign before hdiutil).
           bash packaging/macos/build-dmg.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-macos-aarch64.dmg"
-          # Notarisierung + Stapelung.
+          # Notarization + stapling.
           xcrun notarytool submit "staging/rivulet-macos-aarch64.dmg" \
             --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
           xcrun stapler staple "staging/rivulet-macos-aarch64.dmg"
@@ -315,7 +315,7 @@ jobs:
             staging/rivulet-windows-x86_64.msi
 
   ################################################################
-  # FORMALES GITHUB RELEASE (Alpha)
+  # FORMAL GITHUB RELEASE (Alpha)
   ################################################################
   github_release:
     name: Create Alpha GitHub Release

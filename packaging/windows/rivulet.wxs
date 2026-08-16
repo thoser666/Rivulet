@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  WiX-Source für das Rivulet-MSI.
-  Wird von release.yml / ci.yml gebaut:
+  WiX source for the Rivulet MSI.
+  Built by release.yml / ci.yml:
     candle rivulet.wxs -ext WixUIExtension
     light rivulet.wxso -ext WixUIExtension -o rivulet.msi
 
-  Der Großteil der Dateien wird per harvest (heat.exe) aus dem Staging-
-  Verzeichnis übernommen; diese Datei steuert nur das Produkt-Skelett.
+  Most files are harvested (heat.exe) from the staging directory; this file
+  only controls the product skeleton.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
@@ -17,7 +17,7 @@
            UpgradeCode="A5C1E5E8-7A3B-4C9D-B6E2-9F1D4C7A8B90">
     <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
 
-    <MajorUpgrade DowngradeErrorMessage="Eine neuere Version von Rivulet ist bereits installiert." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Rivulet is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <Feature Id="MainFeature" Title="Rivulet" Level="1">

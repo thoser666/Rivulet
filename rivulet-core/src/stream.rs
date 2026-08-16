@@ -171,11 +171,11 @@ mod tests {
     fn is_rtmps_distinguishes_encrypted_and_plain() {
         assert!(
             StreamSettings::custom("rtmps://host/app", "k").is_rtmps(),
-            "rtmps:// muss als verschlüsselt erkannt werden"
+            "rtmps:// must be recognized as encrypted"
         );
         assert!(
             !StreamSettings::custom("rtmp://host/app", "k").is_rtmps(),
-            "rtmp:// darf nicht als verschlüsselt gelten"
+            "rtmp:// must not be considered encrypted"
         );
     }
 

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Baut ein Linux-AppImage aus dem Staging-Verzeichnis.
+# Builds a Linux AppImage from the staging directory.
 #
-# Verwendung: packaging/linux/build-appimage.sh <version> <staging-dir> <out-file>
+# Usage: packaging/linux/build-appimage.sh <version> <staging-dir> <out-file>
 set -euo pipefail
 
-VERSION="${1:?Version fehlt}"
-STAGING="${2:?Staging-Verzeichnis fehlt}"
-OUT="${3:?Ausgabedatei fehlt}"
+VERSION="${1:?Missing version}"
+STAGING="${2:?Missing staging directory}"
+OUT="${3:?Missing output file}"
 ARCH="$(uname -m)"
 
 if [[ "$ARCH" == "x86_64" ]]; then
@@ -14,14 +14,14 @@ if [[ "$ARCH" == "x86_64" ]]; then
 elif [[ "$ARCH" == "aarch64" ]]; then
   APPIMAGE_ARCH="aarch64"
 else
-  echo "Nicht unterstützte Architektur: $ARCH" >&2
+  echo "Unsupported architecture: $ARCH" >&2
   exit 1
 fi
 
 APPDIR="$STAGING/AppDir"
 mkdir -p "$APPDIR/usr/bin"
 
-# Binary und Desktop-Integration einspielen.
+# Install the binary and desktop integration.
 cp "$STAGING/rivulet-gui" "$APPDIR/usr/bin/rivulet-gui"
 cat > "$APPDIR/rivulet.desktop" <<EOF
 [Desktop Entry]
@@ -37,7 +37,7 @@ EOF
 if [[ -f "packaging/rivulet.png" ]]; then
   cp packaging/rivulet.png "$APPDIR/rivulet.png"
 else
-  # Fallback-Icon: 1x1-PNG erzeugen, falls keins vorhanden ist.
+  # Fallback icon: generate a 1x1 PNG if none is present.
   python3 - <<'PY'
 import struct, zlib
 def png():
@@ -57,27 +57,27 @@ exec "$HERE/usr/bin/rivulet-gui" "$@"
 EOF
 chmod +x "$APPDIR/AppRun" "$APPDIR/usr/bin/rivulet-gui"
 
-# appimagetool herunterladen (deterministischer Release).
+# Download appimagetool (deterministic release).
 APPIMAGETOOL="$STAGING/appimagetool"
 if [[ ! -x "$APPIMAGETOOL" ]]; then
   URL="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-$APPIMAGE_ARCH.AppImage"
   curl -fsSL -o "$APPIMAGETOOL" "$URL"
   chmod +x "$APPIMAGETOOL"
-  # AppImages benötigen FUSE; im Container ggf. nicht verfügbar -> Extraktion.
+  # AppImages need FUSE; it may be unavailable in containers -> extract.
   "$APPIMAGETOOL" --appimage-extract-and-run --version >/dev/null 2>&1 || \
     ARCH="$APPIMAGE_ARCH" "$APPIMAGETOOL" --version >/dev/null 2>&1 || true
 fi
 
-# Desktop-Datei-Kopie nach usr/share/applications für die Integration.
+# Copy the desktop file to usr/share/applications for integration.
 mkdir -p "$APPDIR/usr/share/applications"
 cp "$APPDIR/rivulet.desktop" "$APPDIR/usr/share/applications/rivulet.desktop"
 
 export ARCH="$APPIMAGE_ARCH"
-# appimagetool ist selbst ein AppImage und benötigt FUSE; in CI/Containern ist
-# libfuse2 meist nicht installiert -> immer --appimage-extract-and-run nutzen.
+# appimagetool itself is an AppImage and needs FUSE; in CI/containers
+# libfuse2 is usually not installed -> always use --appimage-extract-and-run.
 if "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$OUT"; then
-  echo "AppImage erstellt: $OUT"
+  echo "AppImage created: $OUT"
 else
-  echo "appimagetool (extract-and-run) fehlgeschlagen." >&2
+  echo "appimagetool (extract-and-run) failed." >&2
   exit 1
 fi

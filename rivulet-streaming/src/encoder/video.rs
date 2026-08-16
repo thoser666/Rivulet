@@ -8,7 +8,7 @@ pub struct VideoEncoder {
     width: u32,
     height: u32,
     fps: u32,
-    #[allow(dead_code)] // Erlaubt, dass das Feld unbenutzt ist
+    #[allow(dead_code)] // Allow this field to remain unused
     bitrate: u64,
     frame_count: u64,
     ffmpeg_process: Option<Child>,
@@ -40,7 +40,7 @@ impl VideoEncoder {
         let ffmpeg = Command::new("ffmpeg")
             .args([
                 // KORREKTUR: `&` entfernt
-                "-y", // Überschreibe Output-Datei
+                "-y", // Overwrite the output file
                 "-f",
                 "rawvideo",
                 "-pixel_format",
@@ -166,8 +166,8 @@ impl Drop for VideoEncoder {
 mod tests {
     use super::*;
 
-    // Diese Validierungen laufen ab, bevor FFmpeg gestartet wird,
-    // daher benötigen die Tests kein ffmpeg-Binary.
+    // These validations run before FFmpeg is launched,
+    // so the tests do not need an ffmpeg binary.
     #[test]
     fn rejects_zero_width() {
         let result = VideoEncoder::new(Path::new("out.mp4"), 0, 720, 30, 1_000_000);

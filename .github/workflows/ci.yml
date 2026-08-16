@@ -3,8 +3,8 @@ name: CI
 on:
   push:
     branches: [ "**" ]
-    # Tags v* triggern den Beta/RC/Stable-Release-Pfad (build_release +
-    # github_release) sowie einen Verifikations-Build.
+    # Tags v* trigger the beta/rc/stable release path (build_release +
+    # github_release) as well as a verification build.
     tags: [ "v*" ]
   pull_request:
 
@@ -16,7 +16,7 @@ env:
 
 jobs:
   ################################################################
-  # LINTS & FORMATTING (läuft nur auf Linux, ist aber plattformunabhängig)
+  # LINTS & FORMATTING (runs only on Linux, but is platform-independent)
   ################################################################
   lints:
     name: Lints (Fmt & Clippy)
@@ -30,7 +30,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # --- HIER IST DIE ERGÄNZUNG ---
+      # --- HERE IS THE ADDITION ---
       - name: Install GStreamer dependencies for clippy
         run: |
           sudo apt-get update -y
@@ -56,7 +56,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
   
   ################################################################
-  # BUILD & TEST MATRIX (läuft auf allen 3 Plattformen)
+  # BUILD & TEST MATRIX (runs on all 3 platforms)
   ################################################################
   build_and_test:
     name: Build & Test on ${{ matrix.os }}
@@ -73,7 +73,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # --- Linux Abhängigkeiten installieren ---
+      # --- Install Linux dependencies ---
       - name: Install Linux dependencies (if applicable)
         if: runner.os == 'Linux'
         run: |
@@ -100,22 +100,22 @@ jobs:
             libpipewire-0.3-dev \
             libspa-0.2-dev
 
-      # --- Windows Abhängigkeiten installieren ---
+      # --- Install Windows dependencies ---
       - name: Install Windows dependencies (if applicable)
         if: runner.os == 'Windows'
-        # Wir verwenden PowerShell als Shell für diesen Schritt
+        # We use PowerShell as the shell for this step
         shell: pwsh
         run: |
-          # 1. Installiere MSYS2 und pkg-config
+          # 1. Install MSYS2 and pkg-config
           choco install msys2 --params "/NoUpdate /InstallDir:C:/msys64"
           C:/msys64/usr/bin/bash -lc "pacman -S --noconfirm mingw-w64-x86_64-pkg-config"
           
-          # 2. Füge MSYS2 zum GitHub Actions PATH hinzu (für diesen und alle folgenden Schritte)
+          # 2. Add MSYS2 to the GitHub Actions PATH (for this and all following steps)
           echo "C:/msys64/mingw64/bin" >> $env:GITHUB_PATH
           
-          # 3. Installiere GStreamer (MSVC, 64-bit, Runtime und Dev) direkt von
-          # freedesktop.org als MSI. Das Chocolatey-Paket "gstreamer-devel"
-          # enthält nicht jede Release-Version (1.24.13 fehlt dort).
+          # 3. Install GStreamer (MSVC, 64-bit, runtime and dev) directly from
+          # freedesktop.org as MSI. The Chocolatey package "gstreamer-devel"
+          # does not contain every release version (1.24.13 is missing there).
           $version = "1.24.13"
           $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$version/msvc"
           $runtimeMsi = Join-Path $env:TEMP "gstreamer-runtime-$version.msi"
@@ -125,9 +125,9 @@ jobs:
           Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
           Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
 
-          # 4. Setze Pfade für alle folgenden Schritte. Der Installer registriert
-          # die Wurzel in der Maschinen-Umgebungsvariable; als Fallback dient der
-          # Standardort C:\gstreamer\1.0\msvc_x86_64.
+          # 4. Set paths for all following steps. The installer registers
+          # the root in the machine environment variable; the default location
+          # C:\gstreamer\1.0\msvc_x86_64 serves as fallback.
           $gstRoot = [System.Environment]::GetEnvironmentVariable("GSTREAMER_1_0_ROOT_MSVC_X86_64", "Machine")
           if (-not $gstRoot) { $gstRoot = "C:\gstreamer\1.0\msvc_x86_64\" }
           $gstBin = Join-Path $gstRoot "bin"
@@ -142,7 +142,7 @@ jobs:
           echo "GST_REGISTRY=$env:TEMP\gst-registry.bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           echo $gstBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      # --- GStreamer-Plugin-Verfügbarkeit prüfen (nur Windows) ---
+      # --- Verify GStreamer plugin availability (Windows only) ---
       - name: Verify GStreamer plugins (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -163,11 +163,11 @@ jobs:
             }
           }
 
-      # --- macOS Abhängigkeiten installieren ---
+      # --- Install macOS dependencies ---
       - name: Install macOS dependencies (if applicable)
         if: runner.os == 'macOS'
         run: |
-          # Vorinstalliertes, untrusted "aws/tap" entfernen (Tap-Trust-Warnung).
+          # Remove the preinstalled, untrusted "aws/tap" (tap trust warning).
           brew untap aws/tap 2>/dev/null || true
           brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
 
@@ -191,11 +191,11 @@ jobs:
         run: cargo test --workspace --verbose
 
   ################################################################
-  # BETA/RC/STABLE RELEASE BUILDS (tag-basiert, refs/tags/v*)
-  # Erzeugt versionierte Release-Binaries für jeden Release-Tag
-  # (z.B. v0.1.0-beta.1, v0.1.0-rc.1, v1.0.0).
-  # Hinweis: Alpha-Tags (vX.Y.Z-alpha.*) werden hier übersprungen, weil der
-  # Alpha-Kanal in release.yml bereits vollständige Releases erzeugt.
+  # BETA/RC/STABLE RELEASE BUILDS (tag-based, refs/tags/v*)
+  # Produces versioned release binaries for every release tag
+  # (e.g. v0.1.0-beta.1, v0.1.0-rc.1, v1.0.0).
+  # Note: Alpha tags (vX.Y.Z-alpha.*) are skipped here because the
+  # alpha channel in release.yml already produces full releases.
   ################################################################
   build_release:
     name: Build Beta/RC/Stable Binaries
@@ -228,7 +228,7 @@ jobs:
       - name: Set release version from tag
         run: echo "RELEASE_VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_ENV"
 
-      # --- Release-Abhängigkeiten für alle Plattformen installieren ---
+      # --- Install release dependencies for all platforms ---
       - name: Install Linux release dependencies
         if: runner.os == 'Linux'
         run: |
@@ -327,7 +327,7 @@ jobs:
           pwsh packaging/windows/build-msi.ps1 -Version "$env:RELEASE_VERSION" -Staging "$(pwd)/staging" -OutFile "$(pwd)/staging/rivulet-windows-x86_64.msi"
 
       # ------------------------------------------------------------------
-      # CODE SIGNING (nur wenn die Secrets hinterlegt sind)
+      # CODE SIGNING (only if the secrets are configured)
       # ------------------------------------------------------------------
       - name: Sign Windows binaries (if credentials configured)
         if: runner.os == 'Windows' && (env.WINDOWS_CERT_BASE64 != '' && env.WINDOWS_CERT_PASSWORD != '')
@@ -340,7 +340,7 @@ jobs:
           [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
           Get-ChildItem -Path staging -Include *.exe,*.dll -Recurse | ForEach-Object {
             & signtool sign /f $certPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $_.FullName
-            if ($LASTEXITCODE -ne 0) { throw "Signierung fehlgeschlagen: $($_.Name)" }
+            if ($LASTEXITCODE -ne 0) { throw "Signing failed: $($_.Name)" }
           }
 
       - name: Sign macOS app (if credentials configured)
@@ -362,9 +362,9 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -s -k temp "$KEYCHAIN"
           codesign --force --options runtime --sign "Developer ID Application" \
             --timestamp "staging/Rivulet.app"
-          # DMG nach dem Signing bauen (Codesign vor hdiutil).
+          # Build the DMG after signing (codesign before hdiutil).
           bash packaging/macos/build-dmg.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-macos-aarch64.dmg"
-          # Notarisierung + Stapelung.
+          # Notarization + stapling.
           xcrun notarytool submit "staging/rivulet-macos-aarch64.dmg" \
             --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
           xcrun stapler staple "staging/rivulet-macos-aarch64.dmg"
@@ -382,7 +382,7 @@ jobs:
             staging/rivulet-windows-x86_64.msi
 
   ################################################################
-  # FORMALES GITHUB RELEASE (für Beta/RC/Stable-Tags)
+  # FORMAL GITHUB RELEASE (for beta/rc/stable tags)
   ################################################################
   github_release:
     name: Create GitHub Release
@@ -403,6 +403,6 @@ jobs:
         with:
           files: release-assets/*
           generate_release_notes: true
-          # Beta/RC-Tags (und Alpha-Tags) als Pre-Release markieren,
-          # stabile Tags (z.B. v1.0.0) als vollständiges Release.
+          # Mark beta/rc tags (and alpha tags) as pre-release,
+          # stable tags (e.g. v1.0.0) as a full release.
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}

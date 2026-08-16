@@ -3,7 +3,7 @@ use std::collections::HashMap;
 pub mod plugin;
 pub mod types;
 
-// Placeholder-Strukturen, damit der Code kompiliert
+// Placeholder structs so that the code compiles
 #[derive(Debug)]
 pub struct PluginConfig;
 
@@ -11,25 +11,25 @@ pub struct PluginConfig;
 pub struct LoadedPlugin;
 
 /// Plugin Manager - handles OBS plugin loading
-#[derive(Debug, Default)] // `Default` implementiert und `Debug` für gute Praxis hinzugefügt
+#[derive(Debug, Default)] // `Default` implemented and `Debug` added for good practice
 pub struct PluginSystem {
-    #[allow(dead_code)] // Erlaubt, dass dieses Feld unbenutzt ist
+    #[allow(dead_code)] // Allow this field to remain unused
     plugins: HashMap<String, LoadedPlugin>,
-    #[allow(dead_code)] // Erlaubt, dass dieses Feld unbenutzt ist
+    #[allow(dead_code)] // Allow this field to remain unused
     configs: HashMap<String, PluginConfig>,
 }
 
 impl PluginSystem {
     /// Creates a new, empty PluginSystem.
     pub fn new() -> Self {
-        // Jetzt können wir die `Default`-Implementierung verwenden
+        // We can use the `Default` implementation here
         Self::default()
     }
 
-    // Hier kommen später die Funktionen zum Laden von Plugins etc. hin
+    // Plugin loading functions etc. will be added here later
 }
 
-// Placeholder für PluginManager, falls er woanders verwendet wird
+// Placeholder for PluginManager, in case it is used elsewhere
 pub struct PluginManager;
 
 #[cfg(test)]

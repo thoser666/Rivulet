@@ -17,29 +17,29 @@ $gstBin = Join-Path $gstRoot "bin"
 $gstPlugins = Join-Path $gstRoot "lib\gstreamer-1.0"
 $gstScannerDir = Join-Path $gstRoot "libexec\gstreamer-1.0"
 
-if (-not (Test-Path $gstBin)) { throw "GStreamer bin nicht gefunden: $gstBin" }
-if (-not (Test-Path $gstPlugins)) { throw "GStreamer-Plugins nicht gefunden: $gstPlugins" }
+if (-not (Test-Path $gstBin)) { throw "GStreamer bin not found: $gstBin" }
+if (-not (Test-Path $gstPlugins)) { throw "GStreamer plugins not found: $gstPlugins" }
 
 $bundle = Join-Path $Staging "bundle"
 New-Item -ItemType Directory -Force -Path $bundle | Out-Null
 
-# 1. Anwendungs-Binary.
+# 1. Application binary.
 Copy-Item (Join-Path $Staging "rivulet-gui.exe") (Join-Path $bundle "rivulet-gui.exe") -Force
 
-# 2. GStreamer-Laufzeit: alle bin-DLLs.
+# 2. GStreamer runtime: all bin DLLs.
 Copy-Item (Join-Path $gstBin "*.*") $bundle -Force -ErrorAction SilentlyContinue
 
-# 3. GStreamer-Plugins in Unterverzeichnis.
+# 3. GStreamer plugins in a subdirectory.
 $pluginsDir = Join-Path $bundle "gstreamer-1.0"
 New-Item -ItemType Directory -Force -Path $pluginsDir | Out-Null
 Copy-Item (Join-Path $gstPlugins "*.*") $pluginsDir -Force -ErrorAction SilentlyContinue
 
-# 4. Plugin-Scanner (wird von GStreamer zum Registrieren benötigt).
+# 4. Plugin scanner (needed by GStreamer for registration).
 if (Test-Path $gstScannerDir) {
   Copy-Item (Join-Path $gstScannerDir "gst-plugin-scanner.exe") $bundle -Force -ErrorAction SilentlyContinue
 }
 
-# 5. Env-Template setzen: rtmp2sink & Plugins aus dem Bundle laden.
+# 5. Set the env template: load rtmp2sink & plugins from the bundle.
 @"
 @echo off
 set GST_PLUGIN_PATH=%~dp0gstreamer-1.0
@@ -49,7 +49,7 @@ set GST_REGISTRY=%TEMP%\rivulet-gst-registry.bin
 start "" "%~dp0rivulet-gui.exe" %*
 "@ | Set-Content -Path (Join-Path $bundle "Rivulet.bat") -Encoding ASCII
 
-# 6. Bundle zippen (Portable-Variante).
+# 6. Zip the bundle (portable variant).
 if (Test-Path $OutFile) { Remove-Item $OutFile -Force }
 Compress-Archive -Path (Join-Path $bundle "*") -DestinationPath $OutFile -CompressionLevel Optimal
-Write-Host "Portables Bundle erstellt: $OutFile"
+Write-Host "Portable bundle created: $OutFile"

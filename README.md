@@ -7,12 +7,12 @@
 [![CI](https://github.com/thoser666/rivulet/workflows/CI/badge.svg)](https://github.com/thoser666/rivulet/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/status-alpha%20v0.2-yellow.svg)](https://github.com/thoser666/rivulet)
+[![Status](https://img.shields.io/badge/status-alpha%20v0.3-yellow.svg)](https://github.com/thoser666/rivulet)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/thoser666/rivulet)
 
-*A complete Rust reimplementation of OBS Studio - built for performance, safety, and reliability*
+*A Rust recording and streaming engine — built for performance, safety, reliability, and embeddability*
 
-[Features](#-features) • [Installation](#-installation) • [Roadmap](#-roadmap) • [Releases](#-releases) • [Contributing](#-contributing)
+[Features](#-features) • [Installation](#-installation) • [Roadmap](#-roadmap) • [Contributing](#-contributing)
 
 ![Rivulet Screenshot](docs/screenshot.png)
 <!-- Add screenshot later -->
@@ -23,7 +23,7 @@
 
 ## 🎯 Vision
 
-Rivulet ist **kein OBS-Klon, sondern eine embeddbare, deterministische Recording- & Streaming-Engine in Rust mit moderner GUI.** Sie liefert OBS-Kernfeatures (Capture, Encoding, Audio, Streaming, Dual Output) und nutzt gleichzeitig die architektonischen Lücken von OBS als eigene Stärken: Automation statt Interaktion, Bibliothek statt Monolith, moderner Render-Pfad statt Legacy, stabiles Plugin-ABI statt C-DLLs.
+Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording & streaming engine written in Rust**, with a modern GUI on top. It provides the OBS core feature set (capture, encoding, audio, streaming, dual output) while turning OBS's architectural gaps into its own strengths: automation instead of interactivity, a library instead of a monolith, a modern render path instead of legacy OpenGL/D3D, and a stable plugin ABI instead of version-sensitive C DLLs.
 
 ### Why Rust?
 - 🔒 **Memory Safety** - No segfaults, no data races
@@ -31,29 +31,30 @@ Rivulet ist **kein OBS-Klon, sondern eine embeddbare, deterministische Recording
 - 🛡️ **Reliability** - Catch bugs at compile time
 - 🌍 **Cross-Platform** - Write once, run everywhere
 
-### 🧭 Positionierung: OBS-Schwächen als Rivulet-Stärken
+### 🧭 Positioning: OBS weaknesses as Rivulet strengths
 
-| OBS-Stärke | OBS-Schwäche | Rivulet-Antwort |
+| OBS strength | OBS weakness | Rivulet's answer |
 | --- | --- | --- |
-| Mächtiges, ausgereiftes Feature-Set | Interaktiv-first: keine Headless-/CI-/Render-Farm-Nutzung, schlecht automatisierbar | Deterministische Pipeline, Headless-CLI, testbare Engine (M6) |
-| Monolithische App + libobs | `libobs` ist keine saubere Library-API; Einbettung in Produkte ist Krampf | `rivulet-core` als normale, semver-stabile Crate (M7) |
-| Plugin-Ökosystem | C/C++-Plugins gegen libobs-ABI, versionssensitiv, können App crashen | WASM-Plugin-Runtime + temporärer OBS-Compat-Mode (M5) |
-| Leistungsfähiger Renderer | OpenGL/D3D-Legacy, schwer modernisierbar | WebGPU/Zero-Copy von Grund auf (M8) |
-| Streaming-Basis | Kern RTMP/FLV, Low-Latency-Protokolle frickelig | WebRTC/WHIP & SRT/RIST als First-Class (M3) |
-| Windows-first | Plattform-Parität ungleich (macOS/Linux schwächer) | Parität als Release-Blocker, nicht Afterthought (M5) |
+| Powerful, mature feature set | Interactive-first: no headless/CI/render-farm use, hard to automate | Deterministic pipeline, headless CLI, testable engine (M6) |
+| Monolithic app + libobs | `libobs` is not a clean library API; embedding it into products is painful | `rivulet-core` as a normal, semver-stable crate (M7) |
+| Plugin ecosystem | C/C++ plugins against the libobs ABI, version-sensitive, can crash the app | WASM plugin runtime + temporary OBS compat mode (M5) |
+| Powerful renderer | OpenGL/D3D legacy, hard to modernize | WebGPU/Zero-copy from the ground up (M8) |
+| Streaming foundation | Core is RTMP/FLV, low-latency protocols are fiddly | WebRTC/WHIP & SRT/RIST as first-class citizens (M3) |
+| Windows-first | Uneven platform parity (macOS/Linux weaker) | Parity as a release blocker, not an afterthought (M5) |
 
 ### Long-term Goals (v1.0+)
-- **Feature Parity** mit OBS Studio (Kern-Features)
-- **Temporäre OBS-Plugin-Kompatibilität** als Brücke, langfristig **WASM-Plugin-Ökosystem**
+- **Feature Parity** with OBS Studio (core feature set)
+- **Temporary OBS plugin compatibility** as a bridge, long-term **WASM plugin ecosystem**
 - **Modern Architecture** - Clean, maintainable codebase
-- **Deterministic & Embeddable** - Engine als Bibliothek, Headless nutzbar, CI-tauglich
+- **Deterministic & Embeddable** - Engine as a library, headless-capable, CI-friendly
 - **Active Community** - Open development, regular updates
+- **Internationalization** - UI and docs are language-neutral; locale files drive all visible strings
 
 ---
 
 ## ✨ Features
 
-### ✅ Currently Available (v0.2)
+### ✅ Currently Available (v0.2/v0.3)
 
 - **Screen Capture** - Capture your primary monitor in real-time
 - **Window Capture** - Capture a single application window (games, etc.) in addition to full monitors, with a window picker in the GUI (Linux & Windows)
@@ -62,7 +63,7 @@ Rivulet ist **kein OBS-Klon, sondern eine embeddbare, deterministische Recording
 - **Hardware Encoding** - NVIDIA NVENC (`nvh264enc`), Intel QuickSync (`qsvh264enc`) and AMD AMF (`amfh264enc`) with automatic detection of the best available encoder and fallback to software x264; engine API `set_video_encoder(VideoEncoder)` / `set_video_bitrate(kbps)`
 - **Audio Capture (engine, Linux)** - Desktop sound and microphone, mixed in real time via GStreamer (48 kHz stereo, per-source volume); usable via the `rivulet-audio` crate and the `record_screen_audio` example
 - **Audio Mixer UI (Linux GUI)** - Start/stop audio capture with live level meter (dB), per-source volume sliders for system/mic
-- **Separate Audio Tracks** - System and microphone output as separate tracks in the MP4 (via the "Getrennte Tracks" option, Linux GUI); engine API `push_audio_track(frame, AudioTrack)`
+- **Separate Audio Tracks** - System and microphone output as separate tracks in the MP4 (via the "Separate Tracks" option, Linux GUI); engine API `push_audio_track(frame, AudioTrack)`
 - **RTMPS Streaming** - Live to Twitch, Kick, YouTube or any custom RTMP/RTMPS ingest (H.264+AAC over FLV); `StreamSettings` presets, engine APIs `set_stream_settings` + `start_streaming` (pure stream) or `start_local_recording` (dual output); example `stream_rtmps`
 - **Dual Output** - Record locally and stream simultaneously; once encoded, split via `tee` into the MP4 file and the FLV/RTMPS sink (enabled by configuring both a local recording and stream settings)
 - **Stream Health & Network Stats** - Live status (`Connecting`/`Good`/`Warning`/`Poor`) with sent/dropped frame counters, bitrate (kbps) and FPS over a sliding window; derived from drop ratio (>5% Poor, >1% Warning), throughput collapse and stalls; engine API `stream_stats()`, polled in `stream_rtmps`
@@ -78,8 +79,9 @@ Rivulet ist **kein OBS-Klon, sondern eine embeddbare, deterministische Recording
   - Auto-timestamped filenames
 - **Cross-Platform** - Windows, macOS, and Linux support (via xcap)
 - **Modern UI** - Clean interface built with egui
+- **Internationalized UI** - All visible strings are driven by locale files (English by default, German included)
 
-### 🚧 In Development (v0.3)
+### 🚧 In Development (v0.4+)
 
 See [Roadmap](#-roadmap) for detailed timeline.
 
@@ -87,240 +89,263 @@ See [Roadmap](#-roadmap) for detailed timeline.
 
 ## 🚀 Roadmap
 
-> **Ziel:** OBS-Kern-Parität *und* die architektonischen Stärken, die OBS nicht bieten kann (Determinismus, Einbettbarkeit, Modernität).
-> **Strategie:** Erst die stabile, embeddbare Engine, dann Szenen & Streaming, dann die Differenzierungs-Features (M6–M8) als Produkt-Identität.
+> **Goal:** OBS core parity *and* the architectural strengths OBS cannot offer (determinism, embeddability, modernity).
+> **Strategy:** First a stable, embeddable engine, then scenes & streaming, then the differentiation features (M6–M9) as product identity.
 
-### Meilenstein-Übersicht
+### Milestone overview
 
-| Meilenstein | Fokus | Status |
+| Milestone | Focus | Status |
 | --- | --- | --- |
-| M0 – Recording Foundation | Aufnahme, Encoding, Audio, GUI | ✅ Erreicht |
-| M1 – Solid Recording | Audio-Tracks, Hardware-Encoding, QoL | 🚧 In Arbeit |
-| M2 – Scenes & Composition | OBS-Kern: Szenen, Quellen, Übergänge | 📅 Geplant |
-| M3 – Streaming | RTMP/RTMPS, Dual Output, WebRTC/SRT | 🚧 In Arbeit |
-| M4 – Advanced Output | Virtual Camera, Replay Buffer, Filter | 📅 Geplant |
-| M5 – Ecosystem & Parität | WASM-Plugins, OBS-Compat, Plattform-Parität | 📅 Geplant |
-| M6 – Automation & Determinism | Headless, CI-Rendering, reproduzierbare Pipeline | 📅 Geplant |
-| M7 – Embeddable Engine | Stabile `rivulet-core`-API, Doku, Tooling | 📅 Geplant |
-| M8 – Modern Architecture | WebGPU-Renderer, Zero-Copy, Leichtgewicht | 📅 Geplant |
+| M0 – Recording Foundation | Capture, Encoding, Audio, GUI | ✅ Done |
+| M1 – Solid Recording | Audio tracks, Hardware encoding, QoL | 🚧 In progress |
+| M2 – Scenes & Composition | OBS core: scenes, sources, transitions | 📅 Planned |
+| M3 – Streaming | RTMP/RTMPS, Dual output, WebRTC/SRT | 🚧 In progress |
+| M4 – Advanced Output | Virtual camera, Replay buffer, Filters | 📅 Planned |
+| M5 – Ecosystem & Parity | WASM plugins, OBS compat, platform parity | 📅 Planned |
+| M6 – Automation & Determinism | Headless, CI rendering, reproducible pipelines | 📅 Planned |
+| M7 – Embeddable Engine | Stable `rivulet-core` API, docs, tooling | 📅 Planned |
+| M8 – Modern Architecture | WebGPU renderer, zero-copy, lightweight | 📅 Planned |
+| M9 – AI Chat Assistant | Local-first LLM chat bot for streamers | 📅 Planned |
 
 ---
 
 ### ✅ M0 – Recording Foundation
 
-**Status: Erreicht**
+**Status: Done**
 
-- [x] Screen-Capture (Monitor, Echtzeit)
-- [x] H.264-Video-Encoding (FFmpeg/GStreamer)
-- [x] Audio-Capture (System + Mikrofon, gemischt, 48 kHz Stereo)
-- [x] Audio/Video-Synchronisation
-- [x] Audio-Mixer-UI mit Live-Pegel-Meter und Volume-Slidern
-- [x] GUI-Aufnahme mit Monitor-Auswahl und Aufnahme-Timer (Linux)
-- [x] Grundgerüst: Engine, Recorder, Scene/Source-Modelle, Plugin-System (Stubs)
+- [x] Screen capture (monitor, real-time)
+- [x] H.264 video encoding (FFmpeg/GStreamer)
+- [x] Audio capture (system + microphone, mixed, 48 kHz stereo)
+- [x] Audio/video synchronization
+- [x] Audio mixer UI with live level meter and volume sliders
+- [x] GUI recording with monitor selection and recording timer (Linux)
+- [x] Skeleton: engine, recorder, scene/source models, plugin system (stubs)
 
 ---
 
 ### 🚧 M1 – Solid Recording
 
-**Status: In Arbeit**
+**Status: In progress**
 
 **Audio**
-- [x] Separate Audio-Tracks (System/Mikrofon)
-- [ ] Audio-Filter (Noise Suppression, Kompressor, Limiter)
-- [ ] Audio-Monitoring (Quellen-Vorschau)
+- [x] Separate audio tracks (system/mic)
+- [ ] Audio filters (noise suppression, compressor, limiter)
+- [ ] Audio monitoring (source preview)
 
 **Performance**
-- [x] Hardware-Encoding (NVIDIA NVENC, Intel QuickSync, AMD AMF)
-- [x] Auto-Detection des besten Encoders mit Fallback
-- [ ] Performance-Metriken (FPS, Encode-Last, Dateigröße)
+- [x] Hardware encoding (NVIDIA NVENC, Intel QuickSync, AMD AMF)
+- [x] Automatic detection of the best encoder with fallback
+- [ ] Performance metrics (FPS, encode load, file size)
 
 **Quality of Life**
-- [ ] Hotkeys (Aufnahme, Pause, Stumm)
-- [ ] Aufnahme-Timer-Overlay und FPS-Counter
-- [ ] Region-Capture und Mehrfach-Monitor-Auswahl
-- [ ] Codec-Auswahl-UI (H264/H265/VP9)
-- [ ] Preset-Management (1080p60, 720p30, ...)
+- [ ] Hotkeys (record, pause, mute)
+- [ ] Recording timer overlay and FPS counter
+- [ ] Region capture and multi-monitor selection
+- [ ] Codec selection UI (H264/H265/VP9)
+- [ ] Preset management (1080p60, 720p30, ...)
 
-**Ziel:** Hochwertiges Recording mit Audio als solide Basis für Scenes & Streaming.
+**Goal:** High-quality recording with audio as a solid foundation for scenes & streaming.
 
 ---
 
 ### 🎨 M2 – Scenes & Composition
 
-**Status: Geplant**
+**Status: Planned**
 
-Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
+The core concept of OBS: scenes, sources, and transitions.
 
-- [ ] Szenen-Verwaltung (mehrere Szenen, Umschalten)
-- [x] Quellen — Fenster-Capture (Monitor + einzelne Fenster, Linux & Windows)
-- [ ] Quellen (Bild, Text, Webcam, Stummschaltung)
-- [ ] Quellen-Komposition (Ebenen, Position, Skalierung, Zuschneiden)
-- [ ] Übergänge (Fade, Cut, Stinger)
-- [ ] Overlays (Bild-in-Bild, Banner)
-- [ ] Chroma Key / Green Screen
-- [ ] Studio-Modus (Vorschau/Programm)
+- [ ] Scene management (multiple scenes, switching)
+- [x] Sources — window capture (monitor + individual windows, Linux & Windows)
+- [ ] Sources (image, text, webcam, mute)
+- [ ] Source composition (layers, position, scaling, cropping)
+- [ ] Transitions (fade, cut, stinger)
+- [ ] Overlays (picture-in-picture, banners)
+- [ ] Chroma key / green screen
+- [ ] Studio mode (preview/program)
 
-**Ziel:** Der komponierbare Arbeitsbereich, den OBS-Nutzer erwarten.
+**Goal:** The composable workspace OBS users expect.
 
 ---
 
 ### 📡 M3 – Streaming
 
-**Status: In Arbeit**
+**Status: In progress**
 
-- [x] RTMP/RTMPS-Client-Implementierung (H.264+AAC, FLV-Muxing)
-- [x] TLS-verschlüsseltes Streaming (RTMPS) mit Zertifikats-Validierung
-- [x] Dual Output (Stream + Aufnahme parallel; einmal codiert, per `tee` aufgeteilt)
-- [x] Stream-Health und Netzwerk-Statistiken (Status via Drop-Ratio/Throughput, `stream_stats()`-API)
-- [ ] Adaptive Bitrate
-- [x] Plattform-Integrationen (Twitch, Kick, YouTube via RTMPS; Custom)
-- [ ] Stream-Key-Management und Stream-Presets
-- [x] Custom-RTMP-Server-Support (beliebige `rtmp://`/`rtmps://`-URL)
-- [ ] **WebRTC/WHIP** als First-Class-Protokoll (ultra-low-latency, SFU-kompatibel)
-- [ ] **SRT/RIST** für professionelle Contribution/Relay
+- [x] RTMP/RTMPS client implementation (H.264+AAC, FLV muxing)
+- [x] TLS-encrypted streaming (RTMPS) with certificate validation
+- [x] Dual output (stream + recording in parallel; encoded once, split via `tee`)
+- [x] Stream health and network stats (status via drop ratio/throughput, `stream_stats()` API)
+- [ ] Adaptive bitrate
+- [x] Platform integrations (Twitch, Kick, YouTube via RTMPS; custom)
+- [ ] Stream key management and stream presets
+- [x] Custom RTMP server support (arbitrary `rtmp://`/`rtmps://` URLs)
+- [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible)
+- [ ] **SRT/RIST** for professional contribution/relay
 
-**Ziel:** Live-Streaming zu den gängigen Plattformen *und* Low-Latency-Protokolle als native Bürger statt RTMP-Legacy.
+**Goal:** Live streaming to the common platforms *and* low-latency protocols as native citizens instead of RTMP legacy.
 
 ---
 
 ### 🎥 M4 – Advanced Output & Capture
 
-**Status: Geplant**
+**Status: Planned**
 
-- [ ] Virtual Camera Output
-- [ ] Replay Buffer / Instant Replay
-- [ ] Browser Sources (CEF-Integration)
-- [ ] Multi-Track-Audio-Export
-- [ ] Video-Filter & Effekte
-- [ ] Cloud-Integration (Cloud-Aufnahmen)
+- [ ] Virtual camera output
+- [ ] Replay buffer / instant replay
+- [ ] Browser sources (CEF integration)
+- [ ] Multi-track audio export
+- [ ] Video filters & effects
+- [ ] Cloud integration (cloud recordings)
 
-**Ziel:** Die erweiterten Ausgabe- und Produktions-Features von OBS.
+**Goal:** The advanced output and production features of OBS.
 
 ---
 
-### 🔌 M5 – Ecosystem & Plattform-Parität
+### 🔌 M5 – Ecosystem & Platform Parity
 
-**Status: Geplant**
+**Status: Planned**
 
-- [ ] Plugin-System (native Rust-Plugins)
-- [ ] **WASM-Plugin-Runtime** (stabiles ABI, sandboxed: Plugins können die App nie crashen; langfristiges Ziel-Plugin-Modell)
-- [ ] **OBS-Plugin-Kompatibilitätsschicht** — *temporäre Brücke*: opt-in "Compatibility Mode" (explizit als unsafe markiert), lädt native libobs-Plugins (Encoder/Filter/Quellen ohne UI); UI-Plugins (Qt) out of scope; Ziel ist der Übergang zum WASM-Plugin-System
-- [ ] Mobile Companion App (Remote Control)
-- [ ] **Windows/macOS-Feature-Parität** (aktuell Linux-first; Fenster-Capture Windows vorhanden, macOS noch offen) — als Release-Blocker, nicht Afterthought
-- [x] Installer (Windows MSI, macOS DMG, Linux AppImage) — automatisiert in CI
-- [ ] Code-Signing und Auto-Update (Signing-Automatik vorhanden, Secrets nötig)
-- [ ] Telemetrie (opt-in, datenschutzfreundlich)
-- [ ] Multi-Language-Support
+- [ ] Plugin system (native Rust plugins)
+- [ ] **WASM plugin runtime** (stable ABI, sandboxed: plugins can never crash the app; long-term target plugin model)
+- [ ] **OBS plugin compatibility layer** — *temporary bridge*: opt-in "Compatibility Mode" (explicitly marked as unsafe), loads native libobs plugins (encoders/filters/sources without UI); UI plugins (Qt) are out of scope; the goal is migration to the WASM plugin system
+- [ ] Mobile companion app (remote control)
+- [ ] **Windows/macOS feature parity** (currently Linux-first; window capture on Windows exists, macOS still open) — as a release blocker, not an afterthought
+- [x] Installers (Windows MSI, macOS DMG, Linux AppImage) — automated in CI
+- [ ] Code signing and auto-update (signing automation present, secrets needed)
+- [ ] Telemetry (opt-in, privacy-friendly)
+- [ ] Multi-language support (locale files fully wired)
 
-**Ziel:** OBS-Kern-Parität über alle Plattformen, mit einem Plugin-Modell, das OBS strukturell überlegen ist (WASM statt C-ABI), plus OBS-Compat als Übergangs-Brücke.
+**Goal:** OBS core parity across all platforms, with a plugin model structurally superior to OBS (WASM instead of a C ABI), plus OBS compat as a transition bridge.
 
 ---
 
 ### 🤖 M6 – Automation & Determinism ("Render-First")
 
-**Status: Geplant**
+**Status: Planned**
 
-*Die Differenzierungs-Säule Nr. 1: OBS ist interaktiv-first, Rivulet ist deterministisch.*
+*Differentiation pillar #1: OBS is interactive-first, Rivulet is deterministic.*
 
-- [ ] Deterministische Pipeline (steuerbare Engine-Clock, reproduzierbare Ausgabe aus denselben Eingaben)
-- [ ] Headless-CLI: Aufnahme/Rendering ohne GUI (`rivulet record ...`), als Binary und Bibliothek nutzbar
-- [ ] CI-taugliches Rendering: Video aus Code generieren (Remotion-Ansatz, nativ in Rust) — z. B. Batch-Erstellung, Tests, Screenshots pro Frame
-- [ ] Pipeline-Inspektor/Diagnose-Tooling (analog `gst-inspect`, `gst-launch`), eingebettet in die Engine
-- [ ] Deterministische Tests als First-Class-Bürger (Golden-Frame-Tests, exakte PTS/DTS-Verifikation)
+- [ ] Deterministic pipeline (controllable engine clock, reproducible output from the same inputs)
+- [ ] Headless CLI: capture/rendering without a GUI (`rivulet record ...`), usable as binary and library
+- [ ] CI-friendly rendering: generate video from code (Remotion approach, native in Rust) — e.g. batch creation, tests, per-frame screenshots
+- [ ] Pipeline inspector/diagnostics tooling (analogous to `gst-inspect`, `gst-launch`), embedded in the engine
+- [ ] Deterministic tests as first-class citizens (golden-frame tests, exact PTS/DTS verification)
 
-**Ziel:** "Video aus Code" und reproduzierbare Aufnahme-Pipelines — der Grund, warum ein Entwickler/Team OBS nicht verwenden *kann*, Rivulet aber schon.
+**Goal:** "Video from code" and reproducible capture pipelines — the reason a developer/team *cannot* use OBS but can use Rivulet.
 
 ---
 
 ### 📦 M7 – Embeddable Engine & API
 
-**Status: Geplant**
+**Status: Planned**
 
-*Differenzierungs-Säule Nr. 2: `rivulet-core` ist eine normale Bibliothek, nicht ein Monolith mit API-Nachrüstung.*
+*Differentiation pillar #2: `rivulet-core` is a normal library, not a monolith with retrofitted API.*
 
-- [ ] Stabilisierte Public API von `rivulet-core` (semver 1.0, `#![warn(missing_docs)]`, Kabelbaum-Typen)
-- [ ] Umfassende API-Doku + Beispiele (Aufnahme, Streaming, Dual Output, Encoder-Auswahl, Frame-Stream)
-- [ ] In-Prozess-Aufnahme-API: Recording-Feature in jede Rust-App einbetten (Audio-/Video-Capture, Encoding, Datei/Stream)
-- [ ] Feature-Detection und Runtime-Diagnose als API (`detect_available_encoders()`, Encoder-Fallback)
-- [ ] Abstraktion von Capture-Backends (xcap, PipeWire, Metal/WGC) hinter stabilen Traits
+- [ ] Stabilized public API for `rivulet-core` (semver 1.0, `#![warn(missing_docs)]`, crate-style types)
+- [ ] Comprehensive API docs + examples (recording, streaming, dual output, encoder selection, frame streaming)
+- [ ] In-process capture API: embed a recording feature in any Rust app (audio/video capture, encoding, file/stream)
+- [ ] Feature detection and runtime diagnostics as an API (`detect_available_encoders()`, encoder fallback)
+- [ ] Abstraction of capture backends (xcap, PipeWire, Metal/WGC) behind stable traits
 
-**Ziel:** "Recording, das man in sein Produkt einbettet" — der Anwendungsfall, für den OBS architektonisch nicht gebaut ist.
+**Goal:** "Recording you can embed into your product" — the use case OBS is architecturally not built for.
 
 ---
 
 ### ⚡ M8 – Modern Architecture
 
-**Status: Geplant**
+**Status: Planned**
 
-*Differenzierungs-Säule Nr. 3: von Grund auf moderner Render-Pfad statt OpenGL/D3D-Legacy.*
+*Differentiation pillar #3: a modern render path from the ground up instead of OpenGL/D3D legacy.*
 
-- [ ] WebGPU-Renderer (wgpu) für Preview, Composite und Effekte
-- [ ] Compute-basierte Video-/Audio-Filter (Chroma Key, Skalierung, Filter) statt CPU/Shader-Legacy
-- [ ] Zero-Copy-/GPUDirect-Capture-Pfade (DMA-BUF, WGC/NVENC-Direct, Metal IO)
-- [ ] Leistungs- und Footprint-Metriken (Idle-CPU/RAM, Laptop-Battery) als CI-Checks
-- [ ] Modernes UI-Fundament (egui) konsistent über alle Plattformen
+- [ ] WebGPU renderer (wgpu) for preview, compositing, and effects
+- [ ] Compute-based video/audio filters (chroma key, scaling, filters) instead of CPU/shader legacy
+- [ ] Zero-copy/GPU-direct capture paths (DMA-BUF, WGC/NVENC-direct, Metal IO)
+- [ ] Performance and footprint metrics (idle CPU/RAM, laptop battery) as CI checks
+- [ ] Modern UI foundation (egui) consistent across all platforms
 
-**Ziel:** Leichtgewichtig und zukunftsfähig — dort technisch vorne, wo OBS nachrüsten muss.
+**Goal:** Lightweight and future-proof — technically ahead where OBS has to retrofit.
 
 ---
 
-### 🎯 Feature-Paritäts-Checkliste (gegenüber OBS)
+### 🤖 M9 – AI Chat Assistant
 
-| OBS-Kategorie | Status |
+**Status: Planned**
+
+*Differentiation pillar #4: OBS has no native chat; streamers use cloud SaaS. Rivulet ships a local-first AI chat assistant.*
+
+- [ ] Chat adapters: Twitch (IRC/WebSocket), Kick (WebSocket), YouTube (Live API)
+- [ ] LLM provider abstraction — **local-first**:
+  - Ollama (`http://localhost:11434`) as default
+  - llama.cpp server / in-process (`llama_cpp2`)
+  - OpenAI-compatible endpoints (cloud, optional)
+- [ ] Personas: configurable system prompts per "personality" (TOML)
+- [ ] Custom commands (`!so`, `!song`, `!setup`, ...) — deterministic, no LLM needed
+- [ ] Context/memory: short chat history + streamer info
+- [ ] Moderation: toxicity filter as a pre-check before responding
+- [ ] GUI panel (chat + bot settings) wired through the i18n layer
+
+**Goal:** A private, subscription-free, API-free AI chat assistant that runs fully locally — the counter-position to cloud chat bots like StreamChatAI.
+
+---
+
+### 🎯 Feature-Parity Checklist (vs. OBS)
+
+| OBS category | Status |
 | --- | --- |
-| Capture-Quellen (Display, Fenster, Webcam) | Teilweise (Display + Fenster) |
-| Szenen & Übergänge | Offen |
-| Audio-Mixer (Quellen, Tracks, Filter) | Teilweise (Mixer, Separate Tracks) |
-| Recording & Encoding | Teilweise (H.264 Hardware + Software) |
-| Streaming (RTMP, Plattformen) | Teilweise (RTMPS Twitch/Kick/YouTube) |
-| Virtual Camera | Offen |
-| Replay Buffer | Offen |
-| Browser Sources | Offen |
-| Studio-Modus & Hotkeys | Offen |
-| Plugin-Ökosystem & OBS-Kompatibilität | Offen |
-| Multi-Track-Audio | Teilweise (2 Tracks) |
-| Plattform-Parität (Windows/macOS) | Offen |
+| Capture sources (display, window, webcam) | Partial (display + window) |
+| Scenes & transitions | Open |
+| Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks) |
+| Recording & encoding | Partial (H.264 hardware + software) |
+| Streaming (RTMP, platforms) | Partial (RTMPS Twitch/Kick/YouTube) |
+| Virtual camera | Open |
+| Replay buffer | Open |
+| Browser sources | Open |
+| Studio mode & hotkeys | Open |
+| Plugin ecosystem & OBS compatibility | Open |
+| Multi-track audio | Partial (2 tracks) |
+| Platform parity (Windows/macOS) | Open |
+| AI chat assistant | Open (M9) |
 
 ---
 
-## 📺 Streaming-Beispiel
+## 📺 Streaming Example
 
-Das Beispiel `stream_rtmps` (`rivulet-audio`) erfasst den Bildschirm samt
-gemischtem System-/Mikrofon-Audio und streamt live per RTMPS zu Twitch, Kick,
-YouTube oder einem beliebigen RTMP-Server:
+The `stream_rtmps` example (`rivulet-audio`) captures the screen together with
+mixed system/microphone audio and streams live via RTMPS to Twitch, Kick,
+YouTube, or any RTMP server:
 
 ```bash
 cd rivulet-audio
 
-# Twitch (default) oder YouTube
-RIVULET_STREAM_KEY="dein-stream-key" \
+# Twitch (default) or YouTube
+RIVULET_STREAM_KEY="your-stream-key" \
 RIVULET_STREAM_SECS=60 \
 cargo run --example stream_rtmps
 
-# Kick benötigt den IVS-Ingest-Endpoint
+# Kick requires the IVS ingest endpoint
 RIVULET_STREAM_URL="rtmps://<id>.global-contribute.live-video.net/app" \
 RIVULET_STREAM_PLATFORM=kick \
-RIVULET_STREAM_KEY="dein-stream-key" \
+RIVULET_STREAM_KEY="your-stream-key" \
 cargo run --example stream_rtmps
 
-# Beliebiger RTMP/RTMPS-Server (z.B. lokal)
+# Any RTMP/RTMPS server (e.g. local)
 RIVULET_STREAM_URL="rtmp://127.0.0.1:1935/live" \
 RIVULET_STREAM_PLATFORM=custom \
 RIVULET_STREAM_KEY="test" \
 cargo run --example stream_rtmps
 ```
 
-**Umgebungsvariablen:**
+**Environment variables:**
 
-| Variable | Bedeutung | Pflicht |
+| Variable | Meaning | Required |
 | --- | --- | --- |
-| `RIVULET_STREAM_KEY` | Stream-Key aus dem Plattform-Dashboard | Ja |
-| `RIVULET_STREAM_PLATFORM` | `twitch` (Default) · `kick` · `youtube` · `custom` | Nein |
-| `RIVULET_STREAM_URL` | Ingest-URL (für `custom` und `kick`) | je nach Plattform |
-| `RIVULET_STREAM_SECS` | Stream-Dauer in Sekunden (Default: 10) | Nein |
-| `RIVULET_STREAM_RECORD_PATH` | Optionaler MP4-Pfad für parallele Aufnahme (Dual Output) | Nein |
+| `RIVULET_STREAM_KEY` | Stream key from the platform dashboard | Yes |
+| `RIVULET_STREAM_PLATFORM` | `twitch` (default) · `kick` · `youtube` · `custom` | No |
+| `RIVULET_STREAM_URL` | Ingest URL (for `custom` and `kick`) | depends on platform |
+| `RIVULET_STREAM_SECS` | Stream duration in seconds (default: 10) | No |
+| `RIVULET_STREAM_RECORD_PATH` | Optional MP4 path for parallel recording (dual output) | No |
 
-Alle zwei Sekunden gibt das Beispiel den Live-Health-Status aus, z. B.
+Every two seconds the example prints the live health status, e.g.
 `[health] Good | 2500 kbps | 30.0 fps | 120 sent / 0 dropped`.
 
 ---
@@ -339,7 +364,7 @@ cargo test --workspace
 cargo test -p rivulet-core
 ```
 
-The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4, including separate audio tracks verified via the GStreamer Discoverer), the streaming pipelines (RTMPS/dual output parse and route audio correctly), stream health tracking (status derivation from drop ratio, bitrate/FPS collapse and stalls), the encoder/recorder lifecycle, and the video encoder abstraction (element names, detection order, fallback, pipeline fragments, 4:2:0 input caps). Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable. The hardware-encoding end-to-end test only runs when the matching GPU plugin is present.
+The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4, including separate audio tracks verified via the GStreamer Discoverer), the streaming pipelines (RTMPS/dual output parse and route audio correctly), stream health tracking (status derivation from drop ratio, bitrate/FPS collapse and stalls), the encoder/recorder lifecycle, the video encoder abstraction (element names, detection order, fallback, pipeline fragments, 4:2:0 input caps), and the i18n layer (locale resolution and translation lookups). Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable. The hardware-encoding end-to-end test only runs when the matching GPU plugin is present.
 
 ### Linting & Formatting
 
@@ -359,9 +384,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 ### Prerequisites
 
-**GStreamer** (Core + `gst-plugins-good`/`gst-plugins-bad`/`gst-plugins-ugly` + `gst-libav`) wird von der Engine für Encoding, Audio-Mixing und Streaming (H.264 + AAC) benötigt.
+**GStreamer** (Core + `gst-plugins-good`/`gst-plugins-bad`/`gst-plugins-ugly` + `gst-libav`) is required by the engine for encoding, audio mixing, and streaming (H.264 + AAC).
 
-**FFmpeg** wird nur noch vom Legacy-Encoder in `rivulet-streaming` verwendet und muss verfügbar sein, wenn dieser Pfad genutzt wird:
+**FFmpeg** is only used by the legacy encoder in `rivulet-streaming` and must be available when that path is used:
 
 #### Windows
 ```powershell
@@ -375,42 +400,41 @@ choco install ffmpeg
 
 ## 📦 Releases
 
-Releases werden vollständig automatisiert über GitHub Actions erzeugt:
+Releases are fully automated via GitHub Actions:
 
-### Alpha-Kanal (`release.yml`)
+### Alpha channel (`release.yml`)
 
-Jeder Push mit einem `feat:`-Commit (Conventional Commits) auf `develop` erzeugt
-ein neues Alpha-Release:
+Every push with a `feat:` commit (Conventional Commits) to `develop` produces
+a new alpha release:
 
-1. **Versionierung**: Die nächste Version wird per SemVer aus den Commits seit
-   dem letzten Tag berechnet (`scripts/release-version.sh`), plus `-alpha.N`
-   (N = nächste freie Nummer). `Cargo.toml` und `CHANGELOG.md` werden gebumpt
-   und als `chore(release): prepare vX.Y.Z-alpha.N` committet.
-2. **Tag**: `vX.Y.Z-alpha.N` wird gesetzt und gepusht.
-3. **Binaries**: Drei Plattformen (Linux x86_64, Windows x86_64, macOS
-   aarch64) bauen Release-Binaries aus dem Tag.
-4. **Pakete**:
+1. **Versioning**: The next version is computed via SemVer from the commits
+   since the last tag (`scripts/release-version.sh`), plus `-alpha.N`
+   (N = next free number). `Cargo.toml` and `CHANGELOG.md` are bumped and
+   committed as `chore(release): prepare vX.Y.Z-alpha.N`.
+2. **Tag**: `vX.Y.Z-alpha.N` is set and pushed.
+3. **Binaries**: Three platforms (Linux x86_64, Windows x86_64, macOS
+   aarch64) build release binaries from the tag.
+4. **Packages**:
    - Linux: AppImage (`packaging/linux/build-appimage.sh`)
-   - Windows: Portable-ZIP + MSI (`packaging/windows/`) — GStreamer-Runtime wird
-     mitgeliefert, sodass das Bundle ohne GStreamer-Installation läuft
+   - Windows: portable ZIP + MSI (`packaging/windows/`) — the GStreamer runtime
+     is bundled, so the bundle runs without a GStreamer installation
    - macOS: DMG (`packaging/macos/build-dmg.sh`)
-5. **Release**: Ein formelles GitHub-Release (Pre-Release) mit allen Artefakten
-   wird erstellt.
+5. **Release**: A formal GitHub release (pre-release) with all artifacts
+   is created.
 
-Dependabot-Pushes werden übersprungen (kein Release-Build für gemergte
-Bot-PRs).
+Dependabot pushes are skipped (no release build for merged bot PRs).
 
-### Beta/RC/Stable-Kanal (`ci.yml`)
+### Beta/RC/stable channel (`ci.yml`)
 
-Ein manuell gesetzter Tag `vX.Y.Z` (ohne `-alpha.*`) baut dieselben Pakete und
-veröffentlicht ein GitHub-Release. Tags mit `-beta.*`/`-rc.*` werden als
-Pre-Release markiert, stabile Tags als vollständiges Release.
+A manually set tag `vX.Y.Z` (without `-alpha.*`) builds the same packages and
+publishes a GitHub release. Tags with `-beta.*`/`-rc.*` are marked as
+pre-releases; stable tags as full releases.
 
-### Code-Signing
+### Code signing
 
-- **Windows**: `signtool` signiert die Binary (nur wenn `WINDOWS_CERT_BASE64`
-  und `WINDOWS_CERT_PASSWORD` als Secrets hinterlegt sind).
-- **macOS**: `codesign` + Notarisierung via `notarytool` (nur wenn die Secrets
-  `MACOS_CERT_BASE64`, `MACOS_CERT_PASSWORD`, `APPLE_ID`, `APPLE_APP_PASSWORD`
-  und `APPLE_TEAM_ID` hinterlegt sind).
-- Ohne Secrets werden unsignierte Pakete gebaut (Standard).
+- **Windows**: `signtool` signs the binary (only if `WINDOWS_CERT_BASE64`
+  and `WINDOWS_CERT_PASSWORD` are provided as secrets).
+- **macOS**: `codesign` + notarization via `notarytool` (only if the secrets
+  `MACOS_CERT_BASE64`, `MACOS_CERT_PASSWORD`, `APPLE_ID`, `APPLE_APP_PASSWORD`,
+  and `APPLE_TEAM_ID` are provided).
+- Without secrets, unsigned packages are built (default).

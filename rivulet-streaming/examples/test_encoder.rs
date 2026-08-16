@@ -11,7 +11,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut frame_data = vec![0u8; (stride * height) as usize];
 
-    // Encoder erstellen
+    // Create the encoder
     let mut encoder = VideoEncoder::new(
         &PathBuf::from("test_output.mp4"),
         width,
@@ -24,11 +24,11 @@ fn main() -> anyhow::Result<()> {
 
     // Encode 90 frames (3 seconds at 30fps)
     for i in 0..90 {
-        // Wechsle Farben: Rot -> Grün -> Blau
+        // Cycle colors: red -> green -> blue
         let color = match (i / 30) % 3 {
-            0 => (255, 0, 0), // Rot
-            1 => (0, 255, 0), // Grün
-            _ => (0, 0, 255), // Blau
+            0 => (255, 0, 0), // Red
+            1 => (0, 255, 0), // Green
+            _ => (0, 0, 255), // Blue
         };
 
         for pixel in frame_data.chunks_mut(4) {

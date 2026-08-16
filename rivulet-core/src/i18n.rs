@@ -1,0 +1,253 @@
+//! Lightweight internationalization (i18n) support.
+//!
+//! All user-visible strings live in translation tables keyed by stable,
+//! semantic keys instead of being hard-coded in the UI. The default locale is
+//! English; every other locale adds its own table. Missing translations fall
+//! back to the key itself, so the UI never breaks.
+//!
+//! Keys may contain `{0}`, `{1}`, ... positional placeholders, rendered via
+//! [`Locale::tr_fmt`]:
+//!
+//! ```
+//! use rivulet_core::Locale;
+//!
+//! let msg = Locale::En.tr_fmt("recording_in_progress", &[42.to_string()]);
+//! ```
+
+use serde::{Deserialize, Serialize};
+
+/// Supported user interface languages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Locale {
+    /// English (default).
+    #[default]
+    En,
+    /// German.
+    De,
+}
+
+impl Locale {
+    /// All supported locales in display order (for language pickers).
+    pub fn all() -> &'static [Locale] {
+        &[Locale::En, Locale::De]
+    }
+
+    /// Parse a locale from a BCP-47-style language tag such as `"en"`,
+    /// `"de"` or `"de-DE"`. Unknown tags fall back to English.
+    pub fn from_code(code: &str) -> Locale {
+        let lower = code.to_ascii_lowercase();
+        let primary = lower.split('-').next().unwrap_or("");
+        match primary {
+            "de" => Locale::De,
+            _ => Locale::En,
+        }
+    }
+
+    /// BCP-47 language code identifying this locale (`"en"`, `"de"`).
+    pub fn code(self) -> &'static str {
+        match self {
+            Locale::En => "en",
+            Locale::De => "de",
+        }
+    }
+
+    /// Native name of the language, for language pickers.
+    pub fn name(self) -> &'static str {
+        match self {
+            Locale::En => "English",
+            Locale::De => "Deutsch",
+        }
+    }
+
+    /// Translate a key into this locale.
+    ///
+    /// Returns the key itself when no translation exists, so missing entries
+    /// degrade gracefully instead of panicking. The result borrows either the
+    /// static translation table or the input key.
+    pub fn tr(self, key: &str) -> &str {
+        self.strings()
+            .iter()
+            .find(|(k, _)| **k == *key)
+            .map_or(key, |(_, v)| v)
+    }
+
+    /// Translate a key and substitute `{0}`, `{1}`, ... positional
+    /// placeholders with the given, already-formatted arguments.
+    ///
+    /// Falls back to the key itself when no translation exists.
+    pub fn tr_fmt(self, key: &str, args: &[String]) -> String {
+        let template = self.tr(key);
+        let mut out = String::with_capacity(template.len() + 16);
+        let mut rest = template;
+        while let Some(open) = rest.find('{') {
+            out.push_str(&rest[..open]);
+            let tail = &rest[open + 1..];
+            match tail.find('}') {
+                Some(close) => {
+                    let spec = &tail[..close];
+                    if let Ok(idx) = spec.parse::<usize>() {
+                        if let Some(arg) = args.get(idx) {
+                            out.push_str(arg);
+                            rest = &tail[close + 1..];
+                            continue;
+                        }
+                    }
+                    out.push('{');
+                    rest = tail;
+                }
+                None => {
+                    out.push_str(rest);
+                    rest = "";
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// Translation table for this locale.
+    ///
+    /// Every locale must define exactly the same keys in the same order; a
+    /// test enforces this invariant.
+    fn strings(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            Locale::En => &[
+                // Recording
+                ("source", "Source:"),
+                ("screen_recording", "Screen recording"),
+                ("windows_screen_recording", "Windows Screen Recording"),
+                ("select_monitor", "Select monitor"),
+                ("select_window", "Select window"),
+                ("unknown_monitor", "Unknown monitor"),
+                ("refresh_sources", "Refresh sources"),
+                ("start_recording", "Start recording"),
+                ("stop_recording", "Stop recording"),
+                ("recording_in_progress", "Recording in progress ({0}s)"),
+                ("recording_saved", "Recording saved."),
+                ("no_source_selected", "No capture source selected."),
+                ("invalid_source", "Invalid selected source."),
+                ("invalid_monitor", "Invalid selected monitor."),
+                ("invalid_window", "Invalid selected window."),
+                // Audio
+                ("audio_mixer", "Audio Mixer"),
+                ("start_audio", "Start audio"),
+                ("stop_audio", "Stop audio"),
+                ("running", "running"),
+                ("system_audio", "System audio"),
+                ("microphone", "Microphone"),
+                ("separate_tracks", "Separate tracks"),
+                (
+                    "audio_capture_unavailable",
+                    "Audio capture unavailable: {0}",
+                ),
+                ("audio_start_failed", "Audio start failed: {0}"),
+                ("peak", "Peak: {0} dB"),
+                // Language picker
+                ("language", "Language"),
+            ],
+            Locale::De => &[
+                // Recording
+                ("source", "Quelle:"),
+                ("screen_recording", "Bildschirmaufnahme"),
+                ("windows_screen_recording", "Windows-Bildschirmaufnahme"),
+                ("select_monitor", "Monitor auswählen"),
+                ("select_window", "Fenster auswählen"),
+                ("unknown_monitor", "Unbekannter Monitor"),
+                ("refresh_sources", "Quellen aktualisieren"),
+                ("start_recording", "Aufnahme starten"),
+                ("stop_recording", "Aufnahme stoppen"),
+                ("recording_in_progress", "Aufnahme läuft ({0}s)"),
+                ("recording_saved", "Aufnahme gespeichert."),
+                ("no_source_selected", "Keine Aufnahmequelle ausgewählt."),
+                ("invalid_source", "Ausgewählte Quelle ist ungültig."),
+                ("invalid_monitor", "Ausgewählter Monitor ist ungültig."),
+                ("invalid_window", "Ausgewähltes Fenster ist ungültig."),
+                // Audio
+                ("audio_mixer", "Audio-Mixer"),
+                ("start_audio", "Audio starten"),
+                ("stop_audio", "Audio stoppen"),
+                ("running", "läuft"),
+                ("system_audio", "Systemaudio"),
+                ("microphone", "Mikrofon"),
+                ("separate_tracks", "Getrennte Tracks"),
+                (
+                    "audio_capture_unavailable",
+                    "Audio-Capture nicht verfügbar: {0}",
+                ),
+                ("audio_start_failed", "Audio-Start fehlgeschlagen: {0}"),
+                ("peak", "Peak: {0} dB"),
+                // Language picker
+                ("language", "Sprache"),
+            ],
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_locale_is_english() {
+        assert_eq!(Locale::default(), Locale::En);
+    }
+
+    #[test]
+    fn translates_english() {
+        assert_eq!(Locale::En.tr("start_recording"), "Start recording");
+    }
+
+    #[test]
+    fn translates_german() {
+        assert_eq!(Locale::De.tr("start_recording"), "Aufnahme starten");
+    }
+
+    #[test]
+    fn unknown_key_falls_back_to_key() {
+        assert_eq!(Locale::En.tr("does_not_exist"), "does_not_exist");
+        assert_eq!(Locale::De.tr("does_not_exist"), "does_not_exist");
+    }
+
+    #[test]
+    fn parses_bcp47_codes() {
+        assert_eq!(Locale::from_code("en"), Locale::En);
+        assert_eq!(Locale::from_code("en-US"), Locale::En);
+        assert_eq!(Locale::from_code("de"), Locale::De);
+        assert_eq!(Locale::from_code("de-DE"), Locale::De);
+        assert_eq!(Locale::from_code("fr"), Locale::En);
+        assert_eq!(Locale::from_code(""), Locale::En);
+    }
+
+    #[test]
+    fn lists_all_locales() {
+        assert_eq!(Locale::all(), &[Locale::En, Locale::De]);
+    }
+
+    #[test]
+    fn exposes_codes_and_native_names() {
+        assert_eq!(Locale::En.code(), "en");
+        assert_eq!(Locale::De.code(), "de");
+        assert_eq!(Locale::En.name(), "English");
+        assert_eq!(Locale::De.name(), "Deutsch");
+    }
+
+    #[test]
+    fn formatted_translations_contain_placeholders() {
+        let en = Locale::En.tr_fmt("recording_in_progress", &[7.to_string()]);
+        assert_eq!(en, "Recording in progress (7s)");
+        let de = Locale::De.tr_fmt("recording_in_progress", &[7.to_string()]);
+        assert_eq!(de, "Aufnahme läuft (7s)");
+        let missing = Locale::En.tr_fmt("does_not_exist", &["x".to_string()]);
+        assert_eq!(missing, "does_not_exist");
+    }
+
+    #[test]
+    fn all_locales_share_the_same_keys() {
+        let en_keys: Vec<&str> = Locale::En.strings().iter().map(|(k, _)| *k).collect();
+        let de_keys: Vec<&str> = Locale::De.strings().iter().map(|(k, _)| *k).collect();
+        assert_eq!(
+            en_keys, de_keys,
+            "every locale must define exactly the same keys in the same order"
+        );
+    }
+}

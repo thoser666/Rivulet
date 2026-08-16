@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Generiert/aktualisiert CHANGELOG.md aus den Conventional-Commits seit dem
-# letzten Tag.
+# Generates/updates CHANGELOG.md from the Conventional Commits since the
+# last tag.
 #
-# Verwendung: scripts/update-changelog.sh <version>
+# Usage: scripts/update-changelog.sh <version>
 set -euo pipefail
 
 VERSION="${1:-}"
@@ -19,7 +19,7 @@ if [[ -n "$LAST_TAG" ]]; then
   BODY="$(git log "$LAST_TAG"..HEAD --pretty=format:'- %s' 2>/dev/null || true)"
 fi
 if [[ -z "$BODY" ]]; then
-  BODY="- Initial release oder keine neuen Commits."
+  BODY="- Initial release or no new commits."
 fi
 
 CHANGELOG="CHANGELOG.md"
@@ -28,11 +28,11 @@ ENTRY="$SECTION
 $BODY"
 
 if [[ -f "$CHANGELOG" ]]; then
-  # Bestehenden Inhalt ohne den Header übernehmen und neue Sektion voranstellen.
+  # Keep the existing content without the header and prepend the new section.
   REST="$(sed '1{/^# Changelog/d;}' "$CHANGELOG" | sed '/./,$!d' | sed 's/^/\n/')"
   printf '%s\n\n%s\n%s\n' "$HEADER" "$ENTRY" "$REST" > "$CHANGELOG"
 else
   printf '%s\n\n%s\n' "$HEADER" "$ENTRY" > "$CHANGELOG"
 fi
 
-echo "CHANGELOG.md aktualisiert (Version $VERSION)."
+echo "CHANGELOG.md updated (version $VERSION)."

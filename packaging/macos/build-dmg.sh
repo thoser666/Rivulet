@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# Baut ein macOS-DMG aus dem Staging-Verzeichnis.
+# Builds a macOS DMG from the staging directory.
 #
-# Verwendung: packaging/macos/build-dmg.sh <version> <staging-dir> <out-file>
+# Usage: packaging/macos/build-dmg.sh <version> <staging-dir> <out-file>
 set -euo pipefail
 
-VERSION="${1:?Version fehlt}"
-STAGING="${2:?Staging-Verzeichnis fehlt}"
-OUT="${3:?Ausgabedatei fehlt}"
+VERSION="${1:?Missing version}"
+STAGING="${2:?Missing staging directory}"
+OUT="${3:?Missing output file}"
 
 APP="$STAGING/Rivulet.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-# Binary einspielen.
+# Install the binary.
 cp "$STAGING/rivulet-gui" "$APP/Contents/MacOS/rivulet-gui"
 chmod +x "$APP/Contents/MacOS/rivulet-gui"
 
-# Info.plist erzeugen.
+# Generate Info.plist.
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -39,12 +39,12 @@ if [[ -f "packaging/rivulet.icns" ]]; then
   cp packaging/rivulet.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-# Ausführbarkeit für die App festlegen.
+# Set the executability of the app.
 chmod -R u+rwX "$APP"
 
-# DMG im Staging bauen.
+# Build the DMG in the staging directory.
 DMG="$STAGING/rivulet.dmg"
 rm -f "$DMG"
 hdiutil create -volname "Rivulet $VERSION" -srcfolder "$APP" -ov -format UDZO "$DMG" >/dev/null
 cp "$DMG" "$OUT"
-echo "DMG erstellt: $OUT"
+echo "DMG created: $OUT"

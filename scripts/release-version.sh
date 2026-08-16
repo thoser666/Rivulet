@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Ermittelt die nächste Release-Version nach Semantic Versioning anhand der
-# Conventional-Commits seit dem letzten Tag, und generiert daraus die
-# Versions-String für den nächsten Release (beta/rc/stable).
+# Determines the next release version according to Semantic Versioning from
+# the Conventional Commits since the last tag, and generates the version
+# string for the next release (beta/rc/stable).
 #
-# Ausgabe: <next-version>
+# Output: <next-version>
 set -euo pipefail
 
-# Letzten Tag ermitteln (v[0-9]*); ohne existierenden Tag starten wir bei
-# 0.0.0 und analysieren den kompletten Verlauf.
+# Determine the last tag (v[0-9]*); without an existing tag we start at
+# 0.0.0 and analyze the complete history.
 LAST_TAG="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
 
 if [[ -n "$LAST_TAG" ]]; then
-  echo "Letzter Tag: $LAST_TAG" >&2
+  echo "Last tag: $LAST_TAG" >&2
   BASE_VERSION="${LAST_TAG#v}"
   BASE_VERSION="${BASE_VERSION%%-*}"
   LOG_RANGE="$LAST_TAG..HEAD"
 else
-  echo "Kein vorheriger Tag gefunden - kompletter Verlauf wird analysiert." >&2
+  echo "No previous tag found - analyzing the complete history." >&2
   BASE_VERSION="0.0.0"
   LOG_RANGE="HEAD"
 fi
@@ -24,8 +24,8 @@ fi
 IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
 MAJOR="${MAJOR:-0}"; MINOR="${MINOR:-0}"; PATCH="${PATCH:-0}"
 
-# Commits im relevanten Bereich nach konventionellen Typen analysieren.
-# `!!`-Präfix in der Subject kennzeichnet einen Breaking Change.
+# Analyze the commits in the relevant range by conventional type.
+# A `!!` prefix in the subject marks a breaking change.
 HAS_BREAKING=false
 HAS_FEATURE=false
 HAS_FIX=false
@@ -40,24 +40,24 @@ while IFS= read -r line; do
   esac
 done < <(git log "$LOG_RANGE" --pretty=format:'%s%n%b' 2>/dev/null || true)
 
-# Wenn keine Commits im Bereich existieren, bleibt die Version unverändert.
+# If there are no commits in the range, the version stays unchanged.
 if [[ -z "$(git log "$LOG_RANGE" --oneline 2>/dev/null || true)" ]]; then
-  echo "Keine neuen Commits seit $LAST_TAG - Version bleibt $BASE_VERSION" >&2
+  echo "No new commits since $LAST_TAG - version stays $BASE_VERSION" >&2
   echo "$BASE_VERSION"
   exit 0
 fi
 
 if [[ "$HAS_BREAKING" == true ]]; then
   MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0
-  REASON="Breaking Change(s)"
+  REASON="breaking change(s)"
 elif [[ "$HAS_FEATURE" == true ]]; then
   MINOR=$((MINOR + 1)); PATCH=0
-  REASON="Feature-Commits"
+  REASON="feature commits"
 else
   PATCH=$((PATCH + 1))
-  REASON="Fix-Commits"
+  REASON="fix commits"
 fi
 
 NEXT="$MAJOR.$MINOR.$PATCH"
-echo "Nächste Version: $NEXT (Basis: $REASON)" >&2
+echo "Next version: $NEXT (basis: $REASON)" >&2
 echo "$NEXT"

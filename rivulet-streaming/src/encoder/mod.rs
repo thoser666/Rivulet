@@ -4,7 +4,7 @@ use anyhow::Result;
 mod video;
 pub use video::VideoEncoder;
 
-// Dies ist nur eine Placeholder-Struktur
+// This is only a placeholder struct
 pub struct Encoder {
     settings: RecordingSettings,
     start_time: Option<std::time::Instant>,

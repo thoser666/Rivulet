@@ -5,7 +5,7 @@ use gstreamer_app as gst_app;
 use gstreamer_video as gst_video;
 use once_cell::sync::Lazy;
 use std::path::PathBuf;
-// Wichtig: Der Prelude wird immer noch für Methoden wie .set_state(), .by_name() etc. benötigt.
+// Important: The prelude is still needed for methods like .set_state(), .by_name(), etc.
 use gst::prelude::*;
 
 pub mod audio;
@@ -20,9 +20,12 @@ pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 pub mod stream;
 pub use stream::{StreamPlatform, StreamSettings};
 
-// GStreamer-Initialisierung
+pub mod i18n;
+pub use i18n::Locale;
+
+// GStreamer initialization
 static GSTREAMER_INIT: Lazy<()> = Lazy::new(|| {
-    gst::init().expect("GStreamer-Initialisierung fehlgeschlagen.");
+    gst::init().expect("GStreamer initialization failed.");
 });
 
 /// Default audio format used by the engine's audio input.
@@ -191,12 +194,9 @@ impl RivuletEngine {
         let location = self
             .stream_settings
             .as_ref()
-            .expect("Stream-Settings müssen gesetzt sein")
+            .expect("Stream settings must be set")
             .location();
-        println!(
-            "[Engine] Initialisiere Streaming-Pipeline für: {}",
-            location
-        );
+        println!("[Engine] Initializing streaming pipeline for: {}", location);
         let mut s = self.video_branch_str();
         s.push_str(&self.audio_branch_str(true));
         s.push_str(&format!(
@@ -216,15 +216,12 @@ impl RivuletEngine {
         let stream_location = self
             .stream_settings
             .as_ref()
-            .expect("Stream-Settings müssen gesetzt sein")
+            .expect("Stream settings must be set")
             .location();
-        let path = self
-            .output_path
-            .as_ref()
-            .expect("Ausgabepfad muss gesetzt sein");
-        let location = path.to_str().expect("Dateipfad ist ungültig.");
+        let path = self.output_path.as_ref().expect("Output path must be set");
+        let location = path.to_str().expect("Invalid file path.");
         println!(
-            "[Engine] Initialisiere Dual-Output-Pipeline (Aufnahme + Stream nach {})",
+            "[Engine] Initializing dual-output pipeline (recording + stream to {})",
             stream_location
         );
 
@@ -267,8 +264,8 @@ impl RivuletEngine {
             Some(self.build_streaming_pipeline_str())
         } else {
             let path = self.output_path.as_ref()?;
-            let location = path.to_str().expect("Dateipfad ist ungültig.");
-            println!("[Engine] Initialisiere Aufnahme-Pipeline für: {}", location);
+            let location = path.to_str().expect("Invalid file path.");
+            println!("[Engine] Initializing recording pipeline for: {}", location);
             Some(self.build_recording_pipeline_str(location))
         }
     }
@@ -278,10 +275,10 @@ impl RivuletEngine {
             return;
         };
 
-        // Hardware-Encoder (NVENC/QuickSync/AMF) sind nicht auf jeder Maschine
-        // nutzbar (fehlende GPU/Treiber). Schlägt das Parsen der Pipeline oder
-        // ihr Start fehl, wird einmalig auf Software-x264 zurückgefallen und
-        // die Pipeline mit dem neuen Encoder erneut gebaut.
+        // Hardware encoders (NVENC/QuickSync/AMF) are not available on every
+        // machine (missing GPU/driver). If pipeline parsing or startup fails,
+        // fall back to software x264 once and rebuild the pipeline with the
+        // new encoder.
         let pipeline = loop {
             let parsed = match gst::parse::launch(&pipeline_str) {
                 Ok(p) => p,
@@ -289,7 +286,7 @@ impl RivuletEngine {
                     if self.try_encoder_fallback(&mut pipeline_str, &e.to_string()) {
                         continue;
                     }
-                    eprintln!("[Engine] Fehler beim Erstellen der Pipeline: {}", e);
+                    eprintln!("[Engine] Error creating the pipeline: {}", e);
                     return;
                 }
             };
@@ -298,13 +295,13 @@ impl RivuletEngine {
                 if self.try_encoder_fallback(&mut pipeline_str, &e.to_string()) {
                     continue;
                 }
-                eprintln!("[Engine] Pipeline konnte nicht gestartet werden: {}", e);
+                eprintln!("[Engine] Pipeline could not be started: {}", e);
                 return;
             }
             break pipeline;
         };
 
-        // Der Rest des Codes ist korrekt...
+        // The rest of the code is correct...
         let appsrc = pipeline
             .by_name("rivulet_src")
             .unwrap()
@@ -359,11 +356,11 @@ impl RivuletEngine {
         self.pipeline = Some(pipeline);
         self.appsrc = Some(appsrc);
         if self.is_dual_output() {
-            println!("[Engine] Dual-Output-Pipeline läuft.");
+            println!("[Engine] Dual-output pipeline running.");
         } else if self.is_streaming() {
-            println!("[Engine] Streaming-Pipeline läuft.");
+            println!("[Engine] Streaming pipeline running.");
         } else {
-            println!("[Engine] Aufnahme-Pipeline läuft.");
+            println!("[Engine] Recording pipeline running.");
         }
     }
 
@@ -378,13 +375,13 @@ impl RivuletEngine {
             return false;
         }
         eprintln!(
-            "[Engine] Encoder {:?} nicht initialisierbar ({}), Fallback auf x264.",
+            "[Engine] Encoder {:?} not initializable ({}), falling back to x264.",
             self.video_encoder, reason
         );
         self.video_encoder = VideoEncoder::Software;
         *pipeline_str = self
             .build_pipeline_str()
-            .expect("Fallback-Pipeline baut immer");
+            .expect("fallback pipeline always builds");
         true
     }
 
@@ -502,8 +499,8 @@ impl RivuletEngine {
         println!("[Engine] Streaming vorbereitet.");
         self.is_recording = true;
 
-        // Stream-Health-Monitoring initialisieren. Defaults passen zur
-        // Engine-Encoding-Konfiguration (30 FPS, 5000 kbit/s).
+        // Initialize the stream health monitor. Defaults match the
+        // engine encoding configuration (30 FPS, 5000 kbit/s).
         self.stream_health = Some(StreamHealthMonitor::new(5000.0, 30.0));
     }
 
@@ -515,13 +512,13 @@ impl RivuletEngine {
         if self.is_recording {
             return;
         }
-        println!("[Engine] Aufnahme vorbereitet für: {:?}", path);
+        println!("[Engine] Recording prepared for: {:?}", path);
         self.output_path = Some(path);
         self.is_recording = true;
 
-        // Stream-Health-Monitoring initialisieren, sobald ein Stream-Ziel
-        // (nur Stream oder Dual Output) konfiguriert ist. Defaults passen zur
-        // Engine-Encoding-Konfiguration (30 FPS, 5000 kbit/s).
+        // Initialize the stream health monitor as soon as a stream target
+        // (stream-only or dual output) is configured. Defaults match the
+        // engine encoding configuration (30 FPS, 5000 kbit/s).
         if self.is_streaming() {
             self.stream_health = Some(StreamHealthMonitor::new(5000.0, 30.0));
         }
@@ -531,7 +528,7 @@ impl RivuletEngine {
         if !self.is_recording {
             return;
         }
-        println!("[Engine] Aufnahme wird gestoppt...");
+        println!("[Engine] Stopping recording...");
 
         if let Some(appsrc) = self.appsrc.as_ref() {
             let _ = appsrc.end_of_stream();
@@ -546,8 +543,8 @@ impl RivuletEngine {
             let _ = appsrc.end_of_stream();
         }
 
-        // Auf EOS warten, damit der Muxer die Datei (moov-Atom) finalisiert,
-        // bevor die Pipeline auf Null gesetzt wird.
+        // Wait for EOS so the muxer finalizes the file (moov atom)
+        // before the pipeline is set to Null.
         if let Some(pipeline) = self.pipeline.as_ref() {
             if let Some(bus) = pipeline.bus() {
                 let _ = bus.timed_pop_filtered(
@@ -560,7 +557,7 @@ impl RivuletEngine {
         if let Some(pipeline) = self.pipeline.take() {
             pipeline
                 .set_state(gst::State::Null)
-                .expect("Pipeline konnte nicht gestoppt werden.");
+                .expect("Pipeline could not be stopped.");
         }
 
         self.appsrc = None;
@@ -570,7 +567,7 @@ impl RivuletEngine {
         self.output_path = None;
         self.stream_health = None;
         self.is_recording = false;
-        println!("[Engine] Aufnahme gestoppt und Datei gespeichert.");
+        println!("[Engine] Recording stopped and file saved.");
     }
 
     pub fn process_raw_frame(&mut self, frame_data: &[u8], width: u32, height: u32) {
@@ -602,10 +599,7 @@ impl RivuletEngine {
                     if let Some(health) = self.stream_health.as_mut() {
                         health.record_frame_dropped();
                     }
-                    eprintln!(
-                        "[Engine] Fehler beim Senden des Frames in die Pipeline: {:?}",
-                        err
-                    );
+                    eprintln!("[Engine] Error pushing frame into the pipeline: {:?}", err);
                     self.stop_recording();
                 }
             }
@@ -742,7 +736,7 @@ mod tests {
 
         assert!(path.exists(), "Ausgabedatei sollte existieren");
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        assert!(len > 0, "Ausgabedatei sollte nicht leer sein");
+        assert!(len > 0, "output file should not be empty");
 
         let _ = std::fs::remove_file(&path);
     }
@@ -778,11 +772,11 @@ mod tests {
 
         assert!(path.exists(), "Ausgabedatei sollte existieren");
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        assert!(len > 0, "Ausgabedatei sollte nicht leer sein");
+        assert!(len > 0, "output file should not be empty");
 
         let uri = file_uri(&path);
         let discoverer = gst_pbutils::Discoverer::new(gst::ClockTime::from_seconds(5))
-            .expect("Discoverer sollte erstellt werden können");
+            .expect("Discoverer should be creatable");
         let info = discoverer
             .discover_uri(&uri)
             .expect("Datei sollte lesbar sein");
@@ -841,7 +835,7 @@ mod tests {
         assert!(pipeline_str.contains("name=audio_src "), "{}", pipeline_str);
         assert!(
             !pipeline_str.contains("audio_src_sys"),
-            "separate Sinks sollten im Streaming-Modus nicht gebaut werden"
+            "separate sinks should not be built in streaming mode"
         );
         assert!(!pipeline_str.contains("audio_src_mic"));
         assert!(pipeline_str.contains("flvmux name=mux streamable=true"));
@@ -922,20 +916,20 @@ mod tests {
         let result = engine.push_audio_frame(&frame);
         assert!(
             result.is_err(),
-            "Gemischtes Audio muss im Streaming-Modus geroutet werden"
+            "mixed audio must be routed in streaming mode"
         );
         assert!(
             result
                 .unwrap_err()
                 .to_string()
                 .contains("Pipeline is not running"),
-            "Es sollte an der Pipeline-Prüfung scheitern, da keine Pipeline läuft"
+            "should fail the pipeline check because no pipeline is running"
         );
 
         // push_audio_track is ignored while streaming (FLV supports one track).
         assert!(
             engine.push_audio_track(&frame, AudioTrack::System).is_ok(),
-            "push_audio_track muss im Streaming-Modus ignoriert werden"
+            "push_audio_track must be ignored in streaming mode"
         );
     }
 
@@ -950,7 +944,7 @@ mod tests {
         let frame = AudioFrame::new(vec![0.0f32; 8], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
         assert!(
             engine.push_audio_frame(&frame).is_ok(),
-            "Gemischte Frames müssen bei separaten Tracks ignoriert werden"
+            "mixed frames must be ignored when separate tracks are enabled"
         );
     }
 
@@ -1060,20 +1054,20 @@ mod tests {
         let result = engine.push_audio_frame(&frame);
         assert!(
             result.is_err(),
-            "Gemischtes Audio muss im Dual-Output-Modus geroutet werden"
+            "mixed audio must be routed in dual-output mode"
         );
         assert!(
             result
                 .unwrap_err()
                 .to_string()
                 .contains("Pipeline is not running"),
-            "Es sollte an der Pipeline-Prüfung scheitern, da keine Pipeline läuft"
+            "should fail the pipeline check because no pipeline is running"
         );
 
         // push_audio_track is ignored in dual output mode.
         assert!(
             engine.push_audio_track(&frame, AudioTrack::System).is_ok(),
-            "push_audio_track muss im Dual-Output-Modus ignoriert werden"
+            "push_audio_track must be ignored in dual-output mode"
         );
     }
 
@@ -1106,11 +1100,11 @@ mod tests {
 
         assert!(path.exists(), "Ausgabedatei sollte existieren");
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-        assert!(len > 0, "Ausgabedatei sollte nicht leer sein");
+        assert!(len > 0, "output file should not be empty");
 
         let uri = file_uri(&path);
         let discoverer = gst_pbutils::Discoverer::new(gst::ClockTime::from_seconds(5))
-            .expect("Discoverer sollte erstellt werden können");
+            .expect("Discoverer should be creatable");
         let info = discoverer
             .discover_uri(&uri)
             .expect("Datei sollte lesbar sein");
@@ -1180,21 +1174,18 @@ mod tests {
         let stats = engine.stream_stats();
         assert!(
             stats.frames_sent > 0,
-            "Frames müssen im Health-Monitor gezählt werden"
+            "frames must be counted in the health monitor"
         );
         assert!(
             stats.bytes_sent > 0,
-            "Bytes müssen im Health-Monitor gezählt werden"
+            "bytes must be counted in the health monitor"
         );
         engine.stop_recording();
 
         // A fresh recording restarts health tracking from zero.
         engine.start_local_recording(path.clone());
         let reset = engine.stream_stats();
-        assert_eq!(
-            reset.frames_sent, 0,
-            "Neustart muss die Zähler zurücksetzen"
-        );
+        assert_eq!(reset.frames_sent, 0, "restart must reset the counters");
         engine.stop_recording();
 
         let _ = std::fs::remove_file(&path);
@@ -1302,7 +1293,7 @@ mod tests {
 
         assert!(
             path.exists() && std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > 0,
-            "NVENC-Aufnahme sollte eine nicht-leere Datei erzeugen"
+            "NVENC recording should produce a non-empty file"
         );
         let _ = std::fs::remove_file(&path);
     }

@@ -5,8 +5,8 @@ edition = "2021"
 rust-version = "1.70"
 
 [dependencies]
-# GUI-Framework (accesskit deaktiviert: zbus/Tokio-Konflikt auf Linux,
-# accesskit_unix verbindet sich in einem Fremd-Thread zum DBus)
+# GUI framework (accesskit disabled: zbus/Tokio conflict on Linux,
+# accesskit_unix connects to DBus from a foreign thread)
 eframe = { version = "0.36.1", default-features = false, features = [
     "default_fonts",
     "glow",
@@ -15,12 +15,12 @@ eframe = { version = "0.36.1", default-features = false, features = [
     "x11",
 ] }
 
-# Abhängigkeiten für die Rivulet-App-Logik
+# Dependencies for the Rivulet app logic
 log = "0.4.21"
 serde = { version = "1.0", features = ["derive"] }
 chrono = { version = "0.4.35", features = ["serde"] }
 
-# Asynchrone Laufzeit und Desktop-Portale
+# Async runtime and desktop portals
 tokio = { version = "1.36.0", features = ["full"] }
 once_cell = "1.19.0"
 serde_json = "1.0.114"
@@ -28,20 +28,20 @@ anyhow = "1.0.81"
 
 rfd = "0.17"
 
-# Lokale Core-Bibliothek
+# Local core library
 rivulet-core = { path = "../rivulet-core" }
 
-# Logging-Bibliothek
+# Logging library
 tracing-subscriber = { version = "0.3.18", features = ["fmt"] }
 
-# Bildverarbeitungs-Bibliothek für das Icon
+# Image processing library for the icon
 image = { version = "0.25.1", features = ["png"] }
 
-# winit wird für die Picker-Konfiguration unter Windows benötigt
+# winit is needed for the picker configuration on Windows
 [target.'cfg(target_os = "windows")'.dependencies.winit]
 version = "0.30"
 
-# Linux-spezifische Abhängigkeiten
+# Linux-specific dependencies
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd = { version = "0.13.10", features = ["tokio", "screencast"] }
 pipewire = { version = "0.10.0", features = ["v0_3_33"] }
@@ -53,6 +53,6 @@ xcap = "=0.9.8"
 [target.'cfg(target_os = "windows")'.dependencies.windows-capture]
 version = "2.0.0"
 
-# Build-Abhängigkeiten
+# Build dependencies
 [build-dependencies]
 winres = "0.1"
