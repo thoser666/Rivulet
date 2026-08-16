@@ -307,14 +307,52 @@ jobs:
           New-Item -ItemType Directory -Force -Path staging | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/rivulet-gui.exe" staging/rivulet-gui.exe -Force
 
+      - name: Check code signing secrets
+        id: signing
+        shell: bash
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          MACOS_CERT_BASE64: ${{ secrets.MACOS_CERT_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [[ -n "$WINDOWS_CERT_BASE64" && -n "$WINDOWS_CERT_PASSWORD" ]]; then
+            echo "windows_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "windows_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "$MACOS_CERT_BASE64" && -n "$MACOS_CERT_PASSWORD" && -n "$APPLE_ID" && -n "$APPLE_APP_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
+            echo "macos_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "macos_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sign Windows executable (if credentials configured)
+        if: runner.os == 'Windows' && steps.signing.outputs.windows_enabled == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          pwsh packaging/windows/sign.ps1 -Paths "$(pwd)/staging/rivulet-gui.exe"
+
       - name: Build AppImage (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           bash packaging/linux/build-appimage.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-linux-x86_64.AppImage"
 
-      - name: Build DMG (macOS)
+      - name: Build macOS app bundle
         if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bash packaging/macos/build-app.sh "$RELEASE_VERSION" "$(pwd)/staging"
+
+      - name: Build unsigned DMG (macOS, no credentials)
+        if: runner.os == 'macOS' && steps.signing.outputs.macos_enabled != 'true'
         shell: bash
         run: |
           bash packaging/macos/build-dmg.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-macos-aarch64.dmg"
@@ -329,22 +367,17 @@ jobs:
       # ------------------------------------------------------------------
       # CODE SIGNING (only if the secrets are configured)
       # ------------------------------------------------------------------
-      - name: Sign Windows binaries (if credentials configured)
-        if: runner.os == 'Windows' && (env.WINDOWS_CERT_BASE64 != '' && env.WINDOWS_CERT_PASSWORD != '')
+      - name: Sign Windows MSI (if credentials configured)
+        if: runner.os == 'Windows' && steps.signing.outputs.windows_enabled == 'true'
         shell: pwsh
         env:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          $certPath = Join-Path $env:TEMP "cert.pfx"
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
-          Get-ChildItem -Path staging -Include *.exe,*.dll -Recurse | ForEach-Object {
-            & signtool sign /f $certPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $_.FullName
-            if ($LASTEXITCODE -ne 0) { throw "Signing failed: $($_.Name)" }
-          }
+          pwsh packaging/windows/sign.ps1 -Paths "$(pwd)/staging/rivulet-windows-x86_64.msi"
 
-      - name: Sign macOS app (if credentials configured)
-        if: runner.os == 'macOS' && (env.MACOS_CERT_BASE64 != '' && env.MACOS_CERT_PASSWORD != '' && env.APPLE_ID != '')
+      - name: Sign & notarize macOS app (if credentials configured)
+        if: runner.os == 'macOS' && steps.signing.outputs.macos_enabled == 'true'
         shell: bash
         env:
           MACOS_CERT_BASE64: ${{ secrets.MACOS_CERT_BASE64 }}
@@ -353,21 +386,7 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          KEYCHAIN="release.keychain"
-          echo "$MACOS_CERT_BASE64" | base64 -d > /tmp/cert.p12
-          security create-keychain -p temp "$KEYCHAIN"
-          security default-keychain -s "$KEYCHAIN"
-          security unlock-keychain -p temp "$KEYCHAIN"
-          security import /tmp/cert.p12 -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k temp "$KEYCHAIN"
-          codesign --force --options runtime --sign "Developer ID Application" \
-            --timestamp "staging/Rivulet.app"
-          # Build the DMG after signing (codesign before hdiutil).
-          bash packaging/macos/build-dmg.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-macos-aarch64.dmg"
-          # Notarization + stapling.
-          xcrun notarytool submit "staging/rivulet-macos-aarch64.dmg" \
-            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
-          xcrun stapler staple "staging/rivulet-macos-aarch64.dmg"
+          bash packaging/macos/sign-notarize.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-macos-aarch64.dmg"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5

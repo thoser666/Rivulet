@@ -141,7 +141,7 @@ See [Roadmap](#-roadmap) for detailed timeline.
 
 **Updates**
 - [x] Auto-update (update check, download & install via GitHub Releases)
-- [ ] Code signing (signing automation present, secrets needed)
+- [x] Code signing (signing automation present, secrets needed)
 
 **Quality of Life**
 - [ ] Hotkeys (record, pause, mute)
@@ -217,7 +217,7 @@ The core concept of OBS: scenes, sources, and transitions.
 - [ ] Mobile companion app (remote control)
 - [ ] **Windows/macOS feature parity** (currently Linux-first; window capture on Windows exists, macOS still open) — as a release blocker, not an afterthought
 - [x] Installers (Windows MSI, macOS DMG, Linux AppImage) — automated in CI
-- [ ] Code signing (signing automation present, secrets needed)
+- [x] Code signing (signing automation present, secrets needed)
 - [ ] Telemetry (opt-in, privacy-friendly)
 - [ ] Multi-language support (locale files fully wired)
 
@@ -376,7 +376,7 @@ cargo test --workspace
 cargo test -p rivulet-core
 ```
 
-The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4, including separate audio tracks verified via the GStreamer Discoverer), the streaming pipelines (RTMPS/dual output parse and route audio correctly), stream health tracking (status derivation from drop ratio, bitrate/FPS collapse and stalls), the encoder/recorder lifecycle, the video encoder abstraction (element names, detection order, fallback, pipeline fragments, 4:2:0 input caps), the recording performance metrics (FPS estimation, encoder load from a sliding window, file byte accounting, reset semantics), the updater (GitHub release parsing, version comparison, platform asset selection, HTTP fetch against a local test server) and the i18n layer (locale resolution and translation lookups). Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable. The hardware-encoding end-to-end test only runs when the matching GPU plugin is present.
+The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4, including separate audio tracks verified via the GStreamer Discoverer), the streaming pipelines (RTMPS/dual output parse and route audio correctly), stream health tracking (status derivation from drop ratio, bitrate/FPS collapse and stalls), the encoder/recorder lifecycle, the video encoder abstraction (element names, detection order, fallback, pipeline fragments, 4:2:0 input caps), the recording performance metrics (FPS estimation, encoder load from a sliding window, file byte accounting, reset semantics), the updater (GitHub release parsing, version comparison, platform asset selection, HTTP fetch against a local test server) and the i18n layer (locale resolution and translation lookups), plus the release code-signing automation (`rivulet-core/tests/ci_signing.rs` — verifies the signing scripts exist, that signing is gated on secret-presence outputs rather than raw secrets in `if:` conditions, and that the Windows MSI is signed after it is built). Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable. The hardware-encoding end-to-end test only runs when the matching GPU plugin is present.
 
 ### Linting & Formatting
 
@@ -444,9 +444,26 @@ pre-releases; stable tags as full releases.
 
 ### Code signing
 
-- **Windows**: `signtool` signs the binary (only if `WINDOWS_CERT_BASE64`
-  and `WINDOWS_CERT_PASSWORD` are provided as secrets).
-- **macOS**: `codesign` + notarization via `notarytool` (only if the secrets
-  `MACOS_CERT_BASE64`, `MACOS_CERT_PASSWORD`, `APPLE_ID`, `APPLE_APP_PASSWORD`,
-  and `APPLE_TEAM_ID` are provided).
-- Without secrets, unsigned packages are built (default).
+Release packages are signed automatically when the matching secrets are
+configured; without secrets, unsigned packages are built (default). Signing
+runs only when *all* required secrets for a platform are present, so CI keeps
+working for forks and for the unsigned development builds.
+
+- **Windows** (`packaging/windows/sign.ps1`): the staged `rivulet-gui.exe` is
+  signed *before* the portable ZIP and MSI are packaged (so the installer
+  embeds the signed binary), and the resulting MSI is signed as well. Secrets:
+  - `WINDOWS_CERT_BASE64` — base64-encoded `.pfx` code signing certificate
+    (`certutil -encode cert.pfx cert.txt`, then paste the body without the
+    `-----BEGIN/END CERTIFICATE-----` lines).
+  - `WINDOWS_CERT_PASSWORD` — password of the `.pfx`.
+- **macOS** (`packaging/macos/sign-notarize.sh`): the app bundle is codesigned
+  with the hardened runtime, packaged into a DMG, then notarized and stapled
+  via `notarytool`. Secrets:
+  - `MACOS_CERT_BASE64` — base64-encoded `.p12` "Developer ID Application"
+    certificate (`base64 -i cert.p12`).
+  - `MACOS_CERT_PASSWORD` — password of the `.p12`.
+  - `APPLE_ID` — Apple ID used for notarization.
+  - `APPLE_APP_PASSWORD` — app-specific password for the Apple ID.
+  - `APPLE_TEAM_ID` — Apple Developer Team ID.
+
+Add the secrets under **Settings → Secrets and variables → Actions**.
