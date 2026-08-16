@@ -142,22 +142,26 @@ fn caller_workflows_use_the_reusable_workflow() {
 fn signing_e2e_smoke_tests_are_wired_up() {
     let workflow = read(".github/workflows/signing-e2e.yml");
     assert!(
-        workflow.contains("packaging/windows/test-signing.ps1"),
-        "e2e workflow must smoke-test the Windows signer"
+        workflow.contains("packaging/windows/sign.tests.ps1"),
+        "e2e workflow must run the Windows Pester tests"
+    );
+    assert!(
+        workflow.contains("Invoke-Pester"),
+        "e2e workflow must run the Windows tests with Pester"
     );
     assert!(
         workflow.contains("packaging/macos/test-signing.sh"),
         "e2e workflow must smoke-test the macOS signer"
     );
 
-    let windows = read("packaging/windows/test-signing.ps1");
+    let windows = read("packaging/windows/sign.tests.ps1");
     assert!(
         windows.contains("New-SelfSignedCertificate"),
-        "Windows smoke test must generate a self-signed cert"
+        "Windows Pester tests must generate a self-signed cert"
     );
     assert!(
         windows.contains("signtool verify"),
-        "Windows smoke test must verify the signature"
+        "Windows Pester tests must verify the signature"
     );
 
     let macos = read("packaging/macos/test-signing.sh");
@@ -175,5 +179,20 @@ fn signing_e2e_smoke_tests_are_wired_up() {
     assert!(
         codesign_app.contains("MACOS_SIGN_IDENTITY"),
         "codesign-app.sh must allow an overridable identity"
+    );
+}
+
+#[test]
+fn shellcheck_and_pester_checks_are_wired_up() {
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("shellcheck packaging/macos/*.sh"),
+        "CI must run shellcheck on the macOS packaging scripts"
+    );
+
+    let e2e = read(".github/workflows/signing-e2e.yml");
+    assert!(
+        e2e.contains("Invoke-Pester"),
+        "signing e2e workflow must run the Windows Pester tests"
     );
 }

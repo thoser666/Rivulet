@@ -38,9 +38,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 
 # 3. Sign through the production codesign path.
-export MACOS_CERT_BASE64="$(base64 < "$CERT_DIR/cert.p12")"
-export MACOS_CERT_PASSWORD="rivulet-test"
-export MACOS_SIGN_IDENTITY="Rivulet CI Test"
+MACOS_CERT_BASE64="$(base64 < "$CERT_DIR/cert.p12")"
+MACOS_CERT_PASSWORD="rivulet-test"
+MACOS_SIGN_IDENTITY="Rivulet CI Test"
+export MACOS_CERT_BASE64 MACOS_CERT_PASSWORD MACOS_SIGN_IDENTITY
 
 bash packaging/macos/codesign-app.sh "$APP"
 

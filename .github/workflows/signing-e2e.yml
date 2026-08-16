@@ -21,9 +21,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Smoke-test code signing
+      - name: Test code signing with Pester
         shell: pwsh
-        run: pwsh packaging/windows/test-signing.ps1
+        run: Invoke-Pester packaging/windows/sign.tests.ps1 -Output Detailed
 
   macos:
     name: macOS codesign (self-signed)
