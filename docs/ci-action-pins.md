@@ -18,12 +18,12 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 <!-- action-pins-table:start -->
 | Action | Version | Pinned SHA | Used in |
 | --- | --- | --- | --- |
-| `actions/cache` | `v5.1.0` | `caa296126883cff596d87d8935842f9db880ef25` | ci.yml, nightly.yml |
-| `actions/checkout` | `v5.1.0` | `fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09` | build-package.yml, ci.yml, nightly.yml, release.yml, signing-e2e.yml |
-| `actions/download-artifact` | `v5.0.0` | `634f93cb2916e3fdff6788551b99b062d0335ce0` | ci.yml, release.yml |
-| `actions/upload-artifact` | `v5.0.0` | `330a01c490aca151604b8cf639adc76d48f6c5d4` | build-package.yml |
+| `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | ci.yml, nightly.yml |
+| `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | build-package.yml, ci.yml, nightly.yml, release.yml, signing-e2e.yml |
+| `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | ci.yml, release.yml |
+| `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | build-package.yml |
 | `dtolnay/rust-toolchain` | `stable` | `4360b52568e2003a75bf9bc1d59f33a8e3fc893c` | build-package.yml, ci.yml, nightly.yml |
-| `softprops/action-gh-release` | `v2.6.2` | `3bb12739c298aeb8a4eeaf626c5b8d85266b0e65` | ci.yml, release.yml |
+| `softprops/action-gh-release` | `v3.0.2` | `3d0d9888cb7fd7b750713d6e236d1fcb99157228` | ci.yml, release.yml |
 <!-- action-pins-table:end -->
 
 > `dtolnay/rust-toolchain` is pinned to the `stable` **branch** (not a release

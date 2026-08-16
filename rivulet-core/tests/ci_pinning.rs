@@ -28,28 +28,28 @@ const WORKFLOWS: &[&str] = &[
 /// someone updates a pin.
 const PINNED_ACTIONS: &[(&str, &str)] = &[
     (
-        "actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09",
-        "v5.1.0",
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "v7.0.1",
     ),
     (
-        "actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4",
-        "v5.0.0",
+        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+        "v7.0.1",
     ),
     (
-        "actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0",
-        "v5.0.0",
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "v8.0.1",
     ),
     (
-        "actions/cache@caa296126883cff596d87d8935842f9db880ef25",
-        "v5.1.0",
+        "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+        "v6.1.0",
     ),
     (
         "dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c",
         "stable",
     ),
     (
-        "softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65",
-        "v2.6.2",
+        "softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228",
+        "v3.0.2",
     ),
 ];
 
