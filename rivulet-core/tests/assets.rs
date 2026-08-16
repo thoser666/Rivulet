@@ -241,3 +241,24 @@ fn asset_drift_check_is_wired_up() {
         "generate-assets.sh must pin the resize filter for cross-version determinism"
     );
 }
+
+#[test]
+fn docker_wrapper_regenerates_assets_in_the_pinned_image() {
+    let wrapper = read("scripts/generate-assets-docker.sh");
+    assert!(
+        wrapper.contains("dpokidov/imagemagick:7.1.2-12"),
+        "the docker wrapper must use the pinned ImageMagick image"
+    );
+    assert!(
+        wrapper.contains("scripts/generate-assets.sh"),
+        "the docker wrapper must invoke the generator script"
+    );
+    assert!(
+        wrapper.contains("--check") && wrapper.contains("scripts/check-assets.py"),
+        "the docker wrapper's --check mode must verify output against the committed files"
+    );
+    assert!(
+        wrapper.contains("docker") && wrapper.contains("podman"),
+        "the docker wrapper must support both Docker and Podman runtimes"
+    );
+}
