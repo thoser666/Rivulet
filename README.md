@@ -400,8 +400,8 @@ approved and auto-merged via `.github/workflows/dependabot-auto-merge.yml`
 once the required checks (including the pinning tests) pass; this needs
 "Allow auto-merge" and branch protection enabled in the repo settings. A
 daily nightly job (`scripts/check-action-pins.py`) also compares every pinned
-SHA against the latest upstream tag/branch to flag stale pins between
-Dependabot runs.
+SHA against upstream — failing on missed same-major updates and reporting
+newer majors (`--fail-on-major` makes those fatal).
 
 ### Assets
 

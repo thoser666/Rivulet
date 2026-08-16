@@ -181,6 +181,14 @@ fn stale_pin_checker_is_wired_up() {
         checker.contains("latest") && checker.contains("semver"),
         "check-action-pins.py must compare against the latest stable release"
     );
+    assert!(
+        checker.contains("outdated in v") && checker.contains("newer major"),
+        "check-action-pins.py must report same-major and newer-major staleness separately"
+    );
+    assert!(
+        checker.contains("--fail-on-major"),
+        "check-action-pins.py must offer --fail-on-major to make major gaps fatal"
+    );
     let nightly = read(".github/workflows/nightly.yml");
     assert!(
         nightly.contains("check-action-pins.py"),

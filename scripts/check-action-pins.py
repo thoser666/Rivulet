@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """Check that every pinned action SHA matches the latest upstream release/branch.
 
-Detects stale pins outside Dependabot's weekly schedule: for tag-pinned actions
-it resolves the latest stable semver tag and compares its commit SHA to the
-pinned one; for branch-pinned actions (e.g. dtolnay/rust-toolchain pinned to
-`stable`) it compares against the branch tip. Exits non-zero if any pin is
-outdated or cannot be resolved.
+Detects stale pins outside Dependabot's weekly schedule. Two distinct cases are
+reported separately:
+
+- **outdated within the major line** — the pinned major has a newer
+  patch/minor release we have not taken (actionable, drop-in update).
+- **newer major available** — a higher major version exists (may be an
+  intentional pin and needs a decision).
+
+Exit codes: non-zero when any pin is *outdated within its major* or cannot be
+resolved. A *newer major* is reported but does not fail unless you pass
+`--fail-on-major`.
 
 Usage:
-    scripts/check-action-pins.py
+    scripts/check-action-pins.py [--fail-on-major]
 """
 
 import re
@@ -56,8 +62,8 @@ def resolve_ref(repo, refspec):
     return sha
 
 
-def latest_stable_tag(repo):
-    """Return ``(tag_name, commit_sha)`` of the highest stable semver tag."""
+def stable_tags(repo):
+    """Return ``[(version_key, tag_name, commit_sha)]`` for stable semver tags."""
     tags = {}
     for line in ls_remote(repo, tags=True):
         sha, _, ref = line.partition("\t")
@@ -68,20 +74,22 @@ def latest_stable_tag(repo):
         else:
             tags.setdefault(name, sha)
 
-    versions = []
+    result = []
     for name, sha in tags.items():
         match = SEMVER_RE.match(name)
         if match:
             key = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
-            versions.append((key, name, sha))
-    if not versions:
-        raise RuntimeError(f"{repo}: no stable semver tags found")
-    _, name, sha = max(versions)
-    return name, sha
+            result.append((key, name, sha))
+    return result
 
 
 def check_action(action, sha, version):
-    """Return ``(status, message)`` where status is 'ok', 'stale' or 'error'."""
+    """Return ``(statuses, message)``.
+
+    ``statuses`` is a subset of ``{"ok", "outdated", "major", "error"}``; an
+    action can be both ``outdated`` (within its major) and ``major`` (a newer
+    major exists).
+    """
     ref_kind = None
     try:
         resolve_ref(action, f"refs/tags/{version}")
@@ -95,46 +103,78 @@ def check_action(action, sha, version):
         except RuntimeError:
             pass
     if ref_kind is None:
-        return "error", f"{action}@{version}: ref does not resolve to a tag or branch"
+        return {"error"}, f"{action}@{version}: ref does not resolve to a tag or branch"
 
     if ref_kind == "branch":
         tip = resolve_ref(action, f"refs/heads/{version}")
         if tip == sha:
-            return "ok", f"{action}@{version} is current (branch tip {sha})"
-        return "stale", f"{action}@{version}: branch tip is {tip}, pinned {sha}"
+            return {"ok"}, f"{action}@{version} is current (branch tip {sha})"
+        return {"outdated"}, f"{action}@{version}: branch tip is {tip}, pinned {sha}"
 
-    latest_name, latest_sha = latest_stable_tag(action)
-    if latest_sha == sha:
-        return "ok", f"{action} is current ({latest_name} = {sha})"
-    return "stale", f"{action}: pinned {version} ({sha}); latest {latest_name} ({latest_sha})"
+    tags = stable_tags(action)
+    if not tags:
+        return {"error"}, f"{action}: no stable semver tags found"
+    pinned = SEMVER_RE.match(version)
+    if not pinned:
+        return {"error"}, f"{action}: pinned version {version!r} is not semver"
+    pinned_key = (int(pinned.group(1)), int(pinned.group(2)), int(pinned.group(3)))
+
+    in_major = [tag for tag in tags if tag[0][0] == pinned_key[0]]
+    if not in_major:
+        return {"error"}, f"{action}: no tags for major v{pinned_key[0]}"
+    major_key, major_name, major_sha = max(in_major)
+    overall_key, overall_name, overall_sha = max(tags)
+
+    statuses = {"ok"}
+    parts = []
+    if major_sha != sha:
+        statuses = {"outdated"}
+        parts.append(
+            f"outdated in v{pinned_key[0]}: pinned {version} ({sha}), "
+            f"latest {major_name} ({major_sha})"
+        )
+    else:
+        parts.append(f"current in v{pinned_key[0]} ({major_name})")
+    if overall_key[0] > pinned_key[0]:
+        statuses.add("major")
+        parts.append(f"newer major available: {overall_name} ({overall_sha})")
+
+    return statuses, f"{action}: " + "; ".join(parts)
 
 
 def main():
     pins = parse_workflows()
     if not pins:
         sys.exit("no third-party action pins found in .github/workflows")
+    fail_on_major = "--fail-on-major" in sys.argv[1:]
 
-    stale = []
+    outdated = []
+    major = []
+    errors = []
     for action in sorted(pins):
         sha, version, _ = pins[action]
         try:
-            status, message = check_action(action, sha, version)
+            statuses, message = check_action(action, sha, version)
         except RuntimeError as exc:
             print(f"ERROR {exc}", file=sys.stderr)
-            stale.append(action)
+            errors.append(action)
             continue
         print(message)
-        if status != "ok":
-            stale.append(action)
+        if "outdated" in statuses:
+            outdated.append(action)
+        if "major" in statuses:
+            major.append(action)
+        if "error" in statuses:
+            errors.append(action)
 
-    if stale:
-        print(
-            f"\n{len(stale)} stale/unresolvable pin(s): {', '.join(stale)}",
-            file=sys.stderr,
-        )
-        return 1
-    print("\nAll action pins are current.")
-    return 0
+    print(
+        f"\nSummary: {len(outdated)} outdated within major, "
+        f"{len(major)} with newer major available, {len(errors)} errors",
+        file=sys.stderr,
+    )
+
+    failed = bool(errors or outdated or (major if fail_on_major else []))
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
