@@ -14,8 +14,7 @@
 
 [Features](#-features) • [Installation](#-installation) • [Roadmap](#-roadmap) • [Contributing](#-contributing)
 
-![Rivulet Screenshot](docs/screenshot.png)
-<!-- Add screenshot later -->
+![Rivulet](docs/thumbnail.png)
 
 </div>
 
