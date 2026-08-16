@@ -11,6 +11,9 @@ use gst::prelude::*;
 pub mod audio;
 pub use audio::{AudioFrame, AudioTrack};
 
+pub mod encoder;
+pub use encoder::{best_encoder, detect_available_encoders, VideoEncoder};
+
 pub mod health;
 pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 
@@ -39,6 +42,11 @@ pub struct RivuletEngine {
     is_recording: bool,
     output_path: Option<PathBuf>,
     stream_settings: Option<StreamSettings>,
+    /// Video encoder used for the H.264 video branch. Defaults to the best
+    /// available encoder detected at construction time.
+    video_encoder: VideoEncoder,
+    /// Target video bitrate in kbit/s applied to the selected encoder.
+    encoder_bitrate_kbps: u32,
     /// Tracks stream health while a streaming pipeline is active. Always
     /// `None` for plain local recordings.
     stream_health: Option<StreamHealthMonitor>,
@@ -60,6 +68,8 @@ impl Default for RivuletEngine {
             is_recording: false,
             output_path: None,
             stream_settings: None,
+            video_encoder: best_encoder(),
+            encoder_bitrate_kbps: 5_000,
             stream_health: None,
         }
     }
@@ -93,6 +103,32 @@ impl RivuletEngine {
         self.is_streaming() && self.output_path.is_some()
     }
 
+    /// Select the video encoder used for the H.264 branch.
+    ///
+    /// Must be called before recording starts. By default the engine picks the
+    /// best available encoder ([`best_encoder`]); if a hardware encoder cannot
+    /// be initialized at runtime the engine falls back to software x264.
+    pub fn set_video_encoder(&mut self, encoder: VideoEncoder) {
+        self.video_encoder = encoder;
+    }
+
+    /// The currently selected video encoder.
+    pub fn video_encoder(&self) -> VideoEncoder {
+        self.video_encoder
+    }
+
+    /// Set the target video bitrate in kbit/s applied to the encoder.
+    ///
+    /// Must be called before recording starts. Defaults to 5000 kbit/s.
+    pub fn set_video_bitrate(&mut self, kbps: u32) {
+        self.encoder_bitrate_kbps = kbps;
+    }
+
+    /// The configured target video bitrate in kbit/s.
+    pub fn video_bitrate(&self) -> u32 {
+        self.encoder_bitrate_kbps
+    }
+
     /// Escape a location string for embedding into a `parse_launch` pipeline
     /// description. GStreamer treats `\` as an escape character in quoted
     /// property values; on Windows paths like `C:\Users\...` would otherwise be
@@ -102,8 +138,13 @@ impl RivuletEngine {
     }
 
     fn video_branch_str(&self) -> String {
-        "appsrc name=rivulet_src ! videoconvert ! x264enc tune=zerolatency ! queue ! mux. "
-            .to_string()
+        format!(
+            "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
+             ! videoconvert ! {} ! {} ! queue ! mux. ",
+            self.video_encoder.input_caps_fragment(),
+            self.video_encoder
+                .branch_fragment(self.encoder_bitrate_kbps)
+        )
     }
 
     /// Build the audio branch of the pipeline. With `force_mixed` the sources
@@ -188,11 +229,15 @@ impl RivuletEngine {
         );
 
         let mut s = String::new();
-        s.push_str(
-            "appsrc name=rivulet_src ! videoconvert ! x264enc tune=zerolatency \
+        s.push_str(&format!(
+            "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
+             ! videoconvert ! {} ! {} \
              ! tee name=video_tee ! queue ! mux_rec. \
              video_tee. ! queue ! mux_stream. ",
-        );
+            self.video_encoder.input_caps_fragment(),
+            self.video_encoder
+                .branch_fragment(self.encoder_bitrate_kbps)
+        ));
         if self.audio_enabled {
             s.push_str(
                 "appsrc name=audio_src format=time is-live=true do-timestamp=true \
@@ -212,28 +257,51 @@ impl RivuletEngine {
         s
     }
 
-    fn initialize_and_start_pipeline(&mut self, width: u32, height: u32) {
-        let pipeline_str = if self.is_dual_output() {
-            self.build_dual_output_pipeline_str()
+    /// Build the pipeline description for the currently configured output mode
+    /// (dual output, streaming, or local recording). Returns `None` when no
+    /// output is configured at all.
+    fn build_pipeline_str(&self) -> Option<String> {
+        if self.is_dual_output() {
+            Some(self.build_dual_output_pipeline_str())
         } else if self.is_streaming() {
-            self.build_streaming_pipeline_str()
+            Some(self.build_streaming_pipeline_str())
         } else {
-            let Some(path) = self.output_path.as_ref() else {
-                return;
-            };
+            let path = self.output_path.as_ref()?;
             let location = path.to_str().expect("Dateipfad ist ungültig.");
             println!("[Engine] Initialisiere Aufnahme-Pipeline für: {}", location);
-            self.build_recording_pipeline_str(location)
+            Some(self.build_recording_pipeline_str(location))
+        }
+    }
+
+    fn initialize_and_start_pipeline(&mut self, width: u32, height: u32) {
+        let Some(mut pipeline_str) = self.build_pipeline_str() else {
+            return;
         };
 
-        // KORREKTUR: Die `parse_launch`-Funktion kommt aus `gstreamer` (Modul `gst::parse`).
-        // In v0.24 können wir `gst::parse::launch(&str)` verwenden; bei Bedarf gäbe es auch `launch_full` mit Context/Flags.
-        let pipeline = match gst::parse::launch(&pipeline_str) {
-            Ok(p) => p.downcast::<gst::Pipeline>().unwrap(),
-            Err(e) => {
-                eprintln!("[Engine] Fehler beim Erstellen der Pipeline: {}", e);
+        // Hardware-Encoder (NVENC/QuickSync/AMF) sind nicht auf jeder Maschine
+        // nutzbar (fehlende GPU/Treiber). Schlägt das Parsen der Pipeline oder
+        // ihr Start fehl, wird einmalig auf Software-x264 zurückgefallen und
+        // die Pipeline mit dem neuen Encoder erneut gebaut.
+        let pipeline = loop {
+            let parsed = match gst::parse::launch(&pipeline_str) {
+                Ok(p) => p,
+                Err(e) => {
+                    if self.try_encoder_fallback(&mut pipeline_str, &e.to_string()) {
+                        continue;
+                    }
+                    eprintln!("[Engine] Fehler beim Erstellen der Pipeline: {}", e);
+                    return;
+                }
+            };
+            let pipeline = parsed.downcast::<gst::Pipeline>().unwrap();
+            if let Err(e) = pipeline.set_state(gst::State::Playing) {
+                if self.try_encoder_fallback(&mut pipeline_str, &e.to_string()) {
+                    continue;
+                }
+                eprintln!("[Engine] Pipeline konnte nicht gestartet werden: {}", e);
                 return;
             }
+            break pipeline;
         };
 
         // Der Rest des Codes ist korrekt...
@@ -288,11 +356,6 @@ impl RivuletEngine {
             }
         }
 
-        if pipeline.set_state(gst::State::Playing).is_err() {
-            eprintln!("[Engine] Pipeline konnte nicht gestartet werden.");
-            return;
-        }
-
         self.pipeline = Some(pipeline);
         self.appsrc = Some(appsrc);
         if self.is_dual_output() {
@@ -302,6 +365,27 @@ impl RivuletEngine {
         } else {
             println!("[Engine] Aufnahme-Pipeline läuft.");
         }
+    }
+
+    /// When a hardware encoder is selected and the pipeline could not be built
+    /// or started, switch to software x264 and rebuild the pipeline string.
+    ///
+    /// Returns `true` when retrying with the rebuilt string is worthwhile, i.e.
+    /// a fallback actually happened. Software x264 is always available, so a
+    /// second failure is reported to the caller instead of retried again.
+    fn try_encoder_fallback(&mut self, pipeline_str: &mut String, reason: &str) -> bool {
+        if !self.video_encoder.is_hardware() {
+            return false;
+        }
+        eprintln!(
+            "[Engine] Encoder {:?} nicht initialisierbar ({}), Fallback auf x264.",
+            self.video_encoder, reason
+        );
+        self.video_encoder = VideoEncoder::Software;
+        *pipeline_str = self
+            .build_pipeline_str()
+            .expect("Fallback-Pipeline baut immer");
+        true
     }
 
     /// Enable or disable the audio input branch of the recording pipeline.
@@ -642,7 +726,7 @@ mod tests {
             std::env::temp_dir().join(format!("rivulet_engine_test_{}.mp4", std::process::id()));
         engine.start_local_recording(path.clone());
 
-        let (width, height) = (64u32, 64u32);
+        let (width, height) = (320u32, 240u32);
         let video = vec![0u8; (width * height * 4) as usize];
         for _ in 0..12 {
             engine.process_raw_frame(&video, width, height);
@@ -677,7 +761,7 @@ mod tests {
         ));
         engine.start_local_recording(path.clone());
 
-        let (width, height) = (64u32, 64u32);
+        let (width, height) = (320u32, 240u32);
         let video = vec![0u8; (width * height * 4) as usize];
         for _ in 0..12 {
             engine.process_raw_frame(&video, width, height);
@@ -1006,7 +1090,7 @@ mod tests {
             std::env::temp_dir().join(format!("rivulet_single_track_{}.mp4", std::process::id()));
         engine.start_local_recording(path.clone());
 
-        let (width, height) = (64u32, 64u32);
+        let (width, height) = (320u32, 240u32);
         let video = vec![0u8; (width * height * 4) as usize];
         for _ in 0..12 {
             engine.process_raw_frame(&video, width, height);
@@ -1087,7 +1171,7 @@ mod tests {
         let path = std::env::temp_dir().join("rivulet_stream_health_frames.mp4");
         engine.start_local_recording(path.clone());
 
-        let (width, height) = (64u32, 64u32);
+        let (width, height) = (320u32, 240u32);
         let video = vec![0u8; (width * height * 4) as usize];
         for _ in 0..15 {
             engine.process_raw_frame(&video, width, height);
@@ -1113,6 +1197,113 @@ mod tests {
         );
         engine.stop_recording();
 
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The engine defaults to the best available encoder (hardware first).
+    #[test]
+    fn engine_defaults_to_best_available_encoder() {
+        let engine = RivuletEngine::default();
+        assert_eq!(engine.video_encoder(), best_encoder());
+        assert_eq!(engine.video_bitrate(), 5_000);
+    }
+
+    /// The video encoder and bitrate can be configured before recording.
+    #[test]
+    fn video_encoder_and_bitrate_can_be_changed() {
+        let mut engine = RivuletEngine::default();
+        engine.set_video_encoder(VideoEncoder::Software);
+        engine.set_video_bitrate(8_000);
+        assert_eq!(engine.video_encoder(), VideoEncoder::Software);
+        assert_eq!(engine.video_bitrate(), 8_000);
+    }
+
+    /// The recording pipeline embeds the selected encoder element and bitrate.
+    #[test]
+    fn recording_pipeline_uses_selected_encoder() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_video_encoder(VideoEncoder::Software);
+        engine.set_video_bitrate(6_000);
+
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/enc.mp4");
+        assert!(
+            pipeline_str
+                .contains("video/x-raw,format=I420 ! x264enc bitrate=6000 tune=zerolatency"),
+            "{}",
+            pipeline_str
+        );
+        gst::parse::launch(&pipeline_str).expect("Pipeline mit x264 sollte parsen");
+    }
+
+    /// The streaming pipeline uses the selected encoder as well.
+    #[test]
+    fn streaming_pipeline_uses_selected_encoder() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_video_encoder(VideoEncoder::Software);
+        engine.set_stream_settings(Some(StreamSettings::custom("rtmp://localhost/live", "k")));
+
+        let pipeline_str = engine.build_streaming_pipeline_str();
+        assert!(
+            pipeline_str
+                .contains("video/x-raw,format=I420 ! x264enc bitrate=5000 tune=zerolatency"),
+            "{}",
+            pipeline_str
+        );
+        gst::parse::launch(&pipeline_str).expect("Streaming-Pipeline mit x264 sollte parsen");
+    }
+
+    /// The dual output pipeline uses the selected encoder in both branches.
+    #[test]
+    fn dual_output_pipeline_uses_selected_encoder() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_video_encoder(VideoEncoder::Software);
+        engine.set_stream_settings(Some(StreamSettings::custom("rtmp://localhost/live", "k")));
+        let path = std::env::temp_dir().join("rivulet_dual_encoder.mp4");
+        engine.start_local_recording(path.clone());
+
+        let pipeline_str = engine.build_dual_output_pipeline_str();
+        assert!(
+            pipeline_str
+                .contains("video/x-raw,format=I420 ! x264enc bitrate=5000 tune=zerolatency"),
+            "{}",
+            pipeline_str
+        );
+        gst::parse::launch(&pipeline_str).expect("Dual-Output-Pipeline mit x264 sollte parsen");
+    }
+
+    /// When NVENC is available the engine's pipeline parses with it and the
+    /// recording writes a valid file. Skipped silently on machines without an
+    /// NVIDIA GPU or the NVCODEC plugin.
+    #[test]
+    fn records_synthetic_video_with_nvenc_when_available() {
+        if !VideoEncoder::Nvenc.is_available() {
+            return;
+        }
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_video_encoder(VideoEncoder::Nvenc);
+        engine.set_audio_enabled(false);
+
+        let path =
+            std::env::temp_dir().join(format!("rivulet_nvenc_test_{}.mp4", std::process::id()));
+        engine.start_local_recording(path.clone());
+
+        let (width, height) = (320u32, 240u32);
+        let video = vec![0u8; (width * height * 4) as usize];
+        for _ in 0..30 {
+            engine.process_raw_frame(&video, width, height);
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        engine.stop_recording();
+
+        assert!(
+            path.exists() && std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > 0,
+            "NVENC-Aufnahme sollte eine nicht-leere Datei erzeugen"
+        );
         let _ = std::fs::remove_file(&path);
     }
 }

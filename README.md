@@ -7,7 +7,7 @@
 [![CI](https://github.com/thoser666/rivulet/workflows/CI/badge.svg)](https://github.com/thoser666/rivulet/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/status-alpha%20v0.1-yellow.svg)](https://github.com/thoser666/rivulet)
+[![Status](https://img.shields.io/badge/status-alpha%20v0.2-yellow.svg)](https://github.com/thoser666/rivulet)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/thoser666/rivulet)
 
 *A complete Rust reimplementation of OBS Studio - built for performance, safety, and reliability*
@@ -46,7 +46,8 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 - **Screen Capture** - Capture your primary monitor in real-time
 - **Window Capture** - Capture a single application window (games, etc.) in addition to full monitors, with a window picker in the GUI (Linux & Windows)
 - **Screen + Audio Recording (Linux GUI)** - Full recording flow in the GUI: monitor selection, start/stop, recording timer; system audio + microphone are captured and mixed into the MP4
-- **Video Encoding** - H.264 encoding via GStreamer (`x264enc`, low-latency tuning)
+- **Video Encoding** - H.264 encoding via GStreamer (`x264enc`, low-latency tuning) or hardware-accelerated encoders
+- **Hardware Encoding** - NVIDIA NVENC (`nvh264enc`), Intel QuickSync (`qsvh264enc`) and AMD AMF (`amfh264enc`) with automatic detection of the best available encoder and fallback to software x264; engine API `set_video_encoder(VideoEncoder)` / `set_video_bitrate(kbps)`
 - **Audio Capture (engine, Linux)** - Desktop sound and microphone, mixed in real time via GStreamer (48 kHz stereo, per-source volume); usable via the `rivulet-audio` crate and the `record_screen_audio` example
 - **Audio Mixer UI (Linux GUI)** - Start/stop audio capture with live level meter (dB), per-source volume sliders for system/mic
 - **Separate Audio Tracks** - System and microphone output as separate tracks in the MP4 (via the "Getrennte Tracks" option, Linux GUI); engine API `push_audio_track(frame, AudioTrack)`
@@ -66,15 +67,7 @@ Rivulet aims to be a **complete reimplementation of OBS Studio in Rust**, provid
 - **Cross-Platform** - Windows, macOS, and Linux support (via xcap)
 - **Modern UI** - Clean interface built with egui
 
-### 🚧 In Development (v0.2)
-
-- **Hardware Encoding**
-  - NVIDIA NVENC
-  - Intel QuickSync
-  - AMD AMF
-  - Auto-detection of best encoder
-
-### 📅 Planned Features
+### 🚧 In Development (v0.3)
 
 See [Roadmap](#-roadmap) for detailed timeline.
 
@@ -122,8 +115,8 @@ See [Roadmap](#-roadmap) for detailed timeline.
 - [ ] Audio-Monitoring (Quellen-Vorschau)
 
 **Performance**
-- [ ] Hardware-Encoding (NVIDIA NVENC, Intel QuickSync, AMD AMF)
-- [ ] Auto-Detection des besten Encoders mit Fallback
+- [x] Hardware-Encoding (NVIDIA NVENC, Intel QuickSync, AMD AMF)
+- [x] Auto-Detection des besten Encoders mit Fallback
 - [ ] Performance-Metriken (FPS, Encode-Last, Dateigröße)
 
 **Quality of Life**
@@ -212,7 +205,7 @@ Das Kernkonzept von OBS: Szenen, Quellen und Übergänge.
 | Capture-Quellen (Display, Fenster, Webcam) | Teilweise (Display + Fenster) |
 | Szenen & Übergänge | Offen |
 | Audio-Mixer (Quellen, Tracks, Filter) | Teilweise (Mixer, Separate Tracks) |
-| Recording & Encoding | Teilweise (H.264-Software) |
+| Recording & Encoding | Teilweise (H.264 Hardware + Software) |
 | Streaming (RTMP, Plattformen) | Teilweise (RTMPS Twitch/Kick/YouTube) |
 | Virtual Camera | Offen |
 | Replay Buffer | Offen |
@@ -280,7 +273,7 @@ cargo test --workspace
 cargo test -p rivulet-core
 ```
 
-The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4, including separate audio tracks verified via the GStreamer Discoverer), the streaming pipelines (RTMPS/dual output parse and route audio correctly), stream health tracking (status derivation from drop ratio, bitrate/FPS collapse and stalls) and the encoder/recorder lifecycle. Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable.
+The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4, including separate audio tracks verified via the GStreamer Discoverer), the streaming pipelines (RTMPS/dual output parse and route audio correctly), stream health tracking (status derivation from drop ratio, bitrate/FPS collapse and stalls), the encoder/recorder lifecycle, and the video encoder abstraction (element names, detection order, fallback, pipeline fragments, 4:2:0 input caps). Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable. The hardware-encoding end-to-end test only runs when the matching GPU plugin is present.
 
 ### Linting & Formatting
 
