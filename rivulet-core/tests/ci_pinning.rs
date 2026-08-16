@@ -94,3 +94,24 @@ fn reviewed_action_pins_are_used() {
         );
     }
 }
+
+#[test]
+fn dependabot_updates_pinned_github_actions() {
+    // Dependabot is what keeps the SHA pins from going stale: it opens a PR
+    // that updates both the commit SHA and the `# vX.Y.Z` comment. Without this
+    // entry the pins would freeze forever and only catch up manually.
+    let config = read(".github/dependabot.yml");
+    let marker = "package-ecosystem: \"github-actions\"";
+    let idx = config
+        .find(marker)
+        .expect("dependabot.yml must configure the github-actions ecosystem");
+    let entry = &config[idx..];
+    assert!(
+        entry.contains("directory: \"/\""),
+        "the github-actions entry must scan the repo root"
+    );
+    assert!(
+        entry.contains("interval: \"weekly\""),
+        "the github-actions entry must have a weekly schedule"
+    );
+}
