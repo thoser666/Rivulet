@@ -10,13 +10,16 @@
 #   scripts/generate-assets-docker.sh --check    # regenerate + verify vs HEAD
 #
 # Environment:
-#   RIVULET_IMAGEMAGICK_IMAGE  container image (default: dpokidov/imagemagick:7.1.2-12)
+#   RIVULET_IMAGEMAGICK_IMAGE  container image (default: dpokidov/imagemagick:7.1.2-12, pinned by digest)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-IMAGE="${RIVULET_IMAGEMAGICK_IMAGE:-dpokidov/imagemagick:7.1.2-12}"
+# Pinned by content digest (manifest-list digest, so it stays multi-arch).
+# ImageMagick publishes no official container, so the tag is also pinned to a
+# specific digest to guard against tag mutation; see the README "Assets" section.
+IMAGE="${RIVULET_IMAGEMAGICK_IMAGE:-dpokidov/imagemagick:7.1.2-12@sha256:87998ec1b8127b2f73f626f74f7b05e8827f9d7605fa52da5370588f7e53cee1}"
 
 CHECK=0
 case "${1:-}" in

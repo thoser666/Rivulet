@@ -42,6 +42,12 @@ fn png_dimensions(bytes: &[u8]) -> (u32, u32) {
     (u32_be(bytes, 16), u32_be(bytes, 20))
 }
 
+/// Content digest of the pinned ImageMagick image (manifest-list digest, so it
+/// stays multi-arch). ImageMagick publishes no official container image, so the
+/// tag is additionally pinned by digest to guard against tag mutation.
+const IMAGEMAGICK_DIGEST: &str =
+    "sha256:87998ec1b8127b2f73f626f74f7b05e8827f9d7605fa52da5370588f7e53cee1";
+
 #[test]
 fn macos_icns_is_structurally_valid() {
     let bytes = fs::read(repo_file("packaging/rivulet.icns"))
@@ -222,8 +228,8 @@ fn asset_drift_check_is_wired_up() {
         "CI must regenerate assets and check them against the committed files"
     );
     assert!(
-        ci.contains("dpokidov/imagemagick:7.1.2-12"),
-        "the asset check must run in a pinned ImageMagick image"
+        ci.contains(IMAGEMAGICK_DIGEST),
+        "the asset check must pin the ImageMagick image by content digest"
     );
     assert!(
         ci.contains("safe.directory"),
@@ -246,8 +252,8 @@ fn asset_drift_check_is_wired_up() {
 fn docker_wrapper_regenerates_assets_in_the_pinned_image() {
     let wrapper = read("scripts/generate-assets-docker.sh");
     assert!(
-        wrapper.contains("dpokidov/imagemagick:7.1.2-12"),
-        "the docker wrapper must use the pinned ImageMagick image"
+        wrapper.contains(IMAGEMAGICK_DIGEST),
+        "the docker wrapper must pin the ImageMagick image by content digest"
     );
     assert!(
         wrapper.contains("scripts/generate-assets.sh"),

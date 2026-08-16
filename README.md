@@ -400,9 +400,12 @@ Linux AppImage icon (`packaging/rivulet.png`) and the macOS app icon
 `scripts/generate-assets.sh` (requires ImageMagick and Python 3). Text uses the
 committed DejaVu Sans fonts and the resize filter is pinned; because text
 rasterization depends on the FreeType version, the canonical output is produced
-with a pinned ImageMagick (`dpokidov/imagemagick:7.1.2-12`). The
-`scripts/generate-assets-docker.sh` wrapper runs that pinned image for you via
-Docker or Podman, so no local ImageMagick installation is needed:
+with a pinned ImageMagick (`dpokidov/imagemagick:7.1.2-12`, pinned by content
+digest `sha256:87998ec1…53cee1`). ImageMagick publishes no official container
+image, so the image is multi-arch (amd64/arm64) and the digest pin guards
+against tag mutation. The `scripts/generate-assets-docker.sh` wrapper runs that
+pinned image for you via Docker or Podman, so no local ImageMagick
+installation is needed:
 
 ```bash
 scripts/generate-assets-docker.sh            # regenerate all assets

@@ -14,7 +14,8 @@
 # The output is deterministic: re-running the script reproduces the committed
 # assets byte-for-byte. Because text rasterization depends on the FreeType
 # version, the canonical output is produced with ImageMagick 7.1.2-12
-# (dpokidov/imagemagick:7.1.2-12); see the README "Assets" section. Override
+# (dpokidov/imagemagick:7.1.2-12, pinned by digest in the wrapper/CI); see the
+# README "Assets" section. Override
 # the fonts via RIVULET_FONT_BOLD / RIVULET_FONT_REGULAR (font file paths).
 #
 # Usage: scripts/generate-assets.sh
