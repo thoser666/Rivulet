@@ -140,6 +140,31 @@ fn action_pin_reference_doc_is_in_sync() {
 }
 
 #[test]
+fn action_pin_table_is_generated_and_checked() {
+    let doc = read("docs/ci-action-pins.md");
+    assert!(
+        doc.contains("<!-- action-pins-table:start -->")
+            && doc.contains("<!-- action-pins-table:end -->"),
+        "the pin table must be delimited by the generation markers"
+    );
+    let generator = read("scripts/generate-action-pins.py");
+    assert!(
+        generator.contains("action-pins-table:start")
+            && generator.contains("action-pins-table:end"),
+        "generate-action-pins.py must own the table markers"
+    );
+    assert!(
+        generator.contains("--check"),
+        "generate-action-pins.py must support --check mode"
+    );
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("generate-action-pins.py"),
+        "CI must run generate-action-pins.py --check to catch table drift"
+    );
+}
+
+#[test]
 fn dependabot_auto_merge_workflow_is_wired_up() {
     let wf = read(".github/workflows/dependabot-auto-merge.yml");
     assert!(

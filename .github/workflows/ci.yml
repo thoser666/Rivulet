@@ -60,6 +60,9 @@ jobs:
           sudo apt-get install -y shellcheck
           shellcheck packaging/macos/*.sh
 
+      - name: Check action pin table is up to date
+        run: python3 scripts/generate-action-pins.py --check
+
       - name: Check generated assets are up to date
         run: |
           # Run generation + comparison in a pinned ImageMagick image so the
