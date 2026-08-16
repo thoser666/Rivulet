@@ -60,6 +60,12 @@ jobs:
           sudo apt-get install -y shellcheck
           shellcheck packaging/macos/*.sh
 
+      - name: Check generated assets are up to date
+        run: |
+          sudo apt-get install -y imagemagick
+          bash scripts/generate-assets.sh
+          python3 scripts/check-assets.py
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 

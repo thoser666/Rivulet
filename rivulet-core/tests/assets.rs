@@ -208,3 +208,29 @@ fn release_workflows_attach_social_images() {
         );
     }
 }
+
+#[test]
+fn asset_drift_check_is_wired_up() {
+    let checker = read("scripts/check-assets.py");
+    assert!(
+        checker.contains("git show") && checker.contains("RGBA"),
+        "check-assets.py must compare decoded pixels against HEAD"
+    );
+
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("scripts/generate-assets.sh") && ci.contains("scripts/check-assets.py"),
+        "CI must regenerate assets and check them against the committed files"
+    );
+
+    let generator = read("scripts/generate-assets.sh");
+    assert!(
+        generator.contains("fonts/DejaVuSans-Bold.ttf")
+            && generator.contains("fonts/DejaVuSans.ttf"),
+        "generate-assets.sh must pin the committed fonts so text is reproducible"
+    );
+    assert!(
+        generator.contains("-filter Mitchell"),
+        "generate-assets.sh must pin the resize filter for cross-version determinism"
+    );
+}

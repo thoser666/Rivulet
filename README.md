@@ -397,13 +397,18 @@ The README thumbnail (`docs/thumbnail.png`), the GitHub social preview
 (`docs/social-preview.png`), the OpenGraph fallback (`docs/opengraph.png`), the
 Linux AppImage icon (`packaging/rivulet.png`) and the macOS app icon
 (`packaging/rivulet.icns`) are generated from the logo by
-`scripts/generate-assets.sh` (requires ImageMagick and Python 3). Re-running
-the script reproduces the committed files byte-for-byte, so any branding change
-is a single command:
+`scripts/generate-assets.sh` (requires ImageMagick and Python 3). The text uses
+the committed DejaVu Sans fonts and the resize filter is pinned, so re-running
+the script reproduces the committed files pixel-for-pixel on any platform, and
+any branding change is a single command:
 
 ```bash
 scripts/generate-assets.sh
 ```
+
+CI regenerates the assets and fails if they drift from the committed files
+(`scripts/check-assets.py`), so logo or generator changes must be committed
+together with the regenerated output.
 
 To activate the social preview, upload `docs/social-preview.png` as the
 repository's *Social preview* image under **Settings → General → Social

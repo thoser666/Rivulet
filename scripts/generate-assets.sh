@@ -13,7 +13,7 @@
 #
 # The output is deterministic: re-running the script reproduces the committed
 # assets byte-for-byte. Override the fonts via RIVULET_FONT_BOLD and
-# RIVULET_FONT_REGULAR (ImageMagick font names).
+# RIVULET_FONT_REGULAR (font file paths).
 #
 # Usage: scripts/generate-assets.sh
 set -euo pipefail
@@ -59,27 +59,15 @@ if [[ -z "$PYTHON" ]]; then
   exit 1
 fi
 
-# --- Font selection -------------------------------------------------------
-# Pick the first available sans-serif font so the script also works on hosts
-# without Arial (e.g. Linux CI runners with DejaVu/Liberation).
-pick_font() {
-  local name
-  for name in "$@"; do
-    if "$MAGICK" -list font 2>/dev/null | grep -qiE "^[[:space:]]*Font:[[:space:]]*${name}[[:space:]]*$"; then
-      printf '%s\n' "$name"
-      return 0
-    fi
-  done
-  return 1
-}
-
-FONT_BOLD="${RIVULET_FONT_BOLD:-$(pick_font "Arial-Bold" "DejaVu-Sans-Bold" "Liberation-Sans-Bold" "Helvetica-Bold" || true)}"
-FONT_REGULAR="${RIVULET_FONT_REGULAR:-$(pick_font "Arial" "DejaVu-Sans" "Liberation-Sans" "Helvetica" || true)}"
-
-BOLD_ARGS=()
-[[ -n "$FONT_BOLD" ]] && BOLD_ARGS=(-font "$FONT_BOLD")
-REGULAR_ARGS=()
-[[ -n "$FONT_REGULAR" ]] && REGULAR_ARGS=(-font "$FONT_REGULAR")
+# --- Fonts ----------------------------------------------------------------
+# Text uses committed DejaVu Sans TTFs so the wordmark/tagline render
+# byte-for-byte identically on every platform (system fonts differ: Arial on
+# Windows, DejaVu on Linux, Helvetica on macOS). Override with font file paths
+# via RIVULET_FONT_BOLD / RIVULET_FONT_REGULAR if desired.
+FONT_BOLD="${RIVULET_FONT_BOLD:-$REPO_ROOT/rivulet-gui/assets/fonts/DejaVuSans-Bold.ttf}"
+FONT_REGULAR="${RIVULET_FONT_REGULAR:-$REPO_ROOT/rivulet-gui/assets/fonts/DejaVuSans.ttf}"
+BOLD_ARGS=(-font "$FONT_BOLD")
+REGULAR_ARGS=(-font "$FONT_REGULAR")
 
 # Strip all metadata and force 8-bit depth so the PNGs are byte-for-byte
 # reproducible across ImageMagick versions.
@@ -105,26 +93,29 @@ SYMBOL_LIGHT="$WORK/rivulet_symbol_light.png"
 
 # 2. 1280x720 brand thumbnail: gradient + symbol + wordmark + tagline.
 "$MAGICK" -size 1280x720 "gradient:${NAVY}-${BLUE}" \
-  \( "$SYMBOL_LIGHT" -resize 'x260' \) -gravity north -geometry +0+35 -composite \
+  \( "$SYMBOL_LIGHT" -filter Mitchell -resize 'x260' \) -gravity north -geometry +0+35 -composite \
   -gravity north "${BOLD_ARGS[@]}" -fill white -pointsize 150 -annotate +0+320 'Rivulet' \
   -gravity north "${REGULAR_ARGS[@]}" -fill "$LIGHT_BLUE" -pointsize 44 -annotate +0+545 'Modern Screen Recording & Streaming' \
   "${STRIP[@]}" "$THUMBNAIL"
 
-# 3. 512x512 transparent icon for the Linux AppImage.
-"$MAGICK" "$SYMBOL" -resize '448x448>' -gravity center -background none -extent 512x512 \
+# 3. 512x512 transparent icon for the Linux AppImage. Resize up to fill the
+#    448px safe area (no `>`: a same-size no-op resize resamples in a
+#    filter-dependent way, so always do a real resize).
+"$MAGICK" "$SYMBOL" -filter Mitchell -resize '448x448' -gravity center -background none -extent 512x512 \
   "${STRIP[@]}" "$ICON"
 
 # 4. macOS app icon (.icns). The ICNS container stores one PNG per supported
 #    size; the type codes mirror `iconutil`'s output (ic11..ic14 are the @2x
-#    "retina" variants of the base sizes).
+#    "retina" variants of the base sizes). Upscale the symbol to fill 1024px
+#    first, so every smaller slice fills its canvas instead of floating small.
 SQUARE="$WORK/rivulet_square.png"
-"$MAGICK" "$SYMBOL" -resize '1024x1024>' -gravity center -background none \
+"$MAGICK" "$SYMBOL" -filter Mitchell -resize '1024x1024' -gravity center -background none \
   -extent 1024x1024 "${STRIP[@]}" "$SQUARE"
 
 ICONSET="$WORK/iconset"
 mkdir -p "$ICONSET"
 for size in 16 32 64 128 256 512 1024; do
-  "$MAGICK" "$SQUARE" -resize "${size}x${size}" "${STRIP[@]}" "$ICONSET/icon_${size}.png"
+  "$MAGICK" "$SQUARE" -filter Mitchell -resize "${size}x${size}" "${STRIP[@]}" "$ICONSET/icon_${size}.png"
 done
 
 "$PYTHON" "$SCRIPT_DIR/png2icns.py" "$ICNS" \
@@ -142,7 +133,7 @@ done
 # 5. 1280x640 GitHub social preview (OpenGraph): same brand, 2:1 ratio, used
 #    when release/repository links are shared. Reuses the light symbol.
 "$MAGICK" -size 1280x640 "gradient:${NAVY}-${BLUE}" \
-  \( "$SYMBOL_LIGHT" -resize 'x200' \) -gravity north -geometry +0+30 -composite \
+  \( "$SYMBOL_LIGHT" -filter Mitchell -resize 'x200' \) -gravity north -geometry +0+30 -composite \
   -gravity north "${BOLD_ARGS[@]}" -fill white -pointsize 130 -annotate +0+260 'Rivulet' \
   -gravity north "${REGULAR_ARGS[@]}" -fill "$LIGHT_BLUE" -pointsize 38 -annotate +0+455 'Modern Screen Recording & Streaming' \
   "${STRIP[@]}" "$SOCIAL"
@@ -150,7 +141,7 @@ done
 # 6. 1200x630 OpenGraph fallback for X/Facebook/LinkedIn, same composition as
 #    the GitHub card but at the more widely supported 1.91:1 ratio.
 "$MAGICK" -size 1200x630 "gradient:${NAVY}-${BLUE}" \
-  \( "$SYMBOL_LIGHT" -resize 'x200' \) -gravity north -geometry +0+30 -composite \
+  \( "$SYMBOL_LIGHT" -filter Mitchell -resize 'x200' \) -gravity north -geometry +0+30 -composite \
   -gravity north "${BOLD_ARGS[@]}" -fill white -pointsize 130 -annotate +0+255 'Rivulet' \
   -gravity north "${REGULAR_ARGS[@]}" -fill "$LIGHT_BLUE" -pointsize 38 -annotate +0+445 'Modern Screen Recording & Streaming' \
   "${STRIP[@]}" "$OPENGRAPH"
