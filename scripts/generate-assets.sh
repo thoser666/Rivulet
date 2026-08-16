@@ -24,9 +24,10 @@ THUMBNAIL="$REPO_ROOT/docs/thumbnail.png"
 ICON="$REPO_ROOT/packaging/rivulet.png"
 ICNS="$REPO_ROOT/packaging/rivulet.icns"
 
-# Rivulet brand colors (from the logo).
-NAVY="#0B2545"
-BLUE="#357AC6"
+# Brand palette, darkened for the hero thumbnail so the light-blue logo and
+# white wordmark read clearly. LIGHT_BLUE is the brand accent (from the logo).
+NAVY="#081C34"
+BLUE="#16457A"
 LIGHT_BLUE="#A0DAED"
 
 # --- ImageMagick detection ------------------------------------------------
@@ -92,9 +93,15 @@ SYMBOL="$WORK/rivulet_symbol.png"
 "$MAGICK" "$LOGO" -fuzz 8% -transparent white -trim +repage \
   -gravity north -crop '100%x83%+0+0' +repage "$SYMBOL"
 
+# Recolor the symbol for the thumbnail only: the original medium blue sits too
+# close to the background gradient, so the hero uses the light brand accent.
+# The app icons keep the original blue (better on light/transparent surfaces).
+SYMBOL_LIGHT="$WORK/rivulet_symbol_light.png"
+"$MAGICK" "$SYMBOL" -fill "$LIGHT_BLUE" -colorize 100 "$SYMBOL_LIGHT"
+
 # 2. 1280x720 brand thumbnail: gradient + symbol + wordmark + tagline.
 "$MAGICK" -size 1280x720 "gradient:${NAVY}-${BLUE}" \
-  \( "$SYMBOL" -resize 'x260' \) -gravity north -geometry +0+35 -composite \
+  \( "$SYMBOL_LIGHT" -resize 'x260' \) -gravity north -geometry +0+35 -composite \
   -gravity north "${BOLD_ARGS[@]}" -fill white -pointsize 150 -annotate +0+320 'Rivulet' \
   -gravity north "${REGULAR_ARGS[@]}" -fill "$LIGHT_BLUE" -pointsize 44 -annotate +0+545 'Modern Screen Recording & Streaming' \
   "${STRIP[@]}" "$THUMBNAIL"
