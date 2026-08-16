@@ -397,16 +397,17 @@ The README thumbnail (`docs/thumbnail.png`), the GitHub social preview
 (`docs/social-preview.png`), the OpenGraph fallback (`docs/opengraph.png`), the
 Linux AppImage icon (`packaging/rivulet.png`) and the macOS app icon
 (`packaging/rivulet.icns`) are generated from the logo by
-`scripts/generate-assets.sh` (requires ImageMagick and Python 3). The text uses
-the committed DejaVu Sans fonts and the resize filter is pinned, so re-running
-the script reproduces the committed files pixel-for-pixel on any platform, and
-any branding change is a single command:
+`scripts/generate-assets.sh` (requires ImageMagick and Python 3). Text uses the
+committed DejaVu Sans fonts and the resize filter is pinned; because text
+rasterization depends on the FreeType version, the canonical output is produced
+with a pinned ImageMagick (`dpokidov/imagemagick:7.1.2-12`):
 
 ```bash
-scripts/generate-assets.sh
+docker run --rm -v "$PWD:/work" -w /work dpokidov/imagemagick:7.1.2-12 \
+  bash -c 'apt-get update -qq && apt-get install -y -qq python3 >/dev/null 2>&1 && bash scripts/generate-assets.sh'
 ```
 
-CI regenerates the assets and fails if they drift from the committed files
+CI runs the same pinned image and fails if the committed assets drift
 (`scripts/check-assets.py`), so logo or generator changes must be committed
 together with the regenerated output.
 

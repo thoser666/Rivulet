@@ -12,8 +12,10 @@
 #   packaging/rivulet.icns    macOS app icon (16..1024 px, PNG-based)
 #
 # The output is deterministic: re-running the script reproduces the committed
-# assets byte-for-byte. Override the fonts via RIVULET_FONT_BOLD and
-# RIVULET_FONT_REGULAR (font file paths).
+# assets byte-for-byte. Because text rasterization depends on the FreeType
+# version, the canonical output is produced with ImageMagick 7.1.2-12
+# (dpokidov/imagemagick:7.1.2-12); see the README "Assets" section. Override
+# the fonts via RIVULET_FONT_BOLD / RIVULET_FONT_REGULAR (font file paths).
 #
 # Usage: scripts/generate-assets.sh
 set -euo pipefail

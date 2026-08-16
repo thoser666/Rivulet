@@ -216,11 +216,18 @@ fn asset_drift_check_is_wired_up() {
         checker.contains("git show") && checker.contains("RGBA"),
         "check-assets.py must compare decoded pixels against HEAD"
     );
-
     let ci = read(".github/workflows/ci.yml");
     assert!(
         ci.contains("scripts/generate-assets.sh") && ci.contains("scripts/check-assets.py"),
         "CI must regenerate assets and check them against the committed files"
+    );
+    assert!(
+        ci.contains("dpokidov/imagemagick:7.1.2-12"),
+        "the asset check must run in a pinned ImageMagick image"
+    );
+    assert!(
+        ci.contains("safe.directory"),
+        "the pinned container must mark the mounted repo as a safe git directory"
     );
 
     let generator = read("scripts/generate-assets.sh");
