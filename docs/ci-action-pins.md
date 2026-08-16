@@ -76,5 +76,8 @@ repository is not configured yet.
 - `rivulet-core/tests/ci_pinning.rs` — fails if any third-party `uses:` is not
   a full 40-char SHA, if the reviewed pins are not the ones in use, or if this
   table drifts from those pins.
+- `scripts/check-action-pins.py` — compares every pinned SHA against the
+  latest upstream tag/branch (run daily by the nightly workflow) to flag stale
+  pins outside Dependabot's schedule.
 - `.github/dependabot.yml` — the `github-actions` entry that proposes the
   updates in the first place.

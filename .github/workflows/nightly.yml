@@ -18,6 +18,20 @@ env:
 
 jobs:
   ################################################################
+  # STALE ACTION PIN DETECTION (daily, outside Dependabot's schedule)
+  ################################################################
+  check_stale_action_pins:
+    name: Check for stale action pins
+    runs-on: ubuntu-latest
+    if: ${{ github.actor != 'dependabot[bot]' && github.actor != 'dependabot-preview[bot]' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Compare pinned SHAs against upstream tags/branches
+        run: python3 scripts/check-action-pins.py
+
+  ################################################################
   # LINTS & FORMATTING (runs only on Linux)
   ################################################################
   lints:

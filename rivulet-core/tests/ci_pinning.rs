@@ -165,6 +165,30 @@ fn action_pin_table_is_generated_and_checked() {
 }
 
 #[test]
+fn stale_pin_checker_is_wired_up() {
+    // Dependabot only runs on its own schedule; this checker closes the gap by
+    // comparing every pinned SHA against upstream tags/branches on demand.
+    let checker = read("scripts/check-action-pins.py");
+    assert!(
+        checker.contains("git ls-remote"),
+        "check-action-pins.py must resolve SHAs via git ls-remote"
+    );
+    assert!(
+        checker.contains("refs/tags/") && checker.contains("refs/heads/"),
+        "check-action-pins.py must distinguish tag-pinned and branch-pinned actions"
+    );
+    assert!(
+        checker.contains("latest") && checker.contains("semver"),
+        "check-action-pins.py must compare against the latest stable release"
+    );
+    let nightly = read(".github/workflows/nightly.yml");
+    assert!(
+        nightly.contains("check-action-pins.py"),
+        "the nightly workflow must run the stale-pin checker daily"
+    );
+}
+
+#[test]
 fn dependabot_auto_merge_workflow_is_wired_up() {
     let wf = read(".github/workflows/dependabot-auto-merge.yml");
     assert!(

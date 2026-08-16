@@ -398,7 +398,10 @@ upstream version for reviewing Dependabot updates (its table is generated
 from the workflows by `scripts/generate-action-pins.py`). Dependabot PRs are
 approved and auto-merged via `.github/workflows/dependabot-auto-merge.yml`
 once the required checks (including the pinning tests) pass; this needs
-"Allow auto-merge" and branch protection enabled in the repo settings.
+"Allow auto-merge" and branch protection enabled in the repo settings. A
+daily nightly job (`scripts/check-action-pins.py`) also compares every pinned
+SHA against the latest upstream tag/branch to flag stale pins between
+Dependabot runs.
 
 ### Assets
 

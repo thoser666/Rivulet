@@ -11,48 +11,17 @@ Usage:
 """
 
 import difflib
-import re
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from action_pins import REPO_ROOT, parse_workflows  # noqa: E402
+
 DOC = REPO_ROOT / "docs" / "ci-action-pins.md"
 
 START_MARKER = "<!-- action-pins-table:start -->"
 END_MARKER = "<!-- action-pins-table:end -->"
-
-USES_RE = re.compile(r"^\s*uses:\s*(.+?)\s*$")
-
-
-def parse_workflows():
-    """Return {action: (sha, version, {workflow filenames})} from the workflows."""
-    pins = {}
-    for wf in sorted(WORKFLOW_DIR.glob("*.yml")):
-        for line in wf.read_text(encoding="utf-8").splitlines():
-            match = USES_RE.match(line)
-            if not match:
-                continue
-            raw = match.group(1)
-            ref_part, _, comment = raw.partition("#")
-            ref = ref_part.strip()
-            if not ref or ref.startswith("./"):
-                continue  # local reusable workflow, not a third-party pin
-            if "@" not in ref:
-                continue
-            action, sha = ref.rsplit("@", 1)
-            version = comment.strip()
-            if action in pins:
-                prev_sha, prev_version, files = pins[action]
-                if (prev_sha, prev_version) != (sha, version):
-                    sys.exit(
-                        f"conflicting pins for {action}: "
-                        f"{prev_sha} #{prev_version or '?'} vs {sha} #{version or '?'}"
-                    )
-                files.add(wf.name)
-            else:
-                pins[action] = (sha, version, {wf.name})
-    return pins
 
 
 def render_table(pins):
