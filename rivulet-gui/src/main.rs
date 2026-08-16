@@ -8,7 +8,33 @@ use rivulet_core::RivuletEngine;
 // Tokio is no longer required here, but we keep it for potential future tasks.
 use tokio::runtime::Runtime;
 
+/// Point GStreamer at the bundled runtime that ships next to the executable
+/// (portable ZIP / MSI). On developer machines (where GStreamer is installed
+/// globally) there is no `gstreamer-1.0` folder next to the exe and this is a
+/// no-op.
+#[cfg(target_os = "windows")]
+fn configure_bundled_gstreamer() {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let plugin_dir = dir.join("gstreamer-1.0");
+            if plugin_dir.is_dir() {
+                std::env::set_var("GST_PLUGIN_PATH", &plugin_dir);
+                std::env::set_var("GST_PLUGIN_SYSTEM_PATH", &plugin_dir);
+                let scanner = dir.join("gst-plugin-scanner.exe");
+                if scanner.exists() {
+                    std::env::set_var("GST_PLUGIN_SCANNER", scanner);
+                }
+                let registry = std::env::temp_dir().join("rivulet-gst-registry.bin");
+                std::env::set_var("GST_REGISTRY", registry);
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), eframe::Error> {
+    #[cfg(target_os = "windows")]
+    configure_bundled_gstreamer();
+
     tracing_subscriber::fmt::init();
 
     let _rt = Runtime::new().unwrap();

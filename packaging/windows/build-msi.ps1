@@ -29,6 +29,10 @@ $wxs = Join-Path $PSScriptRoot "rivulet.wxs"
 $bundle = Join-Path $Staging "bundle"
 if (-not (Test-Path $bundle)) { throw "Bundle directory missing: $bundle (run build-portable.ps1 first)" }
 
+# Icon for the Start Menu / Desktop shortcuts.
+$iconPath = Join-Path $PSScriptRoot "..\..\rivulet-gui\assets\rivulet_logo.ico"
+if (-not (Test-Path $iconPath)) { throw "Icon file missing: $iconPath" }
+
 $harvestXml = Join-Path $Staging "rivulet.harvest.wxs"
 
 # Install the WiX toolset (if not present).
@@ -64,11 +68,11 @@ $mainObj = Join-Path $Staging "rivulet.wixobj"
 $harvestObj = Join-Path $Staging "rivulet.harvest.wixobj"
 
 Write-Host "candle: $wxs"
-& candle.exe $wxs "-dProductVersion=$msiVersion" "-dBundleDir=$bundle" -ext WixUIExtension -out $mainObj
+& candle.exe $wxs "-dProductVersion=$msiVersion" "-dBundleDir=$bundle" "-dIconPath=$iconPath" -ext WixUIExtension -out $mainObj
 if ($LASTEXITCODE -ne 0) { throw "candle.exe failed (product)" }
 
 Write-Host "candle: $harvestXml"
-& candle.exe $harvestXml "-dProductVersion=$msiVersion" "-dBundleDir=$bundle" -ext WixUIExtension -out $harvestObj
+& candle.exe $harvestXml "-dProductVersion=$msiVersion" "-dBundleDir=$bundle" "-dIconPath=$iconPath" -ext WixUIExtension -out $harvestObj
 if ($LASTEXITCODE -ne 0) { throw "candle.exe failed (harvest)" }
 
 $lightOut = Join-Path $Staging "rivulet.msi"

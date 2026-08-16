@@ -2,11 +2,11 @@
 <!--
   WiX source for the Rivulet MSI.
   Built by release.yml / ci.yml:
-    candle rivulet.wxs -ext WixUIExtension
+    candle rivulet.wxs -ext WixUIExtension -dProductVersion=... -dBundleDir=... -dIconPath=...
     light rivulet.wxso -ext WixUIExtension -o rivulet.msi
 
   Most files are harvested (heat.exe) from the staging directory; this file
-  only controls the product skeleton.
+  only controls the product skeleton plus the Start Menu / Desktop shortcuts.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
@@ -22,6 +22,7 @@
 
     <Feature Id="MainFeature" Title="Rivulet" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
+      <ComponentGroupRef Id="RivuletShortcuts" />
     </Feature>
 
     <UIRef Id="WixUI_Minimal" />
@@ -32,6 +33,45 @@
       <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="Rivulet" />
       </Directory>
+
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Rivulet">
+          <Component Id="StartMenuShortcut" Guid="B7C2A1E0-4F3D-4E2C-8B7A-6D5C4B3A2910">
+            <Shortcut Id="RivuletStartMenuShortcut"
+                      Name="Rivulet"
+                      Description="Rivulet - Open-source screen recorder and live streaming studio"
+                      Target="[INSTALLFOLDER]rivulet-gui.exe"
+                      WorkingDirectory="INSTALLFOLDER"
+                      Icon="RivuletIcon" />
+            <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+            <RegistryValue Root="HKCU" Key="Software\Rivulet" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+
+      <Directory Id="DesktopFolder">
+        <Component Id="DesktopShortcut" Guid="8A1B2C3D-9E4F-4A5B-8C7D-6E5F4D3C2B1A">
+          <Shortcut Id="RivuletDesktopShortcut"
+                    Name="Rivulet"
+                    Description="Rivulet - Open-source screen recorder and live streaming studio"
+                    Target="[INSTALLFOLDER]rivulet-gui.exe"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Icon="RivuletIcon" />
+          <RemoveFolder Id="RemoveDesktopFolder" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\Rivulet" Name="installed_desktop" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
     </Directory>
+  </Fragment>
+
+  <Fragment>
+    <ComponentGroup Id="RivuletShortcuts">
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <Icon Id="RivuletIcon" SourceFile="$(var.IconPath)" />
   </Fragment>
 </Wix>
