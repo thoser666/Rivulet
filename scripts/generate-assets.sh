@@ -6,7 +6,8 @@
 #
 # Outputs (relative to the repository root):
 #   docs/thumbnail.png        1280x720 brand thumbnail (README hero image)
-#   docs/social-preview.png   1280x640 GitHub social preview (OpenGraph, 2:1)
+#   docs/social-preview.png   1280x640 GitHub social preview (2:1)
+#   docs/opengraph.png        1200x630 OpenGraph fallback (X/Facebook/LinkedIn)
 #   packaging/rivulet.png     512x512 transparent Linux AppImage icon
 #   packaging/rivulet.icns    macOS app icon (16..1024 px, PNG-based)
 #
@@ -23,6 +24,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOGO="$REPO_ROOT/rivulet-gui/assets/rivulet_logo.jpg"
 THUMBNAIL="$REPO_ROOT/docs/thumbnail.png"
 SOCIAL="$REPO_ROOT/docs/social-preview.png"
+OPENGRAPH="$REPO_ROOT/docs/opengraph.png"
 ICON="$REPO_ROOT/packaging/rivulet.png"
 ICNS="$REPO_ROOT/packaging/rivulet.icns"
 
@@ -145,8 +147,17 @@ done
   -gravity north "${REGULAR_ARGS[@]}" -fill "$LIGHT_BLUE" -pointsize 38 -annotate +0+455 'Modern Screen Recording & Streaming' \
   "${STRIP[@]}" "$SOCIAL"
 
+# 6. 1200x630 OpenGraph fallback for X/Facebook/LinkedIn, same composition as
+#    the GitHub card but at the more widely supported 1.91:1 ratio.
+"$MAGICK" -size 1200x630 "gradient:${NAVY}-${BLUE}" \
+  \( "$SYMBOL_LIGHT" -resize 'x200' \) -gravity north -geometry +0+30 -composite \
+  -gravity north "${BOLD_ARGS[@]}" -fill white -pointsize 130 -annotate +0+255 'Rivulet' \
+  -gravity north "${REGULAR_ARGS[@]}" -fill "$LIGHT_BLUE" -pointsize 38 -annotate +0+445 'Modern Screen Recording & Streaming' \
+  "${STRIP[@]}" "$OPENGRAPH"
+
 echo "Generated:"
 echo "  $THUMBNAIL"
 echo "  $SOCIAL"
+echo "  $OPENGRAPH"
 echo "  $ICON"
 echo "  $ICNS"

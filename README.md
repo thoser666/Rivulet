@@ -394,9 +394,10 @@ the macOS packaging scripts.
 ### Assets
 
 The README thumbnail (`docs/thumbnail.png`), the GitHub social preview
-(`docs/social-preview.png`), the Linux AppImage icon (`packaging/rivulet.png`)
-and the macOS app icon (`packaging/rivulet.icns`) are generated from the logo
-by `scripts/generate-assets.sh` (requires ImageMagick and Python 3). Re-running
+(`docs/social-preview.png`), the OpenGraph fallback (`docs/opengraph.png`), the
+Linux AppImage icon (`packaging/rivulet.png`) and the macOS app icon
+(`packaging/rivulet.icns`) are generated from the logo by
+`scripts/generate-assets.sh` (requires ImageMagick and Python 3). Re-running
 the script reproduces the committed files byte-for-byte, so any branding change
 is a single command:
 
@@ -407,7 +408,8 @@ scripts/generate-assets.sh
 To activate the social preview, upload `docs/social-preview.png` as the
 repository's *Social preview* image under **Settings → General → Social
 preview** on GitHub; it is used when repository and release links are shared
-(OpenGraph/`og:image`).
+(OpenGraph/`og:image`). `docs/opengraph.png` (1200×630) is the matching
+fallback for X, Facebook and LinkedIn cards.
 
 > **Note:** On Linux, set `LIBCLANG_PATH` to your LLVM `lib` directory (e.g. `export LIBCLANG_PATH=/usr/lib/llvm-14/lib`) if the `clang-sys` build fails.
 

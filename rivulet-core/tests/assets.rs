@@ -114,6 +114,10 @@ fn generator_script_produces_all_assets() {
         script.contains("docs/social-preview.png"),
         "generate-assets.sh must emit the social preview"
     );
+    assert!(
+        script.contains("docs/opengraph.png"),
+        "generate-assets.sh must emit the OpenGraph fallback"
+    );
 
     let packer = read("scripts/png2icns.py");
     assert!(
@@ -146,15 +150,17 @@ fn other_branding_assets_exist() {
     let thumbnail = repo_file("docs/thumbnail.png");
     let linux_icon = repo_file("packaging/rivulet.png");
     let social = repo_file("docs/social-preview.png");
+    let opengraph = repo_file("docs/opengraph.png");
     assert!(thumbnail.exists(), "docs/thumbnail.png must be committed");
     assert!(
         linux_icon.exists(),
         "packaging/rivulet.png must be committed"
     );
     assert!(social.exists(), "docs/social-preview.png must be committed");
+    assert!(opengraph.exists(), "docs/opengraph.png must be committed");
 
     let mut header = [0u8; 8];
-    for path in [&thumbnail, &linux_icon, &social] {
+    for path in [&thumbnail, &linux_icon, &social, &opengraph] {
         let bytes = fs::read(path).expect("asset readable");
         header.copy_from_slice(&bytes[..8]);
         assert_eq!(
@@ -175,5 +181,17 @@ fn social_preview_has_opengraph_dimensions() {
         png_dimensions(&bytes),
         (1280, 640),
         "GitHub social previews must be 1280x640 (2:1)"
+    );
+}
+
+#[test]
+fn opengraph_fallback_has_standard_dimensions() {
+    let bytes =
+        fs::read(repo_file("docs/opengraph.png")).expect("docs/opengraph.png must be committed");
+    assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "must be a PNG");
+    assert_eq!(
+        png_dimensions(&bytes),
+        (1200, 630),
+        "OpenGraph fallbacks must be 1200x630 (1.91:1)"
     );
 }
