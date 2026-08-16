@@ -91,7 +91,7 @@ impl Default for RivuletEngine {
 
 impl RivuletEngine {
     pub fn new() -> Self {
-        println!("[Engine] GStreamer bereit.");
+        println!("[Engine] GStreamer ready.");
         Self::default()
     }
 
@@ -579,10 +579,10 @@ impl RivuletEngine {
             return;
         }
         if self.stream_settings.is_none() {
-            eprintln!("[Engine] Keine Stream-Ziele konfiguriert.");
+            eprintln!("[Engine] No stream targets configured.");
             return;
         }
-        println!("[Engine] Streaming vorbereitet.");
+        println!("[Engine] Streaming prepared.");
         self.is_recording = true;
 
         // Initialize the stream health monitor. Defaults match the
@@ -770,7 +770,7 @@ mod tests {
     /// uses backslashes, which are invalid in a URI; they are converted to
     /// forward slashes (`C:\Users\...` -> `file:///C:/Users/...`).
     fn file_uri(path: &std::path::Path) -> String {
-        let s = path.to_str().expect("Pfad muss UTF-8 sein");
+        let s = path.to_str().expect("Path must be UTF-8");
         format!("file:///{}", s.replace('\\', "/"))
     }
 
@@ -843,7 +843,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(100));
         engine.stop_recording();
 
-        assert!(path.exists(), "Ausgabedatei sollte existieren");
+        assert!(path.exists(), "output file should exist");
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         assert!(len > 0, "output file should not be empty");
 
@@ -879,7 +879,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(100));
         engine.stop_recording();
 
-        assert!(path.exists(), "Ausgabedatei sollte existieren");
+        assert!(path.exists(), "output file should exist");
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         assert!(len > 0, "output file should not be empty");
 
@@ -888,12 +888,12 @@ mod tests {
             .expect("Discoverer should be creatable");
         let info = discoverer
             .discover_uri(&uri)
-            .expect("Datei sollte lesbar sein");
+            .expect("File should be readable");
         let audio_streams = info.audio_streams();
         assert_eq!(
             audio_streams.len(),
             2,
-            "Es sollten zwei Audio-Streams vorhanden sein, gefunden: {}",
+            "two audio streams should be present, found: {}",
             audio_streams.len()
         );
 
@@ -909,7 +909,7 @@ mod tests {
 
         let frame = AudioFrame::new(vec![0.0f32; 8], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
         let result = engine.push_audio_track(&frame, AudioTrack::System);
-        assert!(result.is_ok(), "push_audio_track sollte kein Fehler sein");
+        assert!(result.is_ok(), "push_audio_track should not error");
     }
 
     /// The streaming pipeline parses and uses an RTMPS ingest URL.
@@ -923,7 +923,7 @@ mod tests {
         let pipeline_str = engine.build_streaming_pipeline_str();
         assert!(pipeline_str.contains("rtmps://live.twitch.tv/app/testkey123"));
         let pipeline = gst::parse::launch(&pipeline_str)
-            .expect("Streaming-Pipeline sollte parsen")
+            .expect("streaming pipeline should parse")
             .downcast::<gst::Pipeline>()
             .unwrap();
         assert!(pipeline.by_name("rivulet_src").is_some());
@@ -991,7 +991,7 @@ mod tests {
 
         let pipeline_str = engine.build_streaming_pipeline_str();
         assert!(!pipeline_str.contains("audio_src"), "{}", pipeline_str);
-        gst::parse::launch(&pipeline_str).expect("Video-Only-Streaming-Pipeline sollte parsen");
+        gst::parse::launch(&pipeline_str).expect("video-only streaming pipeline should parse");
     }
 
     /// The streaming pipeline mixes audio into a single track by default and
@@ -1007,7 +1007,7 @@ mod tests {
         assert!(pipeline_str.contains("name=audio_src "), "{}", pipeline_str);
         assert!(!pipeline_str.contains("audio_src_sys"), "{}", pipeline_str);
         assert!(pipeline_str.contains("rtmp://localhost/live/k"));
-        gst::parse::launch(&pipeline_str).expect("Custom-RTMP-Pipeline sollte parsen");
+        gst::parse::launch(&pipeline_str).expect("custom RTMP pipeline should parse");
     }
 
     /// While streaming, mixed audio frames are routed into the pipeline even
@@ -1065,17 +1065,17 @@ mod tests {
         engine.set_stream_settings(Some(StreamSettings::twitch("k")));
         assert!(
             !engine.is_dual_output(),
-            "nur Streaming ist kein Dual Output"
+            "streaming alone is not dual output"
         );
 
         let path = std::env::temp_dir().join("rivulet_dual_detect.mp4");
         engine.start_local_recording(path);
-        assert!(engine.is_dual_output(), "Stream + Aufnahme = Dual Output");
+        assert!(engine.is_dual_output(), "stream + recording = dual output");
 
         engine.set_stream_settings(None);
         assert!(
             !engine.is_dual_output(),
-            "nur Aufnahme ist kein Dual Output"
+            "recording alone is not dual output"
         );
     }
 
@@ -1104,7 +1104,7 @@ mod tests {
         assert!(pipeline_str.contains("rtmp2sink location=\"rtmps://live.twitch.tv/app/dualkey\""));
 
         let pipeline = gst::parse::launch(&pipeline_str)
-            .expect("Dual-Output-Pipeline sollte parsen")
+            .expect("dual-output pipeline should parse")
             .downcast::<gst::Pipeline>()
             .unwrap();
         assert!(pipeline.by_name("rivulet_src").is_some());
@@ -1145,7 +1145,7 @@ mod tests {
 
         let pipeline_str = engine.build_dual_output_pipeline_str();
         assert!(!pipeline_str.contains("audio_src"), "{}", pipeline_str);
-        gst::parse::launch(&pipeline_str).expect("Video-Only-Dual-Output-Pipeline sollte parsen");
+        gst::parse::launch(&pipeline_str).expect("video-only dual-output pipeline should parse");
     }
 
     /// In dual output mode mixed audio frames are routed into the pipeline even
@@ -1211,7 +1211,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(100));
         engine.stop_recording();
 
-        assert!(path.exists(), "Ausgabedatei sollte existieren");
+        assert!(path.exists(), "output file should exist");
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         assert!(len > 0, "output file should not be empty");
 
@@ -1220,11 +1220,11 @@ mod tests {
             .expect("Discoverer should be creatable");
         let info = discoverer
             .discover_uri(&uri)
-            .expect("Datei sollte lesbar sein");
+            .expect("File should be readable");
         assert_eq!(
             info.audio_streams().len(),
             1,
-            "Es sollte ein Audio-Stream vorhanden sein"
+            "one audio stream should be present"
         );
 
         let _ = std::fs::remove_file(&path);
@@ -1338,7 +1338,7 @@ mod tests {
             "{}",
             pipeline_str
         );
-        gst::parse::launch(&pipeline_str).expect("Pipeline mit x264 sollte parsen");
+        gst::parse::launch(&pipeline_str).expect("pipeline with x264 should parse");
     }
 
     /// The streaming pipeline uses the selected encoder as well.
@@ -1357,7 +1357,7 @@ mod tests {
             "{}",
             pipeline_str
         );
-        gst::parse::launch(&pipeline_str).expect("Streaming-Pipeline mit x264 sollte parsen");
+        gst::parse::launch(&pipeline_str).expect("streaming pipeline with x264 should parse");
     }
 
     /// The dual output pipeline uses the selected encoder in both branches.
@@ -1378,7 +1378,7 @@ mod tests {
             "{}",
             pipeline_str
         );
-        gst::parse::launch(&pipeline_str).expect("Dual-Output-Pipeline mit x264 sollte parsen");
+        gst::parse::launch(&pipeline_str).expect("dual-output pipeline with x264 should parse");
     }
 
     /// When NVENC is available the engine's pipeline parses with it and the
