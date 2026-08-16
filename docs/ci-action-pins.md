@@ -50,6 +50,23 @@ The printed commit must equal the SHA in the PR. Then update this table and the
 matching entry in `rivulet-core/tests/ci_pinning.rs` so the reference and the
 enforcement stay in sync (the test suite fails otherwise).
 
+## Auto-merge
+
+`.github/workflows/dependabot-auto-merge.yml` approves Dependabot PRs and
+enables auto-merge, so a bump is merged automatically once the required CI
+checks pass — those checks re-run `rivulet-core/tests/ci_pinning.rs` (the
+pinning tests) as part of the `Build & Test` matrix. Two repo settings make
+this take effect (they cannot be committed):
+
+1. **Settings → General → Pull Requests → "Allow auto-merge"** must be on.
+2. **Branch protection on `develop`** must require the `Build & Test` status
+   checks. Auto-merge needs at least one required status check; GitHub then
+   merges only after those checks are green.
+
+Without those settings, the workflow's `gh pr merge --auto` step fails on the
+next Dependabot PR (visible in the Actions tab) — the intended signal that the
+repository is not configured yet.
+
 ## Enforcement
 
 - `rivulet-core/tests/ci_pinning.rs` — fails if any third-party `uses:` is not

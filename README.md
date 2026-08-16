@@ -394,7 +394,10 @@ full commit SHA (with the upstream version in a trailing comment) so a
 repointed tag or branch cannot swap in a malicious commit;
 `rivulet-core/tests/ci_pinning.rs` enforces this and
 [`docs/ci-action-pins.md`](docs/ci-action-pins.md) maps each pin to its
-upstream version for reviewing Dependabot updates.
+upstream version for reviewing Dependabot updates. Dependabot PRs are
+approved and auto-merged via `.github/workflows/dependabot-auto-merge.yml`
+once the required checks (including the pinning tests) pass; this needs
+"Allow auto-merge" and branch protection enabled in the repo settings.
 
 ### Assets
 

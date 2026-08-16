@@ -1,0 +1,40 @@
+name: Dependabot auto-merge
+
+# Approves Dependabot PRs and enables auto-merge so dependency bumps are merged
+# automatically once the required CI checks are green. The pinning tests
+# (rivulet-core/tests/ci_pinning.rs) run inside the `Build & Test` matrix of
+# ci.yml; GitHub only completes the auto-merge after branch protection's
+# required status checks pass, so the pins are re-verified before merging.
+#
+# Prerequisites (repo settings, not committable):
+#   - Settings -> General -> Pull Requests -> "Allow auto-merge" enabled.
+#   - Branch protection on `develop` requiring the `Build & Test` checks.
+#     `gh pr merge --auto` refuses to enable auto-merge without at least one
+#     required status check.
+
+on:
+  pull_request_target:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  dependabot:
+    name: Approve and enable auto-merge
+    runs-on: ubuntu-latest
+    # Only for Dependabot PRs; pull_request_target runs in the base-repo
+    # context, so never checkout or execute anything from the PR itself.
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    steps:
+      - name: Approve the Dependabot PR
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr review --approve "$PR_URL"
+
+      - name: Enable auto-merge
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --squash "$PR_URL"

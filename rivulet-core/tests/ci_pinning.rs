@@ -19,6 +19,7 @@ const WORKFLOWS: &[&str] = &[
     "nightly.yml",
     "signing-e2e.yml",
     "build-package.yml",
+    "dependabot-auto-merge.yml",
 ];
 
 /// The reviewed pins. `(action@sha, human-readable version)` — the version
@@ -136,4 +137,29 @@ fn action_pin_reference_doc_is_in_sync() {
             "docs/ci-action-pins.md must map {action} to {version} on a single row"
         );
     }
+}
+
+#[test]
+fn dependabot_auto_merge_workflow_is_wired_up() {
+    let wf = read(".github/workflows/dependabot-auto-merge.yml");
+    assert!(
+        wf.contains("pull_request_target:"),
+        "auto-merge must run in the base-repo context (write access, no PR checkout)"
+    );
+    assert!(
+        wf.contains("github.actor == 'dependabot[bot]'"),
+        "auto-merge must be gated to Dependabot PRs only"
+    );
+    assert!(
+        wf.contains("gh pr merge --auto"),
+        "auto-merge must enable auto-merge so GitHub merges after required checks pass"
+    );
+    assert!(
+        wf.contains("gh pr review --approve"),
+        "auto-merge must approve the PR so required reviews don't block it"
+    );
+    assert!(
+        wf.contains("secrets.GITHUB_TOKEN"),
+        "auto-merge must authenticate with the workflow token"
+    );
 }
