@@ -26,11 +26,22 @@ fn line_index(text: &str, needle: &str) -> usize {
         .unwrap_or_else(|| panic!("expected to find {needle:?}"))
 }
 
-fn workflows() -> Vec<(&'static str, String)> {
-    ["ci.yml", "release.yml"]
-        .into_iter()
-        .map(|name| (name, read(&format!(".github/workflows/{name}"))))
-        .collect()
+/// The reusable workflow that owns packaging + signing, shared by ci.yml and
+/// release.yml.
+fn signing_workflow() -> String {
+    read(".github/workflows/build-package.yml")
+}
+
+fn all_workflows() -> Vec<(&'static str, String)> {
+    [
+        "ci.yml",
+        "release.yml",
+        "build-package.yml",
+        "signing-e2e.yml",
+    ]
+    .into_iter()
+    .map(|name| (name, read(&format!(".github/workflows/{name}"))))
+    .collect()
 }
 
 #[test]
@@ -48,37 +59,37 @@ fn signing_scripts_exist() {
 }
 
 #[test]
-fn workflows_reference_signing_scripts() {
-    for (name, content) in workflows() {
-        assert!(
-            content.contains("packaging/windows/sign.ps1"),
-            "{name} must sign via the dedicated Windows script"
-        );
-        assert!(
-            content.contains("packaging/macos/sign-notarize.sh"),
-            "{name} must sign via the dedicated macOS script"
-        );
-    }
+fn signing_workflow_references_signing_scripts() {
+    let content = signing_workflow();
+    assert!(
+        content.contains("packaging/windows/sign.ps1"),
+        "reusable workflow must sign via the Windows script"
+    );
+    assert!(
+        content.contains("packaging/macos/sign-notarize.sh"),
+        "reusable workflow must sign via the macOS script"
+    );
 }
 
 #[test]
 fn signing_is_gated_on_secret_presence_outputs() {
-    for (name, content) in workflows() {
-        assert!(
-            content.contains("id: signing"),
-            "{name} must have a signing check step"
-        );
-        assert!(
-            content.contains("steps.signing.outputs.windows_enabled"),
-            "{name} must gate Windows signing on the check output"
-        );
-        assert!(
-            content.contains("steps.signing.outputs.macos_enabled"),
-            "{name} must gate macOS signing on the check output"
-        );
+    let content = signing_workflow();
+    assert!(
+        content.contains("id: signing"),
+        "reusable workflow must have a signing check step"
+    );
+    assert!(
+        content.contains("steps.signing.outputs.windows_enabled"),
+        "reusable workflow must gate Windows signing on the check output"
+    );
+    assert!(
+        content.contains("steps.signing.outputs.macos_enabled"),
+        "reusable workflow must gate macOS signing on the check output"
+    );
 
-        // Secrets must never be referenced directly in an `if:` condition;
-        // GitHub does not evaluate them there.
+    // Secrets must never be referenced directly in an `if:` condition;
+    // GitHub does not evaluate them there. Applies to every workflow.
+    for (name, content) in all_workflows() {
         for line in content.lines() {
             if line.contains("if:") {
                 assert!(
@@ -92,28 +103,38 @@ fn signing_is_gated_on_secret_presence_outputs() {
 
 #[test]
 fn windows_msi_is_signed_after_it_is_built() {
-    for (name, content) in workflows() {
-        let exe_sign = line_index(&content, "Sign Windows executable");
-        let build = line_index(&content, "Build portable ZIP + MSI (Windows)");
-        let msi_sign = line_index(&content, "Sign Windows MSI");
+    let content = signing_workflow();
+    let exe_sign = line_index(&content, "Sign Windows executable");
+    let build = line_index(&content, "Build portable ZIP + MSI (Windows)");
+    let msi_sign = line_index(&content, "Sign Windows MSI");
 
-        assert!(
-            exe_sign < build,
-            "{name}: exe must be signed before packaging"
-        );
-        assert!(
-            build < msi_sign,
-            "{name}: MSI must be signed after it is built"
-        );
-    }
+    assert!(
+        exe_sign < build,
+        "exe must be signed before the ZIP/MSI are packaged"
+    );
+    assert!(build < msi_sign, "MSI must be signed after it is built");
 }
 
 #[test]
 fn macos_app_is_built_before_it_is_signed() {
-    for (name, content) in workflows() {
-        let app = line_index(&content, "Build macOS app bundle");
-        let sign = line_index(&content, "Sign & notarize macOS app");
-        assert!(app < sign, "{name}: app bundle must exist before signing");
+    let content = signing_workflow();
+    let app = line_index(&content, "Build macOS app bundle");
+    let sign = line_index(&content, "Sign & notarize macOS app");
+    assert!(app < sign, "app bundle must exist before signing");
+}
+
+#[test]
+fn caller_workflows_use_the_reusable_workflow() {
+    for name in ["ci.yml", "release.yml"] {
+        let content = read(&format!(".github/workflows/{name}"));
+        assert!(
+            content.contains("uses: ./.github/workflows/build-package.yml"),
+            "{name} must call the reusable build+package workflow"
+        );
+        assert!(
+            content.contains("secrets: inherit"),
+            "{name} must pass secrets to the reusable workflow"
+        );
     }
 }
 
