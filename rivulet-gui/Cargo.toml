@@ -31,6 +31,9 @@ rfd = "0.17"
 # Local core library
 rivulet-core = { path = "../rivulet-core" }
 
+# Update checking and installation (GitHub Releases)
+rivulet-updater = { path = "../rivulet-updater" }
+
 # Logging library
 tracing-subscriber = { version = "0.3.18", features = ["fmt"] }
 

@@ -55,6 +55,21 @@ struct RawFrame {
     height: u32,
 }
 
+// --- Auto-update state machine ---
+#[derive(Debug, Clone, PartialEq, Default)]
+enum UpdateUi {
+    #[default]
+    Idle,
+    Checking,
+    UpToDate,
+    Available(rivulet_updater::UpdateInfo),
+    Downloading(String),
+    Downloaded(std::path::PathBuf),
+    Installing,
+    Installed,
+    Error(String),
+}
+
 // --- Windows handler struct ---
 #[cfg(target_os = "windows")]
 struct CaptureHandler {
@@ -251,6 +266,18 @@ pub struct RivuletApp {
     #[cfg(target_os = "windows")]
     #[serde(skip)]
     last_error: Option<String>,
+
+    // Auto-update
+    #[serde(skip)]
+    update_ui: std::sync::Arc<std::sync::Mutex<UpdateUi>>,
+    #[serde(skip)]
+    update_auto_checked: bool,
+    #[serde(skip)]
+    update_check_clicked: bool,
+    #[serde(skip)]
+    update_download_clicked: bool,
+    #[serde(skip)]
+    update_install_clicked: bool,
 }
 
 impl Default for RivuletApp {
@@ -337,6 +364,12 @@ impl Default for RivuletApp {
             stop_signal: None,
             #[cfg(target_os = "windows")]
             last_error: None,
+
+            update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
+            update_auto_checked: false,
+            update_check_clicked: false,
+            update_download_clicked: false,
+            update_install_clicked: false,
         }
     }
 }
@@ -772,6 +805,162 @@ impl RivuletApp {
         self.tr_fmt("recording_metrics", &[fps, load, size])
     }
 
+    /// Snapshot of the current auto-update state.
+    fn update_ui_snapshot(&self) -> UpdateUi {
+        self.update_ui
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Check for a newer release in the background.
+    fn spawn_update_check(&self, ctx: egui::Context) {
+        let shared = std::sync::Arc::clone(&self.update_ui);
+        *shared.lock().unwrap_or_else(|e| e.into_inner()) = UpdateUi::Checking;
+        std::thread::spawn(move || {
+            let result = rivulet_updater::check_for_update(env!("CARGO_PKG_VERSION"));
+            let state = match result {
+                Ok(None) => UpdateUi::UpToDate,
+                Ok(Some(info)) => UpdateUi::Available(info),
+                Err(e) => UpdateUi::Error(e.to_string()),
+            };
+            *shared.lock().unwrap_or_else(|e| e.into_inner()) = state;
+            ctx.request_repaint();
+        });
+    }
+
+    /// Download the update asset in the background.
+    fn spawn_update_download(&self, ctx: egui::Context, asset: rivulet_updater::Asset) {
+        let shared = std::sync::Arc::clone(&self.update_ui);
+        *shared.lock().unwrap_or_else(|e| e.into_inner()) =
+            UpdateUi::Downloading(asset.name.clone());
+        std::thread::spawn(move || {
+            let dest = std::env::temp_dir().join(&asset.name);
+            let result = rivulet_updater::download_asset(&asset, &dest);
+            let state = match result {
+                Ok(()) => UpdateUi::Downloaded(dest),
+                Err(e) => UpdateUi::Error(e.to_string()),
+            };
+            *shared.lock().unwrap_or_else(|e| e.into_inner()) = state;
+            ctx.request_repaint();
+        });
+    }
+
+    /// Launch the platform installer and (on Windows/Linux) quit the app so
+    /// the running files can be replaced.
+    fn spawn_update_install(&self, ctx: egui::Context, path: std::path::PathBuf) {
+        let shared = std::sync::Arc::clone(&self.update_ui);
+        *shared.lock().unwrap_or_else(|e| e.into_inner()) = UpdateUi::Installing;
+        std::thread::spawn(move || {
+            let result = rivulet_updater::install_asset(&path);
+            let quit_after = result.as_ref().map(|quit| *quit).unwrap_or(false);
+            let state = match result {
+                Ok(_) => UpdateUi::Installed,
+                Err(e) => UpdateUi::Error(e.to_string()),
+            };
+            *shared.lock().unwrap_or_else(|e| e.into_inner()) = state;
+            ctx.request_repaint();
+            if quit_after {
+                // Show the "installed" message for a moment, then close so the
+                // installer can replace the running files (MSI / new AppImage).
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        });
+    }
+
+    /// Render the auto-update section below the recording controls.
+    fn draw_update_status(&mut self, ui: &mut egui::Ui) {
+        match self.update_ui_snapshot() {
+            UpdateUi::Checking => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(self.tr("update_checking"));
+                });
+            }
+            UpdateUi::UpToDate => {
+                ui.colored_label(egui::Color32::LIGHT_GREEN, self.tr("update_up_to_date"));
+            }
+            UpdateUi::Available(info) => {
+                ui.colored_label(
+                    egui::Color32::YELLOW,
+                    self.tr_fmt("update_available", &[info.version]),
+                );
+                if let Some(asset) = &info.asset {
+                    ui.label(self.tr_fmt("update_asset_size", &[format_bytes(asset.size)]));
+                }
+                ui.horizontal(|ui| {
+                    if ui.button(self.tr("update_download_install")).clicked() {
+                        self.update_download_clicked = true;
+                    }
+                    ui.hyperlink_to(self.tr("update_release_notes"), &info.html_url);
+                });
+            }
+            UpdateUi::Downloading(name) => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(self.tr_fmt("update_downloading", &[name]));
+                });
+            }
+            UpdateUi::Downloaded(_path) => {
+                ui.colored_label(
+                    egui::Color32::LIGHT_GREEN,
+                    self.tr("update_downloaded").to_string(),
+                );
+                if ui.button(self.tr("update_install")).clicked() {
+                    self.update_install_clicked = true;
+                }
+            }
+            UpdateUi::Installing => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(self.tr("update_installing"));
+                });
+            }
+            UpdateUi::Installed => {
+                ui.colored_label(
+                    egui::Color32::LIGHT_GREEN,
+                    self.tr("update_installed_restart").to_string(),
+                );
+            }
+            UpdateUi::Error(err) => {
+                ui.colored_label(egui::Color32::RED, self.tr_fmt("update_error", &[err]));
+            }
+            UpdateUi::Idle => {}
+        }
+    }
+
+    /// Handle the queued update actions (check / download / install).
+    fn handle_update_actions(&mut self, ctx: egui::Context) {
+        let busy = matches!(
+            self.update_ui_snapshot(),
+            UpdateUi::Checking | UpdateUi::Downloading(_) | UpdateUi::Installing
+        );
+
+        if !self.update_auto_checked && !busy {
+            self.update_auto_checked = true;
+            self.spawn_update_check(ctx.clone());
+        }
+        if self.update_check_clicked && !busy {
+            self.update_check_clicked = false;
+            self.spawn_update_check(ctx.clone());
+        }
+        if self.update_download_clicked && !busy {
+            self.update_download_clicked = false;
+            if let UpdateUi::Available(info) = self.update_ui_snapshot() {
+                if let Some(asset) = info.asset {
+                    self.spawn_update_download(ctx.clone(), asset);
+                }
+            }
+        }
+        if self.update_install_clicked && !busy {
+            self.update_install_clicked = false;
+            if let UpdateUi::Downloaded(path) = self.update_ui_snapshot() {
+                self.spawn_update_install(ctx, path);
+            }
+        }
+    }
+
     pub fn new(cc: &eframe::CreationContext<'_>, engine: RivuletEngine) -> Self {
         #[allow(unused_mut)]
         let mut app = Self {
@@ -1131,6 +1320,20 @@ impl eframe::App for RivuletApp {
                 ui.label(egui::RichText::new("ℹ️ Screen Recording Feature").strong());
                 ui.label("This feature is currently only available on Linux and Windows.");
             }
+
+            ui.separator();
+            ui.label(egui::RichText::new(self.tr("updates")).strong());
+            ui.horizontal(|ui| {
+                ui.label(self.tr_fmt(
+                    "updates_current_version",
+                    &[env!("CARGO_PKG_VERSION").to_string()],
+                ));
+                if ui.button(self.tr("check_for_updates")).clicked() {
+                    self.update_check_clicked = true;
+                }
+            });
+            self.draw_update_status(ui);
+            self.handle_update_actions(ui.ctx().clone());
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 ui.horizontal(|ui| {
