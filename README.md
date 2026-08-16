@@ -389,7 +389,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 The CI also runs [actionlint](https://github.com/rhysd/actionlint) to lint the
 GitHub Actions workflow files and [ShellCheck](https://www.shellcheck.net/) on
-the macOS packaging scripts.
+the macOS packaging scripts. All third-party GitHub Actions are pinned to a
+full commit SHA (with the upstream version in a trailing comment) so a
+repointed tag or branch cannot swap in a malicious commit;
+`rivulet-core/tests/ci_pinning.rs` enforces this.
 
 ### Assets
 
@@ -414,7 +417,9 @@ scripts/generate-assets-docker.sh --check    # regenerate + verify they match th
 
 CI runs the same pinned image and fails if the committed assets drift
 (`scripts/check-assets.py`), so logo or generator changes must be committed
-together with the regenerated output.
+together with the regenerated output. There is no separate Python image:
+`png2icns.py` and `check-assets.py` use only the Python standard library and
+run under the `python3` installed inside the pinned ImageMagick container.
 
 To activate the social preview, upload `docs/social-preview.png` as the
 repository's *Social preview* image under **Settings → General → Social
