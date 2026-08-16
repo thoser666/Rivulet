@@ -282,9 +282,15 @@ The core concept of OBS: scenes, sources, and transitions.
 - [ ] Custom commands (`!so`, `!song`, `!setup`, ...) — deterministic, no LLM needed
 - [ ] Context/memory: short chat history + streamer info
 - [ ] Moderation: toxicity filter as a pre-check before responding
+- [ ] Bot coexistence: detect other active bots in the same channel (e.g. the
+      [Vivid](https://github.com/thoser666/Vivid) Android bot) and suppress
+      double replies — shared reply cooldown, command-claiming, optional
+      silent/observer mode
 - [ ] GUI panel (chat + bot settings) wired through the i18n layer
 
 **Goal:** A private, subscription-free, API-free AI chat assistant that runs fully locally — the counter-position to cloud chat bots like StreamChatAI.
+
+> ⚠️ **Coexistence with Vivid:** Rivulet (desktop) and Vivid (Android) can be used at the same time — e.g. Vivid streaming from the phone while Rivulet runs on the PC. The Rivulet bot must therefore never fight with the Vivid bot for the same chat: no duplicate replies, coordinated `!`-commands, and a per-channel configurable bot identity.
 
 ---
 
