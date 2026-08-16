@@ -5,9 +5,10 @@
 # and Python 3 (to pack the macOS .icns container).
 #
 # Outputs (relative to the repository root):
-#   docs/thumbnail.png      1280x720 brand thumbnail (README hero image)
-#   packaging/rivulet.png   512x512 transparent Linux AppImage icon
-#   packaging/rivulet.icns  macOS app icon (16..1024 px, PNG-based)
+#   docs/thumbnail.png        1280x720 brand thumbnail (README hero image)
+#   docs/social-preview.png   1280x640 GitHub social preview (OpenGraph, 2:1)
+#   packaging/rivulet.png     512x512 transparent Linux AppImage icon
+#   packaging/rivulet.icns    macOS app icon (16..1024 px, PNG-based)
 #
 # The output is deterministic: re-running the script reproduces the committed
 # assets byte-for-byte. Override the fonts via RIVULET_FONT_BOLD and
@@ -21,6 +22,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 LOGO="$REPO_ROOT/rivulet-gui/assets/rivulet_logo.jpg"
 THUMBNAIL="$REPO_ROOT/docs/thumbnail.png"
+SOCIAL="$REPO_ROOT/docs/social-preview.png"
 ICON="$REPO_ROOT/packaging/rivulet.png"
 ICNS="$REPO_ROOT/packaging/rivulet.icns"
 
@@ -135,7 +137,16 @@ done
   "ic13=$ICONSET/icon_256.png" \
   "ic14=$ICONSET/icon_512.png"
 
+# 5. 1280x640 GitHub social preview (OpenGraph): same brand, 2:1 ratio, used
+#    when release/repository links are shared. Reuses the light symbol.
+"$MAGICK" -size 1280x640 "gradient:${NAVY}-${BLUE}" \
+  \( "$SYMBOL_LIGHT" -resize 'x200' \) -gravity north -geometry +0+30 -composite \
+  -gravity north "${BOLD_ARGS[@]}" -fill white -pointsize 130 -annotate +0+260 'Rivulet' \
+  -gravity north "${REGULAR_ARGS[@]}" -fill "$LIGHT_BLUE" -pointsize 38 -annotate +0+455 'Modern Screen Recording & Streaming' \
+  "${STRIP[@]}" "$SOCIAL"
+
 echo "Generated:"
 echo "  $THUMBNAIL"
+echo "  $SOCIAL"
 echo "  $ICON"
 echo "  $ICNS"

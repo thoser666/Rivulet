@@ -37,6 +37,11 @@ fn u32_be(bytes: &[u8], offset: usize) -> u32 {
     u32::from_be_bytes(bytes[offset..offset + 4].try_into().expect("4-byte window"))
 }
 
+/// Width/height from a PNG's IHDR chunk (offsets 16 and 20).
+fn png_dimensions(bytes: &[u8]) -> (u32, u32) {
+    (u32_be(bytes, 16), u32_be(bytes, 20))
+}
+
 #[test]
 fn macos_icns_is_structurally_valid() {
     let bytes = fs::read(repo_file("packaging/rivulet.icns"))
@@ -95,7 +100,7 @@ fn macos_icns_is_structurally_valid() {
 }
 
 #[test]
-fn generator_script_produces_the_icns() {
+fn generator_script_produces_all_assets() {
     let script = read("scripts/generate-assets.sh");
     assert!(
         script.contains("packaging/rivulet.icns"),
@@ -104,6 +109,10 @@ fn generator_script_produces_the_icns() {
     assert!(
         script.contains("png2icns.py"),
         "generate-assets.sh must pack the ICNS via png2icns.py"
+    );
+    assert!(
+        script.contains("docs/social-preview.png"),
+        "generate-assets.sh must emit the social preview"
     );
 
     let packer = read("scripts/png2icns.py");
@@ -136,14 +145,16 @@ fn build_app_wires_the_icon_into_the_bundle() {
 fn other_branding_assets_exist() {
     let thumbnail = repo_file("docs/thumbnail.png");
     let linux_icon = repo_file("packaging/rivulet.png");
+    let social = repo_file("docs/social-preview.png");
     assert!(thumbnail.exists(), "docs/thumbnail.png must be committed");
     assert!(
         linux_icon.exists(),
         "packaging/rivulet.png must be committed"
     );
+    assert!(social.exists(), "docs/social-preview.png must be committed");
 
     let mut header = [0u8; 8];
-    for path in [&thumbnail, &linux_icon] {
+    for path in [&thumbnail, &linux_icon, &social] {
         let bytes = fs::read(path).expect("asset readable");
         header.copy_from_slice(&bytes[..8]);
         assert_eq!(
@@ -153,4 +164,16 @@ fn other_branding_assets_exist() {
             path.display()
         );
     }
+}
+
+#[test]
+fn social_preview_has_opengraph_dimensions() {
+    let bytes = fs::read(repo_file("docs/social-preview.png"))
+        .expect("docs/social-preview.png must be committed");
+    assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "must be a PNG");
+    assert_eq!(
+        png_dimensions(&bytes),
+        (1280, 640),
+        "GitHub social previews must be 1280x640 (2:1)"
+    );
 }
