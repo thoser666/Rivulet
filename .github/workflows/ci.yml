@@ -256,6 +256,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
       - name: Download all release artifacts
         uses: actions/download-artifact@v5
         with:
@@ -265,7 +268,10 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-assets/*
+          files: |
+            release-assets/*
+            docs/opengraph.png
+            docs/social-preview.png
           generate_release_notes: true
           # Mark beta/rc tags (and alpha tags) as pre-release,
           # stable tags (e.g. v1.0.0) as a full release.

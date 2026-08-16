@@ -165,6 +165,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
       - name: Download all release artifacts
         uses: actions/download-artifact@v5
         with:
@@ -176,7 +179,10 @@ jobs:
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           name: Rivulet ${{ needs.version.outputs.version }}
-          files: release-assets/*
+          files: |
+            release-assets/*
+            docs/opengraph.png
+            docs/social-preview.png
           generate_release_notes: true
           prerelease: true
           draft: false

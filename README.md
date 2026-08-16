@@ -411,6 +411,11 @@ preview** on GitHub; it is used when repository and release links are shared
 (OpenGraph/`og:image`). `docs/opengraph.png` (1200×630) is the matching
 fallback for X, Facebook and LinkedIn cards.
 
+GitHub exposes no public API for that Settings upload, so the release workflow
+attaches both images to every release instead: they are then available at a
+stable URL (`releases/latest/download/opengraph.png`) that a website can
+reference from its `og:image` meta tag.
+
 > **Note:** On Linux, set `LIBCLANG_PATH` to your LLVM `lib` directory (e.g. `export LIBCLANG_PATH=/usr/lib/llvm-14/lib`) if the `clang-sys` build fails.
 
 ---

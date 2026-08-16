@@ -183,7 +183,6 @@ fn social_preview_has_opengraph_dimensions() {
         "GitHub social previews must be 1280x640 (2:1)"
     );
 }
-
 #[test]
 fn opengraph_fallback_has_standard_dimensions() {
     let bytes =
@@ -194,4 +193,18 @@ fn opengraph_fallback_has_standard_dimensions() {
         (1200, 630),
         "OpenGraph fallbacks must be 1200x630 (1.91:1)"
     );
+}
+
+#[test]
+fn release_workflows_attach_social_images() {
+    // There is no public API for the Settings -> Social preview upload, so the
+    // images are attached to every release instead: that gives them a stable
+    // URL (releases/latest/download/...) a website can point og:image at.
+    for name in ["ci.yml", "release.yml"] {
+        let content = read(&format!(".github/workflows/{name}"));
+        assert!(
+            content.contains("docs/opengraph.png") && content.contains("docs/social-preview.png"),
+            "{name} must attach the social images to GitHub releases"
+        );
+    }
 }
