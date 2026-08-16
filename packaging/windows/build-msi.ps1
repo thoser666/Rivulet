@@ -33,6 +33,10 @@ if (-not (Test-Path $bundle)) { throw "Bundle directory missing: $bundle (run bu
 $iconPath = Join-Path $PSScriptRoot "..\..\rivulet-gui\assets\rivulet_logo.ico"
 if (-not (Test-Path $iconPath)) { throw "Icon file missing: $iconPath" }
 
+# License text shown in the WixUI_InstallDir license agreement dialog.
+$licensePath = Join-Path $PSScriptRoot "license.rtf"
+if (-not (Test-Path $licensePath)) { throw "License file missing: $licensePath" }
+
 $harvestXml = Join-Path $Staging "rivulet.harvest.wxs"
 
 # Install the WiX toolset (if not present).
@@ -68,11 +72,11 @@ $mainObj = Join-Path $Staging "rivulet.wixobj"
 $harvestObj = Join-Path $Staging "rivulet.harvest.wixobj"
 
 Write-Host "candle: $wxs"
-& candle.exe $wxs "-dProductVersion=$msiVersion" "-dBundleDir=$bundle" "-dIconPath=$iconPath" -ext WixUIExtension -out $mainObj
+& candle.exe $wxs "-dProductVersion=$msiVersion" "-dBundleDir=$bundle" "-dIconPath=$iconPath" "-dLicensePath=$licensePath" -ext WixUIExtension -out $mainObj
 if ($LASTEXITCODE -ne 0) { throw "candle.exe failed (product)" }
 
 Write-Host "candle: $harvestXml"
-& candle.exe $harvestXml "-dProductVersion=$msiVersion" "-dBundleDir=$bundle" "-dIconPath=$iconPath" -ext WixUIExtension -out $harvestObj
+& candle.exe $harvestXml "-dProductVersion=$msiVersion" "-dBundleDir=$bundle" "-dIconPath=$iconPath" "-dLicensePath=$licensePath" -ext WixUIExtension -out $harvestObj
 if ($LASTEXITCODE -ne 0) { throw "candle.exe failed (harvest)" }
 
 $lightOut = Join-Path $Staging "rivulet.msi"

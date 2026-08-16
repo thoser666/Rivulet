@@ -2,11 +2,12 @@
 <!--
   WiX source for the Rivulet MSI.
   Built by release.yml / ci.yml:
-    candle rivulet.wxs -ext WixUIExtension -dProductVersion=... -dBundleDir=... -dIconPath=...
+    candle rivulet.wxs -ext WixUIExtension -dProductVersion=... -dBundleDir=... -dIconPath=... -dLicensePath=...
     light rivulet.wxso -ext WixUIExtension -o rivulet.msi
 
   Most files are harvested (heat.exe) from the staging directory; this file
-  only controls the product skeleton plus the Start Menu / Desktop shortcuts.
+  only controls the product skeleton plus the Start Menu / Desktop shortcuts
+  and the WixUI_InstallDir flow that lets users pick the target directory.
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
   <Product Id="*"
@@ -20,12 +21,16 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Rivulet is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
+    <!-- Let the user pick the installation folder during setup. -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicensePath)" />
+
     <Feature Id="MainFeature" Title="Rivulet" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
       <ComponentGroupRef Id="RivuletShortcuts" />
     </Feature>
 
-    <UIRef Id="WixUI_Minimal" />
+    <UIRef Id="WixUI_InstallDir" />
   </Product>
 
   <Fragment>
