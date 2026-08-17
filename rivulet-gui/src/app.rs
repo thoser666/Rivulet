@@ -255,6 +255,9 @@ pub struct RivuletApp {
     record_started: Instant,
     #[cfg(target_os = "linux")]
     #[serde(skip)]
+    last_frame_at: Option<Instant>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
     record_status: Option<String>,
 
     // Windows Fields
@@ -390,6 +393,8 @@ impl Default for RivuletApp {
             stop_signal: None,
             #[cfg(target_os = "linux")]
             record_started: Instant::now(),
+            #[cfg(target_os = "linux")]
+            last_frame_at: None,
             #[cfg(target_os = "linux")]
             record_status: None,
 
@@ -803,6 +808,7 @@ impl RivuletApp {
 
         self.is_recording = true;
         self.record_started = Instant::now();
+        self.last_frame_at = None;
         self.record_status = None;
         println!("Linux recording started: {source_desc}");
     }
@@ -827,6 +833,7 @@ impl RivuletApp {
             while let Ok(raw) = rx.try_recv() {
                 self.engine
                     .process_raw_frame(&raw.data, raw.width, raw.height);
+                self.last_frame_at = Some(Instant::now());
             }
         }
         if self.separate_tracks && self.audio_preview {
@@ -1254,6 +1261,29 @@ impl eframe::App for RivuletApp {
                 if let Some(err) = self.engine.take_error() {
                     self.record_status = Some(err);
                 }
+                // Abort when the capture delivers no frames within the
+                // timeout: the capture thread died or its source became
+                // unavailable, so the recording would run forever while
+                // writing nothing.
+                if self.is_recording
+                    && should_abort_for_stalled_frames(
+                        self.record_started,
+                        self.last_frame_at,
+                        Instant::now(),
+                        self.no_frame_timeout,
+                    )
+                {
+                    let secs = self.no_frame_timeout.as_secs();
+                    println!(
+                        "No frames received within {} seconds, stopping recording.",
+                        secs
+                    );
+                    // stop_linux_recording sets record_status to
+                    // "recording_saved"; override it with the abort reason.
+                    self.stop_linux_recording();
+                    self.record_status =
+                        Some(self.tr_fmt("recording_no_frames", &[secs.to_string()]));
+                }
 
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
@@ -1625,6 +1655,26 @@ fn should_abort_for_no_frames(
     last_frame_at.is_none() && now.duration_since(started) >= timeout
 }
 
+/// Whether a Linux recording should be aborted because no frame has arrived
+/// within the timeout.
+///
+/// Unlike Windows (where WGC only delivers frames when the screen changes,
+/// so a static screen can legitimately pause), xcap captures actively on
+/// every loop iteration. A gap longer than the timeout therefore means the
+/// capture thread died or its source became unavailable (window closed,
+/// minimized, or a capture error) — the recording would otherwise keep
+/// "running" forever while writing nothing. The timeout counts from the last
+/// received frame, or from the start when no frame has arrived yet.
+fn should_abort_for_stalled_frames(
+    started: std::time::Instant,
+    last_frame_at: Option<std::time::Instant>,
+    now: std::time::Instant,
+    timeout: std::time::Duration,
+) -> bool {
+    let last_activity = last_frame_at.unwrap_or(started);
+    now.duration_since(last_activity) >= timeout
+}
+
 /// Format a byte count for display (B, KB, MB, GB).
 fn format_bytes(bytes: u64) -> String {
     const KB: f64 = 1024.0;
@@ -1678,6 +1728,58 @@ mod tests {
     fn format_bytes_gigabytes() {
         assert_eq!(format_bytes(1073741824), "1.00 GB");
         assert_eq!(format_bytes(2684354560), "2.50 GB");
+    }
+
+    // ── should_abort_for_stalled_frames ───────────────────────────
+
+    #[test]
+    fn stalled_frames_abort_when_no_frame_ever_arrived() {
+        let started = std::time::Instant::now();
+        let now = started + std::time::Duration::from_secs(6);
+        assert!(should_abort_for_stalled_frames(
+            started,
+            None,
+            now,
+            std::time::Duration::from_secs(5)
+        ));
+    }
+
+    #[test]
+    fn stalled_frames_abort_when_capture_dies_mid_recording() {
+        let started = std::time::Instant::now();
+        let last_frame = started + std::time::Duration::from_secs(2);
+        let now = last_frame + std::time::Duration::from_secs(6);
+        assert!(should_abort_for_stalled_frames(
+            started,
+            Some(last_frame),
+            now,
+            std::time::Duration::from_secs(5)
+        ));
+    }
+
+    #[test]
+    fn stalled_frames_no_abort_while_frames_flow() {
+        let started = std::time::Instant::now();
+        let last_frame = started + std::time::Duration::from_secs(5);
+        let now = last_frame + std::time::Duration::from_millis(500);
+        assert!(!should_abort_for_stalled_frames(
+            started,
+            Some(last_frame),
+            now,
+            std::time::Duration::from_secs(5)
+        ));
+    }
+
+    #[test]
+    fn stalled_frames_no_abort_before_timeout_elapses() {
+        let started = std::time::Instant::now();
+        let now = started + std::time::Duration::from_secs(3);
+        assert!(!should_abort_for_stalled_frames(
+            started,
+            None,
+            now,
+            std::time::Duration::from_secs(5)
+        ));
     }
 
     // ── parse_no_frame_timeout ────────────────────────────────────

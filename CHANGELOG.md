@@ -8,6 +8,7 @@
 - feat(gui): abort Windows recording when no frame arrives within 5 s
 
 - feat(gui): make the no-frame timeout configurable via `--no-frame-timeout <seconds>`
+- feat(gui): extend the no-frame timeout to Linux recordings (fires mid-recording too)
 
 
 

@@ -408,11 +408,15 @@ published to the nightly run's step summary.
 ### GUI
 
 Run the desktop GUI with `cargo run -p rivulet-gui` (or the packaged
-binary). If a Windows recording receives no frames within a timeout
-(default **5 seconds**) it is aborted automatically with an error in the
-UI — the recording pipeline is only started by the first captured frame,
-so a capture that silently delivers nothing would otherwise look like a
-running recording while writing no file. The timeout is configurable at
+binary). If a recording receives no frames within a timeout (default
+**5 seconds**) it is aborted automatically with an error in the UI — the
+recording pipeline is only started by the first captured frame, so a
+capture that silently delivers nothing would otherwise look like a
+running recording while writing no file. On Windows the timeout only
+applies before the first frame (a static screen can legitimately pause);
+on Linux it also fires mid-recording, because xcap captures actively on
+every loop iteration and a frame gap therefore means the capture thread
+died or its source became unavailable. The timeout is configurable at
 startup:
 
 ```bash
