@@ -133,6 +133,12 @@ impl Locale {
                     "recording_no_frames",
                     "No frames received for {0} seconds — recording stopped.",
                 ),
+                // Hotkeys
+                ("hotkey_record", "Start/Stop recording"),
+                ("hotkey_pause", "Pause/Resume recording"),
+                ("hotkey_mute", "Mute/Unmute audio"),
+                ("paused", "Paused"),
+                ("muted", "Muted"),
                 // Audio
                 ("audio_mixer", "Audio Mixer"),
                 ("start_audio", "Start audio"),
@@ -198,6 +204,12 @@ impl Locale {
                     "recording_no_frames",
                     "{0} Sekunden lang keine Frames empfangen — Aufnahme gestoppt.",
                 ),
+                // Hotkeys
+                ("hotkey_record", "Aufnahme starten/stoppen"),
+                ("hotkey_pause", "Aufnahme pausieren/fortsetzen"),
+                ("hotkey_mute", "Audio stummschalten"),
+                ("paused", "Pausiert"),
+                ("muted", "Stumm"),
                 // Audio
                 ("audio_mixer", "Audio-Mixer"),
                 ("start_audio", "Audio starten"),

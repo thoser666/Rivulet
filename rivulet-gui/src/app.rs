@@ -74,6 +74,77 @@ enum UpdateUi {
     Error(String),
 }
 
+// --- Hotkey configuration ---
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct HotkeyConfig {
+    record: egui::Key,
+    pause: egui::Key,
+    mute: egui::Key,
+}
+
+impl Default for HotkeyConfig {
+    fn default() -> Self {
+        Self {
+            record: egui::Key::F9,
+            pause: egui::Key::F10,
+            mute: egui::Key::F11,
+        }
+    }
+}
+
+impl HotkeyConfig {
+    fn label_for(&self, action: &str) -> &str {
+        match action {
+            "record" => match self.record {
+                egui::Key::F1 => "F1",
+                egui::Key::F2 => "F2",
+                egui::Key::F3 => "F3",
+                egui::Key::F4 => "F4",
+                egui::Key::F5 => "F5",
+                egui::Key::F6 => "F6",
+                egui::Key::F7 => "F7",
+                egui::Key::F8 => "F8",
+                egui::Key::F9 => "F9",
+                egui::Key::F10 => "F10",
+                egui::Key::F11 => "F11",
+                egui::Key::F12 => "F12",
+                _ => "?",
+            },
+            "pause" => match self.pause {
+                egui::Key::F1 => "F1",
+                egui::Key::F2 => "F2",
+                egui::Key::F3 => "F3",
+                egui::Key::F4 => "F4",
+                egui::Key::F5 => "F5",
+                egui::Key::F6 => "F6",
+                egui::Key::F7 => "F7",
+                egui::Key::F8 => "F8",
+                egui::Key::F9 => "F9",
+                egui::Key::F10 => "F10",
+                egui::Key::F11 => "F11",
+                egui::Key::F12 => "F12",
+                _ => "?",
+            },
+            "mute" => match self.mute {
+                egui::Key::F1 => "F1",
+                egui::Key::F2 => "F2",
+                egui::Key::F3 => "F3",
+                egui::Key::F4 => "F4",
+                egui::Key::F5 => "F5",
+                egui::Key::F6 => "F6",
+                egui::Key::F7 => "F7",
+                egui::Key::F8 => "F8",
+                egui::Key::F9 => "F9",
+                egui::Key::F10 => "F10",
+                egui::Key::F11 => "F11",
+                egui::Key::F12 => "F12",
+                _ => "?",
+            },
+            _ => "?",
+        }
+    }
+}
+
 // --- Windows handler struct ---
 #[cfg(target_os = "windows")]
 struct CaptureHandler {
@@ -319,6 +390,13 @@ pub struct RivuletApp {
     download_progress: Arc<AtomicU64>,
     #[serde(skip)]
     download_total: u64,
+
+    // Hotkeys & recording modifiers
+    hotkeys: HotkeyConfig,
+    #[serde(skip)]
+    is_paused: bool,
+    #[serde(skip)]
+    is_muted: bool,
 }
 
 impl Default for RivuletApp {
@@ -435,6 +513,9 @@ impl Default for RivuletApp {
             update_install_clicked: false,
             download_progress: Arc::new(AtomicU64::new(0)),
             download_total: 0,
+            hotkeys: HotkeyConfig::default(),
+            is_paused: false,
+            is_muted: false,
         }
     }
 }
@@ -855,15 +936,19 @@ impl RivuletApp {
     }
 
     fn drain_linux_frames(&mut self) {
+        let paused = self.is_paused;
+        let muted = self.is_muted;
         if let Some(rx) = &self.raw_rx {
             while let Ok(raw) = rx.try_recv() {
-                self.engine
-                    .process_raw_frame(&raw.data, raw.width, raw.height);
+                if !paused {
+                    self.engine
+                        .process_raw_frame(&raw.data, raw.width, raw.height);
+                }
                 self.last_frame_at = Some(Instant::now());
             }
         }
         if self.separate_tracks && self.audio_preview {
-            if self.is_recording {
+            if self.is_recording && !muted {
                 if let Some(rx) = &self.audio_system_rx {
                     while let Ok(frame) = rx.try_recv() {
                         let _ = self.engine.push_audio_track(&frame, AudioTrack::System);
@@ -883,7 +968,7 @@ impl RivuletApp {
                 }
             }
         } else if let Some(rx) = &self.audio_rx {
-            if self.is_recording {
+            if self.is_recording && !muted {
                 while let Ok(frame) = rx.try_recv() {
                     let _ = self.engine.push_audio_frame(&frame);
                 }
@@ -1113,6 +1198,42 @@ impl eframe::App for RivuletApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // ── Hotkey handling ────────────────────────────────────────
+        let ctx = ui.ctx();
+        ctx.input(|i| {
+            #[cfg(target_os = "linux")]
+            let any_recording = self.is_recording;
+            #[cfg(target_os = "windows")]
+            let any_recording = self.is_windows_recording;
+
+            // F9: Toggle recording
+            if i.key_pressed(self.hotkeys.record) {
+                if any_recording {
+                    #[cfg(target_os = "windows")]
+                    self.stop_windows_recording();
+                    #[cfg(target_os = "linux")]
+                    self.stop_linux_recording();
+                    self.is_paused = false;
+                    self.is_muted = false;
+                } else {
+                    #[cfg(target_os = "windows")]
+                    self.start_windows_recording();
+                    #[cfg(target_os = "linux")]
+                    self.start_linux_recording();
+                }
+            }
+
+            // F10: Toggle pause (only while recording)
+            if i.key_pressed(self.hotkeys.pause) && any_recording {
+                self.is_paused = !self.is_paused;
+            }
+
+            // F11: Toggle mute (only while recording)
+            if i.key_pressed(self.hotkeys.mute) && any_recording {
+                self.is_muted = !self.is_muted;
+            }
+        });
+
         #[cfg(target_os = "windows")]
         {
             if self.is_windows_recording {
@@ -1124,8 +1245,10 @@ impl eframe::App for RivuletApp {
                     // at capture rates <= UI refresh every frame was eaten and
                     // no MP4 was ever written.
                     let ended = drain_frames_and_check_end(receiver, signal, |frame| {
-                        self.engine
-                            .process_raw_frame(&frame.data, frame.width, frame.height);
+                        if !self.is_paused {
+                            self.engine
+                                .process_raw_frame(&frame.data, frame.width, frame.height);
+                        }
                         self.last_frame_at = Some(Instant::now());
                     });
                     if ended {
@@ -1194,13 +1317,46 @@ impl eframe::App for RivuletApp {
             ui.heading("Welcome to Rivulet");
             ui.separator();
 
+            // Hotkey hints
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Hotkeys: {} [{}] · {} [{}] · {} [{}]",
+                        self.tr("hotkey_record"), self.hotkeys.label_for("record"),
+                        self.tr("hotkey_pause"), self.hotkeys.label_for("pause"),
+                        self.tr("hotkey_mute"), self.hotkeys.label_for("mute"),
+                    ))
+                    .small()
+                    .color(egui::Color32::GRAY),
+                );
+            });
+            ui.add_space(4.0);
+
             #[cfg(target_os = "windows")]
             {
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new(self.tr("windows_screen_recording")).strong());
                 if self.is_windows_recording {
-                    if ui.button("⏹ Stop Recording").clicked() {
-                        self.stop_windows_recording();
+                    ui.horizontal(|ui| {
+                        if ui.button("⏹ Stop Recording").clicked() {
+                            self.stop_windows_recording();
+                            self.is_paused = false;
+                            self.is_muted = false;
+                        }
+                        let pause_label = if self.is_paused { "▶ Resume" } else { "⏸ Pause" };
+                        if ui.button(pause_label).clicked() {
+                            self.is_paused = !self.is_paused;
+                        }
+                        let mute_label = if self.is_muted { "🔊 Unmute" } else { "🔇 Mute" };
+                        if ui.button(mute_label).clicked() {
+                            self.is_muted = !self.is_muted;
+                        }
+                    });
+                    if self.is_paused {
+                        ui.label(egui::RichText::new(self.tr("paused")).color(egui::Color32::YELLOW).strong());
+                    }
+                    if self.is_muted {
+                        ui.label(egui::RichText::new(self.tr("muted")).color(egui::Color32::LIGHT_BLUE).strong());
                     }
                     ui.label(self.metrics_line());
                 } else {
@@ -1267,7 +1423,7 @@ impl eframe::App for RivuletApp {
                     if ui
                         .add_enabled(
                             source_selected,
-                            egui::Button::new(format!("⏺ {}", self.tr("start_recording"))),
+                            egui::Button::new(format!("⏺ {} [{}]", self.tr("start_recording"), self.hotkeys.label_for("record"))),
                         )
                         .clicked()
                     {
@@ -1328,8 +1484,24 @@ impl eframe::App for RivuletApp {
                             .clicked()
                         {
                             self.stop_linux_recording();
+                            self.is_paused = false;
+                            self.is_muted = false;
+                        }
+                        let pause_label = if self.is_paused { "▶ Resume" } else { "⏸ Pause" };
+                        if ui.button(pause_label).clicked() {
+                            self.is_paused = !self.is_paused;
+                        }
+                        let mute_label = if self.is_muted { "🔊 Unmute" } else { "🔇 Mute" };
+                        if ui.button(mute_label).clicked() {
+                            self.is_muted = !self.is_muted;
                         }
                     });
+                    if self.is_paused {
+                        ui.label(egui::RichText::new(self.tr("paused")).color(egui::Color32::YELLOW).strong());
+                    }
+                    if self.is_muted {
+                        ui.label(egui::RichText::new(self.tr("muted")).color(egui::Color32::LIGHT_BLUE).strong());
+                    }
                     ui.label(self.metrics_line());
                 } else {
                     ui.horizontal(|ui| {
@@ -1413,7 +1585,7 @@ impl eframe::App for RivuletApp {
                     if ui
                         .add_enabled(
                             source_selected,
-                            egui::Button::new(format!("⏺ {}", self.tr("start_recording"))),
+                            egui::Button::new(format!("⏺ {} [{}]", self.tr("start_recording"), self.hotkeys.label_for("record"))),
                         )
                         .clicked()
                     {
