@@ -18,6 +18,7 @@
 - docs(readme): document step-by-step signing secret setup (certificates + all 7 secrets)
 
 - feat(audio): expose skipped audio filters via AudioCapture::skipped_filters()
+- feat(gui): warn in the Linux audio mixer when filters were skipped (missing GStreamer elements)
 
 
 

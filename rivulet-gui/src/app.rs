@@ -14,7 +14,7 @@ use {
     ashpd::desktop::Session,
     once_cell::sync::Lazy,
     pipewire::spa::utils::Fd,
-    rivulet_audio::{AudioCapture, AudioConfig, AudioFilters},
+    rivulet_audio::{AudioCapture, AudioConfig, AudioFilters, SkippedFilter},
     rivulet_core::{AudioFrame, AudioTrack},
     std::sync::atomic::AtomicU32,
     std::sync::mpsc as std_mpsc,
@@ -198,6 +198,9 @@ pub struct RivuletApp {
     audio_status: Option<String>,
     #[cfg(target_os = "linux")]
     #[serde(skip)]
+    audio_warning: Option<String>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
     audio_peak: Arc<AtomicU32>,
     #[cfg(target_os = "linux")]
     capture_system: bool,
@@ -350,6 +353,8 @@ impl Default for RivuletApp {
             audio_preview: false,
             #[cfg(target_os = "linux")]
             audio_status: None,
+            #[cfg(target_os = "linux")]
+            audio_warning: None,
             #[cfg(target_os = "linux")]
             audio_peak: Arc::new(AtomicU32::new(0)),
             #[cfg(target_os = "linux")]
@@ -607,7 +612,17 @@ impl RivuletApp {
             Err(e) => {
                 self.audio_status =
                     Some(self.tr_fmt("audio_capture_unavailable", &[e.to_string()]));
+                self.audio_warning = None;
                 return;
+            }
+        };
+
+        let skipped_warning = {
+            let skipped = audio.skipped_filters();
+            if skipped.is_empty() {
+                None
+            } else {
+                Some(self.skipped_filters_warning(skipped))
             }
         };
 
@@ -634,9 +649,11 @@ impl RivuletApp {
                     self.audio = Some(audio);
                     self.audio_preview = true;
                     self.audio_status = None;
+                    self.audio_warning = skipped_warning.clone();
                 }
                 Err(e) => {
                     self.audio_status = Some(self.tr_fmt("audio_start_failed", &[e.to_string()]));
+                    self.audio_warning = None;
                 }
             }
         } else {
@@ -651,9 +668,11 @@ impl RivuletApp {
                     self.audio = Some(audio);
                     self.audio_preview = true;
                     self.audio_status = None;
+                    self.audio_warning = skipped_warning;
                 }
                 Err(e) => {
                     self.audio_status = Some(self.tr_fmt("audio_start_failed", &[e.to_string()]));
+                    self.audio_warning = None;
                 }
             }
         }
@@ -667,7 +686,14 @@ impl RivuletApp {
         self.audio_system_rx = None;
         self.audio_mic_rx = None;
         self.audio_preview = false;
+        self.audio_warning = None;
         self.audio_peak.store(0.0f32.to_bits(), Ordering::SeqCst);
+    }
+
+    /// Build a localized warning listing audio filters that were skipped
+    /// because their GStreamer elements are not installed.
+    fn skipped_filters_warning(&self, skipped: &[SkippedFilter]) -> String {
+        format_skipped_filters(self.locale, skipped)
     }
 
     fn refresh_linux_sources(&mut self) {
@@ -1536,6 +1562,9 @@ impl eframe::App for RivuletApp {
                 if let Some(status) = &self.audio_status {
                     ui.colored_label(egui::Color32::RED, status);
                 }
+                if let Some(warning) = &self.audio_warning {
+                    ui.colored_label(egui::Color32::YELLOW, warning);
+                }
             }
 
             #[cfg(not(any(target_os = "linux", target_os = "windows")))]
@@ -1610,6 +1639,25 @@ fn drain_error_receiver(receiver: &std::sync::mpsc::Receiver<String>) -> Option<
         last = Some(err);
     }
     last
+}
+
+/// Format a localized warning listing the audio filters that were skipped
+/// because their GStreamer elements are not installed (e.g. `webrtcdsp` on
+/// distros that do not ship it).
+#[cfg(target_os = "linux")]
+fn format_skipped_filters(locale: Locale, skipped: &[SkippedFilter]) -> String {
+    let items: Vec<String> = skipped
+        .iter()
+        .map(|f| {
+            let feature_key = match f.element {
+                "webrtcdsp" => "filter_noise_suppression",
+                "audiodynamic" => "filter_compressor_limiter",
+                _ => "filter_unknown",
+            };
+            format!("{} ({})", locale.tr(feature_key), f.element)
+        })
+        .collect();
+    locale.tr_fmt("audio_filters_skipped", &[items.join(", ")])
 }
 
 /// Parse the `--no-frame-timeout <seconds>` CLI flag from the given command
@@ -2009,5 +2057,65 @@ mod tests {
         });
         assert!(ended, "disconnected channel without stop signal must end");
         assert_eq!(forwarded, vec![9], "queued frame must be delivered first");
+    }
+
+    // ── format_skipped_filters (Linux) ────────────────────────────
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn skipped_filters_warning_lists_features_in_english() {
+        let skipped = [SkippedFilter {
+            element: "webrtcdsp",
+            feature: "noise suppression",
+        }];
+        assert_eq!(
+            format_skipped_filters(Locale::En, &skipped),
+            "Audio filters skipped (missing GStreamer elements): noise suppression (webrtcdsp)"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn skipped_filters_warning_translates_to_german() {
+        let skipped = [SkippedFilter {
+            element: "webrtcdsp",
+            feature: "noise suppression",
+        }];
+        assert_eq!(
+            format_skipped_filters(Locale::De, &skipped),
+            "Audiofilter übersprungen (fehlende GStreamer-Elemente): Rauschunterdrückung (webrtcdsp)"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn skipped_filters_warning_joins_multiple_filters() {
+        let skipped = [
+            SkippedFilter {
+                element: "webrtcdsp",
+                feature: "noise suppression",
+            },
+            SkippedFilter {
+                element: "audiodynamic",
+                feature: "compressor/limiter",
+            },
+        ];
+        assert_eq!(
+            format_skipped_filters(Locale::En, &skipped),
+            "Audio filters skipped (missing GStreamer elements): noise suppression (webrtcdsp), compressor/limiter (audiodynamic)"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn skipped_filters_warning_falls_back_for_unknown_element() {
+        let skipped = [SkippedFilter {
+            element: "futurefilter",
+            feature: "audio filter",
+        }];
+        assert_eq!(
+            format_skipped_filters(Locale::En, &skipped),
+            "Audio filters skipped (missing GStreamer elements): audio filter (futurefilter)"
+        );
     }
 }
