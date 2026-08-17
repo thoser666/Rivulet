@@ -362,10 +362,7 @@ mod tests {
         let result = download_asset_with_progress(&asset, &dest, Arc::clone(&progress));
         assert!(result.is_ok());
         assert_eq!(progress.load(Ordering::Relaxed), body_len as u64);
-        assert_eq!(
-            std::fs::metadata(&dest).unwrap().len() as usize,
-            body_len
-        );
+        assert_eq!(std::fs::metadata(&dest).unwrap().len() as usize, body_len);
         let _ = std::fs::remove_file(&dest);
     }
 

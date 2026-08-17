@@ -16,8 +16,8 @@ use {
     pipewire::spa::utils::Fd,
     rivulet_audio::{AudioCapture, AudioConfig, AudioFilters},
     rivulet_core::{AudioFrame, AudioTrack},
-    std::sync::mpsc as std_mpsc,
     std::sync::atomic::AtomicU32,
+    std::sync::mpsc as std_mpsc,
     std::thread,
     std::time::Instant,
     tokio::runtime::Runtime,
@@ -1030,22 +1030,21 @@ impl eframe::App for RivuletApp {
         #[cfg(target_os = "windows")]
         {
             if self.is_windows_recording {
-                if let (Some(receiver), Some(signal)) =
-                    (&self.frame_receiver, &self.stop_signal)
-                {
-                    if should_stop_recording(receiver, signal) {
+                if let (Some(receiver), Some(signal)) = (&self.frame_receiver, &self.stop_signal) {
+                    // Drain all pending frames into the engine and detect an
+                    // unexpected capture-thread exit in a single pass. The
+                    // check must not run `try_recv()` on its own: a separate
+                    // probe consumed one frame per UI tick and dropped it, so
+                    // at capture rates <= UI refresh every frame was eaten and
+                    // no MP4 was ever written.
+                    let ended = drain_frames_and_check_end(receiver, signal, |frame| {
+                        self.engine
+                            .process_raw_frame(&frame.data, frame.width, frame.height);
+                    });
+                    if ended {
                         println!("Recording ended unexpectedly.");
                         self.stop_windows_recording();
                     }
-                }
-            }
-            if let Some(receiver) = &self.frame_receiver {
-                while let Ok(raw_frame) = receiver.try_recv() {
-                    self.engine.process_raw_frame(
-                        &raw_frame.data,
-                        raw_frame.width,
-                        raw_frame.height,
-                    );
                 }
             }
         }
@@ -1454,20 +1453,29 @@ impl eframe::App for RivuletApp {
     }
 }
 
-/// Determine whether a recording should be stopped because the capture
-/// thread disconnected (sent no more frames and dropped the sender).
+/// Drain all pending frames from the capture channel, forwarding each one to
+/// `on_frame`, and determine whether the capture thread ended unexpectedly.
 ///
-/// Returns `true` when the channel is disconnected AND the stop signal
-/// has not already been set (i.e. the thread ended on its own, not via
-/// a user-initiated stop).
-fn should_stop_recording(
+/// Returns `true` when the channel is disconnected AND the stop signal has
+/// not been set (i.e. the thread ended on its own, not via a user-initiated
+/// stop). Every frame is passed to `on_frame` before the next one is pulled,
+/// so the disconnect detection never swallows a frame: a previous separate
+/// `try_recv()` probe consumed one frame per UI tick and dropped it, which
+/// starved the pipeline and prevented any MP4 from being written.
+fn drain_frames_and_check_end(
     receiver: &std::sync::mpsc::Receiver<RawFrame>,
     stop_signal: &AtomicBool,
+    mut on_frame: impl FnMut(&RawFrame),
 ) -> bool {
-    matches!(
-        receiver.try_recv(),
-        Err(std::sync::mpsc::TryRecvError::Disconnected)
-    ) && !stop_signal.load(Ordering::SeqCst)
+    loop {
+        match receiver.try_recv() {
+            Ok(raw_frame) => on_frame(&raw_frame),
+            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                return !stop_signal.load(Ordering::SeqCst);
+            }
+        }
+    }
 }
 
 /// Format a byte count for display (B, KB, MB, GB).
@@ -1525,21 +1533,21 @@ mod tests {
         assert_eq!(format_bytes(2684354560), "2.50 GB");
     }
 
-    // ── should_stop_recording ─────────────────────────────────────
+    // ── drain_frames_and_check_end ────────────────────────────────
 
     #[test]
     fn stop_when_disconnected_and_signal_not_set() {
         let (tx, rx) = std::sync::mpsc::channel::<RawFrame>();
         let signal = AtomicBool::new(false);
         drop(tx); // disconnect
-        assert!(should_stop_recording(&rx, &signal));
+        assert!(drain_frames_and_check_end(&rx, &signal, |_| {}));
     }
 
     #[test]
     fn no_stop_when_channel_open() {
         let (_tx, rx) = std::sync::mpsc::channel::<RawFrame>();
         let signal = AtomicBool::new(false);
-        assert!(!should_stop_recording(&rx, &signal));
+        assert!(!drain_frames_and_check_end(&rx, &signal, |_| {}));
     }
 
     #[test]
@@ -1547,7 +1555,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel::<RawFrame>();
         let signal = AtomicBool::new(true);
         drop(tx); // disconnect
-        assert!(!should_stop_recording(&rx, &signal));
+        assert!(!drain_frames_and_check_end(&rx, &signal, |_| {}));
     }
 
     #[test]
@@ -1560,7 +1568,7 @@ mod tests {
             height: 0,
         })
         .unwrap();
-        assert!(!should_stop_recording(&rx, &signal));
+        assert!(!drain_frames_and_check_end(&rx, &signal, |_| {}));
     }
 
     #[test]
@@ -1568,19 +1576,70 @@ mod tests {
         // connected + signal not set → no stop
         let (tx1, rx1) = std::sync::mpsc::channel::<RawFrame>();
         let signal1 = AtomicBool::new(false);
-        assert!(!should_stop_recording(&rx1, &signal1));
+        assert!(!drain_frames_and_check_end(&rx1, &signal1, |_| {}));
         drop(tx1);
 
         // disconnected + signal set → no stop
         let (tx2, rx2) = std::sync::mpsc::channel::<RawFrame>();
         let signal2 = AtomicBool::new(true);
         drop(tx2);
-        assert!(!should_stop_recording(&rx2, &signal2));
+        assert!(!drain_frames_and_check_end(&rx2, &signal2, |_| {}));
 
         // disconnected + signal not set → stop
         let (tx3, rx3) = std::sync::mpsc::channel::<RawFrame>();
         let signal3 = AtomicBool::new(false);
         drop(tx3);
-        assert!(should_stop_recording(&rx3, &signal3));
+        assert!(drain_frames_and_check_end(&rx3, &signal3, |_| {}));
+    }
+
+    #[test]
+    fn frames_are_forwarded_and_not_dropped_by_the_check() {
+        // Regression test: a separate try_recv() stop-probe consumed one
+        // frame per UI tick and dropped it, starving the recording pipeline
+        // so no MP4 was ever written. Every queued frame must reach the
+        // callback even while the disconnect check runs.
+        let (tx, rx) = std::sync::mpsc::channel::<RawFrame>();
+        let signal = AtomicBool::new(false);
+        for i in 0..5u8 {
+            tx.send(RawFrame {
+                data: vec![i],
+                width: 1,
+                height: 1,
+            })
+            .unwrap();
+        }
+
+        let mut forwarded = Vec::new();
+        let ended = drain_frames_and_check_end(&rx, &signal, |f| {
+            forwarded.push(f.data[0]);
+        });
+        assert!(!ended, "open channel must not end the recording");
+        assert_eq!(
+            forwarded,
+            vec![0, 1, 2, 3, 4],
+            "all frames must be forwarded"
+        );
+    }
+
+    #[test]
+    fn frames_are_forwarded_before_disconnect_is_reported() {
+        // Frames queued before the sender is dropped must still be delivered
+        // before the unexpected-end signal is reported.
+        let (tx, rx) = std::sync::mpsc::channel::<RawFrame>();
+        let signal = AtomicBool::new(false);
+        tx.send(RawFrame {
+            data: vec![9],
+            width: 1,
+            height: 1,
+        })
+        .unwrap();
+        drop(tx); // disconnect after the queued frame
+
+        let mut forwarded = Vec::new();
+        let ended = drain_frames_and_check_end(&rx, &signal, |f| {
+            forwarded.push(f.data[0]);
+        });
+        assert!(ended, "disconnected channel without stop signal must end");
+        assert_eq!(forwarded, vec![9], "queued frame must be delivered first");
     }
 }
