@@ -27,7 +27,7 @@ use {
 use {
     rfd,
     std::sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, Sender},
         Arc,
     },
@@ -289,6 +289,10 @@ pub struct RivuletApp {
     update_download_clicked: bool,
     #[serde(skip)]
     update_install_clicked: bool,
+    #[serde(skip)]
+    download_progress: Arc<AtomicU64>,
+    #[serde(skip)]
+    download_total: u64,
 }
 
 impl Default for RivuletApp {
@@ -391,6 +395,8 @@ impl Default for RivuletApp {
             update_check_clicked: false,
             update_download_clicked: false,
             update_install_clicked: false,
+            download_progress: Arc::new(AtomicU64::new(0)),
+            download_total: 0,
         }
     }
 }
@@ -856,13 +862,16 @@ impl RivuletApp {
     }
 
     /// Download the update asset in the background.
-    fn spawn_update_download(&self, ctx: egui::Context, asset: rivulet_updater::Asset) {
+    fn spawn_update_download(&mut self, ctx: egui::Context, asset: rivulet_updater::Asset) {
         let shared = std::sync::Arc::clone(&self.update_ui);
         *shared.lock().unwrap_or_else(|e| e.into_inner()) =
             UpdateUi::Downloading(asset.name.clone());
+        self.download_progress.store(0, Ordering::Relaxed);
+        self.download_total = asset.size;
+        let progress = Arc::clone(&self.download_progress);
         std::thread::spawn(move || {
             let dest = std::env::temp_dir().join(&asset.name);
-            let result = rivulet_updater::download_asset(&asset, &dest);
+            let result = rivulet_updater::download_asset_with_progress(&asset, &dest, progress);
             let state = match result {
                 Ok(()) => UpdateUi::Downloaded(dest),
                 Err(e) => UpdateUi::Error(e.to_string()),
@@ -923,10 +932,20 @@ impl RivuletApp {
                 });
             }
             UpdateUi::Downloading(name) => {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(self.tr_fmt("update_downloading", &[name]));
-                });
+                ui.label(self.tr_fmt("update_downloading", &[name]));
+                let downloaded = self.download_progress.load(Ordering::Relaxed);
+                let fraction = if self.download_total > 0 {
+                    (downloaded as f32 / self.download_total as f32).min(1.0)
+                } else {
+                    0.0
+                };
+                let downloaded_mb = downloaded as f64 / (1024.0 * 1024.0);
+                let total_mb = self.download_total as f64 / (1024.0 * 1024.0);
+                ui.add(
+                    egui::ProgressBar::new(fraction)
+                        .text(format!("{downloaded_mb:.1} / {total_mb:.1} MB")),
+                );
+                ui.ctx().request_repaint();
             }
             UpdateUi::Downloaded(_path) => {
                 ui.colored_label(

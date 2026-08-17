@@ -8,7 +8,10 @@
 //! updater reads the *latest release* from the `releases` endpoint (which
 //! includes prereleases) instead of `releases/latest` (which does not).
 
+use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 /// Repository the updates are fetched from.
 #[derive(Debug, Clone)]
@@ -142,6 +145,29 @@ pub fn download_asset(asset: &Asset, dest: &Path) -> anyhow::Result<()> {
     let mut reader = response.into_reader();
     let mut file = std::fs::File::create(dest)?;
     std::io::copy(&mut reader, &mut file)?;
+    Ok(())
+}
+
+/// Download the asset to `dest`, updating `progress` with bytes downloaded.
+pub fn download_asset_with_progress(
+    asset: &Asset,
+    dest: &Path,
+    progress: Arc<AtomicU64>,
+) -> anyhow::Result<()> {
+    let response = ureq::get(&asset.url)
+        .set("User-Agent", "rivulet-updater")
+        .call()?;
+    let mut reader = response.into_reader();
+    let mut file = std::fs::File::create(dest)?;
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])?;
+        progress.fetch_add(n as u64, Ordering::Relaxed);
+    }
     Ok(())
 }
 
