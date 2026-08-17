@@ -150,9 +150,6 @@ impl Locale {
                     "audio_filters_skipped",
                     "Audio filters skipped (missing GStreamer elements): {0}",
                 ),
-                ("filter_noise_suppression", "noise suppression"),
-                ("filter_compressor_limiter", "compressor/limiter"),
-                ("filter_unknown", "audio filter"),
                 ("peak", "Peak: {0} dB"),
                 // Updates
                 ("updates", "Updates"),
@@ -218,9 +215,6 @@ impl Locale {
                     "audio_filters_skipped",
                     "Audiofilter übersprungen (fehlende GStreamer-Elemente): {0}",
                 ),
-                ("filter_noise_suppression", "Rauschunterdrückung"),
-                ("filter_compressor_limiter", "Kompressor/Limiter"),
-                ("filter_unknown", "Audiofilter"),
                 ("peak", "Peak: {0} dB"),
                 // Updates
                 ("updates", "Updates"),

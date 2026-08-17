@@ -1,6 +1,7 @@
 # Changelog
 
 ## [0.15.0-alpha.1] - 2026-08-17
+- refactor(core): centralize localized filter names in SkippedFilter::feature_name_in
 - test(gui): verify skipped-filter warnings use the same feature names as the capture log
 - refactor(core): move SkippedFilter into rivulet-core and make the skipped-filter warning formatting platform-neutral
 - feat(gui): warn in the Linux audio mixer when filters were skipped (missing GStreamer elements)

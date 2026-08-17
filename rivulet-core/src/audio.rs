@@ -1,3 +1,5 @@
+use crate::Locale;
+
 /// Identifies which input channel an [`AudioFrame`] belongs to.
 ///
 /// Used when recording separate audio tracks so that the system audio and the
@@ -66,6 +68,22 @@ impl SkippedFilter {
             _ => "audio filter",
         }
     }
+
+    /// The feature name for a GStreamer element factory, localized for the
+    /// given [`Locale`].
+    ///
+    /// English ([`SkippedFilter::feature_name`]) is the fallback and the name
+    /// used by the capture log; other locales translate the same element
+    /// mapping, so the GUI warning and the log stay consistent for every
+    /// locale. A locale without an explicit translation falls back to English.
+    pub fn feature_name_in(element: &str, locale: Locale) -> &'static str {
+        match (element, locale) {
+            ("webrtcdsp", Locale::De) => "Rauschunterdrückung",
+            ("audiodynamic", Locale::De) => "Kompressor/Limiter",
+            (_, Locale::De) => "Audiofilter",
+            _ => Self::feature_name(element),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -119,6 +137,31 @@ mod tests {
         assert_eq!(
             SkippedFilter::feature_name("future-element"),
             "audio filter"
+        );
+    }
+
+    #[test]
+    fn feature_name_in_localizes_from_the_shared_mapping() {
+        // English must always match the log's canonical name.
+        for element in ["webrtcdsp", "audiodynamic", "future-element"] {
+            assert_eq!(
+                SkippedFilter::feature_name_in(element, Locale::En),
+                SkippedFilter::feature_name(element),
+                "English GUI name for `{element}` must match the log name"
+            );
+        }
+        // German translates the same mapping instead of defining its own.
+        assert_eq!(
+            SkippedFilter::feature_name_in("webrtcdsp", Locale::De),
+            "Rauschunterdrückung"
+        );
+        assert_eq!(
+            SkippedFilter::feature_name_in("audiodynamic", Locale::De),
+            "Kompressor/Limiter"
+        );
+        assert_eq!(
+            SkippedFilter::feature_name_in("future-element", Locale::De),
+            "Audiofilter"
         );
     }
 }

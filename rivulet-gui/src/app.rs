@@ -1650,12 +1650,8 @@ fn format_skipped_filters(locale: Locale, skipped: &[SkippedFilter]) -> String {
     let items: Vec<String> = skipped
         .iter()
         .map(|f| {
-            let feature_key = match f.element {
-                "webrtcdsp" => "filter_noise_suppression",
-                "audiodynamic" => "filter_compressor_limiter",
-                _ => "filter_unknown",
-            };
-            format!("{} ({})", locale.tr(feature_key), f.element)
+            let feature = SkippedFilter::feature_name_in(f.element, locale);
+            format!("{feature} ({})", f.element)
         })
         .collect();
     locale.tr_fmt("audio_filters_skipped", &[items.join(", ")])
@@ -2118,37 +2114,30 @@ mod tests {
 
     #[test]
     fn skipped_filters_warning_matches_the_log_feature_names() {
-        // The capture log uses SkippedFilter::feature_name (via the audio
-        // crate); the English GUI warning must report the same feature name
-        // and element for every skipped filter.
-        let cases = [
-            ("webrtcdsp", "filter_noise_suppression"),
-            ("audiodynamic", "filter_compressor_limiter"),
-        ];
-        for (element, key) in cases {
+        // The capture log uses SkippedFilter::feature_name (English); the GUI
+        // warning must render the same element mapping in every locale, so the
+        // two can never drift apart.
+        for element in ["webrtcdsp", "audiodynamic", "future-element"] {
+            let english = SkippedFilter::feature_name(element);
+            // English GUI == English log.
+            assert_eq!(
+                SkippedFilter::feature_name_in(element, Locale::En),
+                english,
+                "English GUI feature name for `{element}` must match the log name"
+            );
             let filter = SkippedFilter {
                 element,
-                feature: SkippedFilter::feature_name(element),
+                feature: english,
             };
-            assert_eq!(
-                Locale::En.tr(key),
-                filter.feature,
-                "English GUI feature name for `{element}` must match the log feature name"
-            );
             let warning = format_skipped_filters(Locale::En, &[filter]);
             assert!(
-                warning.contains(filter.feature),
-                "warning {warning:?} must mention the feature name used by the log"
+                warning.contains(english),
+                "warning {warning:?} must mention the log feature name for `{element}`"
             );
             assert!(
                 warning.contains(element),
-                "warning {warning:?} must mention the skipped element name"
+                "warning {warning:?} must mention the skipped element `{element}`"
             );
         }
-        // Unknown elements fall back to the same generic name on both sides.
-        assert_eq!(
-            Locale::En.tr("filter_unknown"),
-            SkippedFilter::feature_name("future-element")
-        );
     }
 }
