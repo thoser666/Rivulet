@@ -1014,8 +1014,11 @@ impl eframe::App for RivuletApp {
         #[cfg(target_os = "windows")]
         {
             if self.is_windows_recording {
-                if self.frame_receiver.is_some() {
-                    if self.frame_receiver.as_ref().unwrap().try_recv().is_err() {
+                if let Some(receiver) = &self.frame_receiver {
+                    if matches!(
+                        receiver.try_recv(),
+                        Err(std::sync::mpsc::TryRecvError::Disconnected)
+                    ) {
                         if let Some(signal) = &self.stop_signal {
                             if !signal.load(Ordering::SeqCst) {
                                 println!("Recording ended unexpectedly.");
