@@ -786,6 +786,58 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn record_skipped_emits_the_warning_via_tracing() {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone, Default)]
+        struct LogBuffer(Arc<Mutex<String>>);
+
+        impl std::io::Write for LogBuffer {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                let text = std::str::from_utf8(buf).unwrap_or("<non-utf8>");
+                self.0.lock().unwrap().push_str(text);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let buffer = LogBuffer::default();
+        let writer = buffer.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+
+        tracing::subscriber::with_default(subscriber, || {
+            let mut skipped = Vec::new();
+            sys_impl::record_skipped(&mut skipped, &["webrtcdsp", "audiodynamic", "webrtcdsp"]);
+        });
+
+        let log = buffer.0.lock().unwrap();
+        assert!(
+            log.contains(
+                "noise suppression skipped: GStreamer element `webrtcdsp` is not installed"
+            ),
+            "expected the noise-suppression warning in the captured log, got: {log}"
+        );
+        assert!(
+            log.contains(
+                "compressor/limiter skipped: GStreamer element `audiodynamic` is not installed"
+            ),
+            "expected the compressor/limiter warning in the captured log, got: {log}"
+        );
+        assert_eq!(
+            log.matches("webrtcdsp").count(),
+            1,
+            "the duplicate webrtcdsp entry must not be logged twice, got: {log}"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn skipped_filters_reports_unavailable_elements() {
         let _ = gstreamer::init();
         let config = AudioConfig {
