@@ -2,6 +2,10 @@
 
 use eframe::egui;
 use rivulet_core::{Locale, RivuletEngine};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Arc,
+};
 
 // --- Linux-specific imports ---
 #[cfg(target_os = "linux")]
@@ -13,10 +17,7 @@ use {
     rivulet_audio::{AudioCapture, AudioConfig, AudioFilters},
     rivulet_core::{AudioFrame, AudioTrack},
     std::sync::mpsc as std_mpsc,
-    std::sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
-        Arc,
-    },
+    std::sync::atomic::AtomicU32,
     std::thread,
     std::time::Instant,
     tokio::runtime::Runtime,
@@ -26,11 +27,7 @@ use {
 #[cfg(target_os = "windows")]
 use {
     rfd,
-    std::sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc::{self, Receiver, Sender},
-        Arc,
-    },
+    std::sync::mpsc::{self, Receiver, Sender},
     std::thread,
     windows_capture::{
         // Import only the types that are available from capture
