@@ -1,6 +1,7 @@
 # Changelog
 
 ## [0.15.0-alpha.1] - 2026-08-17
+- refactor(audio): emit the skipped-filter log line via SkippedFilter::log_message and test its exact text
 - refactor(core): centralize localized filter names in SkippedFilter::feature_name_in
 - test(gui): verify skipped-filter warnings use the same feature names as the capture log
 - refactor(core): move SkippedFilter into rivulet-core and make the skipped-filter warning formatting platform-neutral

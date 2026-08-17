@@ -84,6 +84,18 @@ impl SkippedFilter {
             _ => Self::feature_name(element),
         }
     }
+
+    /// The console log message emitted when this filter is skipped during
+    /// pipeline construction.
+    ///
+    /// Kept as a pure function of the struct so the exact log text can be
+    /// tested independently of the `tracing` backend.
+    pub fn log_message(&self) -> String {
+        format!(
+            "{} skipped: GStreamer element `{}` is not installed",
+            self.feature, self.element
+        )
+    }
 }
 
 #[cfg(test)]
@@ -163,5 +175,30 @@ mod tests {
             SkippedFilter::feature_name_in("future-element", Locale::De),
             "Audiofilter"
         );
+    }
+
+    #[test]
+    fn log_message_reports_the_exact_text() {
+        let cases = [
+            (
+                "webrtcdsp",
+                "noise suppression skipped: GStreamer element `webrtcdsp` is not installed",
+            ),
+            (
+                "audiodynamic",
+                "compressor/limiter skipped: GStreamer element `audiodynamic` is not installed",
+            ),
+            (
+                "future-element",
+                "audio filter skipped: GStreamer element `future-element` is not installed",
+            ),
+        ];
+        for (element, expected) in cases {
+            let filter = SkippedFilter {
+                element,
+                feature: SkippedFilter::feature_name(element),
+            };
+            assert_eq!(filter.log_message(), expected);
+        }
     }
 }

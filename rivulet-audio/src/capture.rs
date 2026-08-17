@@ -464,11 +464,7 @@ mod sys_impl {
             if skipped.contains(&filter) {
                 continue;
             }
-            tracing::warn!(
-                "{} skipped: GStreamer element `{}` is not installed",
-                filter.feature,
-                filter.element
-            );
+            tracing::warn!("{}", filter.log_message());
             skipped.push(filter);
         }
     }
@@ -775,6 +771,16 @@ mod tests {
                     feature: "compressor/limiter",
                 },
             ]
+        );
+        // The recorded filters must produce the exact log line that
+        // `record_skipped` emits via `tracing::warn!`.
+        assert_eq!(
+            skipped[0].log_message(),
+            "noise suppression skipped: GStreamer element `webrtcdsp` is not installed"
+        );
+        assert_eq!(
+            skipped[1].log_message(),
+            "compressor/limiter skipped: GStreamer element `audiodynamic` is not installed"
         );
     }
 
