@@ -1,6 +1,7 @@
 # Changelog
 
 ## [0.15.0-alpha.1] - 2026-08-17
+- feat(gui): warn in the Linux audio mixer when filters were skipped (missing GStreamer elements)
 - feat(audio): expose skipped audio filters via AudioCapture::skipped_filters
 - docs(readme): document step-by-step signing secret setup
 - fix(audio): skip audio filter elements that are not installed
@@ -18,7 +19,6 @@
 - docs(readme): document step-by-step signing secret setup (certificates + all 7 secrets)
 
 - feat(audio): expose skipped audio filters via AudioCapture::skipped_filters()
-- feat(gui): warn in the Linux audio mixer when filters were skipped (missing GStreamer elements)
 
 
 
