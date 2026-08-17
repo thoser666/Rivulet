@@ -6,6 +6,7 @@
 ## [0.13.0-alpha.1] - 2026-08-17
 
 - feat(gui): make the no-frame recording timeout configurable
+- docs(readme): define the beta-gate criteria in the roadmap
 
 
 

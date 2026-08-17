@@ -110,6 +110,28 @@ See [Roadmap](#-roadmap) for detailed timeline.
 
 ---
 
+### Beta-Gate
+
+Beta is **not date-driven** — it is a manual, criteria-based decision. The
+project leaves alpha and enters beta (tag `vX.Y.Z-beta.1`, see
+[Releases](#releases)) only when **all** of the following verifiable criteria
+are met:
+
+| # | Criterion | Verifiable via |
+| --- | --- | --- |
+| 1 | **M1 – Solid Recording complete** | All M1 checklist items checked (audio filters/monitoring, hardware encoding, hotkeys, timer overlay, region capture, codec UI, presets) |
+| 2 | **M3 – Streaming complete** | All M3 checklist items checked (RTMP/RTMPS, dual output, adaptive bitrate, stream-key management, WebRTC/WHIP, SRT/RIST) |
+| 3 | **Platform parity (M5 release blocker)** | Recording + streaming verified on **Windows and Linux**; macOS capture implemented and verified (currently open) |
+| 4 | **Code-signing secrets configured** | `WINDOWS_CERT_*` and `MACOS_CERT_*`/`APPLE_*` secrets set in the repo so a beta build produces **signed** packages (the automation itself is already smoke-tested without secrets by `signing-e2e.yml`) |
+| 5 | **CI fully green on `develop`** | All checks pass: build, full test suite, actionlint, ShellCheck, action-pin checks, asset-drift check |
+| 6 | **No known release-blocking bugs** | No open issue marked as release blocker (the recording frame-loss and no-frame-timeout regressions are fixed) |
+
+**Gatekeeper:** The beta tag is set manually (see the Beta/RC/stable channel
+below). The roadmap checklist above is the source of truth for *when*; the
+release channel only describes *how* the tag is built and published.
+
+---
+
 ### ✅ M0 – Recording Foundation
 
 **Status: Done**
@@ -515,6 +537,9 @@ Dependabot pushes are skipped (no release build for merged bot PRs).
 A manually set tag `vX.Y.Z` (without `-alpha.*`) builds the same packages and
 publishes a GitHub release. Tags with `-beta.*`/`-rc.*` are marked as
 pre-releases; stable tags as full releases.
+
+Entering beta is gated on the [Beta-Gate](#beta-gate) criteria defined in the
+[Roadmap](#roadmap): the tag may only be set once all six criteria are met.
 
 ### Code signing
 
