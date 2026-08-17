@@ -221,7 +221,7 @@ mod sys_impl {
             let mut skipped = Vec::new();
             if config.separate_tracks {
                 if let Some(src) = &system_src {
-                    pipeline_str.push_str(&build_source_branch(
+                    let (branch, missing) = build_source_branch(
                         src,
                         "sys_vol",
                         &config.system_filters,
@@ -229,11 +229,12 @@ mod sys_impl {
                         "appsink name=sys_sink emit-signals=false sync=false",
                         "sys",
                         config.system_monitor,
-                        &mut skipped,
-                    ));
+                    );
+                    record_skipped(&mut skipped, &missing);
+                    pipeline_str.push_str(&branch);
                 }
                 if let Some(src) = &mic_src {
-                    pipeline_str.push_str(&build_source_branch(
+                    let (branch, missing) = build_source_branch(
                         src,
                         "mic_vol",
                         &config.mic_filters,
@@ -241,8 +242,9 @@ mod sys_impl {
                         "appsink name=mic_sink emit-signals=false sync=false",
                         "mic",
                         config.mic_monitor,
-                        &mut skipped,
-                    ));
+                    );
+                    record_skipped(&mut skipped, &missing);
+                    pipeline_str.push_str(&branch);
                 }
             } else {
                 for (i, src) in [system_src.as_ref(), mic_src.as_ref()]
@@ -260,7 +262,7 @@ mod sys_impl {
                     } else {
                         ("mic_vol", "mic", &config.mic_filters, config.mic_monitor)
                     };
-                    pipeline_str.push_str(&build_source_branch(
+                    let (branch, missing) = build_source_branch(
                         src,
                         vol,
                         filters,
@@ -268,8 +270,9 @@ mod sys_impl {
                         "adder.",
                         name,
                         monitor,
-                        &mut skipped,
-                    ));
+                    );
+                    record_skipped(&mut skipped, &missing);
+                    pipeline_str.push_str(&branch);
                 }
                 pipeline_str.push_str(
                     "adder name=adder ! appsink name=out_sink emit-signals=false sync=false",
@@ -542,14 +545,12 @@ mod sys_impl {
         target: &str,
         monitor_name: &str,
         monitor: bool,
-        skipped: &mut Vec<SkippedFilter>,
-    ) -> String {
+    ) -> (String, Vec<&'static str>) {
         let _ = gst::init();
         let (filter_chain, missing) =
             filter_chain_str_with(filters, |name| gst::ElementFactory::find(name).is_some());
-        record_skipped(skipped, &missing);
-        // Nur ein `!` einfügen, wenn überhaupt Filter aktiv sind (sonst
-        // entsteht ein leeres Element "!").
+        // Only insert a `!` when at least one filter is active; otherwise a
+        // dangling empty element "!" would be produced.
         let filter_segment = if filter_chain.is_empty() {
             String::new()
         } else {
@@ -567,7 +568,7 @@ mod sys_impl {
         } else {
             branch.push_str(&format!("! queue ! {target} "));
         }
-        branch
+        (branch, missing)
     }
 
     /// Resolve the PulseAudio monitor source of the default sink, i.e. the
@@ -825,8 +826,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn source_branch_without_monitor_has_no_tee() {
-        let mut skipped = Vec::new();
-        let branch = sys_impl::build_source_branch(
+        let (branch, missing) = sys_impl::build_source_branch(
             "pulsesrc",
             "sys_vol",
             &AudioFilters::default(),
@@ -834,19 +834,17 @@ mod tests {
             "appsink name=sys_sink",
             "sys",
             false,
-            &mut skipped,
         );
         assert!(!branch.contains("tee"));
         assert!(!branch.contains("autoaudiosink"));
         assert!(branch.contains("appsink name=sys_sink"));
-        assert!(skipped.is_empty());
+        assert!(missing.is_empty());
     }
 
     #[cfg(target_os = "linux")]
     #[test]
     fn source_branch_with_monitor_creates_tee_and_sink() {
-        let mut skipped = Vec::new();
-        let branch = sys_impl::build_source_branch(
+        let (branch, missing) = sys_impl::build_source_branch(
             "pulsesrc",
             "sys_vol",
             &AudioFilters::default(),
@@ -854,13 +852,12 @@ mod tests {
             "appsink name=sys_sink",
             "sys",
             true,
-            &mut skipped,
         );
         assert!(branch.contains("tee name=sys_tee"));
         assert!(branch.contains("volume name=sys_mon_vol"));
         assert!(branch.contains("autoaudiosink"));
         assert!(branch.contains("appsink name=sys_sink"));
-        assert!(skipped.is_empty());
+        assert!(missing.is_empty());
     }
 
     #[cfg(target_os = "linux")]
