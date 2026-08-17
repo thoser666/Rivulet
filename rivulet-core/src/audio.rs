@@ -52,6 +52,22 @@ pub struct SkippedFilter {
     pub feature: &'static str,
 }
 
+impl SkippedFilter {
+    /// The English, human-readable feature name provided by a GStreamer
+    /// element factory.
+    ///
+    /// This is the single source of truth for the feature name used both in
+    /// the capture log message and in the GUI warning, so the two can never
+    /// drift apart.
+    pub fn feature_name(element: &str) -> &'static str {
+        match element {
+            "webrtcdsp" => "noise suppression",
+            "audiodynamic" => "compressor/limiter",
+            _ => "audio filter",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +104,21 @@ mod tests {
         assert_ne!(AudioTrack::System, AudioTrack::Microphone);
         assert_eq!(AudioTrack::System, AudioTrack::System);
         assert_eq!(AudioTrack::Microphone, AudioTrack::Microphone);
+    }
+
+    #[test]
+    fn skipped_filter_feature_name_is_the_shared_mapping() {
+        assert_eq!(
+            SkippedFilter::feature_name("webrtcdsp"),
+            "noise suppression"
+        );
+        assert_eq!(
+            SkippedFilter::feature_name("audiodynamic"),
+            "compressor/limiter"
+        );
+        assert_eq!(
+            SkippedFilter::feature_name("future-element"),
+            "audio filter"
+        );
     }
 }

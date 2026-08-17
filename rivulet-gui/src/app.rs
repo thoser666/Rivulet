@@ -2115,4 +2115,40 @@ mod tests {
             "Audio filters skipped (missing GStreamer elements): audio filter (futurefilter)"
         );
     }
+
+    #[test]
+    fn skipped_filters_warning_matches_the_log_feature_names() {
+        // The capture log uses SkippedFilter::feature_name (via the audio
+        // crate); the English GUI warning must report the same feature name
+        // and element for every skipped filter.
+        let cases = [
+            ("webrtcdsp", "filter_noise_suppression"),
+            ("audiodynamic", "filter_compressor_limiter"),
+        ];
+        for (element, key) in cases {
+            let filter = SkippedFilter {
+                element,
+                feature: SkippedFilter::feature_name(element),
+            };
+            assert_eq!(
+                Locale::En.tr(key),
+                filter.feature,
+                "English GUI feature name for `{element}` must match the log feature name"
+            );
+            let warning = format_skipped_filters(Locale::En, &[filter]);
+            assert!(
+                warning.contains(filter.feature),
+                "warning {warning:?} must mention the feature name used by the log"
+            );
+            assert!(
+                warning.contains(element),
+                "warning {warning:?} must mention the skipped element name"
+            );
+        }
+        // Unknown elements fall back to the same generic name on both sides.
+        assert_eq!(
+            Locale::En.tr("filter_unknown"),
+            SkippedFilter::feature_name("future-element")
+        );
+    }
 }

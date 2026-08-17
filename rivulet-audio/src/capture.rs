@@ -446,13 +446,11 @@ mod sys_impl {
     /// Resolve the PulseAudio monitor source of the default sink, i.e. the
     /// "what you hear" capture device. Falls back to the default source.
     /// Map an element factory name to the human-readable filter feature it
-    /// provides, for user-facing messages.
+    /// provides, for user-facing messages. Delegates to the shared mapping in
+    /// [`SkippedFilter::feature_name`] so the capture log and the GUI warning
+    /// report the same feature name.
     pub(crate) fn filter_feature_name(element: &'static str) -> &'static str {
-        match element {
-            "webrtcdsp" => "noise suppression",
-            "audiodynamic" => "compressor/limiter",
-            _ => "audio filter",
-        }
+        SkippedFilter::feature_name(element)
     }
 
     /// Record skipped filter elements into `skipped` (deduplicated), logging a
@@ -748,16 +746,16 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn filter_feature_name_maps_elements() {
-        assert_eq!(
-            sys_impl::filter_feature_name("webrtcdsp"),
-            "noise suppression"
-        );
-        assert_eq!(
-            sys_impl::filter_feature_name("audiodynamic"),
-            "compressor/limiter"
-        );
-        assert_eq!(sys_impl::filter_feature_name("unknown"), "audio filter");
+    fn filter_feature_name_uses_the_shared_core_mapping() {
+        // The capture log must use the same feature name as the shared core
+        // mapping, so log and GUI warnings can never drift apart.
+        for element in ["webrtcdsp", "audiodynamic", "unknown"] {
+            assert_eq!(
+                sys_impl::filter_feature_name(element),
+                SkippedFilter::feature_name(element),
+                "capture log feature name for `{element}` must match the shared mapping"
+            );
+        }
     }
 
     #[cfg(target_os = "linux")]
