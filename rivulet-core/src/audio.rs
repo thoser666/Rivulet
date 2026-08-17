@@ -37,6 +37,21 @@ impl AudioFrame {
     }
 }
 
+/// An audio filter that was requested but could not be built because its
+/// GStreamer element is not installed (e.g. `webrtcdsp` on distros that do
+/// not ship it).
+///
+/// The capture pipeline degrades gracefully by skipping such filters;
+/// consumers (such as the GUI) use this to surface the omission to the user
+/// instead of only logging a warning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SkippedFilter {
+    /// GStreamer element factory name (e.g. `webrtcdsp`).
+    pub element: &'static str,
+    /// Human-readable feature name (e.g. `noise suppression`).
+    pub feature: &'static str,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

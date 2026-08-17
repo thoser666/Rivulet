@@ -1,7 +1,7 @@
 #![allow(unused_imports, dead_code, unused_variables)]
 
 use eframe::egui;
-use rivulet_core::{Locale, RivuletEngine};
+use rivulet_core::{Locale, RivuletEngine, SkippedFilter};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
@@ -14,7 +14,7 @@ use {
     ashpd::desktop::Session,
     once_cell::sync::Lazy,
     pipewire::spa::utils::Fd,
-    rivulet_audio::{AudioCapture, AudioConfig, AudioFilters, SkippedFilter},
+    rivulet_audio::{AudioCapture, AudioConfig, AudioFilters},
     rivulet_core::{AudioFrame, AudioTrack},
     std::sync::atomic::AtomicU32,
     std::sync::mpsc as std_mpsc,
@@ -1643,8 +1643,9 @@ fn drain_error_receiver(receiver: &std::sync::mpsc::Receiver<String>) -> Option<
 
 /// Format a localized warning listing the audio filters that were skipped
 /// because their GStreamer elements are not installed (e.g. `webrtcdsp` on
-/// distros that do not ship it).
-#[cfg(target_os = "linux")]
+/// distros that do not ship it). Platform-neutral so the warning formatting
+/// is exercised on every build path, even where the audio engine is not
+/// active (Windows/macOS).
 fn format_skipped_filters(locale: Locale, skipped: &[SkippedFilter]) -> String {
     let items: Vec<String> = skipped
         .iter()
@@ -2059,9 +2060,8 @@ mod tests {
         assert_eq!(forwarded, vec![9], "queued frame must be delivered first");
     }
 
-    // ── format_skipped_filters (Linux) ────────────────────────────
+    // ── format_skipped_filters ────────────────────────────────────
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn skipped_filters_warning_lists_features_in_english() {
         let skipped = [SkippedFilter {
@@ -2074,7 +2074,6 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn skipped_filters_warning_translates_to_german() {
         let skipped = [SkippedFilter {
@@ -2087,7 +2086,6 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn skipped_filters_warning_joins_multiple_filters() {
         let skipped = [
@@ -2106,7 +2104,6 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn skipped_filters_warning_falls_back_for_unknown_element() {
         let skipped = [SkippedFilter {

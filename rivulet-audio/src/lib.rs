@@ -8,4 +8,5 @@
 
 pub mod capture;
 
-pub use capture::{AudioCapture, AudioConfig, AudioFilters, SkippedFilter};
+pub use capture::{AudioCapture, AudioConfig, AudioFilters};
+pub use rivulet_core::SkippedFilter;

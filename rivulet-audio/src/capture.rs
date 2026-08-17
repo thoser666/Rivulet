@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rivulet_core::AudioFrame;
+use rivulet_core::{AudioFrame, SkippedFilter};
 
 /// Filter chain applied to an input track before it is mixed or recorded.
 ///
@@ -18,19 +18,6 @@ pub struct AudioFilters {
     pub compressor: bool,
     /// Hard limiter (prevents clipping, ratio ~20:1).
     pub limiter: bool,
-}
-
-/// A filter that was requested in the [`AudioConfig`] but could not be built
-/// because its GStreamer element is not installed (e.g. `webrtcdsp` on distros
-/// that do not ship it). The capture pipeline degrades gracefully by skipping
-/// such filters; [`AudioCapture::skipped_filters`] lets callers surface this
-/// to the user instead of only logging a warning.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SkippedFilter {
-    /// GStreamer element factory name (e.g. `webrtcdsp`).
-    pub element: &'static str,
-    /// Human-readable feature name (e.g. `noise suppression`).
-    pub feature: &'static str,
 }
 
 /// Configuration for audio capture.

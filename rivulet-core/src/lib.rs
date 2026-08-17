@@ -12,7 +12,7 @@ use std::time::Instant;
 use gst::prelude::*;
 
 pub mod audio;
-pub use audio::{AudioFrame, AudioTrack};
+pub use audio::{AudioFrame, AudioTrack, SkippedFilter};
 
 pub mod encoder;
 pub use encoder::{best_encoder, detect_available_encoders, VideoEncoder};
