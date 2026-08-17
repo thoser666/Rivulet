@@ -7,7 +7,7 @@
 [![CI](https://github.com/thoser666/rivulet/workflows/CI/badge.svg)](https://github.com/thoser666/rivulet/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/status-alpha%20v0.3-yellow.svg)](https://github.com/thoser666/rivulet)
+[![Status](https://img.shields.io/badge/status-alpha%20v0.9-yellow.svg)](https://github.com/thoser666/rivulet/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/thoser666/rivulet)
 
 *A Rust recording and streaming engine — built for performance, safety, reliability, and embeddability*
@@ -67,7 +67,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Dual Output** - Record locally and stream simultaneously; once encoded, split via `tee` into the MP4 file and the FLV/RTMPS sink (enabled by configuring both a local recording and stream settings)
 - **Stream Health & Network Stats** - Live status (`Connecting`/`Good`/`Warning`/`Poor`) with sent/dropped frame counters, bitrate (kbps) and FPS over a sliding window; derived from drop ratio (>5% Poor, >1% Warning), throughput collapse and stalls; engine API `stream_stats()`, polled in `stream_rtmps`
 - **Recording Performance Metrics** - Live FPS, encoder load (%) and output file size during a recording, measured via GStreamer pad probes (per-frame encode duration paired by PTS, filesink byte counter); engine API `recording_stats()`, shown in the GUI next to the recording timer
-- **Auto-Update** - Checks the GitHub Releases API on startup and manually for newer versions, downloads the matching platform package (MSI / AppImage / DMG) and launches the installer; the alpha channel keeps up with every feature push
+- **Auto-Update** - Checks the GitHub Releases API on startup and manually for newer versions, downloads the matching platform package (MSI / AppImage / DMG) with a live progress bar and launches the installer; the alpha channel keeps up with every feature push
 - **Live Preview** - See what you're recording as you record
 - **Tab-Based Interface** - Clean, DaVinci Resolve-style UI
   - Record Tab - Main recording controls and preview

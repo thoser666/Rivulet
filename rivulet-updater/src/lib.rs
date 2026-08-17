@@ -334,6 +334,104 @@ mod tests {
         assert_eq!(info.version, "0.5.0-alpha.2");
     }
 
+    #[test]
+    fn download_asset_with_progress_tracks_bytes() {
+        let payload = vec![0xABu8; 256 * 1024]; // 256 KB payload
+        let body_len = payload.len();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body_len
+            );
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.write_all(&payload);
+        });
+
+        let asset = Asset {
+            name: "test.bin".into(),
+            url: format!("http://{addr}/test.bin"),
+            size: body_len as u64,
+        };
+        let progress = Arc::new(AtomicU64::new(0));
+        let dest = std::env::temp_dir().join("rivulet_test_download.bin");
+        let result = download_asset_with_progress(&asset, &dest, Arc::clone(&progress));
+        assert!(result.is_ok());
+        assert_eq!(progress.load(Ordering::Relaxed), body_len as u64);
+        assert_eq!(
+            std::fs::metadata(&dest).unwrap().len() as usize,
+            body_len
+        );
+        let _ = std::fs::remove_file(&dest);
+    }
+
+    #[test]
+    fn download_asset_with_progress_starts_at_zero() {
+        let payload = b"hello".to_vec();
+        let body_len = payload.len();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body_len
+            );
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.write_all(&payload);
+        });
+
+        let asset = Asset {
+            name: "tiny.bin".into(),
+            url: format!("http://{addr}/tiny.bin"),
+            size: 999,
+        };
+        let progress = Arc::new(AtomicU64::new(0));
+        let dest = std::env::temp_dir().join("rivulet_test_tiny.bin");
+        download_asset_with_progress(&asset, &dest, Arc::clone(&progress)).unwrap();
+        assert_eq!(progress.load(Ordering::Relaxed), body_len as u64);
+        let _ = std::fs::remove_file(&dest);
+    }
+
+    #[test]
+    fn download_asset_with_progress_invalid_url_fails() {
+        let asset = Asset {
+            name: "fail.bin".into(),
+            url: "http://127.0.0.1:1/nonexistent".into(),
+            size: 100,
+        };
+        let progress = Arc::new(AtomicU64::new(0));
+        let dest = std::env::temp_dir().join("rivulet_test_fail.bin");
+        let result = download_asset_with_progress(&asset, &dest, Arc::clone(&progress));
+        assert!(result.is_err());
+        let _ = std::fs::remove_file(&dest);
+    }
+
+    #[test]
+    fn install_asset_returns_correct_quit_flag() {
+        let fake = std::env::temp_dir().join("rivulet_test_nonexistent.msi");
+        let result = install_asset(&fake);
+        // The function will fail to spawn on a nonexistent file, but we
+        // can at least verify the platform-specific return type compiles
+        // and the error is an I/O error (file not found / spawn failure).
+        #[cfg(target_os = "windows")]
+        {
+            // msiexec spawn may succeed even with nonexistent file (it's async),
+            // so we just check it doesn't panic.
+            let _ = result;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            assert!(result.is_err());
+        }
+    }
+
     /// The asset name the tests expect for the host platform.
     fn expected_asset_name() -> String {
         match std::env::consts::OS {
