@@ -10,6 +10,7 @@ rust-version = "1.70"
 eframe = { version = "0.36.1", default-features = false, features = [
     "default_fonts",
     "glow",
+    "links",
     "persistence",
     "wayland",
     "x11",
