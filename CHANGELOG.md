@@ -2,6 +2,7 @@
 
 ## [0.12.0-alpha.1] - 2026-08-17
 - feat(gui): abort Windows recording when no frame arrives within 5 s
+- feat(gui): make the no-frame timeout configurable via `--no-frame-timeout <seconds>`
 
 ## [0.11.0-alpha.1] - 2026-08-17
 

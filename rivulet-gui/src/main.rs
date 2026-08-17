@@ -2,7 +2,7 @@
 
 mod app;
 
-use crate::app::RivuletApp;
+use crate::app::{parse_no_frame_timeout, RivuletApp, DEFAULT_NO_FRAME_TIMEOUT};
 use eframe::egui::{self, IconData};
 use rivulet_core::RivuletEngine;
 // Tokio is no longer required here, but we keep it for potential future tasks.
@@ -40,10 +40,24 @@ fn main() -> Result<(), eframe::Error> {
     let _rt = Runtime::new().unwrap();
     let engine = RivuletEngine::new();
 
-    run_native("Rivulet", engine)
+    // Parse the optional `--no-frame-timeout <seconds>` flag.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let no_frame_timeout = parse_no_frame_timeout(&args, DEFAULT_NO_FRAME_TIMEOUT);
+    if no_frame_timeout != DEFAULT_NO_FRAME_TIMEOUT {
+        println!(
+            "No-frame timeout set to {} seconds via CLI.",
+            no_frame_timeout.as_secs()
+        );
+    }
+
+    run_native("Rivulet", engine, no_frame_timeout)
 }
 
-fn run_native(app_name: &str, engine: RivuletEngine) -> Result<(), eframe::Error> {
+fn run_native(
+    app_name: &str,
+    engine: RivuletEngine,
+    no_frame_timeout: std::time::Duration,
+) -> Result<(), eframe::Error> {
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size(egui::vec2(800.0, 600.0))
@@ -58,7 +72,7 @@ fn run_native(app_name: &str, engine: RivuletEngine) -> Result<(), eframe::Error
         native_options,
         Box::new(|cc| {
             // The call is simple again; the app manages its own communication internally.
-            let app = RivuletApp::new(cc, engine);
+            let app = RivuletApp::new(cc, engine, no_frame_timeout);
             Ok(Box::new(app))
         }),
     )

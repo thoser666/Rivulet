@@ -52,12 +52,12 @@ struct RawFrame {
     height: u32,
 }
 
-/// Maximum time to wait for the first captured frame before aborting a
-/// Windows recording with an error. The pipeline is only initialized once
+/// Default maximum time to wait for the first captured frame before aborting
+/// a Windows recording with an error. The pipeline is only initialized once
 /// the first frame arrives, so a capture that never delivers a frame would
-/// otherwise look like a running recording while writing nothing.
-#[cfg(target_os = "windows")]
-const NO_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// otherwise look like a running recording while writing nothing. Overridable
+/// at startup via `--no-frame-timeout <seconds>`.
+pub const DEFAULT_NO_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 // --- Auto-update state machine ---
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -292,6 +292,12 @@ pub struct RivuletApp {
     #[serde(skip)]
     last_frame_at: Option<Instant>,
 
+    /// Maximum time to wait for the first captured frame before aborting a
+    /// Windows recording with an error. Configured at startup via the
+    /// `--no-frame-timeout <seconds>` CLI flag.
+    #[serde(skip)]
+    no_frame_timeout: std::time::Duration,
+
     // Auto-update
     #[serde(skip)]
     update_ui: std::sync::Arc<std::sync::Mutex<UpdateUi>>,
@@ -409,6 +415,8 @@ impl Default for RivuletApp {
             record_started: Instant::now(),
             #[cfg(target_os = "windows")]
             last_frame_at: None,
+
+            no_frame_timeout: DEFAULT_NO_FRAME_TIMEOUT,
 
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
@@ -1043,10 +1051,15 @@ impl RivuletApp {
         }
     }
 
-    pub fn new(cc: &eframe::CreationContext<'_>, engine: RivuletEngine) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        engine: RivuletEngine,
+        no_frame_timeout: std::time::Duration,
+    ) -> Self {
         #[allow(unused_mut)]
         let mut app = Self {
             engine,
+            no_frame_timeout,
             ..Default::default()
         };
         #[cfg(target_os = "windows")]
@@ -1097,10 +1110,10 @@ impl eframe::App for RivuletApp {
                         self.record_started,
                         self.last_frame_at,
                         Instant::now(),
-                        NO_FRAME_TIMEOUT,
+                        self.no_frame_timeout,
                     )
                 {
-                    let secs = NO_FRAME_TIMEOUT.as_secs();
+                    let secs = self.no_frame_timeout.as_secs();
                     self.last_error = Some(self.tr_fmt("recording_no_frames", &[secs.to_string()]));
                     println!(
                         "No frames received within {} seconds, stopping recording.",
@@ -1569,6 +1582,32 @@ fn drain_error_receiver(receiver: &std::sync::mpsc::Receiver<String>) -> Option<
     last
 }
 
+/// Parse the `--no-frame-timeout <seconds>` CLI flag from the given command
+/// line arguments (without the program name).
+///
+/// Returns the configured timeout, or the default when the flag is absent,
+/// malformed, or zero. Unknown arguments are ignored so the flag stays
+/// forward-compatible with other CLI options.
+pub fn parse_no_frame_timeout(
+    args: &[String],
+    default: std::time::Duration,
+) -> std::time::Duration {
+    let mut secs = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--no-frame-timeout" {
+            if let Some(value) = iter.next() {
+                if let Ok(n) = value.parse::<u64>() {
+                    if n > 0 {
+                        secs = Some(n);
+                    }
+                }
+            }
+        }
+    }
+    secs.map(std::time::Duration::from_secs).unwrap_or(default)
+}
+
 /// Whether a recording should be aborted because the capture delivered no
 /// frame at all within the timeout.
 ///
@@ -1639,6 +1678,59 @@ mod tests {
     fn format_bytes_gigabytes() {
         assert_eq!(format_bytes(1073741824), "1.00 GB");
         assert_eq!(format_bytes(2684354560), "2.50 GB");
+    }
+
+    // ── parse_no_frame_timeout ────────────────────────────────────
+
+    #[test]
+    fn no_frame_timeout_default_when_flag_absent() {
+        let args: Vec<String> = vec![];
+        let default = std::time::Duration::from_secs(5);
+        assert_eq!(parse_no_frame_timeout(&args, default), default);
+    }
+
+    #[test]
+    fn no_frame_timeout_parses_value() {
+        let args = vec!["--no-frame-timeout".to_string(), "12".to_string()];
+        let parsed = parse_no_frame_timeout(&args, std::time::Duration::from_secs(5));
+        assert_eq!(parsed, std::time::Duration::from_secs(12));
+    }
+
+    #[test]
+    fn no_frame_timeout_last_value_wins() {
+        let args = vec![
+            "--no-frame-timeout".to_string(),
+            "3".to_string(),
+            "--no-frame-timeout".to_string(),
+            "15".to_string(),
+        ];
+        let parsed = parse_no_frame_timeout(&args, std::time::Duration::from_secs(5));
+        assert_eq!(parsed, std::time::Duration::from_secs(15));
+    }
+
+    #[test]
+    fn no_frame_timeout_ignores_invalid_values() {
+        let args = vec!["--no-frame-timeout".to_string(), "abc".to_string()];
+        let default = std::time::Duration::from_secs(5);
+        assert_eq!(parse_no_frame_timeout(&args, default), default);
+
+        let args = vec!["--no-frame-timeout".to_string(), "0".to_string()];
+        assert_eq!(parse_no_frame_timeout(&args, default), default);
+
+        // Missing value falls back to default.
+        let args = vec!["--no-frame-timeout".to_string()];
+        assert_eq!(parse_no_frame_timeout(&args, default), default);
+    }
+
+    #[test]
+    fn no_frame_timeout_ignores_unknown_args() {
+        let args = vec![
+            "--other".to_string(),
+            "--no-frame-timeout".to_string(),
+            "7".to_string(),
+        ];
+        let parsed = parse_no_frame_timeout(&args, std::time::Duration::from_secs(5));
+        assert_eq!(parsed, std::time::Duration::from_secs(7));
     }
 
     // ── should_abort_for_no_frames ────────────────────────────────
