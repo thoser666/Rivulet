@@ -67,6 +67,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Dual Output** - Record locally and stream simultaneously; once encoded, split via `tee` into the MP4 file and the FLV/RTMPS sink (enabled by configuring both a local recording and stream settings)
 - **Stream Health & Network Stats** - Live status (`Connecting`/`Good`/`Warning`/`Poor`) with sent/dropped frame counters, bitrate (kbps) and FPS over a sliding window; derived from drop ratio (>5% Poor, >1% Warning), throughput collapse and stalls; engine API `stream_stats()`, polled in `stream_rtmps`
 - **Recording Performance Metrics** - Live FPS, encoder load (%) and output file size during a recording, measured via GStreamer pad probes (per-frame encode duration paired by PTS, filesink byte counter); engine API `recording_stats()`, shown in the GUI next to the recording timer
+- **Hotkeys** - F9 toggles recording, F10 pauses/resumes, F11 mutes/unmutes audio; pause skips video frames while capture keeps running, mute drops audio frames; hotkey hints shown in the UI and on the Start Recording button
 - **Auto-Update** - Checks the GitHub Releases API on startup and manually for newer versions, downloads the matching platform package (MSI / AppImage / DMG) with a live progress bar and launches the installer; the alpha channel keeps up with every feature push
 - **Live Preview** - See what you're recording as you record
 - **Tab-Based Interface** - Clean, DaVinci Resolve-style UI
@@ -165,7 +166,7 @@ release channel only describes *how* the tag is built and published.
 - [x] Code signing (signing automation present, secrets needed)
 
 **Quality of Life**
-- [ ] Hotkeys (record, pause, mute)
+- [x] Hotkeys (record, pause, mute)
 - [ ] Recording timer overlay and FPS counter
 - [ ] Region capture and multi-monitor selection
 - [ ] Codec selection UI (H264/H265/VP9)
@@ -333,7 +334,7 @@ The core concept of OBS: scenes, sources, and transitions.
 | Virtual camera | Open |
 | Replay buffer | Open |
 | Browser sources | Open |
-| Studio mode & hotkeys | Open |
+| Studio mode & hotkeys | Partial (hotkeys: record/pause/mute) |
 | Plugin ecosystem & OBS compatibility | Open |
 | Multi-track audio | Partial (2 tracks) |
 | Platform parity (Windows/macOS) | Open |
