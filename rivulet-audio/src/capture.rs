@@ -6,6 +6,10 @@ use rivulet_core::AudioFrame;
 /// The filters are inserted into the GStreamer pipeline between the volume
 /// element and the caps filter. They are realised with the `webrtcdsp`
 /// (noise suppression) and `audiodynamic` (compressor/limiter) elements.
+///
+/// Elements whose GStreamer factory is not installed (e.g. `webrtcdsp` on
+/// distros that do not ship it) are skipped with a warning when the pipeline
+/// is built, so a missing optional filter never fails the capture.
 #[derive(Debug, Clone, Default)]
 pub struct AudioFilters {
     /// Noise suppression (WebRTC audio processing library).
@@ -419,27 +423,68 @@ mod sys_impl {
     /// Build the GStreamer element chain for the configured audio filters.
     /// Empty string when no filter is enabled. Elements are joined with `! `
     /// and carry no leading/trailing separator.
+    ///
+    /// Elements whose GStreamer factory is not installed (e.g. `webrtcdsp` on
+    /// distros that do not ship it) are skipped with a warning instead of
+    /// failing the whole capture pipeline, so a missing optional filter
+    /// degrades gracefully.
     pub(crate) fn filter_chain_str(filters: &AudioFilters) -> String {
-        let mut elements = Vec::new();
+        let _ = gst::init();
+        let (chain, skipped) =
+            filter_chain_str_with(filters, |name| gst::ElementFactory::find(name).is_some());
+        for name in skipped {
+            let what = match name {
+                "webrtcdsp" => "noise suppression",
+                "audiodynamic" => "compressor/limiter",
+                _ => "audio filter",
+            };
+            tracing::warn!("{what} skipped: GStreamer element `{name}` is not installed");
+        }
+        chain
+    }
+
+    /// Availability-aware variant of [`filter_chain_str`] for tests: the
+    /// `available` predicate decides which element factories exist. Returns
+    /// the joined chain and the unique factory names that were requested but
+    /// not available.
+    pub(crate) fn filter_chain_str_with(
+        filters: &AudioFilters,
+        available: impl Fn(&str) -> bool,
+    ) -> (String, Vec<&'static str>) {
+        let mut elements: Vec<&'static str> = Vec::new();
+        let mut skipped: Vec<&'static str> = Vec::new();
+
+        let mut push = |factory: &'static str, fragment: &'static str| {
+            if available(factory) {
+                elements.push(fragment);
+            } else if !skipped.contains(&factory) {
+                skipped.push(factory);
+            }
+        };
+
         if filters.noise_suppression {
-            elements.push(
+            push(
+                "webrtcdsp",
                 "webrtcdsp noise-suppression=true echo-cancel=false \
                  gain-control=false high-pass-filter=false",
             );
         }
         if filters.compressor {
-            elements.push(
+            push(
+                "audiodynamic",
                 "audiodynamic mode=compressor characteristics=soft-knee \
                  threshold=0.5 ratio=4.0",
             );
         }
         if filters.limiter {
-            elements.push(
+            push(
+                "audiodynamic",
                 "audiodynamic mode=compressor characteristics=hard-knee \
                  threshold=0.95 ratio=20.0",
             );
         }
-        elements.join(" ! ")
+
+        (elements.join(" ! "), skipped)
     }
 
     /// Build one complete source branch of the capture pipeline:
@@ -621,10 +666,44 @@ mod tests {
             compressor: true,
             limiter: true,
         };
-        let chain = sys_impl::filter_chain_str(&filters);
+        // All elements available -> full chain, nothing skipped.
+        let (chain, skipped) = sys_impl::filter_chain_str_with(&filters, |_| true);
         assert!(chain.contains("webrtcdsp"));
         assert!(chain.contains("audiodynamic"));
         assert_eq!(chain.matches("audiodynamic").count(), 2);
+        assert!(skipped.is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn filter_chain_str_skips_unavailable_elements() {
+        let filters = AudioFilters {
+            noise_suppression: true,
+            compressor: true,
+            limiter: true,
+        };
+        // Simulate a distro whose gst-plugins-bad does not ship webrtcdsp
+        // (e.g. Ubuntu): the filter is dropped, the rest of the chain stays.
+        let (chain, skipped) =
+            sys_impl::filter_chain_str_with(&filters, |name| name != "webrtcdsp");
+        assert!(!chain.contains("webrtcdsp"));
+        assert!(chain.contains("audiodynamic"));
+        assert_eq!(chain.matches("audiodynamic").count(), 2);
+        assert_eq!(skipped, vec!["webrtcdsp"]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn filter_chain_str_skips_all_unavailable_elements() {
+        let filters = AudioFilters {
+            noise_suppression: true,
+            compressor: true,
+            limiter: true,
+        };
+        // Nothing available -> empty chain, each factory reported once.
+        let (chain, skipped) = sys_impl::filter_chain_str_with(&filters, |_| false);
+        assert_eq!(chain, "");
+        assert_eq!(skipped, vec!["webrtcdsp", "audiodynamic"]);
     }
 
     #[cfg(target_os = "linux")]
