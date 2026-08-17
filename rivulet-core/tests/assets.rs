@@ -235,6 +235,11 @@ fn asset_drift_check_is_wired_up() {
         ci.contains("safe.directory"),
         "the pinned container must mark the mounted repo as a safe git directory"
     );
+    assert!(
+        ci.contains("--entrypoint bash"),
+        "the CI docker run must override the entrypoint to bash, otherwise \
+         the ImageMagick entrypoint intercepts the command"
+    );
 
     let generator = read("scripts/generate-assets.sh");
     assert!(

@@ -69,9 +69,9 @@ jobs:
           # check is immune to runner ImageMagick/FreeType version drift. The
           # image is pinned by content digest (there is no official ImageMagick
           # image) to guard against tag mutation; it is multi-arch (amd64/arm64).
-          docker run --rm -v "$PWD:/work" -w /work \
+          docker run --rm -v "$PWD:/work" -w /work --entrypoint bash \
             dpokidov/imagemagick:7.1.2-12@sha256:87998ec1b8127b2f73f626f74f7b05e8827f9d7605fa52da5370588f7e53cee1 \
-            bash -c 'apt-get update -qq && apt-get install -y -qq python3 git >/dev/null 2>&1 && git config --global --add safe.directory /work && bash scripts/generate-assets.sh && python3 scripts/check-assets.py'
+            -c 'apt-get update -qq && apt-get install -y -qq python3 git >/dev/null 2>&1 && git config --global --add safe.directory /work && bash scripts/generate-assets.sh && python3 scripts/check-assets.py'
 
       - name: Check formatting
         run: cargo fmt --all -- --check
