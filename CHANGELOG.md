@@ -2,6 +2,7 @@
 
 ## [0.14.0-alpha.1] - 2026-08-17
 - feat(gui): extend the no-frame recording timeout to Linux
+- ci(beta-gate): evaluate beta-readiness on every push (scripts/check-beta-gate.py)
 
 ## [0.13.0-alpha.1] - 2026-08-17
 

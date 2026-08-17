@@ -209,6 +209,62 @@ fn stale_pin_checker_is_wired_up() {
 }
 
 #[test]
+fn beta_gate_checker_is_wired_up() {
+    // The Beta-Gate (README → Roadmap) is the criteria list that gates leaving
+    // alpha. The checker must evaluate all six criteria and CI must publish the
+    // result to the step summary on every push.
+    let checker = read("scripts/check-beta-gate.py");
+    assert!(
+        checker.contains("M1 – Solid Recording") && checker.contains("M3 – Streaming"),
+        "check-beta-gate.py must evaluate the M1 and M3 roadmap criteria"
+    );
+    assert!(
+        checker.contains("Platform parity") && checker.contains("Windows/macOS feature parity"),
+        "check-beta-gate.py must evaluate the platform-parity (M5) criterion"
+    );
+    assert!(
+        checker.contains("REQUIRED_SECRETS") && checker.contains("WINDOWS_CERT_BASE64"),
+        "check-beta-gate.py must check the code-signing secrets"
+    );
+    assert!(
+        checker.contains("actions/runs") && checker.contains("conclusion"),
+        "check-beta-gate.py must check the latest CI run on develop"
+    );
+    assert!(
+        checker.contains("release-blocker"),
+        "check-beta-gate.py must check for open release-blocker issues"
+    );
+    assert!(
+        checker.contains("--json")
+            && checker.contains("json.dumps")
+            && checker.contains("--comment")
+            && checker.contains("render_comment"),
+        "check-beta-gate.py must offer --json and --comment output modes"
+    );
+    assert!(
+        checker.contains("--fail"),
+        "check-beta-gate.py must offer --fail to turn unmet criteria into exit 1"
+    );
+
+    // The gate itself lives in the roadmap; the README must define it.
+    let readme = read("README.md");
+    assert!(
+        readme.contains("### Beta-Gate"),
+        "README must contain the Beta-Gate section"
+    );
+
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("check-beta-gate.py"),
+        "the CI workflow must run the beta-gate checker"
+    );
+    assert!(
+        ci.contains("GITHUB_STEP_SUMMARY"),
+        "the CI workflow must publish the beta-gate result to the step summary"
+    );
+}
+
+#[test]
 fn dependabot_auto_merge_workflow_is_wired_up() {
     let wf = read(".github/workflows/dependabot-auto-merge.yml");
     assert!(

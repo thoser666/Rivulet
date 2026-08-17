@@ -427,6 +427,18 @@ newer majors (`--fail-on-major` makes those fatal). `--json` gives a
 machine-readable result and `--comment` a compact Markdown notification,
 published to the nightly run's step summary.
 
+Beta-readiness is evaluated on every push by `scripts/check-beta-gate.py`
+(CI job `Beta-Gate readiness`): it parses the roadmap checkboxes for M1/M3
+and the 3-OS CI build matrix, and checks the signing secrets, the latest CI
+run and open `release-blocker` issues via the GitHub API when a token is
+available. The verdict is published to the run's step summary. It is
+informational by default (exit 0 — the project is expected to be NOT READY
+while it is still in alpha); `--fail` turns any unmet or unverified criterion
+into exit 1 (e.g. as a gate for a beta tag), and `--json`/`--comment` give
+machine-readable or Markdown output. Note that a workflow `GITHUB_TOKEN` can
+never read Actions secrets, so the signing criterion stays `unverified` in
+CI by design and is confirmed locally with a PAT that has secret read access.
+
 ### GUI
 
 Run the desktop GUI with `cargo run -p rivulet-gui` (or the packaged

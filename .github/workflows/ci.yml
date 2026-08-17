@@ -80,6 +80,33 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   ################################################################
+  # BETA-GATE READINESS DASHBOARD (pure Python, no build needed)
+  # Evaluates the six Beta-Gate criteria from README.md (roadmap
+  # checkboxes, 3-OS CI matrix) plus GitHub API checks when the token
+  # allows them. Informational by default: publishes the verdict to the
+  # step summary without failing (the project is expected to be NOT READY
+  # while it is still in alpha). Pass --fail to turn it into a gate.
+  ################################################################
+  beta_gate:
+    name: Beta-Gate readiness
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check beta-gate criteria
+        run: |
+          # Publish the Markdown dashboard to the run's step summary so the
+          # beta-readiness status is visible on every push. pipefail keeps the
+          # step red if the checker itself crashes.
+          set -o pipefail
+          python3 scripts/check-beta-gate.py --comment | tee -a "$GITHUB_STEP_SUMMARY"
+
+  ################################################################
   # BUILD & TEST MATRIX (runs on all 3 platforms)
   ################################################################
   build_and_test:
