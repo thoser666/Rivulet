@@ -579,6 +579,77 @@ working for forks and for the unsigned development builds.
 
 Add the secrets under **Settings → Secrets and variables → Actions**.
 
-The signing scripts are smoke-tested on every push with a self-signed
-certificate (`.github/workflows/signing-e2e.yml`, no secrets required), so the
-automation is verified even before real certificates are configured.
+### Setting up the signing secrets
+
+All seven secrets are a [Beta-Gate](#beta-gate) criterion (criterion 4): CI
+keeps working without them (unsigned packages are built), but a beta release
+must be signed. Configure them in the repository settings
+(**Settings → Secrets and variables → Actions**). The automation itself is
+smoke-tested on every push without secrets
+(`.github/workflows/signing-e2e.yml`), so the scripts are verified even before
+real certificates exist.
+
+#### Windows (`WINDOWS_CERT_*`)
+
+1. **Obtain a certificate.** Buy a code-signing certificate from an issuer
+   (DigiCert, Sectigo, GlobalSign, …). For a first smoke test you can create a
+   self-signed one with PowerShell — note that Windows will not trust it
+   (warning “unknown publisher”), so a purchased certificate is required for
+   real users:
+   ```powershell
+   New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Rivulet" `
+     -CertStoreLocation Cert:\CurrentUser\My
+   ```
+2. **Export it to a `.pfx` file** (the `.pfx` password is stored as
+   `WINDOWS_CERT_PASSWORD`):
+   ```powershell
+   $thumb = (Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert).Thumbprint
+   $pwd = Read-Host "PFX password" -AsSecureString
+   Export-PfxCertificate -Cert "Cert:\CurrentUser\My\$thumb" `
+     -FilePath cert.pfx -Password $pwd
+   ```
+3. **Base64-encode the `.pfx`** into a single line:
+   ```powershell
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("cert.pfx"))
+   ```
+   (Alternatively `certutil -encode cert.pfx cert.txt` and paste the body
+   without the `-----BEGIN/END CERTIFICATE-----` lines.)
+4. **Create the secrets:** paste the base64 blob into `WINDOWS_CERT_BASE64`
+   and the password into `WINDOWS_CERT_PASSWORD`. `packaging/windows/sign.ps1`
+   decodes the blob, signs the staged `rivulet-gui.exe` before packaging, and
+   signs the resulting MSI.
+
+#### macOS (`MACOS_CERT_*` + `APPLE_*`)
+
+1. **Obtain a certificate.** In the Apple Developer portal
+   (developer.apple.com → Certificates) create a *Developer ID Application*
+   certificate, download it and install it into the macOS Keychain.
+2. **Export it to a `.p12` file**: Keychain Access → right-click the
+   certificate → *Export…* → format *Personal Information Exchange (.p12)*.
+   The export password is stored as `MACOS_CERT_PASSWORD`.
+3. **Base64-encode the `.p12`** into a single line:
+   ```bash
+   base64 -i cert.p12
+   ```
+4. **Create the secrets:** `MACOS_CERT_BASE64` (the base64 blob) and
+   `MACOS_CERT_PASSWORD` (the export password). `codesign-app.sh` imports the
+   `.p12` into a temporary keychain and signs the app bundle with the hardened
+   runtime.
+5. **Notarization credentials** — create an *app-specific password* for your
+   Apple ID (appleid.apple.com → Sign-In & Security → App-Specific Passwords):
+   - `APPLE_ID` — your Apple ID (the sign-in email).
+   - `APPLE_APP_PASSWORD` — the app-specific password (never your Apple ID
+     password).
+   - `APPLE_TEAM_ID` — your Team ID (developer.apple.com → Membership).
+6. *(Optional)* if your certificate identity is not `Developer ID
+   Application`, set `MACOS_SIGN_IDENTITY` accordingly (defaults to
+   `Developer ID Application`).
+
+#### Verifying
+
+- `gh secret list` shows which names are configured.
+- `scripts/check-beta-gate.py` (run with a token that can read secrets)
+  reports exactly which of the seven secrets are still missing — criterion 4
+  of the Beta-Gate.
+- With all secrets present, the next release build signs the packages; without
+  them, unsigned packages are produced (the default).
