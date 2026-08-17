@@ -270,6 +270,9 @@ pub struct RivuletApp {
     frame_receiver: Option<Receiver<RawFrame>>,
     #[cfg(target_os = "windows")]
     #[serde(skip)]
+    error_receiver: Option<Receiver<String>>,
+    #[cfg(target_os = "windows")]
+    #[serde(skip)]
     stop_signal: Option<Arc<AtomicBool>>,
     #[cfg(target_os = "windows")]
     #[serde(skip)]
@@ -383,6 +386,8 @@ impl Default for RivuletApp {
             #[cfg(target_os = "windows")]
             frame_receiver: None,
             #[cfg(target_os = "windows")]
+            error_receiver: None,
+            #[cfg(target_os = "windows")]
             stop_signal: None,
             #[cfg(target_os = "windows")]
             last_error: None,
@@ -443,6 +448,9 @@ impl RivuletApp {
             let (sender, receiver) = mpsc::channel();
             self.frame_receiver = Some(receiver);
 
+            let (error_sender, error_receiver) = mpsc::channel::<String>();
+            self.error_receiver = Some(error_receiver);
+
             let stop_signal = Arc::new(AtomicBool::new(false));
             self.stop_signal = Some(stop_signal.clone());
 
@@ -467,7 +475,9 @@ impl RivuletApp {
                     if !e.to_string().contains("user stopped")
                         && !e.to_string().contains("GUI channel closed")
                     {
-                        eprintln!("Error in capture thread: {}", e);
+                        let message = format!("Capture error: {}", e);
+                        eprintln!("{}", message);
+                        let _ = error_sender.send(message);
                     }
                 }
                 println!("Capture thread stopped.");
@@ -482,6 +492,9 @@ impl RivuletApp {
 
             let (sender, receiver) = mpsc::channel();
             self.frame_receiver = Some(receiver);
+
+            let (error_sender, error_receiver) = mpsc::channel::<String>();
+            self.error_receiver = Some(error_receiver);
 
             let stop_signal = Arc::new(AtomicBool::new(false));
             self.stop_signal = Some(stop_signal.clone());
@@ -507,7 +520,9 @@ impl RivuletApp {
                     if !e.to_string().contains("user stopped")
                         && !e.to_string().contains("GUI channel closed")
                     {
-                        eprintln!("Error in capture thread: {}", e);
+                        let message = format!("Capture error: {}", e);
+                        eprintln!("{}", message);
+                        let _ = error_sender.send(message);
                     }
                 }
                 println!("Capture thread stopped.");
@@ -526,6 +541,7 @@ impl RivuletApp {
         self.is_windows_recording = false;
         self.engine.stop_recording();
         self.frame_receiver = None;
+        self.error_receiver = None;
         self.stop_signal = None;
     }
 }
@@ -1047,6 +1063,19 @@ impl eframe::App for RivuletApp {
                     }
                 }
             }
+            // Surface engine failures (pipeline build/start/push errors) in
+            // the UI instead of only on the console. The engine retains the
+            // most recent error until it is consumed here.
+            if let Some(err) = self.engine.take_error() {
+                self.last_error = Some(err);
+            }
+            // Surface capture-thread failures (e.g. Graphics Capture refusing
+            // the source) the same way.
+            if let Some(receiver) = &self.error_receiver {
+                if let Some(err) = drain_error_receiver(receiver) {
+                    self.last_error = Some(err);
+                }
+            }
         }
 
         egui::Panel::top("top_panel").show(ui, |ui| {
@@ -1161,6 +1190,11 @@ impl eframe::App for RivuletApp {
             #[cfg(target_os = "linux")]
             {
                 self.drain_linux_frames();
+                // Surface engine failures (pipeline build/start/push errors)
+                // in the UI instead of only on the console.
+                if let Some(err) = self.engine.take_error() {
+                    self.record_status = Some(err);
+                }
 
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
@@ -1478,6 +1512,17 @@ fn drain_frames_and_check_end(
     }
 }
 
+/// Collect all pending error messages from the capture thread's error
+/// channel, returning the most recent one (or `None` when the channel is
+/// empty). Older errors are superseded by newer ones.
+fn drain_error_receiver(receiver: &std::sync::mpsc::Receiver<String>) -> Option<String> {
+    let mut last = None;
+    while let Ok(err) = receiver.try_recv() {
+        last = Some(err);
+    }
+    last
+}
+
 /// Format a byte count for display (B, KB, MB, GB).
 fn format_bytes(bytes: u64) -> String {
     const KB: f64 = 1024.0;
@@ -1531,6 +1576,31 @@ mod tests {
     fn format_bytes_gigabytes() {
         assert_eq!(format_bytes(1073741824), "1.00 GB");
         assert_eq!(format_bytes(2684354560), "2.50 GB");
+    }
+
+    // ── drain_error_receiver ──────────────────────────────────────
+
+    #[test]
+    fn error_receiver_drains_all_errors_latest_wins() {
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        tx.send("first".to_string()).unwrap();
+        tx.send("second".to_string()).unwrap();
+        assert_eq!(
+            drain_error_receiver(&rx).as_deref(),
+            Some("second"),
+            "most recent error must win"
+        );
+        assert_eq!(
+            drain_error_receiver(&rx),
+            None,
+            "channel is empty after draining"
+        );
+    }
+
+    #[test]
+    fn error_receiver_empty_channel_returns_none() {
+        let (_tx, rx) = std::sync::mpsc::channel::<String>();
+        assert_eq!(drain_error_receiver(&rx), None);
     }
 
     // ── drain_frames_and_check_end ────────────────────────────────

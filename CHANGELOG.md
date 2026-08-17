@@ -5,6 +5,7 @@
 - feat(updater): add download progress bar
 - fix(gui): only stop recording when capture thread actually disconnects
 - fix(gui): stop the disconnect probe from swallowing capture frames (no MP4 was written)
+- feat(gui): surface engine and capture errors in the UI instead of only on the console
 - fix(updater): show MSI installer UI instead of silent install
 - fix(gui): enable eframe links feature for hyperlink_to
 

@@ -63,6 +63,10 @@ pub struct RivuletEngine {
     /// an `Arc<Mutex<..>>` so GStreamer pad probes running on the streaming
     /// thread can update it while the app thread reads it.
     recording_metrics: Option<Arc<Mutex<RecordingStatsMonitor>>>,
+    /// Most recent engine error (pipeline build/start/frame-push failure).
+    /// Consumed by the GUI via [`RivuletEngine::take_error`] so failures are
+    /// shown in the UI instead of only on the console.
+    last_error: Option<String>,
 }
 
 impl Default for RivuletEngine {
@@ -85,6 +89,7 @@ impl Default for RivuletEngine {
             encoder_bitrate_kbps: 5_000,
             stream_health: None,
             recording_metrics: None,
+            last_error: None,
         }
     }
 }
@@ -93,6 +98,25 @@ impl RivuletEngine {
     pub fn new() -> Self {
         println!("[Engine] GStreamer ready.");
         Self::default()
+    }
+
+    /// Record an engine error for display in the GUI and log it to stderr.
+    ///
+    /// The most recent error is retained until it is consumed via
+    /// [`RivuletEngine::take_error`], so the UI can surface it next to the
+    /// recording controls instead of relying on console output alone.
+    fn set_error(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        eprintln!("[Engine] {}", message);
+        self.last_error = Some(message);
+    }
+
+    /// Take (and clear) the most recent engine error, if any.
+    ///
+    /// Returns `None` when the engine has been operating normally since the
+    /// last call. Errors are reported at most once per consumer.
+    pub fn take_error(&mut self) -> Option<String> {
+        self.last_error.take()
     }
 
     /// Configure the RTMP/RTMPS stream output. When set, the engine streams to
@@ -297,7 +321,7 @@ impl RivuletEngine {
                     if self.try_encoder_fallback(&mut pipeline_str, &e.to_string()) {
                         continue;
                     }
-                    eprintln!("[Engine] Error creating the pipeline: {}", e);
+                    self.set_error(format!("Could not create the recording pipeline: {}", e));
                     return;
                 }
             };
@@ -306,7 +330,7 @@ impl RivuletEngine {
                 if self.try_encoder_fallback(&mut pipeline_str, &e.to_string()) {
                     continue;
                 }
-                eprintln!("[Engine] Pipeline could not be started: {}", e);
+                self.set_error(format!("Could not start the recording pipeline: {}", e));
                 return;
             }
             break pipeline;
@@ -579,7 +603,7 @@ impl RivuletEngine {
             return;
         }
         if self.stream_settings.is_none() {
-            eprintln!("[Engine] No stream targets configured.");
+            self.set_error("No stream targets configured for streaming.");
             return;
         }
         println!("[Engine] Streaming prepared.");
@@ -698,7 +722,10 @@ impl RivuletEngine {
                     if let Some(health) = self.stream_health.as_mut() {
                         health.record_frame_dropped();
                     }
-                    eprintln!("[Engine] Error pushing frame into the pipeline: {:?}", err);
+                    self.set_error(format!(
+                        "Could not push a frame into the recording pipeline: {:?}",
+                        err
+                    ));
                     self.stop_recording();
                 }
             }
@@ -847,7 +874,35 @@ mod tests {
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         assert!(len > 0, "output file should not be empty");
 
+        // A successful recording must not leave a stale error behind for the
+        // GUI to display.
+        assert!(
+            engine.take_error().is_none(),
+            "successful recording must not record an error"
+        );
+
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// Errors are recorded via `take_error` and consumed exactly once.
+    #[test]
+    fn engine_errors_are_recorded_and_consumed_once() {
+        let mut engine = RivuletEngine::default();
+        assert!(engine.take_error().is_none(), "no error before a failure");
+
+        // Streaming without configured targets is a deterministic failure
+        // that does not depend on the GStreamer installation.
+        engine.start_streaming();
+
+        let err = engine.take_error().expect("failure must be recorded");
+        assert!(
+            err.contains("No stream targets"),
+            "unexpected message: {err}"
+        );
+        assert!(
+            engine.take_error().is_none(),
+            "error must be consumed exactly once"
+        );
     }
 
     /// End-to-end test for separate audio tracks: both tracks are pushed into
