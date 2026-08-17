@@ -1033,17 +1033,12 @@ impl eframe::App for RivuletApp {
         #[cfg(target_os = "windows")]
         {
             if self.is_windows_recording {
-                if let Some(receiver) = &self.frame_receiver {
-                    if matches!(
-                        receiver.try_recv(),
-                        Err(std::sync::mpsc::TryRecvError::Disconnected)
-                    ) {
-                        if let Some(signal) = &self.stop_signal {
-                            if !signal.load(Ordering::SeqCst) {
-                                println!("Recording ended unexpectedly.");
-                                self.stop_windows_recording();
-                            }
-                        }
+                if let (Some(receiver), Some(signal)) =
+                    (&self.frame_receiver, &self.stop_signal)
+                {
+                    if should_stop_recording(receiver, signal) {
+                        println!("Recording ended unexpectedly.");
+                        self.stop_windows_recording();
                     }
                 }
             }
@@ -1462,6 +1457,22 @@ impl eframe::App for RivuletApp {
     }
 }
 
+/// Determine whether a recording should be stopped because the capture
+/// thread disconnected (sent no more frames and dropped the sender).
+///
+/// Returns `true` when the channel is disconnected AND the stop signal
+/// has not already been set (i.e. the thread ended on its own, not via
+/// a user-initiated stop).
+fn should_stop_recording(
+    receiver: &std::sync::mpsc::Receiver<RawFrame>,
+    stop_signal: &AtomicBool,
+) -> bool {
+    matches!(
+        receiver.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Disconnected)
+    ) && !stop_signal.load(Ordering::SeqCst)
+}
+
 /// Format a byte count for display (B, KB, MB, GB).
 fn format_bytes(bytes: u64) -> String {
     const KB: f64 = 1024.0;
@@ -1476,5 +1487,103 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} KB", bytes / KB)
     } else {
         format!("{bytes:.0} B")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    // ── format_bytes ──────────────────────────────────────────────
+
+    #[test]
+    fn format_bytes_zero() {
+        assert_eq!(format_bytes(0), "0 B");
+    }
+
+    #[test]
+    fn format_bytes_bytes() {
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(1023), "1023 B");
+    }
+
+    #[test]
+    fn format_bytes_kilobytes() {
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+        assert_eq!(format_bytes(1048575), "1024.0 KB");
+    }
+
+    #[test]
+    fn format_bytes_megabytes() {
+        assert_eq!(format_bytes(1048576), "1.00 MB");
+        assert_eq!(format_bytes(5242880), "5.00 MB");
+        assert_eq!(format_bytes(1073741823), "1024.00 MB");
+    }
+
+    #[test]
+    fn format_bytes_gigabytes() {
+        assert_eq!(format_bytes(1073741824), "1.00 GB");
+        assert_eq!(format_bytes(2684354560), "2.50 GB");
+    }
+
+    // ── should_stop_recording ─────────────────────────────────────
+
+    #[test]
+    fn stop_when_disconnected_and_signal_not_set() {
+        let (tx, rx) = std::sync::mpsc::channel::<RawFrame>();
+        let signal = AtomicBool::new(false);
+        drop(tx); // disconnect
+        assert!(should_stop_recording(&rx, &signal));
+    }
+
+    #[test]
+    fn no_stop_when_channel_open() {
+        let (_tx, rx) = std::sync::mpsc::channel::<RawFrame>();
+        let signal = AtomicBool::new(false);
+        assert!(!should_stop_recording(&rx, &signal));
+    }
+
+    #[test]
+    fn no_stop_when_disconnected_but_signal_set() {
+        let (tx, rx) = std::sync::mpsc::channel::<RawFrame>();
+        let signal = AtomicBool::new(true);
+        drop(tx); // disconnect
+        assert!(!should_stop_recording(&rx, &signal));
+    }
+
+    #[test]
+    fn no_stop_when_frames_available() {
+        let (tx, rx) = std::sync::mpsc::channel::<RawFrame>();
+        let signal = AtomicBool::new(false);
+        tx.send(RawFrame {
+            data: vec![],
+            width: 0,
+            height: 0,
+        })
+        .unwrap();
+        assert!(!should_stop_recording(&rx, &signal));
+    }
+
+    #[test]
+    fn stop_only_when_both_conditions_met() {
+        // connected + signal not set → no stop
+        let (tx1, rx1) = std::sync::mpsc::channel::<RawFrame>();
+        let signal1 = AtomicBool::new(false);
+        assert!(!should_stop_recording(&rx1, &signal1));
+        drop(tx1);
+
+        // disconnected + signal set → no stop
+        let (tx2, rx2) = std::sync::mpsc::channel::<RawFrame>();
+        let signal2 = AtomicBool::new(true);
+        drop(tx2);
+        assert!(!should_stop_recording(&rx2, &signal2));
+
+        // disconnected + signal not set → stop
+        let (tx3, rx3) = std::sync::mpsc::channel::<RawFrame>();
+        let signal3 = AtomicBool::new(false);
+        drop(tx3);
+        assert!(should_stop_recording(&rx3, &signal3));
     }
 }
