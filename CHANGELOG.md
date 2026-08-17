@@ -5,6 +5,7 @@
 - ci(beta-gate): evaluate beta-readiness on every push (scripts/check-beta-gate.py)
 - fix(audio): skip audio filter elements that are not installed (e.g. webrtcdsp on Ubuntu) instead of failing the capture
 - docs(readme): document step-by-step signing secret setup (certificates + all 7 secrets)
+- feat(audio): expose skipped audio filters via AudioCapture::skipped_filters()
 
 ## [0.13.0-alpha.1] - 2026-08-17
 

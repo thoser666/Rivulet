@@ -20,6 +20,19 @@ pub struct AudioFilters {
     pub limiter: bool,
 }
 
+/// A filter that was requested in the [`AudioConfig`] but could not be built
+/// because its GStreamer element is not installed (e.g. `webrtcdsp` on distros
+/// that do not ship it). The capture pipeline degrades gracefully by skipping
+/// such filters; [`AudioCapture::skipped_filters`] lets callers surface this
+/// to the user instead of only logging a warning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SkippedFilter {
+    /// GStreamer element factory name (e.g. `webrtcdsp`).
+    pub element: &'static str,
+    /// Human-readable feature name (e.g. `noise suppression`).
+    pub feature: &'static str,
+}
+
 /// Configuration for audio capture.
 #[derive(Debug, Clone)]
 pub struct AudioConfig {
@@ -115,6 +128,14 @@ impl AudioCapture {
         self.inner.is_running()
     }
 
+    /// Filters that were requested but are not installed on this system and
+    /// were therefore skipped when the pipeline was built (e.g. `webrtcdsp`
+    /// on distros that do not ship it). Empty when every requested filter
+    /// could be built.
+    pub fn skipped_filters(&self) -> &[SkippedFilter] {
+        self.inner.skipped_filters()
+    }
+
     /// Change the system audio volume.
     pub fn set_system_volume(&self, volume: f32) {
         self.inner.set_system_volume(volume);
@@ -153,6 +174,15 @@ mod sys_impl {
         mic_mon_vol: Option<gst::Element>,
         running: Arc<AtomicBool>,
         thread: Option<JoinHandle<()>>,
+        skipped: Vec<SkippedFilter>,
+    }
+
+    impl AudioCaptureInner {
+        /// Filters that were requested but not installed, in the order they
+        /// were first encountered while building the pipeline.
+        pub fn skipped_filters(&self) -> &[SkippedFilter] {
+            &self.skipped
+        }
     }
 
     impl AudioCaptureInner {
@@ -188,6 +218,7 @@ mod sys_impl {
             }
 
             let mut pipeline_str = String::new();
+            let mut skipped = Vec::new();
             if config.separate_tracks {
                 if let Some(src) = &system_src {
                     pipeline_str.push_str(&build_source_branch(
@@ -198,6 +229,7 @@ mod sys_impl {
                         "appsink name=sys_sink emit-signals=false sync=false",
                         "sys",
                         config.system_monitor,
+                        &mut skipped,
                     ));
                 }
                 if let Some(src) = &mic_src {
@@ -209,6 +241,7 @@ mod sys_impl {
                         "appsink name=mic_sink emit-signals=false sync=false",
                         "mic",
                         config.mic_monitor,
+                        &mut skipped,
                     ));
                 }
             } else {
@@ -235,6 +268,7 @@ mod sys_impl {
                         "adder.",
                         name,
                         monitor,
+                        &mut skipped,
                     ));
                 }
                 pipeline_str.push_str(
@@ -295,6 +329,7 @@ mod sys_impl {
                 mic_mon_vol,
                 running: Arc::new(AtomicBool::new(false)),
                 thread: None,
+                skipped,
             })
         }
 
@@ -420,33 +455,40 @@ mod sys_impl {
 
     /// Resolve the PulseAudio monitor source of the default sink, i.e. the
     /// "what you hear" capture device. Falls back to the default source.
-    /// Build the GStreamer element chain for the configured audio filters.
-    /// Empty string when no filter is enabled. Elements are joined with `! `
-    /// and carry no leading/trailing separator.
-    ///
-    /// Elements whose GStreamer factory is not installed (e.g. `webrtcdsp` on
-    /// distros that do not ship it) are skipped with a warning instead of
-    /// failing the whole capture pipeline, so a missing optional filter
-    /// degrades gracefully.
-    pub(crate) fn filter_chain_str(filters: &AudioFilters) -> String {
-        let _ = gst::init();
-        let (chain, skipped) =
-            filter_chain_str_with(filters, |name| gst::ElementFactory::find(name).is_some());
-        for name in skipped {
-            let what = match name {
-                "webrtcdsp" => "noise suppression",
-                "audiodynamic" => "compressor/limiter",
-                _ => "audio filter",
-            };
-            tracing::warn!("{what} skipped: GStreamer element `{name}` is not installed");
+    /// Map an element factory name to the human-readable filter feature it
+    /// provides, for user-facing messages.
+    pub(crate) fn filter_feature_name(element: &'static str) -> &'static str {
+        match element {
+            "webrtcdsp" => "noise suppression",
+            "audiodynamic" => "compressor/limiter",
+            _ => "audio filter",
         }
-        chain
     }
 
-    /// Availability-aware variant of [`filter_chain_str`] for tests: the
-    /// `available` predicate decides which element factories exist. Returns
-    /// the joined chain and the unique factory names that were requested but
-    /// not available.
+    /// Record skipped filter elements into `skipped` (deduplicated), logging a
+    /// warning the first time each feature is reported.
+    pub(crate) fn record_skipped(skipped: &mut Vec<SkippedFilter>, names: &[&'static str]) {
+        for name in names {
+            let filter = SkippedFilter {
+                element: name,
+                feature: filter_feature_name(name),
+            };
+            if skipped.contains(&filter) {
+                continue;
+            }
+            tracing::warn!(
+                "{} skipped: GStreamer element `{}` is not installed",
+                filter.feature,
+                filter.element
+            );
+            skipped.push(filter);
+        }
+    }
+
+    /// Availability-aware variant used by [`build_source_branch`] and the
+    /// tests: the `available` predicate decides which element factories exist.
+    /// Returns the joined chain and the unique factory names that were
+    /// requested but not available.
     pub(crate) fn filter_chain_str_with(
         filters: &AudioFilters,
         available: impl Fn(&str) -> bool,
@@ -500,8 +542,12 @@ mod sys_impl {
         target: &str,
         monitor_name: &str,
         monitor: bool,
+        skipped: &mut Vec<SkippedFilter>,
     ) -> String {
-        let filter_chain = filter_chain_str(filters);
+        let _ = gst::init();
+        let (filter_chain, missing) =
+            filter_chain_str_with(filters, |name| gst::ElementFactory::find(name).is_some());
+        record_skipped(skipped, &missing);
         // Nur ein `!` einfügen, wenn überhaupt Filter aktiv sind (sonst
         // entsteht ein leeres Element "!").
         let filter_segment = if filter_chain.is_empty() {
@@ -610,6 +656,10 @@ mod sys_impl {
             false
         }
 
+        pub fn skipped_filters(&self) -> &[SkippedFilter] {
+            &[]
+        }
+
         pub fn set_system_volume(&self, _volume: f32) {}
 
         pub fn set_mic_volume(&self, _volume: f32) {}
@@ -655,7 +705,9 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn filter_chain_str_returns_empty_by_default() {
-        assert_eq!(sys_impl::filter_chain_str(&AudioFilters::default()), "");
+        let (chain, skipped) = sys_impl::filter_chain_str_with(&AudioFilters::default(), |_| true);
+        assert_eq!(chain, "");
+        assert!(skipped.is_empty());
     }
 
     #[cfg(target_os = "linux")]
@@ -708,7 +760,72 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn filter_feature_name_maps_elements() {
+        assert_eq!(
+            sys_impl::filter_feature_name("webrtcdsp"),
+            "noise suppression"
+        );
+        assert_eq!(
+            sys_impl::filter_feature_name("audiodynamic"),
+            "compressor/limiter"
+        );
+        assert_eq!(sys_impl::filter_feature_name("unknown"), "audio filter");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn record_skipped_dedupes_and_maps() {
+        let mut skipped = Vec::new();
+        sys_impl::record_skipped(&mut skipped, &["webrtcdsp", "audiodynamic", "webrtcdsp"]);
+        assert_eq!(
+            skipped,
+            vec![
+                SkippedFilter {
+                    element: "webrtcdsp",
+                    feature: "noise suppression",
+                },
+                SkippedFilter {
+                    element: "audiodynamic",
+                    feature: "compressor/limiter",
+                },
+            ]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn skipped_filters_reports_unavailable_elements() {
+        let _ = gstreamer::init();
+        let config = AudioConfig {
+            separate_tracks: true,
+            system_filters: AudioFilters {
+                noise_suppression: true,
+                compressor: true,
+                limiter: true,
+            },
+            mic_filters: AudioFilters {
+                noise_suppression: true,
+                compressor: true,
+                limiter: true,
+            },
+            ..Default::default()
+        };
+        let cap = AudioCapture::new(config).expect("pipeline builds even with missing filters");
+        let webrtc_missing = gstreamer::ElementFactory::find("webrtcdsp").is_none();
+        let reports_webrtc = cap
+            .skipped_filters()
+            .iter()
+            .any(|s| s.element == "webrtcdsp");
+        assert_eq!(
+            webrtc_missing, reports_webrtc,
+            "skipped_filters() must report webrtcdsp exactly when it is not installed"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn source_branch_without_monitor_has_no_tee() {
+        let mut skipped = Vec::new();
         let branch = sys_impl::build_source_branch(
             "pulsesrc",
             "sys_vol",
@@ -717,15 +834,18 @@ mod tests {
             "appsink name=sys_sink",
             "sys",
             false,
+            &mut skipped,
         );
         assert!(!branch.contains("tee"));
         assert!(!branch.contains("autoaudiosink"));
         assert!(branch.contains("appsink name=sys_sink"));
+        assert!(skipped.is_empty());
     }
 
     #[cfg(target_os = "linux")]
     #[test]
     fn source_branch_with_monitor_creates_tee_and_sink() {
+        let mut skipped = Vec::new();
         let branch = sys_impl::build_source_branch(
             "pulsesrc",
             "sys_vol",
@@ -734,11 +854,13 @@ mod tests {
             "appsink name=sys_sink",
             "sys",
             true,
+            &mut skipped,
         );
         assert!(branch.contains("tee name=sys_tee"));
         assert!(branch.contains("volume name=sys_mon_vol"));
         assert!(branch.contains("autoaudiosink"));
         assert!(branch.contains("appsink name=sys_sink"));
+        assert!(skipped.is_empty());
     }
 
     #[cfg(target_os = "linux")]
