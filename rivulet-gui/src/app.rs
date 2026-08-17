@@ -29,6 +29,7 @@ use {
     rfd,
     std::sync::mpsc::{self, Receiver, Sender},
     std::thread,
+    std::time::Instant,
     windows_capture::{
         // Import only the types that are available from capture
         capture::{Context, GraphicsCaptureApiHandler},
@@ -50,6 +51,13 @@ struct RawFrame {
     width: u32,
     height: u32,
 }
+
+/// Maximum time to wait for the first captured frame before aborting a
+/// Windows recording with an error. The pipeline is only initialized once
+/// the first frame arrives, so a capture that never delivers a frame would
+/// otherwise look like a running recording while writing nothing.
+#[cfg(target_os = "windows")]
+const NO_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 // --- Auto-update state machine ---
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -277,6 +285,12 @@ pub struct RivuletApp {
     #[cfg(target_os = "windows")]
     #[serde(skip)]
     last_error: Option<String>,
+    #[cfg(target_os = "windows")]
+    #[serde(skip)]
+    record_started: Instant,
+    #[cfg(target_os = "windows")]
+    #[serde(skip)]
+    last_frame_at: Option<Instant>,
 
     // Auto-update
     #[serde(skip)]
@@ -391,6 +405,10 @@ impl Default for RivuletApp {
             stop_signal: None,
             #[cfg(target_os = "windows")]
             last_error: None,
+            #[cfg(target_os = "windows")]
+            record_started: Instant::now(),
+            #[cfg(target_os = "windows")]
+            last_frame_at: None,
 
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
@@ -458,6 +476,8 @@ impl RivuletApp {
 
             self.is_windows_recording = true;
             self.last_error = None;
+            self.record_started = Instant::now();
+            self.last_frame_at = None;
 
             thread::spawn(move || {
                 let settings = Settings::new(
@@ -503,6 +523,8 @@ impl RivuletApp {
 
             self.is_windows_recording = true;
             self.last_error = None;
+            self.record_started = Instant::now();
+            self.last_frame_at = None;
 
             thread::spawn(move || {
                 let settings = Settings::new(
@@ -541,7 +563,9 @@ impl RivuletApp {
         self.is_windows_recording = false;
         self.engine.stop_recording();
         self.frame_receiver = None;
-        self.error_receiver = None;
+        // Keep the error receiver alive after the stop so a capture error
+        // that arrives a frame late is still shown in the UI; the next
+        // recording start replaces it.
         self.stop_signal = None;
     }
 }
@@ -1056,11 +1080,33 @@ impl eframe::App for RivuletApp {
                     let ended = drain_frames_and_check_end(receiver, signal, |frame| {
                         self.engine
                             .process_raw_frame(&frame.data, frame.width, frame.height);
+                        self.last_frame_at = Some(Instant::now());
                     });
                     if ended {
                         println!("Recording ended unexpectedly.");
                         self.stop_windows_recording();
                     }
+                }
+                // Abort when the capture delivers no frames at all within the
+                // timeout: the pipeline is only initialized by the first frame,
+                // so the recording would run forever while writing nothing.
+                // Only applies while the recording is still active (not already
+                // stopped by the disconnect path above).
+                if self.is_windows_recording
+                    && should_abort_for_no_frames(
+                        self.record_started,
+                        self.last_frame_at,
+                        Instant::now(),
+                        NO_FRAME_TIMEOUT,
+                    )
+                {
+                    let secs = NO_FRAME_TIMEOUT.as_secs();
+                    self.last_error = Some(self.tr_fmt("recording_no_frames", &[secs.to_string()]));
+                    println!(
+                        "No frames received within {} seconds, stopping recording.",
+                        secs
+                    );
+                    self.stop_windows_recording();
                 }
             }
             // Surface engine failures (pipeline build/start/push errors) in
@@ -1523,6 +1569,23 @@ fn drain_error_receiver(receiver: &std::sync::mpsc::Receiver<String>) -> Option<
     last
 }
 
+/// Whether a recording should be aborted because the capture delivered no
+/// frame at all within the timeout.
+///
+/// The pipeline is only initialized once the first frame arrives, so a
+/// capture that never produces a frame would otherwise look like a running
+/// recording while writing nothing. Once any frame has arrived the timeout
+/// no longer applies (a static screen can legitimately deliver no further
+/// frames).
+fn should_abort_for_no_frames(
+    started: std::time::Instant,
+    last_frame_at: Option<std::time::Instant>,
+    now: std::time::Instant,
+    timeout: std::time::Duration,
+) -> bool {
+    last_frame_at.is_none() && now.duration_since(started) >= timeout
+}
+
 /// Format a byte count for display (B, KB, MB, GB).
 fn format_bytes(bytes: u64) -> String {
     const KB: f64 = 1024.0;
@@ -1576,6 +1639,47 @@ mod tests {
     fn format_bytes_gigabytes() {
         assert_eq!(format_bytes(1073741824), "1.00 GB");
         assert_eq!(format_bytes(2684354560), "2.50 GB");
+    }
+
+    // ── should_abort_for_no_frames ────────────────────────────────
+
+    #[test]
+    fn abort_when_no_frame_arrived_within_timeout() {
+        let started = std::time::Instant::now();
+        let now = started + std::time::Duration::from_secs(6);
+        assert!(should_abort_for_no_frames(
+            started,
+            None,
+            now,
+            std::time::Duration::from_secs(5)
+        ));
+    }
+
+    #[test]
+    fn no_abort_before_timeout_elapses() {
+        let started = std::time::Instant::now();
+        let now = started + std::time::Duration::from_secs(3);
+        assert!(!should_abort_for_no_frames(
+            started,
+            None,
+            now,
+            std::time::Duration::from_secs(5)
+        ));
+    }
+
+    #[test]
+    fn no_abort_once_any_frame_arrived() {
+        // A static screen can legitimately stop producing frames; the timeout
+        // only applies before the very first frame (pipeline never started).
+        let started = std::time::Instant::now();
+        let last_frame = started + std::time::Duration::from_millis(500);
+        let now = started + std::time::Duration::from_secs(30);
+        assert!(!should_abort_for_no_frames(
+            started,
+            Some(last_frame),
+            now,
+            std::time::Duration::from_secs(5)
+        ));
     }
 
     // ── drain_error_receiver ──────────────────────────────────────

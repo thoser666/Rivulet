@@ -129,6 +129,10 @@ impl Locale {
                 ("invalid_source", "Invalid selected source."),
                 ("invalid_monitor", "Invalid selected monitor."),
                 ("invalid_window", "Invalid selected window."),
+                (
+                    "recording_no_frames",
+                    "No frames received for {0} seconds — recording stopped.",
+                ),
                 // Audio
                 ("audio_mixer", "Audio Mixer"),
                 ("start_audio", "Start audio"),
@@ -186,6 +190,10 @@ impl Locale {
                 ("invalid_source", "Ausgewählte Quelle ist ungültig."),
                 ("invalid_monitor", "Ausgewählter Monitor ist ungültig."),
                 ("invalid_window", "Ausgewähltes Fenster ist ungültig."),
+                (
+                    "recording_no_frames",
+                    "{0} Sekunden lang keine Frames empfangen — Aufnahme gestoppt.",
+                ),
                 // Audio
                 ("audio_mixer", "Audio-Mixer"),
                 ("start_audio", "Audio starten"),

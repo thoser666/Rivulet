@@ -2,6 +2,7 @@
 
 ## [0.11.0-alpha.1] - 2026-08-17
 - feat(gui): surface engine and capture errors in the UI
+- feat(gui): abort a Windows recording with an error when no frame arrives within 5 s (pipeline never started)
 - fix(gui): stop the disconnect probe from swallowing capture frames
 - fix(gui): move AtomicBool/Ordering/Arc imports to unconditional scope
 - fix(ci): add --entrypoint bash to ImageMagick docker run
@@ -19,7 +20,6 @@
 - fix(gui): stop the disconnect probe from swallowing capture frames (no MP4 was written)
 
 - feat(gui): surface engine and capture errors in the UI instead of only on the console
-
 - fix(updater): show MSI installer UI instead of silent install
 
 - fix(gui): enable eframe links feature for hyperlink_to
