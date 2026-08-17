@@ -155,7 +155,13 @@ pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
     {
         let path = path.to_string_lossy();
         std::process::Command::new("msiexec")
-            .args(["/i", path.as_ref(), "/qn", "/norestart"])
+            .args([
+                "/i",
+                path.as_ref(),
+                "/passive",
+                "/norestart",
+                "REBOOT=ReallySuppress",
+            ])
             .spawn()?;
         Ok(true)
     }
