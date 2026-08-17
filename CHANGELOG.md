@@ -1,16 +1,37 @@
 # Changelog
 
+## [0.15.0-alpha.1] - 2026-08-17
+- feat(audio): expose skipped audio filters via AudioCapture::skipped_filters
+- docs(readme): document step-by-step signing secret setup
+- fix(audio): skip audio filter elements that are not installed
+- ci(beta-gate): evaluate beta-readiness on every push
+- docs(readme): define the beta-gate criteria in the roadmap
+
 ## [0.14.0-alpha.1] - 2026-08-17
+
 - feat(gui): extend the no-frame recording timeout to Linux
+
 - ci(beta-gate): evaluate beta-readiness on every push (scripts/check-beta-gate.py)
+
 - fix(audio): skip audio filter elements that are not installed (e.g. webrtcdsp on Ubuntu) instead of failing the capture
+
 - docs(readme): document step-by-step signing secret setup (certificates + all 7 secrets)
+
 - feat(audio): expose skipped audio filters via AudioCapture::skipped_filters()
+
+
 
 ## [0.13.0-alpha.1] - 2026-08-17
 
+
+
 - feat(gui): make the no-frame recording timeout configurable
+
 - docs(readme): define the beta-gate criteria in the roadmap
+
+
+
+
 
 
 
@@ -18,13 +39,31 @@
 
 
 
+
+
+
+
 - feat(gui): abort Windows recording when no frame arrives within 5 s
+
+
+
+
 
 
 
 - feat(gui): make the no-frame timeout configurable via `--no-frame-timeout <seconds>`
 
+
+
 - feat(gui): extend the no-frame timeout to Linux recordings (fires mid-recording too)
+
+
+
+
+
+
+
+
 
 
 
@@ -40,7 +79,23 @@
 
 
 
+
+
+
+
+
+
+
+
 - feat(gui): surface engine and capture errors in the UI
+
+
+
+
+
+
+
+
 
 
 
@@ -56,7 +111,23 @@
 
 
 
+
+
+
+
+
+
+
+
 - fix(gui): stop the disconnect probe from swallowing capture frames
+
+
+
+
+
+
+
+
 
 
 
@@ -72,7 +143,23 @@
 
 
 
+
+
+
+
+
+
+
+
 - fix(ci): add --entrypoint bash to ImageMagick docker run
+
+
+
+
+
+
+
+
 
 
 
@@ -88,7 +175,31 @@
 
 
 
+
+
+
+
+
+
+
+
 - docs: update README, CHANGELOG, and LINUX_BUILD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -136,7 +247,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - feat(updater): add download progress bar
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -168,7 +327,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - fix(gui): stop the disconnect probe from swallowing capture frames (no MP4 was written)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -192,6 +383,14 @@
 
 
 
+
+
+
+
+
+
+
+
 - fix(updater): show MSI installer UI instead of silent install
 
 
@@ -208,7 +407,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - fix(gui): enable eframe links feature for hyperlink_to
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -272,7 +519,71 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - feat(gui): embed real Rivulet icon in the Windows executable
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -336,7 +647,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - feat(audio): complete M1 audio module (filters + monitoring)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -368,7 +727,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - ci(actions): bump pinned actions to current major versions
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -400,7 +791,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - ci(actions): detect stale action pins outside Dependabot's schedule
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -432,7 +855,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - ci(dependabot): auto-approve and auto-merge Dependabot PRs
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -464,7 +919,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - ci(dependabot): keep SHA-pinned GitHub Actions current
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -496,7 +983,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - ci(assets): pin the ImageMagick image by content digest
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -528,7 +1047,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - ci(assets): pin asset generation to a fixed ImageMagick image
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -560,7 +1111,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - ci(release): attach social preview images as release assets
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -592,7 +1175,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - docs(assets): add GitHub social preview (OpenGraph) image
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -624,7 +1239,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - chore(assets): add macOS app icon and wire it into the bundle
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -656,7 +1303,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - docs(assets): add app thumbnail and Linux AppImage icon
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -688,7 +1367,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - refactor(ci): extract build/package/sign steps into a reusable workflow
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -720,7 +1431,39 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - ci(packaging): smoke-test code signing with self-signed certificates
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -752,7 +1495,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - chore(core): translate remaining German log and error messages to English
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -816,7 +1607,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - feat(packaging): let users choose the Rivulet install directory in the MSI
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -848,6 +1687,22 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - fix(core): make recording metric tests deterministic with injectable clock
 
 
@@ -864,7 +1719,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - fix(packaging): add Start Menu and Desktop shortcuts to the Windows MSI
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -928,6 +1831,38 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - feat(updater): add auto-update via GitHub Releases (check, download, install)
 
 
@@ -944,7 +1879,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - chore: update copyright year in LICENSE
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1008,6 +1991,38 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - feat(core): track recording performance metrics (FPS, encoder load, file size)
 
 
@@ -1024,7 +2039,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - docs(readme): document M9 bot coexistence with the Vivid bot
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1088,6 +2151,38 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - feat(core): add i18n layer and switch project to English
 
 
@@ -1104,7 +2199,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - docs(readme): expand roadmap with OBS differentiation (M6-M8)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1168,6 +2311,38 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - feat(core): hardware video encoding (NVENC/QuickSync/AMF) with auto-detection
 
 
@@ -1184,7 +2359,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - chore(deps): update eframe requirement from 0.35.0 to 0.36.1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1248,7 +2471,71 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - fix(ci): declare MSI package as x64 platform (ICE80)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1312,7 +2599,71 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - fix(ci): Win64 mark on harvested MSI components
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1376,6 +2727,38 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - fix(ci): 64-bit mark in MSI harvest (ICE80)
 
 
@@ -1392,7 +2775,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - chore(ci): fix GitHub Actions warnings
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1456,7 +2887,71 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - fix(ci): convert MSI version to numeric format
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1520,6 +3015,38 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - feat(ci): manual alpha release trigger via workflow_dispatch
 
 
@@ -1536,7 +3063,55 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - fix(ci): fix AppImage and MSI packaging
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -1600,6 +3175,38 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 - feat(ci): fix release versioning (first release + manifest update)
 
 
@@ -1632,7 +3239,71 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## [0.0.0-alpha.1] - 2026-08-14
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
