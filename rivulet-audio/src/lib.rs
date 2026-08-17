@@ -8,4 +8,4 @@
 
 pub mod capture;
 
-pub use capture::{AudioCapture, AudioConfig};
+pub use capture::{AudioCapture, AudioConfig, AudioFilters};

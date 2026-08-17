@@ -130,8 +130,8 @@ See [Roadmap](#-roadmap) for detailed timeline.
 
 **Audio**
 - [x] Separate audio tracks (system/mic)
-- [ ] Audio filters (noise suppression, compressor, limiter)
-- [ ] Audio monitoring (source preview)
+- [x] Audio filters (noise suppression, compressor, limiter)
+- [x] Audio monitoring (source preview)
 
 **Performance**
 - [x] Hardware encoding (NVIDIA NVENC, Intel QuickSync, AMD AMF)

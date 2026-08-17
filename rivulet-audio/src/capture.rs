@@ -1,6 +1,21 @@
 use anyhow::Result;
 use rivulet_core::AudioFrame;
 
+/// Filter chain applied to an input track before it is mixed or recorded.
+///
+/// The filters are inserted into the GStreamer pipeline between the volume
+/// element and the caps filter. They are realised with the `webrtcdsp`
+/// (noise suppression) and `audiodynamic` (compressor/limiter) elements.
+#[derive(Debug, Clone, Default)]
+pub struct AudioFilters {
+    /// Noise suppression (WebRTC audio processing library).
+    pub noise_suppression: bool,
+    /// Compressor (dynamic range compression, ratio ~4:1).
+    pub compressor: bool,
+    /// Hard limiter (prevents clipping, ratio ~20:1).
+    pub limiter: bool,
+}
+
 /// Configuration for audio capture.
 #[derive(Debug, Clone)]
 pub struct AudioConfig {
@@ -12,6 +27,16 @@ pub struct AudioConfig {
     pub system_volume: f32,
     /// Volume applied to the microphone source in `[0.0, 1.0]`.
     pub mic_volume: f32,
+    /// Filters applied to the system audio track.
+    pub system_filters: AudioFilters,
+    /// Filters applied to the microphone track.
+    pub mic_filters: AudioFilters,
+    /// Send the system track to the default audio output for monitoring.
+    pub system_monitor: bool,
+    /// Send the microphone track to the default audio output for monitoring.
+    pub mic_monitor: bool,
+    /// Master volume of the monitoring output in `[0.0, 1.0]`.
+    pub monitor_volume: f32,
     /// Output sample rate in Hz.
     pub sample_rate: u32,
     /// Output channel count.
@@ -28,6 +53,11 @@ impl Default for AudioConfig {
             capture_mic: true,
             system_volume: 1.0,
             mic_volume: 1.0,
+            system_filters: AudioFilters::default(),
+            mic_filters: AudioFilters::default(),
+            system_monitor: false,
+            mic_monitor: false,
+            monitor_volume: 1.0,
             sample_rate: 48_000,
             channels: 2,
             separate_tracks: false,
@@ -90,6 +120,11 @@ impl AudioCapture {
     pub fn set_mic_volume(&self, volume: f32) {
         self.inner.set_mic_volume(volume);
     }
+
+    /// Change the master monitoring volume.
+    pub fn set_monitor_volume(&self, volume: f32) {
+        self.inner.set_monitor_volume(volume);
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -110,6 +145,8 @@ mod sys_impl {
         appsink_mic: Option<gst_app::AppSink>,
         sys_vol: Option<gst::Element>,
         mic_vol: Option<gst::Element>,
+        sys_mon_vol: Option<gst::Element>,
+        mic_mon_vol: Option<gst::Element>,
         running: Arc<AtomicBool>,
         thread: Option<JoinHandle<()>>,
     }
@@ -149,17 +186,25 @@ mod sys_impl {
             let mut pipeline_str = String::new();
             if config.separate_tracks {
                 if let Some(src) = &system_src {
-                    pipeline_str.push_str(&format!(
-                        "{} ! volume name=sys_vol ! audioconvert ! audioresample \
-                         ! {} ! queue ! appsink name=sys_sink emit-signals=false sync=false ",
-                        src, caps_filter
+                    pipeline_str.push_str(&build_source_branch(
+                        src,
+                        "sys_vol",
+                        &config.system_filters,
+                        &caps_filter,
+                        "appsink name=sys_sink emit-signals=false sync=false",
+                        "sys",
+                        config.system_monitor,
                     ));
                 }
                 if let Some(src) = &mic_src {
-                    pipeline_str.push_str(&format!(
-                        "{} ! volume name=mic_vol ! audioconvert ! audioresample \
-                         ! {} ! queue ! appsink name=mic_sink emit-signals=false sync=false ",
-                        src, caps_filter
+                    pipeline_str.push_str(&build_source_branch(
+                        src,
+                        "mic_vol",
+                        &config.mic_filters,
+                        &caps_filter,
+                        "appsink name=mic_sink emit-signals=false sync=false",
+                        "mic",
+                        config.mic_monitor,
                     ));
                 }
             } else {
@@ -168,11 +213,24 @@ mod sys_impl {
                     .flatten()
                     .enumerate()
                 {
-                    let vol = if i == 0 { "sys_vol" } else { "mic_vol" };
-                    pipeline_str.push_str(&format!(
-                        "{} ! volume name={} ! audioconvert ! audioresample \
-                         ! {} ! queue ! adder. ",
-                        src, vol, caps_filter
+                    let (vol, name, filters, monitor) = if i == 0 {
+                        (
+                            "sys_vol",
+                            "sys",
+                            &config.system_filters,
+                            config.system_monitor,
+                        )
+                    } else {
+                        ("mic_vol", "mic", &config.mic_filters, config.mic_monitor)
+                    };
+                    pipeline_str.push_str(&build_source_branch(
+                        src,
+                        vol,
+                        filters,
+                        &caps_filter,
+                        "adder.",
+                        name,
+                        monitor,
                     ));
                 }
                 pipeline_str.push_str(
@@ -187,12 +245,20 @@ mod sys_impl {
 
             let sys_vol = pipeline.by_name("sys_vol");
             let mic_vol = pipeline.by_name("mic_vol");
+            let sys_mon_vol = pipeline.by_name("sys_mon_vol");
+            let mic_mon_vol = pipeline.by_name("mic_mon_vol");
 
             if let Some(v) = &sys_vol {
                 v.set_property("volume", config.system_volume as f64);
             }
             if let Some(v) = &mic_vol {
                 v.set_property("volume", config.mic_volume as f64);
+            }
+            if let Some(v) = &sys_mon_vol {
+                v.set_property("volume", config.monitor_volume as f64);
+            }
+            if let Some(v) = &mic_mon_vol {
+                v.set_property("volume", config.monitor_volume as f64);
             }
 
             let (appsink, appsink_sys, appsink_mic) = if config.separate_tracks {
@@ -221,6 +287,8 @@ mod sys_impl {
                 appsink_mic,
                 sys_vol,
                 mic_vol,
+                sys_mon_vol,
+                mic_mon_vol,
                 running: Arc::new(AtomicBool::new(false)),
                 thread: None,
             })
@@ -334,6 +402,81 @@ mod sys_impl {
                 v.set_property("volume", f64::from(volume.clamp(0.0, 1.0)));
             }
         }
+
+        pub fn set_monitor_volume(&self, volume: f32) {
+            let v = f64::from(volume.clamp(0.0, 1.0));
+            if let Some(el) = &self.sys_mon_vol {
+                el.set_property("volume", v);
+            }
+            if let Some(el) = &self.mic_mon_vol {
+                el.set_property("volume", v);
+            }
+        }
+    }
+
+    /// Resolve the PulseAudio monitor source of the default sink, i.e. the
+    /// "what you hear" capture device. Falls back to the default source.
+    /// Build the GStreamer element chain for the configured audio filters.
+    /// Empty string when no filter is enabled. Elements are joined with `! `
+    /// and carry no leading/trailing separator.
+    pub(crate) fn filter_chain_str(filters: &AudioFilters) -> String {
+        let mut elements = Vec::new();
+        if filters.noise_suppression {
+            elements.push(
+                "webrtcdsp noise-suppression=true echo-cancel=false \
+                 gain-control=false high-pass-filter=false",
+            );
+        }
+        if filters.compressor {
+            elements.push(
+                "audiodynamic mode=compressor characteristics=soft-knee \
+                 threshold=0.5 ratio=4.0",
+            );
+        }
+        if filters.limiter {
+            elements.push(
+                "audiodynamic mode=compressor characteristics=hard-knee \
+                 threshold=0.95 ratio=20.0",
+            );
+        }
+        elements.join(" ! ")
+    }
+
+    /// Build one complete source branch of the capture pipeline:
+    /// `src ! volume ! audioconvert ! audioresample ! <filters> ! <caps>`
+    /// followed by `target` (an appsink or the adder). When monitoring is
+    /// enabled a `tee` splits the signal so one leg reaches `target` and the
+    /// other feeds `autoaudiosink` through a named volume element.
+    pub(crate) fn build_source_branch(
+        src: &str,
+        vol_name: &str,
+        filters: &AudioFilters,
+        caps_filter: &str,
+        target: &str,
+        monitor_name: &str,
+        monitor: bool,
+    ) -> String {
+        let filter_chain = filter_chain_str(filters);
+        // Nur ein `!` einfügen, wenn überhaupt Filter aktiv sind (sonst
+        // entsteht ein leeres Element "!").
+        let filter_segment = if filter_chain.is_empty() {
+            String::new()
+        } else {
+            format!("! {filter_chain} ! audioconvert ! audioresample ")
+        };
+        let mut branch = format!(
+            "{src} ! volume name={vol_name} ! audioconvert ! audioresample \
+             {filter_segment}! {caps_filter} ",
+        );
+        if monitor {
+            branch.push_str(&format!(
+                "! tee name={monitor_name}_tee ! queue ! {target} \
+                 {monitor_name}_tee. ! queue ! volume name={monitor_name}_mon_vol ! autoaudiosink ",
+            ));
+        } else {
+            branch.push_str(&format!("! queue ! {target} "));
+        }
+        branch
     }
 
     /// Resolve the PulseAudio monitor source of the default sink, i.e. the
@@ -425,6 +568,8 @@ mod sys_impl {
         pub fn set_system_volume(&self, _volume: f32) {}
 
         pub fn set_mic_volume(&self, _volume: f32) {}
+
+        pub fn set_monitor_volume(&self, _volume: f32) {}
     }
 }
 
@@ -444,8 +589,99 @@ mod tests {
     }
 
     #[test]
+    fn default_config_disables_filters_and_monitoring() {
+        let config = AudioConfig::default();
+        assert!(!config.system_filters.noise_suppression);
+        assert!(!config.system_filters.compressor);
+        assert!(!config.system_filters.limiter);
+        assert!(!config.mic_filters.noise_suppression);
+        assert!(!config.mic_filters.compressor);
+        assert!(!config.mic_filters.limiter);
+        assert!(!config.system_monitor);
+        assert!(!config.mic_monitor);
+        assert_eq!(config.monitor_volume.to_bits(), 1.0f32.to_bits());
+    }
+
+    #[test]
     fn default_config_uses_mixed_tracks() {
         assert!(!AudioConfig::default().separate_tracks);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn filter_chain_str_returns_empty_by_default() {
+        assert_eq!(sys_impl::filter_chain_str(&AudioFilters::default()), "");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn filter_chain_str_lists_enabled_filters() {
+        let filters = AudioFilters {
+            noise_suppression: true,
+            compressor: true,
+            limiter: true,
+        };
+        let chain = sys_impl::filter_chain_str(&filters);
+        assert!(chain.contains("webrtcdsp"));
+        assert!(chain.contains("audiodynamic"));
+        assert_eq!(chain.matches("audiodynamic").count(), 2);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn source_branch_without_monitor_has_no_tee() {
+        let branch = sys_impl::build_source_branch(
+            "pulsesrc",
+            "sys_vol",
+            &AudioFilters::default(),
+            "capsfilter caps=\"audio/x-raw\"",
+            "appsink name=sys_sink",
+            "sys",
+            false,
+        );
+        assert!(!branch.contains("tee"));
+        assert!(!branch.contains("autoaudiosink"));
+        assert!(branch.contains("appsink name=sys_sink"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn source_branch_with_monitor_creates_tee_and_sink() {
+        let branch = sys_impl::build_source_branch(
+            "pulsesrc",
+            "sys_vol",
+            &AudioFilters::default(),
+            "capsfilter caps=\"audio/x-raw\"",
+            "appsink name=sys_sink",
+            "sys",
+            true,
+        );
+        assert!(branch.contains("tee name=sys_tee"));
+        assert!(branch.contains("volume name=sys_mon_vol"));
+        assert!(branch.contains("autoaudiosink"));
+        assert!(branch.contains("appsink name=sys_sink"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn all_filters_and_monitoring_builds_pipeline() {
+        let config = AudioConfig {
+            separate_tracks: true,
+            system_filters: AudioFilters {
+                noise_suppression: true,
+                compressor: true,
+                limiter: true,
+            },
+            mic_filters: AudioFilters {
+                noise_suppression: true,
+                compressor: true,
+                limiter: true,
+            },
+            system_monitor: true,
+            mic_monitor: true,
+            ..Default::default()
+        };
+        assert!(AudioCapture::new(config).is_ok());
     }
 
     #[cfg(target_os = "linux")]

@@ -11,7 +11,7 @@ use {
     ashpd::desktop::Session,
     once_cell::sync::Lazy,
     pipewire::spa::utils::Fd,
-    rivulet_audio::{AudioCapture, AudioConfig},
+    rivulet_audio::{AudioCapture, AudioConfig, AudioFilters},
     rivulet_core::{AudioFrame, AudioTrack},
     std::sync::mpsc as std_mpsc,
     std::sync::{
@@ -205,6 +205,18 @@ pub struct RivuletApp {
     system_volume: f32,
     #[cfg(target_os = "linux")]
     mic_volume: f32,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    system_filters: AudioFilters,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
+    mic_filters: AudioFilters,
+    #[cfg(target_os = "linux")]
+    system_monitor: bool,
+    #[cfg(target_os = "linux")]
+    mic_monitor: bool,
+    #[cfg(target_os = "linux")]
+    monitor_volume: f32,
 
     // Linux screen recording
     #[cfg(target_os = "linux")]
@@ -324,6 +336,16 @@ impl Default for RivuletApp {
             system_volume: 0.8,
             #[cfg(target_os = "linux")]
             mic_volume: 1.0,
+            #[cfg(target_os = "linux")]
+            system_filters: AudioFilters::default(),
+            #[cfg(target_os = "linux")]
+            mic_filters: AudioFilters::default(),
+            #[cfg(target_os = "linux")]
+            system_monitor: false,
+            #[cfg(target_os = "linux")]
+            mic_monitor: false,
+            #[cfg(target_os = "linux")]
+            monitor_volume: 1.0,
 
             #[cfg(target_os = "linux")]
             audio_rx: None,
@@ -516,6 +538,11 @@ impl RivuletApp {
             capture_mic: self.capture_mic,
             system_volume: self.system_volume,
             mic_volume: self.mic_volume,
+            system_filters: self.system_filters.clone(),
+            mic_filters: self.mic_filters.clone(),
+            system_monitor: self.system_monitor,
+            mic_monitor: self.mic_monitor,
+            monitor_volume: self.monitor_volume,
             separate_tracks: self.separate_tracks,
             ..Default::default()
         };
@@ -1294,6 +1321,68 @@ impl eframe::App for RivuletApp {
                     self.mic_volume = mic_vol;
                     if let Some(audio) = &self.audio {
                         audio.set_mic_volume(mic_vol);
+                    }
+                }
+
+                ui.separator();
+                ui.label(egui::RichText::new("Filter").strong());
+                let mut sys_ns = self.system_filters.noise_suppression;
+                let mut sys_cmp = self.system_filters.compressor;
+                let mut sys_lim = self.system_filters.limiter;
+                let mut mic_ns = self.mic_filters.noise_suppression;
+                let mut mic_cmp = self.mic_filters.compressor;
+                let mut mic_lim = self.mic_filters.limiter;
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut sys_ns, "NS (System)");
+                    ui.checkbox(&mut sys_cmp, "Cmp (System)");
+                    ui.checkbox(&mut sys_lim, "Lim (System)");
+                });
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut mic_ns, "NS (Mikro)");
+                    ui.checkbox(&mut mic_cmp, "Cmp (Mikro)");
+                    ui.checkbox(&mut mic_lim, "Lim (Mikro)");
+                });
+                let filters_changed = sys_ns != self.system_filters.noise_suppression
+                    || sys_cmp != self.system_filters.compressor
+                    || sys_lim != self.system_filters.limiter
+                    || mic_ns != self.mic_filters.noise_suppression
+                    || mic_cmp != self.mic_filters.compressor
+                    || mic_lim != self.mic_filters.limiter;
+                if filters_changed {
+                    self.system_filters.noise_suppression = sys_ns;
+                    self.system_filters.compressor = sys_cmp;
+                    self.system_filters.limiter = sys_lim;
+                    self.mic_filters.noise_suppression = mic_ns;
+                    self.mic_filters.compressor = mic_cmp;
+                    self.mic_filters.limiter = mic_lim;
+                    if self.audio_preview {
+                        self.start_audio_capture();
+                    }
+                }
+
+                ui.separator();
+                ui.label(egui::RichText::new("Monitoring").strong());
+                let mut sys_mon = self.system_monitor;
+                let mut mic_mon = self.mic_monitor;
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut sys_mon, "System abhören");
+                    ui.checkbox(&mut mic_mon, "Mikrofon abhören");
+                });
+                if sys_mon != self.system_monitor || mic_mon != self.mic_monitor {
+                    self.system_monitor = sys_mon;
+                    self.mic_monitor = mic_mon;
+                    if self.audio_preview {
+                        self.start_audio_capture();
+                    }
+                }
+                let mut mon_vol = self.monitor_volume;
+                if ui
+                    .add(egui::Slider::new(&mut mon_vol, 0.0..=1.0).text("Monitoring-Lautstärke"))
+                    .changed()
+                {
+                    self.monitor_volume = mon_vol;
+                    if let Some(audio) = &self.audio {
+                        audio.set_monitor_volume(mon_vol);
                     }
                 }
 
