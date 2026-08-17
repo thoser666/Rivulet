@@ -65,10 +65,13 @@ fn run_native(app_name: &str, engine: RivuletEngine) -> Result<(), eframe::Error
 }
 
 fn create_icon() -> IconData {
-    let image = image::RgbaImage::from_fn(64, 64, |_x, _y| image::Rgba([33, 150, 243, 255]));
+    let ico_bytes = include_bytes!("../assets/rivulet_logo.ico");
+    let img = image::load_from_memory(ico_bytes).expect("failed to decode embedded icon");
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
     IconData {
-        rgba: image.into_raw(),
-        width: 64,
-        height: 64,
+        rgba: rgba.into_raw(),
+        width,
+        height,
     }
 }

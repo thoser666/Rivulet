@@ -1,4 +1,3 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![allow(unused_imports, dead_code, unused_variables)]
 
 use eframe::egui;
