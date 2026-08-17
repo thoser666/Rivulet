@@ -1,6 +1,7 @@
 # Changelog
 
 ## [0.15.0-alpha.1] - 2026-08-17
+- refactor(audio): centralize audio pipeline warn/error messages as testable message functions
 - test(audio): capture tracing output to verify record_skipped emits the skipped-filter warning
 - refactor(audio): emit the skipped-filter log line via SkippedFilter::log_message and test its exact text
 - refactor(core): centralize localized filter names in SkippedFilter::feature_name_in

@@ -7,6 +7,7 @@
 //! separate streams for recording into distinct audio tracks.
 
 pub mod capture;
+pub(crate) mod messages;
 
 pub use capture::{AudioCapture, AudioConfig, AudioFilters};
 pub use rivulet_core::SkippedFilter;

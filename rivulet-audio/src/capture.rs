@@ -1,6 +1,8 @@
 use anyhow::Result;
 use rivulet_core::{AudioFrame, SkippedFilter};
 
+use crate::messages;
+
 /// Filter chain applied to an input track before it is mixed or recorded.
 ///
 /// The filters are inserted into the GStreamer pipeline between the volume
@@ -201,7 +203,7 @@ mod sys_impl {
             };
 
             if system_src.is_none() && mic_src.is_none() {
-                anyhow::bail!("No audio input sources enabled");
+                anyhow::bail!("{}", messages::no_audio_input_sources());
             }
 
             let mut pipeline_str = String::new();
@@ -267,7 +269,7 @@ mod sys_impl {
             }
 
             let pipeline = gst::parse::launch(&pipeline_str)
-                .map_err(|e| anyhow::anyhow!("Failed to build audio pipeline: {}", e))?
+                .map_err(|e| anyhow::anyhow!("{}", messages::audio_pipeline_build_failed(&e)))?
                 .downcast::<gst::Pipeline>()
                 .expect("parsed element is a pipeline");
 
@@ -325,7 +327,7 @@ mod sys_impl {
 
         pub fn start(&mut self, on_frame: AudioFrameCallback) -> Result<()> {
             if self.config.separate_tracks {
-                anyhow::bail!("Separate audio tracks are enabled; use start_separated()");
+                anyhow::bail!("{}", messages::separate_tracks_enabled_misuse());
             }
             if self.running.load(Ordering::SeqCst) {
                 return Ok(());
@@ -360,7 +362,7 @@ mod sys_impl {
             mic_cb: AudioFrameCallback,
         ) -> Result<()> {
             if !self.config.separate_tracks {
-                anyhow::bail!("Separate audio tracks are disabled; use start()");
+                anyhow::bail!("{}", messages::separate_tracks_disabled_misuse());
             }
             if self.running.load(Ordering::SeqCst) {
                 return Ok(());
@@ -372,7 +374,7 @@ mod sys_impl {
             let sys_sink = self.appsink_sys.clone();
             let mic_sink = self.appsink_mic.clone();
             if sys_sink.is_none() && mic_sink.is_none() {
-                anyhow::bail!("No audio input sources enabled");
+                anyhow::bail!("{}", messages::no_audio_input_sources());
             }
 
             let running = Arc::clone(&self.running);
@@ -573,9 +575,9 @@ mod sys_impl {
     fn lookup_appsink(pipeline: &gst::Pipeline, name: &str) -> Result<gst_app::AppSink> {
         pipeline
             .by_name(name)
-            .ok_or_else(|| anyhow::anyhow!("Missing appsink '{}' in audio pipeline", name))?
+            .ok_or_else(|| anyhow::anyhow!("{}", messages::missing_appsink(name)))?
             .downcast::<gst_app::AppSink>()
-            .map_err(|_| anyhow::anyhow!("Element '{}' is not an appsink", name))
+            .map_err(|_| anyhow::anyhow!("{}", messages::not_an_appsink(name)))
     }
 
     /// Pull a single sample from the appsink and convert it into an
@@ -615,11 +617,11 @@ mod sys_impl {
 
     impl AudioCaptureInner {
         pub fn new(_config: &AudioConfig) -> Result<Self> {
-            anyhow::bail!("Audio capture is currently only supported on Linux")
+            anyhow::bail!("{}", messages::capture_linux_only())
         }
 
         pub fn start(&mut self, _on_frame: AudioFrameCallback) -> Result<()> {
-            anyhow::bail!("Audio capture is currently only supported on Linux")
+            anyhow::bail!("{}", messages::capture_linux_only())
         }
 
         pub fn start_separated(
@@ -627,7 +629,7 @@ mod sys_impl {
             _system_cb: AudioFrameCallback,
             _mic_cb: AudioFrameCallback,
         ) -> Result<()> {
-            anyhow::bail!("Audio capture is currently only supported on Linux")
+            anyhow::bail!("{}", messages::capture_linux_only())
         }
 
         pub fn stop(&mut self) -> Result<()> {
