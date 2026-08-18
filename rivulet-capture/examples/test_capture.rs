@@ -1,8 +1,30 @@
 use rivulet_capture::{CaptureSource, XCapScreenCapture};
+use rivulet_core::CaptureRegion;
 use std::time::Duration;
+
+/// Parse optional `x y width height` region arguments (monitor-local pixels).
+/// When fewer than four are given, the capture covers the full monitor.
+fn parse_region(args: &[String]) -> Option<CaptureRegion> {
+    if args.len() < 4 {
+        return None;
+    }
+    let x = args[0].parse::<u32>().ok()?;
+    let y = args[1].parse::<u32>().ok()?;
+    let width = args[2].parse::<u32>().ok()?;
+    let height = args[3].parse::<u32>().ok()?;
+    Some(CaptureRegion {
+        x,
+        y,
+        width,
+        height,
+    })
+}
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
+
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let region = parse_region(&args);
 
     println!("Listing available monitors...");
     let monitors = XCapScreenCapture::list_monitors()?;
@@ -20,7 +42,16 @@ fn main() -> anyhow::Result<()> {
     }
 
     println!("\nInitializing screen capture for primary monitor...");
-    let mut capture = XCapScreenCapture::new(0)?;
+    let mut capture = match region {
+        Some(region) => {
+            println!(
+                "Region: {}x{} at ({}, {})",
+                region.width, region.height, region.x, region.y
+            );
+            XCapScreenCapture::new_with_region(0, Some(region))?
+        }
+        None => XCapScreenCapture::new(0)?,
+    };
 
     let (width, height) = capture.dimensions();
     println!("Capture resolution: {}x{}", width, height);

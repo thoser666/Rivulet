@@ -35,6 +35,9 @@ pub use i18n::Locale;
 pub mod preset;
 pub use preset::RecordingPreset;
 
+pub mod region;
+pub use region::CaptureRegion;
+
 // GStreamer initialization
 static GSTREAMER_INIT: Lazy<()> = Lazy::new(|| {
     gst::init().expect("GStreamer initialization failed.");
@@ -426,11 +429,10 @@ impl RivuletEngine {
             .unwrap();
 
         let target_fps = self.preset.effective_fps(30) as i32;
-        let video_info =
-            gst_video::VideoInfo::builder(gst_video::VideoFormat::Rgba, width, height)
-                .fps((target_fps, 1))
-                .build()
-                .unwrap();
+        let video_info = gst_video::VideoInfo::builder(gst_video::VideoFormat::Rgba, width, height)
+            .fps((target_fps, 1))
+            .build()
+            .unwrap();
         appsrc.set_caps(Some(&video_info.to_caps().unwrap()));
         appsrc.set_property("format", gst::Format::Time);
         appsrc.set_property("is-live", true);

@@ -41,6 +41,10 @@ tracing-subscriber = { version = "0.3.18", features = ["fmt"] }
 # Image processing library for the icon
 image = { version = "0.25.1", features = ["png"] }
 
+# Monitor/display capture on all platforms; used for monitor previews in the
+# region editor (on Linux also for capture itself)
+xcap = "=0.9.8"
+
 # winit is needed for the picker configuration on Windows
 [target.'cfg(target_os = "windows")'.dependencies.winit]
 version = "0.30"
@@ -50,7 +54,6 @@ version = "0.30"
 ashpd = { version = "0.13.10", features = ["tokio", "screencast"] }
 pipewire = { version = "0.10.0", features = ["v0_3_33"] }
 rivulet-audio = { path = "../rivulet-audio" }
-xcap = "=0.9.8"
 
 
 

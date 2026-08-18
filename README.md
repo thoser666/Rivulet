@@ -57,6 +57,8 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 
 - **Screen Capture** - Capture your primary monitor in real-time
 - **Window Capture** - Capture a single application window (games, etc.) in addition to full monitors, with a window picker in the GUI (Linux & Windows)
+- **Multi-Monitor Selection** - Pick any connected monitor from a dropdown instead of being limited to the primary display (Linux & Windows)
+- **Region Capture** - Record a rectangular area of a monitor with an interactive drag selector over a live preview, plus precise X/Y/W/H inputs and a one-click "full monitor" reset (Linux & Windows)
 - **Screen + Audio Recording (Linux GUI)** - Full recording flow in the GUI: monitor selection, start/stop, recording timer; system audio + microphone are captured and mixed into the MP4
 - **Video Encoding** - H.264/H.265/VP9 encoding via GStreamer with codec selection UI; hardware-accelerated encoders (NVENC, QuickSync, AMF) with automatic detection and software fallback
 - **Hardware Encoding** - NVIDIA NVENC (`nvh264enc`), Intel QuickSync (`qsvh264enc`) and AMD AMF (`amfh264enc`) with automatic detection of the best available encoder and fallback to software x264; engine API `set_video_encoder(VideoEncoder)` / `set_video_bitrate(kbps)`
@@ -169,7 +171,7 @@ release channel only describes *how* the tag is built and published.
 **Quality of Life**
 - [x] Hotkeys (record, pause, mute)
 - [ ] Recording timer overlay and FPS counter
-- [ ] Region capture and multi-monitor selection
+- [x] Region capture and multi-monitor selection
 - [x] Codec selection UI (H264/H265/VP9)
 - [x] Preset management (1080p60, 720p30, ...)
 
@@ -327,7 +329,7 @@ The core concept of OBS: scenes, sources, and transitions.
 
 | OBS category | Status |
 | --- | --- |
-| Capture sources (display, window, webcam) | Partial (display + window) |
+| Capture sources (display, window, webcam) | Partial (display + window + region, multi-monitor) |
 | Scenes & transitions | Open |
 | Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks) |
 | Recording & encoding | Partial (H.264/H.265/VP9, HW + SW) |

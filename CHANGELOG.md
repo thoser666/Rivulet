@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.19.0-alpha.1] - 2026-08-18
+- feat(region): add region capture with interactive drag selection and multi-monitor selection (Linux & Windows)
+
 ## [0.18.0-alpha.1] - 2026-08-18
 - feat(preset): add recording preset management (1080p60, 720p30, ...)
 

@@ -142,6 +142,24 @@ impl Locale {
                 // Codec selection
                 ("video_codec", "Video codec"),
                 ("recording_preset", "Preset"),
+                // Region capture
+                ("capture_region", "Capture region"),
+                ("region_select", "Select region…"),
+                ("region_status", "{0}×{1} @ ({2},{3})"),
+                ("region_editor_title", "Select capture region"),
+                (
+                    "region_hint",
+                    "Drag on the preview to choose the recording area, or enter values below.",
+                ),
+                ("region_x", "X"),
+                ("region_y", "Y"),
+                ("region_width", "W"),
+                ("region_height", "H"),
+                ("region_full_monitor", "Full monitor"),
+                ("region_apply", "Apply"),
+                ("region_cancel", "Cancel"),
+                ("region_preview_failed", "Preview unavailable: {0}"),
+                ("region_preview_unavailable", "the monitor could not be captured"),
                 // Audio
                 ("audio_mixer", "Audio Mixer"),
                 ("start_audio", "Start audio"),
@@ -216,6 +234,24 @@ impl Locale {
                 // Codec selection
                 ("video_codec", "Video-Codec"),
                 ("recording_preset", "Preset"),
+                // Region capture
+                ("capture_region", "Bereich aufnehmen"),
+                ("region_select", "Bereich auswählen…"),
+                ("region_status", "{0}×{1} @ ({2},{3})"),
+                ("region_editor_title", "Aufnahmebereich auswählen"),
+                (
+                    "region_hint",
+                    "Ziehen Sie auf der Vorschau, um den Aufnahmebereich zu wählen, oder geben Sie unten Werte ein.",
+                ),
+                ("region_x", "X"),
+                ("region_y", "Y"),
+                ("region_width", "B"),
+                ("region_height", "H"),
+                ("region_full_monitor", "Gesamter Monitor"),
+                ("region_apply", "Übernehmen"),
+                ("region_cancel", "Abbrechen"),
+                ("region_preview_failed", "Vorschau nicht verfügbar: {0}"),
+                ("region_preview_unavailable", "der Monitor konnte nicht erfasst werden"),
                 // Audio
                 ("audio_mixer", "Audio-Mixer"),
                 ("start_audio", "Audio starten"),

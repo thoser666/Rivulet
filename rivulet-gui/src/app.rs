@@ -1,7 +1,7 @@
 #![allow(unused_imports, dead_code, unused_variables)]
 
 use eframe::egui;
-use rivulet_core::{Locale, RivuletEngine, SkippedFilter};
+use rivulet_core::{CaptureRegion, Locale, RivuletEngine, SkippedFilter};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
@@ -45,11 +45,40 @@ use {
 };
 
 // --- Data structure for raw frames ---
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct RawFrame {
     data: Vec<u8>,
     width: u32,
     height: u32,
+}
+
+/// Live preview of the selected monitor inside the region editor, including
+/// the drag state for selecting the capture region on top of the image.
+struct RegionPreview {
+    texture: egui::TextureHandle,
+    /// Full monitor size in physical pixels.
+    full_width: u32,
+    full_height: u32,
+    /// Pointer position (in image pixel coordinates) where the current drag
+    /// started, while the user is dragging the region selection.
+    drag_start: Option<egui::Pos2>,
+}
+
+impl RegionPreview {
+    fn new(ctx: &egui::Context, image: image::RgbaImage) -> Self {
+        let full_width = image.width();
+        let full_height = image.height();
+        let color_image = egui::ColorImage::from_rgba_unmultiplied(
+            [full_width as usize, full_height as usize],
+            image.as_raw(),
+        );
+        Self {
+            texture: ctx.load_texture("region_preview", color_image, egui::TextureOptions::LINEAR),
+            full_width,
+            full_height,
+            drag_start: None,
+        }
+    }
 }
 
 /// Default maximum time to wait for the first captured frame before aborting
@@ -375,6 +404,20 @@ pub struct RivuletApp {
     #[serde(skip)]
     no_frame_timeout: std::time::Duration,
 
+    // Region capture (applies to monitor capture on all platforms)
+    #[serde(skip)]
+    region_enabled: bool,
+    #[serde(skip)]
+    region: CaptureRegion,
+    #[serde(skip)]
+    region_editor_open: bool,
+    #[serde(skip)]
+    region_preview: Option<RegionPreview>,
+    #[serde(skip)]
+    region_editor_dims: Option<(u32, u32)>,
+    #[serde(skip)]
+    region_preview_error: Option<String>,
+
     // Auto-update
     #[serde(skip)]
     update_ui: std::sync::Arc<std::sync::Mutex<UpdateUi>>,
@@ -513,6 +556,13 @@ impl Default for RivuletApp {
 
             no_frame_timeout: DEFAULT_NO_FRAME_TIMEOUT,
 
+            region_enabled: false,
+            region: CaptureRegion::full(1920, 1080),
+            region_editor_open: false,
+            region_preview: None,
+            region_editor_dims: None,
+            region_preview_error: None,
+
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
             update_check_clicked: false,
@@ -546,6 +596,32 @@ impl RivuletApp {
 
         self.selected_monitor_idx = None;
         self.selected_window_idx = None;
+    }
+
+    /// Open the region editor for the currently selected monitor, capturing
+    /// a preview via xcap (the capture itself uses windows-capture).
+    fn open_region_editor(&mut self, ctx: &egui::Context) {
+        let Some(idx) = self.selected_monitor_idx else {
+            return;
+        };
+        let Some(monitor) = self.monitors.get(idx) else {
+            return;
+        };
+        let name = monitor.name().unwrap_or_default();
+        self.region_editor_dims =
+            Some((monitor.width().unwrap_or(0), monitor.height().unwrap_or(0)));
+        self.region_preview_error = None;
+        let xcap_monitors = xcap::Monitor::all().unwrap_or_default();
+        match monitor_preview_image(&xcap_monitors, &name) {
+            Some(image) => self.region_preview = Some(RegionPreview::new(ctx, image)),
+            None => {
+                self.region_preview_error = Some(self.tr_fmt(
+                    "region_preview_failed",
+                    &[self.tr("region_preview_unavailable").to_string()],
+                ));
+            }
+        }
+        self.region_editor_open = true;
     }
 
     fn start_windows_recording(&mut self) {
@@ -815,6 +891,31 @@ impl RivuletApp {
         }
     }
 
+    /// Open the region editor for the currently selected monitor, capturing
+    /// a live preview of it for the drag selection.
+    fn open_region_editor(&mut self, ctx: &egui::Context) {
+        let Some(idx) = self.selected_monitor_idx else {
+            return;
+        };
+        let Some(monitor) = self.monitors.get(idx) else {
+            return;
+        };
+        let name = monitor.name().unwrap_or_default();
+        self.region_editor_dims =
+            Some((monitor.width().unwrap_or(0), monitor.height().unwrap_or(0)));
+        self.region_preview_error = None;
+        match monitor_preview_image(&self.monitors, &name) {
+            Some(image) => self.region_preview = Some(RegionPreview::new(ctx, image)),
+            None => {
+                self.region_preview_error = Some(self.tr_fmt(
+                    "region_preview_failed",
+                    &[self.tr("region_preview_unavailable").to_string()],
+                ));
+            }
+        }
+        self.region_editor_open = true;
+    }
+
     fn start_linux_recording(&mut self) {
         if self.is_recording {
             return;
@@ -960,8 +1061,10 @@ impl RivuletApp {
         if let Some(rx) = &self.raw_rx {
             while let Ok(raw) = rx.try_recv() {
                 if !paused {
+                    let crop = self.region_enabled && self.selected_monitor_idx.is_some();
+                    let frame = cropped_frame_for_region(crop, self.region, &raw);
                     self.engine
-                        .process_raw_frame(&raw.data, raw.width, raw.height);
+                        .process_raw_frame(&frame.data, frame.width, frame.height);
                 }
                 self.last_frame_at = Some(Instant::now());
             }
@@ -1157,6 +1260,165 @@ impl RivuletApp {
         }
     }
 
+    /// Render the region capture editor (preview with drag selection,
+    /// numeric inputs, and apply/cancel/reset actions).
+    fn draw_region_editor(&mut self, ctx: &egui::Context) {
+        if !self.region_editor_open {
+            return;
+        }
+        let mut preview = self.region_preview.take();
+        let mut region = self.region;
+        let error = self.region_preview_error.clone();
+        let dims = preview
+            .as_ref()
+            .map(|p| (p.full_width, p.full_height))
+            .or(self.region_editor_dims);
+        let mut apply = false;
+        let mut cancel = false;
+        let mut reset = false;
+
+        egui::Window::new(self.tr("region_editor_title"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                if let Some(err) = &error {
+                    ui.colored_label(egui::Color32::RED, err);
+                }
+                ui.label(self.tr("region_hint"));
+                let Some((full_width, full_height)) = dims else {
+                    ui.label(self.tr("region_preview_unavailable"));
+                    return;
+                };
+                if let Some(p) = preview.as_mut() {
+                    // Preview image scaled to the available width, with the
+                    // current selection drawn on top. Dragging selects a new
+                    // region; the outside is dimmed while dragging.
+                    let scale = ui.available_width().min(700.0) / full_width.max(1) as f32;
+                    let size = egui::vec2(full_width as f32 * scale, full_height as f32 * scale);
+                    let (rect, response) =
+                        ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+                    let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                    ui.painter()
+                        .image(p.texture.id(), rect, uv, egui::Color32::WHITE);
+                    if let Some(start) = p.drag_start {
+                        if let Some(current) = response.interact_pointer_pos() {
+                            let drag_rect = egui::Rect::from_two_pos(start, current);
+                            ui.painter().rect_filled(
+                                rect,
+                                0.0,
+                                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 110),
+                            );
+                            ui.painter().with_clip_rect(drag_rect).image(
+                                p.texture.id(),
+                                rect,
+                                uv,
+                                egui::Color32::WHITE,
+                            );
+                            ui.painter().rect_stroke(
+                                drag_rect,
+                                0.0,
+                                egui::Stroke::new(2.0, egui::Color32::RED),
+                                egui::StrokeKind::Middle,
+                            );
+                        }
+                    } else {
+                        let sel_rect = region_rect_in(region, rect, full_width, full_height);
+                        ui.painter().rect_stroke(
+                            sel_rect,
+                            0.0,
+                            egui::Stroke::new(2.0, egui::Color32::RED),
+                            egui::StrokeKind::Middle,
+                        );
+                    }
+                    if response.drag_started() {
+                        p.drag_start = response.interact_pointer_pos();
+                    }
+                    if let Some(start) = p.drag_start {
+                        if response.dragged() {
+                            if let Some(current) = response.interact_pointer_pos() {
+                                let to_px = |pos: egui::Pos2| {
+                                    (pos - rect.min) / rect.size()
+                                        * egui::vec2(full_width as f32, full_height as f32)
+                                };
+                                let s = to_px(start);
+                                let c = to_px(current);
+                                region = region_from_pixel_points(
+                                    s.x,
+                                    s.y,
+                                    c.x,
+                                    c.y,
+                                    full_width,
+                                    full_height,
+                                );
+                            }
+                        }
+                        if response.drag_stopped() {
+                            p.drag_start = None;
+                        }
+                    }
+                }
+                // Precise numeric inputs, clamped to the monitor bounds.
+                ui.horizontal(|ui| {
+                    ui.label(self.tr("region_x"));
+                    ui.add(
+                        egui::DragValue::new(&mut region.x).range(0..=full_width.saturating_sub(1)),
+                    );
+                    ui.label(self.tr("region_y"));
+                    ui.add(
+                        egui::DragValue::new(&mut region.y)
+                            .range(0..=full_height.saturating_sub(1)),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label(self.tr("region_width"));
+                    ui.add(egui::DragValue::new(&mut region.width).range(1..=full_width));
+                    ui.label(self.tr("region_height"));
+                    ui.add(egui::DragValue::new(&mut region.height).range(1..=full_height));
+                });
+                // Snap to even dimensions (required by the encoders) after
+                // manual entry, so a typed odd value can never produce an
+                // unencodable frame.
+                region.width = (region.width & !1).clamp(2, full_width);
+                region.height = (region.height & !1).clamp(2, full_height);
+                if region.x + region.width > full_width {
+                    region.x = full_width.saturating_sub(region.width);
+                }
+                if region.y + region.height > full_height {
+                    region.y = full_height.saturating_sub(region.height);
+                }
+                ui.horizontal(|ui| {
+                    if ui.button(self.tr("region_full_monitor")).clicked() {
+                        reset = true;
+                    }
+                    if ui.button(self.tr("region_apply")).clicked() {
+                        apply = true;
+                    }
+                    if ui.button(self.tr("region_cancel")).clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+
+        if reset {
+            if let Some((full_width, full_height)) = dims {
+                region = CaptureRegion::full(full_width, full_height);
+            }
+        }
+        if apply || cancel {
+            self.region_editor_open = false;
+        }
+        self.region = region;
+        self.region_preview = if self.region_editor_open {
+            preview
+        } else {
+            None
+        };
+        if !self.region_editor_open {
+            self.region_preview_error = None;
+        }
+    }
+
     /// Handle the queued update actions (check / download / install).
     fn handle_update_actions(&mut self, ctx: egui::Context) {
         let busy = matches!(
@@ -1265,6 +1527,8 @@ impl eframe::App for RivuletApp {
                     // no MP4 was ever written.
                     let ended = drain_frames_and_check_end(receiver, signal, |frame| {
                         if !self.is_paused {
+                            let crop = self.region_enabled && self.selected_monitor_idx.is_some();
+                            let frame = cropped_frame_for_region(crop, self.region, frame);
                             self.engine
                                 .process_raw_frame(&frame.data, frame.width, frame.height);
                         }
@@ -1341,9 +1605,12 @@ impl eframe::App for RivuletApp {
                 ui.label(
                     egui::RichText::new(format!(
                         "Hotkeys: {} [{}] · {} [{}] · {} [{}]",
-                        self.tr("hotkey_record"), self.hotkeys.label_for("record"),
-                        self.tr("hotkey_pause"), self.hotkeys.label_for("pause"),
-                        self.tr("hotkey_mute"), self.hotkeys.label_for("mute"),
+                        self.tr("hotkey_record"),
+                        self.hotkeys.label_for("record"),
+                        self.tr("hotkey_pause"),
+                        self.hotkeys.label_for("pause"),
+                        self.tr("hotkey_mute"),
+                        self.hotkeys.label_for("mute"),
                     ))
                     .small()
                     .color(egui::Color32::GRAY),
@@ -1362,20 +1629,36 @@ impl eframe::App for RivuletApp {
                             self.is_paused = false;
                             self.is_muted = false;
                         }
-                        let pause_label = if self.is_paused { "▶ Resume" } else { "⏸ Pause" };
+                        let pause_label = if self.is_paused {
+                            "▶ Resume"
+                        } else {
+                            "⏸ Pause"
+                        };
                         if ui.button(pause_label).clicked() {
                             self.is_paused = !self.is_paused;
                         }
-                        let mute_label = if self.is_muted { "🔊 Unmute" } else { "🔇 Mute" };
+                        let mute_label = if self.is_muted {
+                            "🔊 Unmute"
+                        } else {
+                            "🔇 Mute"
+                        };
                         if ui.button(mute_label).clicked() {
                             self.is_muted = !self.is_muted;
                         }
                     });
                     if self.is_paused {
-                        ui.label(egui::RichText::new(self.tr("paused")).color(egui::Color32::YELLOW).strong());
+                        ui.label(
+                            egui::RichText::new(self.tr("paused"))
+                                .color(egui::Color32::YELLOW)
+                                .strong(),
+                        );
                     }
                     if self.is_muted {
-                        ui.label(egui::RichText::new(self.tr("muted")).color(egui::Color32::LIGHT_BLUE).strong());
+                        ui.label(
+                            egui::RichText::new(self.tr("muted"))
+                                .color(egui::Color32::LIGHT_BLUE)
+                                .strong(),
+                        );
                     }
                     ui.label(self.metrics_line());
                 } else {
@@ -1403,6 +1686,12 @@ impl eframe::App for RivuletApp {
                                         )
                                         .clicked()
                                     {
+                                        if self.selected_monitor_idx != Some(i) {
+                                            self.region = CaptureRegion::full(
+                                                monitor.width().unwrap_or(0),
+                                                monitor.height().unwrap_or(0),
+                                            );
+                                        }
                                         self.selected_monitor_idx = Some(i);
                                         self.selected_window_idx = None;
                                     }
@@ -1426,6 +1715,10 @@ impl eframe::App for RivuletApp {
                                     {
                                         self.selected_window_idx = Some(i);
                                         self.selected_monitor_idx = None;
+                                        // Region capture only applies to
+                                        // monitor capture; window capture is
+                                        // always full-window.
+                                        self.region_enabled = false;
                                     }
                                 }
                             });
@@ -1435,6 +1728,36 @@ impl eframe::App for RivuletApp {
                             .clicked()
                         {
                             self.refresh_capture_sources();
+                        }
+                    });
+                    // Region capture controls (monitor capture only)
+                    ui.horizontal(|ui| {
+                        let monitor_selected = self.selected_monitor_idx.is_some();
+                        let capture_region_label = self.tr("capture_region");
+                        ui.add_enabled(
+                            monitor_selected,
+                            egui::Checkbox::new(&mut self.region_enabled, capture_region_label),
+                        );
+                        if ui
+                            .add_enabled(
+                                monitor_selected && self.region_enabled,
+                                egui::Button::new(self.tr("region_select")),
+                            )
+                            .clicked()
+                        {
+                            self.open_region_editor(ui.ctx());
+                        }
+                        if monitor_selected && self.region_enabled {
+                            let r = self.region;
+                            ui.label(self.tr_fmt(
+                                "region_status",
+                                &[
+                                    r.width.to_string(),
+                                    r.height.to_string(),
+                                    r.x.to_string(),
+                                    r.y.to_string(),
+                                ],
+                            ));
                         }
                     });
                     let source_selected =
@@ -1450,7 +1773,10 @@ impl eframe::App for RivuletApp {
                                     rivulet_core::VideoCodec::VP9,
                                 ] {
                                     if ui
-                                        .selectable_label(self.selected_codec == codec, codec.label())
+                                        .selectable_label(
+                                            self.selected_codec == codec,
+                                            codec.label(),
+                                        )
                                         .clicked()
                                     {
                                         self.selected_codec = codec;
@@ -1479,7 +1805,11 @@ impl eframe::App for RivuletApp {
                     if ui
                         .add_enabled(
                             source_selected,
-                            egui::Button::new(format!("⏺ {} [{}]", self.tr("start_recording"), self.hotkeys.label_for("record"))),
+                            egui::Button::new(format!(
+                                "⏺ {} [{}]",
+                                self.tr("start_recording"),
+                                self.hotkeys.label_for("record")
+                            )),
                         )
                         .clicked()
                     {
@@ -1543,20 +1873,36 @@ impl eframe::App for RivuletApp {
                             self.is_paused = false;
                             self.is_muted = false;
                         }
-                        let pause_label = if self.is_paused { "▶ Resume" } else { "⏸ Pause" };
+                        let pause_label = if self.is_paused {
+                            "▶ Resume"
+                        } else {
+                            "⏸ Pause"
+                        };
                         if ui.button(pause_label).clicked() {
                             self.is_paused = !self.is_paused;
                         }
-                        let mute_label = if self.is_muted { "🔊 Unmute" } else { "🔇 Mute" };
+                        let mute_label = if self.is_muted {
+                            "🔊 Unmute"
+                        } else {
+                            "🔇 Mute"
+                        };
                         if ui.button(mute_label).clicked() {
                             self.is_muted = !self.is_muted;
                         }
                     });
                     if self.is_paused {
-                        ui.label(egui::RichText::new(self.tr("paused")).color(egui::Color32::YELLOW).strong());
+                        ui.label(
+                            egui::RichText::new(self.tr("paused"))
+                                .color(egui::Color32::YELLOW)
+                                .strong(),
+                        );
                     }
                     if self.is_muted {
-                        ui.label(egui::RichText::new(self.tr("muted")).color(egui::Color32::LIGHT_BLUE).strong());
+                        ui.label(
+                            egui::RichText::new(self.tr("muted"))
+                                .color(egui::Color32::LIGHT_BLUE)
+                                .strong(),
+                        );
                     }
                     ui.label(self.metrics_line());
                 } else {
@@ -1590,6 +1936,12 @@ impl eframe::App for RivuletApp {
                                         )
                                         .clicked()
                                     {
+                                        if self.selected_monitor_idx != Some(i) {
+                                            self.region = CaptureRegion::full(
+                                                m.width().unwrap_or(0),
+                                                m.height().unwrap_or(0),
+                                            );
+                                        }
                                         self.selected_monitor_idx = Some(i);
                                         self.selected_window_idx = None;
                                     }
@@ -1625,6 +1977,10 @@ impl eframe::App for RivuletApp {
                                     {
                                         self.selected_window_idx = Some(i);
                                         self.selected_monitor_idx = None;
+                                        // Region capture only applies to
+                                        // monitor capture; window capture is
+                                        // always full-window.
+                                        self.region_enabled = false;
                                     }
                                 }
                             });
@@ -1634,6 +1990,36 @@ impl eframe::App for RivuletApp {
                             .clicked()
                         {
                             self.refresh_linux_sources();
+                        }
+                    });
+                    // Region capture controls (monitor capture only)
+                    ui.horizontal(|ui| {
+                        let monitor_selected = self.selected_monitor_idx.is_some();
+                        let capture_region_label = self.tr("capture_region");
+                        ui.add_enabled(
+                            monitor_selected,
+                            egui::Checkbox::new(&mut self.region_enabled, capture_region_label),
+                        );
+                        if ui
+                            .add_enabled(
+                                monitor_selected && self.region_enabled,
+                                egui::Button::new(self.tr("region_select")),
+                            )
+                            .clicked()
+                        {
+                            self.open_region_editor(ui.ctx());
+                        }
+                        if monitor_selected && self.region_enabled {
+                            let r = self.region;
+                            ui.label(self.tr_fmt(
+                                "region_status",
+                                &[
+                                    r.width.to_string(),
+                                    r.height.to_string(),
+                                    r.x.to_string(),
+                                    r.y.to_string(),
+                                ],
+                            ));
                         }
                     });
                     let source_selected =
@@ -1649,7 +2035,10 @@ impl eframe::App for RivuletApp {
                                     rivulet_core::VideoCodec::VP9,
                                 ] {
                                     if ui
-                                        .selectable_label(self.selected_codec == codec, codec.label())
+                                        .selectable_label(
+                                            self.selected_codec == codec,
+                                            codec.label(),
+                                        )
                                         .clicked()
                                     {
                                         self.selected_codec = codec;
@@ -1678,7 +2067,11 @@ impl eframe::App for RivuletApp {
                     if ui
                         .add_enabled(
                             source_selected,
-                            egui::Button::new(format!("⏺ {} [{}]", self.tr("start_recording"), self.hotkeys.label_for("record"))),
+                            egui::Button::new(format!(
+                                "⏺ {} [{}]",
+                                self.tr("start_recording"),
+                                self.hotkeys.label_for("record")
+                            )),
                         )
                         .clicked()
                     {
@@ -1867,6 +2260,10 @@ impl eframe::App for RivuletApp {
                 });
             });
         });
+
+        // Region capture editor (floating window, rendered after the panels
+        // so it appears on top of the main UI).
+        self.draw_region_editor(ui.ctx());
     }
 }
 
@@ -1920,6 +2317,90 @@ fn format_skipped_filters(locale: Locale, skipped: &[SkippedFilter]) -> String {
         })
         .collect();
     locale.tr_fmt("audio_filters_skipped", &[items.join(", ")])
+}
+
+/// Crop a raw frame to the configured capture region (monitor capture only).
+///
+/// Returns the original frame without copying when region capture is disabled
+/// or the region is invalid for the frame; otherwise returns a cropped copy
+/// whose dimensions are even-aligned and clamped to the frame bounds (the
+/// engine's video encoders require even frame dimensions).
+fn cropped_frame_for_region<'a>(
+    enabled: bool,
+    region: CaptureRegion,
+    frame: &'a RawFrame,
+) -> std::borrow::Cow<'a, RawFrame> {
+    if !enabled {
+        return std::borrow::Cow::Borrowed(frame);
+    }
+    let stride = frame.width * 4;
+    match region.crop_rgba(&frame.data, frame.width, frame.height, stride) {
+        Some((data, width, height)) => std::borrow::Cow::Owned(RawFrame {
+            data,
+            width,
+            height,
+        }),
+        None => std::borrow::Cow::Borrowed(frame),
+    }
+}
+
+/// Normalize two corner points (in monitor pixels) into an even-aligned,
+/// clamped capture region. Pure helper for the interactive region editor's
+/// drag selection, so the geometry is unit-testable.
+fn region_from_pixel_points(
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    full_width: u32,
+    full_height: u32,
+) -> CaptureRegion {
+    if full_width < 2 || full_height < 2 {
+        return CaptureRegion {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        };
+    }
+    let min_x = x0.min(x1).clamp(0.0, full_width.saturating_sub(2) as f32);
+    let max_x = x0.max(x1).clamp(min_x + 2.0, full_width as f32);
+    let min_y = y0.min(y1).clamp(0.0, full_height.saturating_sub(2) as f32);
+    let max_y = y0.max(y1).clamp(min_y + 2.0, full_height as f32);
+    CaptureRegion {
+        x: min_x as u32,
+        y: min_y as u32,
+        width: ((max_x - min_x) as u32) & !1,
+        height: ((max_y - min_y) as u32) & !1,
+    }
+}
+
+/// Map a capture region to screen coordinates inside the preview image rect.
+fn region_rect_in(
+    region: CaptureRegion,
+    rect: egui::Rect,
+    full_width: u32,
+    full_height: u32,
+) -> egui::Rect {
+    let sx = rect.width() / full_width.max(1) as f32;
+    let sy = rect.height() / full_height.max(1) as f32;
+    egui::Rect::from_min_size(
+        rect.min + egui::vec2(region.x as f32 * sx, region.y as f32 * sy),
+        egui::vec2(region.width as f32 * sx, region.height as f32 * sy),
+    )
+}
+
+/// Capture a still image of the monitor whose name matches `preferred_name`
+/// (falling back to the first listed monitor) for the region editor preview.
+fn monitor_preview_image(
+    xcap_monitors: &[xcap::Monitor],
+    preferred_name: &str,
+) -> Option<image::RgbaImage> {
+    let monitor = xcap_monitors
+        .iter()
+        .find(|m| m.name().unwrap_or_default() == preferred_name)
+        .or_else(|| xcap_monitors.first())?;
+    monitor.capture_image().ok()
 }
 
 /// Parse the `--no-frame-timeout <seconds>` CLI flag from the given command
@@ -2404,5 +2885,108 @@ mod tests {
                 "warning {warning:?} must mention the skipped element `{element}`"
             );
         }
+    }
+
+    // ── cropped_frame_for_region ──────────────────────────────────
+
+    fn test_frame(width: u32, height: u32) -> RawFrame {
+        let mut data = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                data.extend_from_slice(&[x as u8, y as u8, 7, 9]);
+            }
+        }
+        RawFrame {
+            data,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn crop_disabled_passes_the_frame_through() {
+        let frame = test_frame(4, 3);
+        let region = CaptureRegion {
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 2,
+        };
+        let cropped = cropped_frame_for_region(false, region, &frame);
+        assert!(matches!(cropped, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(cropped.width, 4);
+        assert_eq!(cropped.height, 3);
+        assert_eq!(cropped.data, frame.data);
+    }
+
+    #[test]
+    fn crop_enabled_extracts_the_sub_region() {
+        let frame = test_frame(4, 3);
+        let region = CaptureRegion {
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 2,
+        };
+        let cropped = cropped_frame_for_region(true, region, &frame).into_owned();
+        assert_eq!(cropped.width, 2);
+        assert_eq!(cropped.height, 2);
+        // Pixel (1,1): (1,1,7,9); (2,1): (2,1,7,9); (1,2): (1,2,7,9); (2,2): (2,2,7,9)
+        assert_eq!(
+            cropped.data,
+            vec![1, 1, 7, 9, 2, 1, 7, 9, 1, 2, 7, 9, 2, 2, 7, 9]
+        );
+    }
+
+    #[test]
+    fn crop_enabled_falls_back_for_invalid_region() {
+        let frame = test_frame(4, 3);
+        // Region fully outside the frame -> clamped to empty -> passthrough.
+        let region = CaptureRegion {
+            x: 100,
+            y: 100,
+            width: 2,
+            height: 2,
+        };
+        let cropped = cropped_frame_for_region(true, region, &frame);
+        assert!(matches!(cropped, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(cropped.width, 4);
+        assert_eq!(cropped.height, 3);
+    }
+
+    // ── region_from_pixel_points ──────────────────────────────────
+
+    #[test]
+    fn drag_region_normalizes_the_drag_direction() {
+        // Dragging bottom-right vs top-left must yield the same region.
+        let a = region_from_pixel_points(100.0, 50.0, 500.0, 400.0, 1920, 1080);
+        let b = region_from_pixel_points(500.0, 400.0, 100.0, 50.0, 1920, 1080);
+        assert_eq!(a, b);
+        assert_eq!(a.x, 100);
+        assert_eq!(a.y, 50);
+        assert_eq!(a.width, 400);
+        assert_eq!(a.height, 350);
+    }
+
+    #[test]
+    fn drag_region_clamps_to_the_monitor_bounds() {
+        let region = region_from_pixel_points(-50.0, -20.0, 3000.0, 2000.0, 1920, 1080);
+        assert_eq!(region.x, 0);
+        assert_eq!(region.y, 0);
+        assert_eq!(region.width, 1920);
+        assert_eq!(region.height, 1080);
+    }
+
+    #[test]
+    fn drag_region_is_even_aligned() {
+        let region = region_from_pixel_points(10.0, 10.0, 413.0, 313.0, 1920, 1080);
+        assert_eq!(region.width % 2, 0);
+        assert_eq!(region.height % 2, 0);
+    }
+
+    #[test]
+    fn drag_region_rejects_degenerate_surfaces() {
+        let region = region_from_pixel_points(0.0, 0.0, 10.0, 10.0, 1, 1);
+        assert!(region.is_empty());
     }
 }
