@@ -22,7 +22,6 @@ if [[ ! -d "$APP" ]]; then
   exit 1
 fi
 
-KEYCHAIN="rivulet-release.keychain"
 KEYCHAIN_PATH="$HOME/Library/Keychains/rivulet-release.keychain-db"
 CERT="/tmp/rivulet-cert.p12"
 
@@ -34,10 +33,23 @@ security unlock-keychain -p temp "$KEYCHAIN_PATH"
 security import "$CERT" -k "$KEYCHAIN_PATH" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
 security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k temp "$KEYCHAIN_PATH"
 
-# Scope codesign to the throwaway keychain. On newer macOS the freshly
-# imported identity is not found via the default search list, which makes
-# `codesign --sign` fail with "<name>: no identity found".
-codesign --keychain "$KEYCHAIN_PATH" --force --options runtime --sign "$IDENTITY" --timestamp "$APP"
+# Resolve the signing identity. `codesign --sign <name>` matches the
+# identity's common name, but a freshly imported self-signed certificate
+# is not reliably matched by name on macOS 26 ("<name>: no identity found").
+# Prefer the exact name match, then fall back to the first codesigning
+# identity's keychain hash, which is always stable.
+echo "Available signing identities:"
+security find-identity -v -p codesigning "$KEYCHAIN_PATH" 2>/dev/null || true
+SIGN_IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" 2>/dev/null | grep -F "\"$IDENTITY\"" | awk '{print $2}' | head -1 || true)"
+if [[ -z "$SIGN_IDENTITY" ]]; then
+  SIGN_IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" 2>/dev/null | awk '/^[[:space:]]*[0-9]+\)/{print $2; exit}')"
+fi
+if [[ -z "$SIGN_IDENTITY" ]]; then
+  echo "No codesigning identity found in $KEYCHAIN_PATH" >&2
+  exit 1
+fi
+
+codesign --keychain "$KEYCHAIN_PATH" --force --options runtime --sign "$SIGN_IDENTITY" --timestamp "$APP"
 codesign --verify --verbose=2 "$APP"
 
 echo "Codesigned: $APP"
