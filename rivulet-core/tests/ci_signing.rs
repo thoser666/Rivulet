@@ -156,8 +156,8 @@ fn signing_e2e_smoke_tests_are_wired_up() {
 
     let windows = read("packaging/windows/sign-pester.tests.ps1");
     assert!(
-        windows.contains("CreateSelfSigned"),
-        "Windows Pester tests must generate a self-signed cert"
+        windows.contains("test-cert.pfx"),
+        "Windows Pester tests must use the committed self-signed cert"
     );
     assert!(
         windows.contains("signtool verify"),

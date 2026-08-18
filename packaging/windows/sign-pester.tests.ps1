@@ -8,45 +8,22 @@ BeforeAll {
     $testRoot = Join-Path ([IO.Path]::GetTempPath()) ("rivulet-sign-tests-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 
-    Write-Host "[sign.tests] preparing self-signed certificate"
-
     # signtool only signs real PE/MSI payloads, so use a copy of cmd.exe.
     $testExe = Join-Path $testRoot "test.exe"
     Copy-Item "$env:SystemRoot\System32\cmd.exe" $testExe -Force
 
-    # Build a self-signed code-signing certificate via the .NET API instead
-    # of New-SelfSignedCertificate: the PKI cmdlets hang/crash under
-    # PowerShell 7.5 on the GitHub Windows runner
-    # (PowerShell/PowerShell#25189), which left this job stuck forever.
-    $rsa = [System.Security.Cryptography.RSA]::Create(2048)
-    $req = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
-        "CN=Rivulet Pester Test",
-        $rsa,
-        [System.Security.Cryptography.HashAlgorithmName]::SHA256,
-        [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
-    $req.CertificateExtensions.Add(
-        [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false, $false, 0, $false))
-    $codeSigningOids = [System.Security.Cryptography.OidCollection]::new()
-    $codeSigningOids.Add([System.Security.Cryptography.Oid]::new("1.3.6.1.5.5.7.3.3")) | Out-Null
-    $req.CertificateExtensions.Add(
-        [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($codeSigningOids, $false))
-    $cert = $req.CreateSelfSigned([DateTimeOffset]::Now.AddDays(-1), [DateTimeOffset]::Now.AddDays(1))
-
-    $pfxPath = Join-Path $testRoot "cert.pfx"
-    [IO.File]::WriteAllBytes(
-        $pfxPath,
-        $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, "rivulet-test"))
+    # Use the committed throwaway self-signed code-signing certificate
+    # (test-cert.pfx, password "rivulet-test"). Generating a certificate on
+    # the runner hangs: CNG key generation blocks under pwsh 7.5 on GitHub
+    # runners, so the cert is checked in with a long validity instead.
+    $pfxPath = Join-Path $PSScriptRoot "test-cert.pfx"
     $certBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($pfxPath))
 
     # Trust the certificate in the current-user root store so that
     # `signtool verify /pa` can validate the chain without elevation.
-    # Use certutil instead of Import-Certificate: installing into the root
-    # store triggers a "Security Warning" UI prompt, which hangs indefinitely
-    # on CI runners; certutil -f performs the same install without UI.
-    $cerPath = Join-Path $testRoot "cert.cer"
-    [IO.File]::WriteAllBytes(
-        $cerPath,
-        $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+    # certutil -f performs the install without a "Security Warning" UI
+    # prompt, which would hang indefinitely on CI runners.
+    $cerPath = Join-Path $PSScriptRoot "test-cert.cer"
     certutil -user -addstore -f Root $cerPath | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "certutil -addstore Root failed (exit $LASTEXITCODE)" }
 
@@ -85,8 +62,7 @@ BeforeAll {
 
 AfterAll {
     Remove-Item -Recurse -Force $testRoot -ErrorAction SilentlyContinue
-    # Root store removal is also UI-free via certutil. The signing cert
-    # itself is ephemeral (.NET in-memory) and never entered a store.
+    # Root store removal is also UI-free via certutil.
     certutil -user -delstore Root "Rivulet Pester Test" | Out-Null
 }
 

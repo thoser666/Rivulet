@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 - ci(signing-e2e): fix macOS smoke test — generate the p12 with legacy algorithms (OpenSSL 3 defaults are rejected by `security import` on macOS 26), scope `codesign` to the throwaway keychain, and sign by the identity's keychain hash (name matching is unreliable for self-signed certs)
-- ci(signing-e2e): fix Windows Pester hang — build the self-signed cert via the .NET API (`New-SelfSignedCertificate` hangs under pwsh 7.5 on the runner), trust it with `certutil` (no UI prompt), fix Pester 5 scoping, and add job timeouts; test renamed to `sign-pester.tests.ps1`
+- ci(signing-e2e): fix Windows Pester hang — CNG key generation blocks under pwsh 7.5 on the runner, so a throwaway self-signed cert is committed as a fixture instead of generated; trust it with `certutil` (no UI prompt), fix Pester 5 scoping, and add job timeouts; test renamed to `sign-pester.tests.ps1`
 - ci(security): redact signing-secret details from the beta-gate JSON/comment output (CodeQL alert #45)
 
 ## [0.19.0-alpha.1] - 2026-08-18
