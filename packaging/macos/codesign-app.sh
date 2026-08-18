@@ -23,16 +23,21 @@ if [[ ! -d "$APP" ]]; then
 fi
 
 KEYCHAIN="rivulet-release.keychain"
+KEYCHAIN_PATH="$HOME/Library/Keychains/rivulet-release.keychain-db"
 CERT="/tmp/rivulet-cert.p12"
 
 echo "$MACOS_CERT_BASE64" | base64 -D > "$CERT"
-security create-keychain -p temp "$KEYCHAIN"
-security default-keychain -s "$KEYCHAIN"
-security unlock-keychain -p temp "$KEYCHAIN"
-security import "$CERT" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
-security set-key-partition-list -S apple-tool:,apple: -s -k temp "$KEYCHAIN"
+security create-keychain -p temp "$KEYCHAIN_PATH"
+security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+security default-keychain -s "$KEYCHAIN_PATH"
+security unlock-keychain -p temp "$KEYCHAIN_PATH"
+security import "$CERT" -k "$KEYCHAIN_PATH" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k temp "$KEYCHAIN_PATH"
 
-codesign --force --options runtime --sign "$IDENTITY" --timestamp "$APP"
+# Scope codesign to the throwaway keychain. On newer macOS the freshly
+# imported identity is not found via the default search list, which makes
+# `codesign --sign` fail with "<name>: no identity found".
+codesign --keychain "$KEYCHAIN_PATH" --force --options runtime --sign "$IDENTITY" --timestamp "$APP"
 codesign --verify --verbose=2 "$APP"
 
 echo "Codesigned: $APP"

@@ -11,7 +11,7 @@ APP_ROOT="$(mktemp -d)"
 APP="$APP_ROOT/RivuletTest.app"
 
 cleanup() {
-  security delete-keychain rivulet-release.keychain >/dev/null 2>&1 || true
+  security delete-keychain "$HOME/Library/Keychains/rivulet-release.keychain-db" >/dev/null 2>&1 || true
   rm -rf "$CERT_DIR" "$APP_ROOT"
 }
 trap cleanup EXIT
