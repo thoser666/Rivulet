@@ -1,7 +1,7 @@
 # Pester tests for packaging/windows/sign.ps1.
 #
 # Run with Pester 5 on a Windows host with the Windows SDK installed:
-#   Invoke-Pester packaging/windows/sign.tests.ps1
+#   Invoke-Pester packaging/windows/sign-pester.tests.ps1
 
 BeforeAll {
     $signScript = Join-Path $PSScriptRoot "sign.ps1"
@@ -14,16 +14,28 @@ BeforeAll {
     $testExe = Join-Path $testRoot "test.exe"
     Copy-Item "$env:SystemRoot\System32\cmd.exe" $testExe -Force
 
-    # Self-signed code signing certificate (current-user store, no admin).
-    $cert = New-SelfSignedCertificate `
-        -Subject "CN=Rivulet Pester Test" `
-        -Type CodeSigningCert `
-        -CertStoreLocation Cert:\CurrentUser\My `
-        -KeyExportPolicy Exportable `
-        -NotAfter (Get-Date).AddDays(1)
+    # Build a self-signed code-signing certificate via the .NET API instead
+    # of New-SelfSignedCertificate: the PKI cmdlets hang/crash under
+    # PowerShell 7.5 on the GitHub Windows runner
+    # (PowerShell/PowerShell#25189), which left this job stuck forever.
+    $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+    $req = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+        "CN=Rivulet Pester Test",
+        $rsa,
+        [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+        [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+    $req.CertificateExtensions.Add(
+        [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new($false, $false, 0, $false))
+    $codeSigningOids = [System.Security.Cryptography.OidCollection]::new()
+    $codeSigningOids.Add([System.Security.Cryptography.Oid]::new("1.3.6.1.5.5.7.3.3")) | Out-Null
+    $req.CertificateExtensions.Add(
+        [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($codeSigningOids, $false))
+    $cert = $req.CreateSelfSigned([DateTimeOffset]::Now.AddDays(-1), [DateTimeOffset]::Now.AddDays(1))
+
     $pfxPath = Join-Path $testRoot "cert.pfx"
-    $password = ConvertTo-SecureString -String "rivulet-test" -Force -AsPlainText
-    Export-PfxCertificate -Cert $cert -FilePath $pfxPath -Password $password | Out-Null
+    [IO.File]::WriteAllBytes(
+        $pfxPath,
+        $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, "rivulet-test"))
     $certBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($pfxPath))
 
     # Trust the certificate in the current-user root store so that
@@ -32,7 +44,9 @@ BeforeAll {
     # store triggers a "Security Warning" UI prompt, which hangs indefinitely
     # on CI runners; certutil -f performs the same install without UI.
     $cerPath = Join-Path $testRoot "cert.cer"
-    Export-Certificate -Cert $cert -FilePath $cerPath | Out-Null
+    [IO.File]::WriteAllBytes(
+        $cerPath,
+        $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
     certutil -user -addstore -f Root $cerPath | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "certutil -addstore Root failed (exit $LASTEXITCODE)" }
 
@@ -71,10 +85,8 @@ BeforeAll {
 
 AfterAll {
     Remove-Item -Recurse -Force $testRoot -ErrorAction SilentlyContinue
-    Get-ChildItem Cert:\CurrentUser\My |
-        Where-Object { $_.Subject -eq "CN=Rivulet Pester Test" } |
-        Remove-Item -ErrorAction SilentlyContinue
-    # Root store removal is also UI-free via certutil.
+    # Root store removal is also UI-free via certutil. The signing cert
+    # itself is ephemeral (.NET in-memory) and never entered a store.
     certutil -user -delstore Root "Rivulet Pester Test" | Out-Null
 }
 

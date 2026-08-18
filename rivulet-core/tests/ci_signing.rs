@@ -142,7 +142,7 @@ fn caller_workflows_use_the_reusable_workflow() {
 fn signing_e2e_smoke_tests_are_wired_up() {
     let workflow = read(".github/workflows/signing-e2e.yml");
     assert!(
-        workflow.contains("packaging/windows/sign.tests.ps1"),
+        workflow.contains("packaging/windows/sign-pester.tests.ps1"),
         "e2e workflow must run the Windows Pester tests"
     );
     assert!(
@@ -154,9 +154,9 @@ fn signing_e2e_smoke_tests_are_wired_up() {
         "e2e workflow must smoke-test the macOS signer"
     );
 
-    let windows = read("packaging/windows/sign.tests.ps1");
+    let windows = read("packaging/windows/sign-pester.tests.ps1");
     assert!(
-        windows.contains("New-SelfSignedCertificate"),
+        windows.contains("CreateSelfSigned"),
         "Windows Pester tests must generate a self-signed cert"
     );
     assert!(

@@ -26,7 +26,7 @@ jobs:
 
       - name: Test code signing with Pester
         shell: pwsh
-        run: Invoke-Pester packaging/windows/sign.tests.ps1 -Output Detailed
+        run: Invoke-Pester packaging/windows/sign-pester.tests.ps1 -Output Detailed
 
   macos:
     name: macOS codesign (self-signed)
