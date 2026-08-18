@@ -375,23 +375,50 @@ mod tests {
 
     #[test]
     fn element_names_per_codec_h264() {
-        assert_eq!(VideoEncoder::Nvenc.element_name_for_codec(VideoCodec::H264), "nvh264enc");
-        assert_eq!(VideoEncoder::QuickSync.element_name_for_codec(VideoCodec::H264), "qsvh264enc");
-        assert_eq!(VideoEncoder::Amf.element_name_for_codec(VideoCodec::H264), "amfh264enc");
-        assert_eq!(VideoEncoder::Software.element_name_for_codec(VideoCodec::H264), "x264enc");
+        assert_eq!(
+            VideoEncoder::Nvenc.element_name_for_codec(VideoCodec::H264),
+            "nvh264enc"
+        );
+        assert_eq!(
+            VideoEncoder::QuickSync.element_name_for_codec(VideoCodec::H264),
+            "qsvh264enc"
+        );
+        assert_eq!(
+            VideoEncoder::Amf.element_name_for_codec(VideoCodec::H264),
+            "amfh264enc"
+        );
+        assert_eq!(
+            VideoEncoder::Software.element_name_for_codec(VideoCodec::H264),
+            "x264enc"
+        );
     }
 
     #[test]
     fn element_names_per_codec_h265() {
-        assert_eq!(VideoEncoder::Nvenc.element_name_for_codec(VideoCodec::H265), "nvh265enc");
-        assert_eq!(VideoEncoder::QuickSync.element_name_for_codec(VideoCodec::H265), "qsvh265enc");
-        assert_eq!(VideoEncoder::Amf.element_name_for_codec(VideoCodec::H265), "amfh265enc");
-        assert_eq!(VideoEncoder::Software.element_name_for_codec(VideoCodec::H265), "x265enc");
+        assert_eq!(
+            VideoEncoder::Nvenc.element_name_for_codec(VideoCodec::H265),
+            "nvh265enc"
+        );
+        assert_eq!(
+            VideoEncoder::QuickSync.element_name_for_codec(VideoCodec::H265),
+            "qsvh265enc"
+        );
+        assert_eq!(
+            VideoEncoder::Amf.element_name_for_codec(VideoCodec::H265),
+            "amfh265enc"
+        );
+        assert_eq!(
+            VideoEncoder::Software.element_name_for_codec(VideoCodec::H265),
+            "x265enc"
+        );
     }
 
     #[test]
     fn element_names_per_codec_vp9() {
-        assert_eq!(VideoEncoder::Software.element_name_for_codec(VideoCodec::VP9), "vp9enc");
+        assert_eq!(
+            VideoEncoder::Software.element_name_for_codec(VideoCodec::VP9),
+            "vp9enc"
+        );
     }
 
     #[test]

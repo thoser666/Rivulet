@@ -1486,6 +1486,10 @@ impl eframe::App for RivuletApp {
             let any_recording = self.is_recording;
             #[cfg(target_os = "windows")]
             let any_recording = self.is_windows_recording;
+            // macOS has no recording engine yet; keep the hotkey block
+            // compiling with a constant so the GUI builds on all platforms.
+            #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+            let any_recording = false;
 
             // F9: Toggle recording
             if i.key_pressed(self.hotkeys.record) {
