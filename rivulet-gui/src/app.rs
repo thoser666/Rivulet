@@ -109,6 +109,54 @@ enum UpdateUi {
     Error(String),
 }
 
+// --- Main navigation ---
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum AppView {
+    #[default]
+    Record,
+    Mixer,
+    Scenes,
+    Stream,
+    Assistant,
+    Settings,
+}
+
+impl AppView {
+    /// All views in sidebar display order.
+    fn all() -> &'static [AppView] {
+        &[
+            AppView::Record,
+            AppView::Mixer,
+            AppView::Scenes,
+            AppView::Stream,
+            AppView::Assistant,
+            AppView::Settings,
+        ]
+    }
+
+    /// i18n key for the sidebar label and the view heading.
+    fn nav_key(self) -> &'static str {
+        match self {
+            AppView::Record => "nav_record",
+            AppView::Mixer => "nav_mixer",
+            AppView::Scenes => "nav_scenes",
+            AppView::Stream => "nav_stream",
+            AppView::Assistant => "nav_assistant",
+            AppView::Settings => "nav_settings",
+        }
+    }
+
+    /// Milestone of still-planned views (`None` once implemented).
+    fn planned_milestone(self) -> Option<&'static str> {
+        match self {
+            AppView::Scenes => Some("M2"),
+            AppView::Stream => Some("M3"),
+            AppView::Assistant => Some("M9"),
+            _ => None,
+        }
+    }
+}
+
 // --- Hotkey configuration ---
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct HotkeyConfig {
@@ -424,6 +472,10 @@ pub struct RivuletApp {
     #[serde(skip)]
     region_preview_error: Option<String>,
 
+    // Main navigation
+    #[serde(skip)]
+    view: AppView,
+
     // Auto-update
     #[serde(skip)]
     update_ui: std::sync::Arc<std::sync::Mutex<UpdateUi>>,
@@ -568,6 +620,8 @@ impl Default for RivuletApp {
             region_preview: None,
             region_editor_dims: None,
             region_preview_error: None,
+
+            view: AppView::Record,
 
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
@@ -1620,30 +1674,49 @@ impl eframe::App for RivuletApp {
             });
         });
 
+        egui::Panel::left("nav_panel")
+            .resizable(false)
+            .show(ui, |ui| {
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new("Rivulet").strong().size(18.0));
+                ui.separator();
+                ui.add_space(6.0);
+                for view in AppView::all() {
+                    if ui
+                        .selectable_label(self.view == *view, self.tr(view.nav_key()))
+                        .clicked()
+                    {
+                        self.view = *view;
+                    }
+                }
+            });
+
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.heading("Welcome to Rivulet");
+            ui.heading(self.tr(self.view.nav_key()));
             ui.separator();
 
-            // Hotkey hints
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(format!(
-                        "Hotkeys: {} [{}] · {} [{}] · {} [{}]",
-                        self.tr("hotkey_record"),
-                        self.hotkeys.label_for("record"),
-                        self.tr("hotkey_pause"),
-                        self.hotkeys.label_for("pause"),
-                        self.tr("hotkey_mute"),
-                        self.hotkeys.label_for("mute"),
-                    ))
-                    .small()
-                    .color(egui::Color32::GRAY),
-                );
-            });
-            ui.add_space(4.0);
+            // Hotkey hints (only on the Record view)
+            if self.view == AppView::Record {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Hotkeys: {} [{}] · {} [{}] · {} [{}]",
+                            self.tr("hotkey_record"),
+                            self.hotkeys.label_for("record"),
+                            self.tr("hotkey_pause"),
+                            self.hotkeys.label_for("pause"),
+                            self.tr("hotkey_mute"),
+                            self.hotkeys.label_for("mute"),
+                        ))
+                        .small()
+                        .color(egui::Color32::GRAY),
+                    );
+                });
+                ui.add_space(4.0);
+            }
 
             #[cfg(target_os = "windows")]
-            {
+            if self.view == AppView::Record {
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new(self.tr("windows_screen_recording")).strong());
                 if self.is_windows_recording {
@@ -1877,398 +1950,424 @@ impl eframe::App for RivuletApp {
                         Some(self.tr_fmt("recording_no_frames", &[secs.to_string()]));
                 }
 
-                ui.add_space(10.0);
-                ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
+                if self.view == AppView::Record {
+                    ui.add_space(10.0);
+                    ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
 
-                if self.is_recording {
-                    ui.horizontal(|ui| {
-                        let elapsed = self.record_started.elapsed().as_secs();
-                        ui.label(
-                            egui::RichText::new(
-                                self.tr_fmt("recording_in_progress", &[elapsed.to_string()]),
-                            )
-                            .color(egui::Color32::LIGHT_RED),
-                        );
-                        if ui
-                            .button(format!("⏹ {}", self.tr("stop_recording")))
-                            .clicked()
-                        {
-                            self.stop_linux_recording();
-                            self.is_paused = false;
-                            self.is_muted = false;
+                    if self.is_recording {
+                        ui.horizontal(|ui| {
+                            let elapsed = self.record_started.elapsed().as_secs();
+                            ui.label(
+                                egui::RichText::new(
+                                    self.tr_fmt("recording_in_progress", &[elapsed.to_string()]),
+                                )
+                                .color(egui::Color32::LIGHT_RED),
+                            );
+                            if ui
+                                .button(format!("⏹ {}", self.tr("stop_recording")))
+                                .clicked()
+                            {
+                                self.stop_linux_recording();
+                                self.is_paused = false;
+                                self.is_muted = false;
+                            }
+                            let pause_label = if self.is_paused {
+                                "▶ Resume"
+                            } else {
+                                "⏸ Pause"
+                            };
+                            if ui.button(pause_label).clicked() {
+                                self.is_paused = !self.is_paused;
+                            }
+                            let mute_label = if self.is_muted {
+                                "🔊 Unmute"
+                            } else {
+                                "🔇 Mute"
+                            };
+                            if ui.button(mute_label).clicked() {
+                                self.is_muted = !self.is_muted;
+                            }
+                        });
+                        if self.is_paused {
+                            ui.label(
+                                egui::RichText::new(self.tr("paused"))
+                                    .color(egui::Color32::YELLOW)
+                                    .strong(),
+                            );
                         }
-                        let pause_label = if self.is_paused {
-                            "▶ Resume"
-                        } else {
-                            "⏸ Pause"
-                        };
-                        if ui.button(pause_label).clicked() {
-                            self.is_paused = !self.is_paused;
+                        if self.is_muted {
+                            ui.label(
+                                egui::RichText::new(self.tr("muted"))
+                                    .color(egui::Color32::LIGHT_BLUE)
+                                    .strong(),
+                            );
                         }
-                        let mute_label = if self.is_muted {
-                            "🔊 Unmute"
-                        } else {
-                            "🔇 Mute"
-                        };
-                        if ui.button(mute_label).clicked() {
-                            self.is_muted = !self.is_muted;
-                        }
-                    });
-                    if self.is_paused {
-                        ui.label(
-                            egui::RichText::new(self.tr("paused"))
-                                .color(egui::Color32::YELLOW)
-                                .strong(),
-                        );
-                    }
-                    if self.is_muted {
-                        ui.label(
-                            egui::RichText::new(self.tr("muted"))
-                                .color(egui::Color32::LIGHT_BLUE)
-                                .strong(),
-                        );
-                    }
-                    ui.label(self.metrics_line());
-                } else {
-                    ui.horizontal(|ui| {
-                        ui.label(self.tr("source"));
-                        egui::ComboBox::from_id_salt("linux_monitor_select")
-                            .selected_text(
-                                self.selected_monitor_idx
-                                    .and_then(|idx| self.monitors.get(idx))
-                                    .map(|m| {
-                                        format!(
-                                            "{} ({}x{})",
-                                            m.name().unwrap_or_default(),
-                                            m.width().unwrap_or(0),
-                                            m.height().unwrap_or(0)
-                                        )
-                                    })
-                                    .unwrap_or_else(|| self.tr("select_monitor").to_string()),
-                            )
-                            .show_ui(ui, |ui| {
-                                for (i, m) in self.monitors.iter().enumerate() {
-                                    if ui
-                                        .selectable_label(
-                                            self.selected_monitor_idx == Some(i),
+                        ui.label(self.metrics_line());
+                    } else {
+                        ui.horizontal(|ui| {
+                            ui.label(self.tr("source"));
+                            egui::ComboBox::from_id_salt("linux_monitor_select")
+                                .selected_text(
+                                    self.selected_monitor_idx
+                                        .and_then(|idx| self.monitors.get(idx))
+                                        .map(|m| {
                                             format!(
                                                 "{} ({}x{})",
                                                 m.name().unwrap_or_default(),
                                                 m.width().unwrap_or(0),
                                                 m.height().unwrap_or(0)
-                                            ),
-                                        )
-                                        .clicked()
-                                    {
-                                        if self.selected_monitor_idx != Some(i) {
-                                            self.region = CaptureRegion::full(
-                                                m.width().unwrap_or(0),
-                                                m.height().unwrap_or(0),
-                                            );
+                                            )
+                                        })
+                                        .unwrap_or_else(|| self.tr("select_monitor").to_string()),
+                                )
+                                .show_ui(ui, |ui| {
+                                    for (i, m) in self.monitors.iter().enumerate() {
+                                        if ui
+                                            .selectable_label(
+                                                self.selected_monitor_idx == Some(i),
+                                                format!(
+                                                    "{} ({}x{})",
+                                                    m.name().unwrap_or_default(),
+                                                    m.width().unwrap_or(0),
+                                                    m.height().unwrap_or(0)
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            if self.selected_monitor_idx != Some(i) {
+                                                self.region = CaptureRegion::full(
+                                                    m.width().unwrap_or(0),
+                                                    m.height().unwrap_or(0),
+                                                );
+                                            }
+                                            self.selected_monitor_idx = Some(i);
+                                            self.selected_window_idx = None;
                                         }
-                                        self.selected_monitor_idx = Some(i);
-                                        self.selected_window_idx = None;
                                     }
-                                }
-                            });
-                        egui::ComboBox::from_id_salt("linux_window_select")
-                            .selected_text(
-                                self.selected_window_idx
-                                    .and_then(|idx| self.windows.get(idx))
-                                    .map(|w| {
-                                        format!(
-                                            "\"{}\" ({}x{})",
-                                            w.title().unwrap_or_default(),
-                                            w.width().unwrap_or(0),
-                                            w.height().unwrap_or(0)
-                                        )
-                                    })
-                                    .unwrap_or_else(|| self.tr("select_window").to_string()),
-                            )
-                            .show_ui(ui, |ui| {
-                                for (i, w) in self.windows.iter().enumerate() {
-                                    if ui
-                                        .selectable_label(
-                                            self.selected_window_idx == Some(i),
+                                });
+                            egui::ComboBox::from_id_salt("linux_window_select")
+                                .selected_text(
+                                    self.selected_window_idx
+                                        .and_then(|idx| self.windows.get(idx))
+                                        .map(|w| {
                                             format!(
                                                 "\"{}\" ({}x{})",
                                                 w.title().unwrap_or_default(),
                                                 w.width().unwrap_or(0),
                                                 w.height().unwrap_or(0)
-                                            ),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.selected_window_idx = Some(i);
-                                        self.selected_monitor_idx = None;
-                                        // Region capture only applies to
-                                        // monitor capture; window capture is
-                                        // always full-window.
-                                        self.region_enabled = false;
+                                            )
+                                        })
+                                        .unwrap_or_else(|| self.tr("select_window").to_string()),
+                                )
+                                .show_ui(ui, |ui| {
+                                    for (i, w) in self.windows.iter().enumerate() {
+                                        if ui
+                                            .selectable_label(
+                                                self.selected_window_idx == Some(i),
+                                                format!(
+                                                    "\"{}\" ({}x{})",
+                                                    w.title().unwrap_or_default(),
+                                                    w.width().unwrap_or(0),
+                                                    w.height().unwrap_or(0)
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.selected_window_idx = Some(i);
+                                            self.selected_monitor_idx = None;
+                                            // Region capture only applies to
+                                            // monitor capture; window capture is
+                                            // always full-window.
+                                            self.region_enabled = false;
+                                        }
                                     }
-                                }
-                            });
-                        if ui
-                            .button("🔄")
-                            .on_hover_text(self.tr("refresh_sources"))
-                            .clicked()
-                        {
-                            self.refresh_linux_sources();
-                        }
-                    });
-                    // Region capture controls (monitor capture only)
-                    ui.horizontal(|ui| {
-                        let monitor_selected = self.selected_monitor_idx.is_some();
-                        let capture_region_label = self.tr("capture_region");
-                        ui.add_enabled(
-                            monitor_selected,
-                            egui::Checkbox::new(&mut self.region_enabled, capture_region_label),
-                        );
+                                });
+                            if ui
+                                .button("🔄")
+                                .on_hover_text(self.tr("refresh_sources"))
+                                .clicked()
+                            {
+                                self.refresh_linux_sources();
+                            }
+                        });
+                        // Region capture controls (monitor capture only)
+                        ui.horizontal(|ui| {
+                            let monitor_selected = self.selected_monitor_idx.is_some();
+                            let capture_region_label = self.tr("capture_region");
+                            ui.add_enabled(
+                                monitor_selected,
+                                egui::Checkbox::new(&mut self.region_enabled, capture_region_label),
+                            );
+                            if ui
+                                .add_enabled(
+                                    monitor_selected && self.region_enabled,
+                                    egui::Button::new(self.tr("region_select")),
+                                )
+                                .clicked()
+                            {
+                                self.open_region_editor(ui.ctx());
+                            }
+                            if monitor_selected && self.region_enabled {
+                                let r = self.region;
+                                ui.label(self.tr_fmt(
+                                    "region_status",
+                                    &[
+                                        r.width.to_string(),
+                                        r.height.to_string(),
+                                        r.x.to_string(),
+                                        r.y.to_string(),
+                                    ],
+                                ));
+                            }
+                        });
+                        let source_selected = self.selected_monitor_idx.is_some()
+                            || self.selected_window_idx.is_some();
+                        ui.horizontal(|ui| {
+                            ui.label(self.tr("video_codec"));
+                            egui::ComboBox::from_id_salt("linux_codec_select")
+                                .selected_text(self.selected_codec.label())
+                                .show_ui(ui, |ui| {
+                                    for codec in [
+                                        rivulet_core::VideoCodec::H264,
+                                        rivulet_core::VideoCodec::H265,
+                                        rivulet_core::VideoCodec::VP9,
+                                    ] {
+                                        if ui
+                                            .selectable_label(
+                                                self.selected_codec == codec,
+                                                codec.label(),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.selected_codec = codec;
+                                        }
+                                    }
+                                });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(self.tr("recording_preset"));
+                            egui::ComboBox::from_id_salt("linux_preset_select")
+                                .selected_text(self.selected_preset.label)
+                                .show_ui(ui, |ui| {
+                                    for preset in rivulet_core::RecordingPreset::all() {
+                                        if ui
+                                            .selectable_label(
+                                                self.selected_preset == *preset,
+                                                preset.label,
+                                            )
+                                            .clicked()
+                                        {
+                                            self.selected_preset = *preset;
+                                        }
+                                    }
+                                });
+                        });
                         if ui
                             .add_enabled(
-                                monitor_selected && self.region_enabled,
-                                egui::Button::new(self.tr("region_select")),
+                                source_selected,
+                                egui::Button::new(format!(
+                                    "⏺ {} [{}]",
+                                    self.tr("start_recording"),
+                                    self.hotkeys.label_for("record")
+                                )),
                             )
                             .clicked()
                         {
-                            self.open_region_editor(ui.ctx());
+                            self.start_linux_recording();
                         }
-                        if monitor_selected && self.region_enabled {
-                            let r = self.region;
-                            ui.label(self.tr_fmt(
-                                "region_status",
-                                &[
-                                    r.width.to_string(),
-                                    r.height.to_string(),
-                                    r.x.to_string(),
-                                    r.y.to_string(),
-                                ],
-                            ));
-                        }
-                    });
-                    let source_selected =
-                        self.selected_monitor_idx.is_some() || self.selected_window_idx.is_some();
-                    ui.horizontal(|ui| {
-                        ui.label(self.tr("video_codec"));
-                        egui::ComboBox::from_id_salt("linux_codec_select")
-                            .selected_text(self.selected_codec.label())
-                            .show_ui(ui, |ui| {
-                                for codec in [
-                                    rivulet_core::VideoCodec::H264,
-                                    rivulet_core::VideoCodec::H265,
-                                    rivulet_core::VideoCodec::VP9,
-                                ] {
-                                    if ui
-                                        .selectable_label(
-                                            self.selected_codec == codec,
-                                            codec.label(),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.selected_codec = codec;
-                                    }
-                                }
-                            });
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(self.tr("recording_preset"));
-                        egui::ComboBox::from_id_salt("linux_preset_select")
-                            .selected_text(self.selected_preset.label)
-                            .show_ui(ui, |ui| {
-                                for preset in rivulet_core::RecordingPreset::all() {
-                                    if ui
-                                        .selectable_label(
-                                            self.selected_preset == *preset,
-                                            preset.label,
-                                        )
-                                        .clicked()
-                                    {
-                                        self.selected_preset = *preset;
-                                    }
-                                }
-                            });
-                    });
-                    if ui
-                        .add_enabled(
-                            source_selected,
-                            egui::Button::new(format!(
-                                "⏺ {} [{}]",
-                                self.tr("start_recording"),
-                                self.hotkeys.label_for("record")
-                            )),
-                        )
-                        .clicked()
-                    {
-                        self.start_linux_recording();
+                    }
+                    if let Some(status) = &self.record_status {
+                        ui.colored_label(egui::Color32::LIGHT_BLUE, status);
                     }
                 }
-                if let Some(status) = &self.record_status {
-                    ui.colored_label(egui::Color32::LIGHT_BLUE, status);
-                }
 
-                ui.separator();
-                ui.label(egui::RichText::new(self.tr("audio_mixer")).strong());
-
-                ui.horizontal(|ui| {
-                    if self.audio_preview {
-                        if ui.button(format!("⏹ {}", self.tr("stop_audio"))).clicked() {
-                            self.stop_audio_capture();
-                        }
-                        ui.label(
-                            egui::RichText::new(format!("● {}", self.tr("running")))
-                                .color(egui::Color32::LIGHT_GREEN),
-                        );
-                    } else if ui.button(format!("▶ {}", self.tr("start_audio"))).clicked() {
-                        self.start_audio_capture();
-                    }
-                });
-
-                let mut sys = self.capture_system;
-                let mut mic = self.capture_mic;
-                let mut separate = self.separate_tracks;
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut sys, self.tr("system_audio"));
-                    ui.checkbox(&mut mic, self.tr("microphone"));
+                if self.view == AppView::Mixer {
                     ui.separator();
-                    ui.checkbox(&mut separate, self.tr("separate_tracks"));
-                });
-                if sys != self.capture_system || mic != self.capture_mic {
-                    self.capture_system = sys;
-                    self.capture_mic = mic;
-                    if self.audio_preview {
-                        self.start_audio_capture();
-                    }
-                }
-                if separate != self.separate_tracks {
-                    self.separate_tracks = separate;
-                    if self.audio_preview {
-                        self.start_audio_capture();
-                    }
-                }
+                    ui.label(egui::RichText::new(self.tr("audio_mixer")).strong());
 
-                let mut sys_vol = self.system_volume;
-                let mut mic_vol = self.mic_volume;
-                if ui
-                    .add(egui::Slider::new(&mut sys_vol, 0.0..=1.0).text(self.tr("system_audio")))
-                    .changed()
-                {
-                    self.system_volume = sys_vol;
-                    if let Some(audio) = &self.audio {
-                        audio.set_system_volume(sys_vol);
-                    }
-                }
-                if ui
-                    .add(egui::Slider::new(&mut mic_vol, 0.0..=1.0).text(self.tr("microphone")))
-                    .changed()
-                {
-                    self.mic_volume = mic_vol;
-                    if let Some(audio) = &self.audio {
-                        audio.set_mic_volume(mic_vol);
-                    }
-                }
+                    ui.horizontal(|ui| {
+                        if self.audio_preview {
+                            if ui.button(format!("⏹ {}", self.tr("stop_audio"))).clicked() {
+                                self.stop_audio_capture();
+                            }
+                            ui.label(
+                                egui::RichText::new(format!("● {}", self.tr("running")))
+                                    .color(egui::Color32::LIGHT_GREEN),
+                            );
+                        } else if ui.button(format!("▶ {}", self.tr("start_audio"))).clicked() {
+                            self.start_audio_capture();
+                        }
+                    });
 
-                ui.separator();
-                ui.label(egui::RichText::new("Filter").strong());
-                let mut sys_ns = self.system_filters.noise_suppression;
-                let mut sys_cmp = self.system_filters.compressor;
-                let mut sys_lim = self.system_filters.limiter;
-                let mut mic_ns = self.mic_filters.noise_suppression;
-                let mut mic_cmp = self.mic_filters.compressor;
-                let mut mic_lim = self.mic_filters.limiter;
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut sys_ns, "NS (System)");
-                    ui.checkbox(&mut sys_cmp, "Cmp (System)");
-                    ui.checkbox(&mut sys_lim, "Lim (System)");
-                });
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut mic_ns, "NS (Mikro)");
-                    ui.checkbox(&mut mic_cmp, "Cmp (Mikro)");
-                    ui.checkbox(&mut mic_lim, "Lim (Mikro)");
-                });
-                let filters_changed = sys_ns != self.system_filters.noise_suppression
-                    || sys_cmp != self.system_filters.compressor
-                    || sys_lim != self.system_filters.limiter
-                    || mic_ns != self.mic_filters.noise_suppression
-                    || mic_cmp != self.mic_filters.compressor
-                    || mic_lim != self.mic_filters.limiter;
-                if filters_changed {
-                    self.system_filters.noise_suppression = sys_ns;
-                    self.system_filters.compressor = sys_cmp;
-                    self.system_filters.limiter = sys_lim;
-                    self.mic_filters.noise_suppression = mic_ns;
-                    self.mic_filters.compressor = mic_cmp;
-                    self.mic_filters.limiter = mic_lim;
-                    if self.audio_preview {
-                        self.start_audio_capture();
+                    let mut sys = self.capture_system;
+                    let mut mic = self.capture_mic;
+                    let mut separate = self.separate_tracks;
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut sys, self.tr("system_audio"));
+                        ui.checkbox(&mut mic, self.tr("microphone"));
+                        ui.separator();
+                        ui.checkbox(&mut separate, self.tr("separate_tracks"));
+                    });
+                    if sys != self.capture_system || mic != self.capture_mic {
+                        self.capture_system = sys;
+                        self.capture_mic = mic;
+                        if self.audio_preview {
+                            self.start_audio_capture();
+                        }
                     }
-                }
-
-                ui.separator();
-                ui.label(egui::RichText::new("Monitoring").strong());
-                let mut sys_mon = self.system_monitor;
-                let mut mic_mon = self.mic_monitor;
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut sys_mon, "System abhören");
-                    ui.checkbox(&mut mic_mon, "Mikrofon abhören");
-                });
-                if sys_mon != self.system_monitor || mic_mon != self.mic_monitor {
-                    self.system_monitor = sys_mon;
-                    self.mic_monitor = mic_mon;
-                    if self.audio_preview {
-                        self.start_audio_capture();
+                    if separate != self.separate_tracks {
+                        self.separate_tracks = separate;
+                        if self.audio_preview {
+                            self.start_audio_capture();
+                        }
                     }
-                }
-                let mut mon_vol = self.monitor_volume;
-                if ui
-                    .add(egui::Slider::new(&mut mon_vol, 0.0..=1.0).text("Monitoring-Lautstärke"))
-                    .changed()
-                {
-                    self.monitor_volume = mon_vol;
-                    if let Some(audio) = &self.audio {
-                        audio.set_monitor_volume(mon_vol);
+
+                    let mut sys_vol = self.system_volume;
+                    let mut mic_vol = self.mic_volume;
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut sys_vol, 0.0..=1.0)
+                                .text(self.tr("system_audio")),
+                        )
+                        .changed()
+                    {
+                        self.system_volume = sys_vol;
+                        if let Some(audio) = &self.audio {
+                            audio.set_system_volume(sys_vol);
+                        }
                     }
-                }
+                    if ui
+                        .add(egui::Slider::new(&mut mic_vol, 0.0..=1.0).text(self.tr("microphone")))
+                        .changed()
+                    {
+                        self.mic_volume = mic_vol;
+                        if let Some(audio) = &self.audio {
+                            audio.set_mic_volume(mic_vol);
+                        }
+                    }
 
-                let peak = f32::from_bits(self.audio_peak.load(Ordering::SeqCst)).clamp(0.0, 1.0);
-                let db = if peak > 0.0 {
-                    20.0 * peak.log10()
-                } else {
-                    -96.0
-                };
-                ui.add(
-                    egui::ProgressBar::new(peak)
-                        .desired_width(f32::INFINITY)
-                        .text(self.tr_fmt("peak", &[format!("{db:.1}")])),
-                );
+                    ui.separator();
+                    ui.label(egui::RichText::new("Filter").strong());
+                    let mut sys_ns = self.system_filters.noise_suppression;
+                    let mut sys_cmp = self.system_filters.compressor;
+                    let mut sys_lim = self.system_filters.limiter;
+                    let mut mic_ns = self.mic_filters.noise_suppression;
+                    let mut mic_cmp = self.mic_filters.compressor;
+                    let mut mic_lim = self.mic_filters.limiter;
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut sys_ns, "NS (System)");
+                        ui.checkbox(&mut sys_cmp, "Cmp (System)");
+                        ui.checkbox(&mut sys_lim, "Lim (System)");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut mic_ns, "NS (Mikro)");
+                        ui.checkbox(&mut mic_cmp, "Cmp (Mikro)");
+                        ui.checkbox(&mut mic_lim, "Lim (Mikro)");
+                    });
+                    let filters_changed = sys_ns != self.system_filters.noise_suppression
+                        || sys_cmp != self.system_filters.compressor
+                        || sys_lim != self.system_filters.limiter
+                        || mic_ns != self.mic_filters.noise_suppression
+                        || mic_cmp != self.mic_filters.compressor
+                        || mic_lim != self.mic_filters.limiter;
+                    if filters_changed {
+                        self.system_filters.noise_suppression = sys_ns;
+                        self.system_filters.compressor = sys_cmp;
+                        self.system_filters.limiter = sys_lim;
+                        self.mic_filters.noise_suppression = mic_ns;
+                        self.mic_filters.compressor = mic_cmp;
+                        self.mic_filters.limiter = mic_lim;
+                        if self.audio_preview {
+                            self.start_audio_capture();
+                        }
+                    }
 
-                if let Some(status) = &self.audio_status {
-                    ui.colored_label(egui::Color32::RED, status);
-                }
-                if let Some(warning) = &self.audio_warning {
-                    ui.colored_label(egui::Color32::YELLOW, warning);
+                    ui.separator();
+                    ui.label(egui::RichText::new("Monitoring").strong());
+                    let mut sys_mon = self.system_monitor;
+                    let mut mic_mon = self.mic_monitor;
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut sys_mon, "System abhören");
+                        ui.checkbox(&mut mic_mon, "Mikrofon abhören");
+                    });
+                    if sys_mon != self.system_monitor || mic_mon != self.mic_monitor {
+                        self.system_monitor = sys_mon;
+                        self.mic_monitor = mic_mon;
+                        if self.audio_preview {
+                            self.start_audio_capture();
+                        }
+                    }
+                    let mut mon_vol = self.monitor_volume;
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut mon_vol, 0.0..=1.0)
+                                .text("Monitoring-Lautstärke"),
+                        )
+                        .changed()
+                    {
+                        self.monitor_volume = mon_vol;
+                        if let Some(audio) = &self.audio {
+                            audio.set_monitor_volume(mon_vol);
+                        }
+                    }
+
+                    let peak =
+                        f32::from_bits(self.audio_peak.load(Ordering::SeqCst)).clamp(0.0, 1.0);
+                    let db = if peak > 0.0 {
+                        20.0 * peak.log10()
+                    } else {
+                        -96.0
+                    };
+                    ui.add(
+                        egui::ProgressBar::new(peak)
+                            .desired_width(f32::INFINITY)
+                            .text(self.tr_fmt("peak", &[format!("{db:.1}")])),
+                    );
+
+                    if let Some(status) = &self.audio_status {
+                        ui.colored_label(egui::Color32::RED, status);
+                    }
+                    if let Some(warning) = &self.audio_warning {
+                        ui.colored_label(egui::Color32::YELLOW, warning);
+                    }
                 }
             }
 
+            #[cfg(not(target_os = "linux"))]
+            if self.view == AppView::Mixer {
+                ui.add_space(20.0);
+                ui.label(self.tr("mixer_unavailable"));
+            }
+
             #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-            {
+            if self.view == AppView::Record {
                 ui.add_space(20.0);
                 ui.label(egui::RichText::new("ℹ️ Screen Recording Feature").strong());
                 ui.label("This feature is currently only available on Linux and Windows.");
             }
 
-            ui.separator();
-            ui.label(egui::RichText::new(self.tr("updates")).strong());
-            ui.horizontal(|ui| {
-                ui.label(self.tr_fmt(
-                    "updates_current_version",
-                    &[env!("CARGO_PKG_VERSION").to_string()],
-                ));
-                if ui.button(self.tr("check_for_updates")).clicked() {
-                    self.update_check_clicked = true;
-                }
-            });
-            self.draw_update_status(ui);
-            self.handle_update_actions(ui.ctx().clone());
+            // Placeholder views (still-planned milestones)
+            if let Some(milestone) = self.view.planned_milestone() {
+                ui.add_space(20.0);
+                ui.label(self.tr_fmt("section_planned", &[milestone.to_string()]));
+            }
+
+            // Settings: updates section
+            if self.view == AppView::Settings {
+                ui.separator();
+                ui.label(egui::RichText::new(self.tr("updates")).strong());
+                ui.horizontal(|ui| {
+                    ui.label(self.tr_fmt(
+                        "updates_current_version",
+                        &[env!("CARGO_PKG_VERSION").to_string()],
+                    ));
+                    if ui.button(self.tr("check_for_updates")).clicked() {
+                        self.update_check_clicked = true;
+                    }
+                });
+                self.draw_update_status(ui);
+                self.handle_update_actions(ui.ctx().clone());
+            }
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 ui.horizontal(|ui| {
@@ -2511,6 +2610,34 @@ fn format_bytes(bytes: u64) -> String {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicBool;
+
+    // ── navigation (AppView) ───────────────────────────────────────
+
+    #[test]
+    fn app_view_defaults_to_record() {
+        assert_eq!(AppView::default(), AppView::Record);
+    }
+
+    #[test]
+    fn app_view_all_views_cover_sidebar_and_headings() {
+        // Every view must map to an i18n key (sidebar label + heading),
+        // and every key must be non-empty.
+        for view in AppView::all() {
+            assert!(!view.nav_key().is_empty(), "view has no nav key");
+        }
+        assert_eq!(AppView::all().len(), 6);
+    }
+
+    #[test]
+    fn placeholder_views_expose_their_milestone() {
+        assert_eq!(AppView::Scenes.planned_milestone(), Some("M2"));
+        assert_eq!(AppView::Stream.planned_milestone(), Some("M3"));
+        assert_eq!(AppView::Assistant.planned_milestone(), Some("M9"));
+        // Implemented views have no milestone banner.
+        assert_eq!(AppView::Record.planned_milestone(), None);
+        assert_eq!(AppView::Mixer.planned_milestone(), None);
+        assert_eq!(AppView::Settings.planned_milestone(), None);
+    }
 
     // ── format_bytes ──────────────────────────────────────────────
 

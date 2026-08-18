@@ -200,6 +200,15 @@ impl Locale {
                 ("update_error", "Update check failed: {0}"),
                 // Language picker
                 ("language", "Language"),
+                // Navigation
+                ("nav_record", "Record"),
+                ("nav_mixer", "Mixer"),
+                ("nav_scenes", "Scenes"),
+                ("nav_stream", "Stream"),
+                ("nav_assistant", "Assistant"),
+                ("nav_settings", "Settings"),
+                ("section_planned", "This section is planned for milestone {0}."),
+                ("mixer_unavailable", "The audio mixer is currently only available on Linux."),
             ],
             Locale::De => &[
                 // Recording
@@ -293,6 +302,15 @@ impl Locale {
                 ("update_error", "Update-Check fehlgeschlagen: {0}"),
                 // Language picker
                 ("language", "Sprache"),
+                // Navigation
+                ("nav_record", "Aufnehmen"),
+                ("nav_mixer", "Mixer"),
+                ("nav_scenes", "Szenen"),
+                ("nav_stream", "Stream"),
+                ("nav_assistant", "Assistant"),
+                ("nav_settings", "Einstellungen"),
+                ("section_planned", "Dieser Bereich ist für Meilenstein {0} geplant."),
+                ("mixer_unavailable", "Der Audio-Mixer ist derzeit nur unter Linux verfügbar."),
             ],
         }
     }
@@ -372,6 +390,38 @@ mod tests {
         assert_eq!(
             en_keys, de_keys,
             "every locale must define exactly the same keys in the same order"
+        );
+    }
+
+    #[test]
+    fn navigation_keys_translate_in_both_locales() {
+        assert_eq!(Locale::En.tr("nav_record"), "Record");
+        assert_eq!(Locale::De.tr("nav_record"), "Aufnehmen");
+        assert_eq!(Locale::En.tr("nav_mixer"), "Mixer");
+        assert_eq!(Locale::De.tr("nav_mixer"), "Mixer");
+        assert_eq!(Locale::En.tr("nav_scenes"), "Scenes");
+        assert_eq!(Locale::De.tr("nav_scenes"), "Szenen");
+        assert_eq!(Locale::En.tr("nav_stream"), "Stream");
+        assert_eq!(Locale::De.tr("nav_stream"), "Stream");
+        assert_eq!(Locale::En.tr("nav_assistant"), "Assistant");
+        assert_eq!(Locale::De.tr("nav_assistant"), "Assistant");
+        assert_eq!(Locale::En.tr("nav_settings"), "Settings");
+        assert_eq!(Locale::De.tr("nav_settings"), "Einstellungen");
+    }
+
+    #[test]
+    fn planned_section_and_mixer_unavailable_translate() {
+        let en = Locale::En.tr_fmt("section_planned", &["M9".to_string()]);
+        assert_eq!(en, "This section is planned for milestone M9.");
+        let de = Locale::De.tr_fmt("section_planned", &["M2".to_string()]);
+        assert_eq!(de, "Dieser Bereich ist für Meilenstein M2 geplant.");
+        assert_eq!(
+            Locale::En.tr("mixer_unavailable"),
+            "The audio mixer is currently only available on Linux."
+        );
+        assert_eq!(
+            Locale::De.tr("mixer_unavailable"),
+            "Der Audio-Mixer ist derzeit nur unter Linux verfügbar."
         );
     }
 }
