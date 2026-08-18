@@ -367,6 +367,17 @@ def evaluate(repo, ref, token):
     return results, verdict
 
 
+def redact_sensitive_details(results):
+    """Return a copy of results with sensitive details removed for logging/output."""
+    redacted = []
+    for r in results:
+        item = dict(r)
+        if item.get("criterion") == 4 and item.get("status") == "not-met":
+            item["detail"] = "required signing secrets are not fully configured"
+        redacted.append(item)
+    return redacted
+
+
 def render_comment(results, verdict, repo, ref):
     """Return a compact Markdown dashboard for the step summary / an issue."""
     lines = ["## 🚦 Beta-Gate status", ""]
@@ -402,6 +413,7 @@ def main():
     token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
 
     results, verdict = evaluate(repo, ref, token)
+    safe_results = redact_sensitive_details(results)
     not_met = [r for r in results if r["status"] == "not-met"]
     unverified = [r for r in results if r["status"] == "unverified"]
     failed = bool(fail and (not_met or unverified))
@@ -416,13 +428,13 @@ def main():
                     "repo": repo,
                     "ref": ref,
                     "token_present": bool(token),
-                    "criteria": results,
+                    "criteria": safe_results,
                 },
                 indent=2,
             )
         )
     elif as_comment:
-        print(render_comment(results, verdict, repo, ref))
+        print(render_comment(safe_results, verdict, repo, ref))
     else:
         for r in results:
             print(f"[{r['criterion']}] {r['name']}: {r['status']} — {r['detail']}")
