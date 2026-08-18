@@ -13,19 +13,11 @@ BeforeAll {
     Copy-Item "$env:SystemRoot\System32\cmd.exe" $testExe -Force
 
     # Use the committed throwaway self-signed code-signing certificate
-    # (test-cert.pfx, password "rivulet-test"). Generating a certificate on
-    # the runner hangs: CNG key generation blocks under pwsh 7.5 on GitHub
-    # runners, so the cert is checked in with a long validity instead.
+    # (test-cert.pfx, password "rivulet-test"). Generating a certificate or
+    # trusting one in the root store hangs on GitHub runners, so the cert is
+    # checked in and the signature is verified without chain trust below.
     $pfxPath = Join-Path $PSScriptRoot "test-cert.pfx"
     $certBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($pfxPath))
-
-    # Trust the certificate in the current-user root store so that
-    # `signtool verify /pa` can validate the chain without elevation.
-    # certutil -f performs the install without a "Security Warning" UI
-    # prompt, which would hang indefinitely on CI runners.
-    $cerPath = Join-Path $PSScriptRoot "test-cert.cer"
-    certutil -user -addstore -f Root $cerPath | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "certutil -addstore Root failed (exit $LASTEXITCODE)" }
 
     Write-Host "[sign.tests] locating signtool.exe"
 
@@ -62,8 +54,6 @@ BeforeAll {
 
 AfterAll {
     Remove-Item -Recurse -Force $testRoot -ErrorAction SilentlyContinue
-    # Root store removal is also UI-free via certutil.
-    certutil -user -delstore Root "Rivulet Pester Test" | Out-Null
 }
 
 Describe "sign.ps1" {
@@ -98,11 +88,14 @@ Describe "sign.ps1" {
         It "applies a verifiable Authenticode signature" {
             $env:WINDOWS_CERT_BASE64 = $certBase64
             $env:WINDOWS_CERT_PASSWORD = "rivulet-test"
+            $env:WINDOWS_TIMESTAMP_URL = "off"
             $result = Invoke-SignScript -Paths @($testExe)
             $result.ExitCode | Should -Be 0
 
-            & $signtoolPath verify /pa /v $testExe | Out-Null
-            $LASTEXITCODE | Should -Be 0
+            $sig = Get-AuthenticodeSignature $testExe
+            $sig.Status | Should -Not -Be "NotSigned"
+            $sig.Status | Should -Not -Be "HashMismatch"
+            $sig.SignerCertificate.Subject | Should -Match "Rivulet Pester Test"
         }
     }
 }

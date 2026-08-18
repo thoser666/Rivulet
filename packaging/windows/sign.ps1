@@ -41,11 +41,20 @@ Write-Host "Using signtool: $signtoolPath"
 $certPath = Join-Path $env:TEMP "rivulet-cert.pfx"
 [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($certBase64))
 
+# WINDOWS_TIMESTAMP_URL overrides the RFC3161 timestamp server. Set it to
+# "off" to skip timestamping (the smoke test does this to stay offline).
+$timestampUrl = $env:WINDOWS_TIMESTAMP_URL
+if ($null -eq $timestampUrl) { $timestampUrl = "http://timestamp.digicert.com" }
+
 try {
   foreach ($file in $Paths) {
     $resolved = (Resolve-Path $file).Path
     Write-Host "Signing: $resolved"
-    & $signtoolPath sign /f $certPath /p $certPassword /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $resolved
+    if ($timestampUrl -eq "off") {
+      & $signtoolPath sign /f $certPath /p $certPassword /fd SHA256 $resolved
+    } else {
+      & $signtoolPath sign /f $certPath /p $certPassword /fd SHA256 /tr $timestampUrl /td SHA256 $resolved
+    }
     if ($LASTEXITCODE -ne 0) { throw "Signing failed: $resolved" }
   }
 } finally {

@@ -160,7 +160,7 @@ fn signing_e2e_smoke_tests_are_wired_up() {
         "Windows Pester tests must use the committed self-signed cert"
     );
     assert!(
-        windows.contains("signtool verify"),
+        windows.contains("Get-AuthenticodeSignature"),
         "Windows Pester tests must verify the signature"
     );
 
