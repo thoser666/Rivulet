@@ -96,10 +96,16 @@ enum UpdateUi {
     Checking,
     UpToDate,
     Available(rivulet_updater::UpdateInfo),
-    Downloading(String),
-    Downloaded(std::path::PathBuf),
-    Installing,
-    Installed,
+    Downloading {
+        name: String,
+        version: String,
+    },
+    Downloaded {
+        path: std::path::PathBuf,
+        version: String,
+    },
+    Installing(String),
+    Installed(String),
     Error(String),
 }
 
@@ -1147,10 +1153,17 @@ impl RivuletApp {
     }
 
     /// Download the update asset in the background.
-    fn spawn_update_download(&mut self, ctx: egui::Context, asset: rivulet_updater::Asset) {
+    fn spawn_update_download(
+        &mut self,
+        ctx: egui::Context,
+        asset: rivulet_updater::Asset,
+        version: String,
+    ) {
         let shared = std::sync::Arc::clone(&self.update_ui);
-        *shared.lock().unwrap_or_else(|e| e.into_inner()) =
-            UpdateUi::Downloading(asset.name.clone());
+        *shared.lock().unwrap_or_else(|e| e.into_inner()) = UpdateUi::Downloading {
+            name: asset.name.clone(),
+            version: version.clone(),
+        };
         self.download_progress.store(0, Ordering::Relaxed);
         self.download_total = asset.size;
         let progress = Arc::clone(&self.download_progress);
@@ -1158,7 +1171,10 @@ impl RivuletApp {
             let dest = std::env::temp_dir().join(&asset.name);
             let result = rivulet_updater::download_asset_with_progress(&asset, &dest, progress);
             let state = match result {
-                Ok(()) => UpdateUi::Downloaded(dest),
+                Ok(()) => UpdateUi::Downloaded {
+                    path: dest,
+                    version,
+                },
                 Err(e) => UpdateUi::Error(e.to_string()),
             };
             *shared.lock().unwrap_or_else(|e| e.into_inner()) = state;
@@ -1168,14 +1184,14 @@ impl RivuletApp {
 
     /// Launch the platform installer and (on Windows/Linux) quit the app so
     /// the running files can be replaced.
-    fn spawn_update_install(&self, ctx: egui::Context, path: std::path::PathBuf) {
+    fn spawn_update_install(&self, ctx: egui::Context, path: std::path::PathBuf, version: String) {
         let shared = std::sync::Arc::clone(&self.update_ui);
-        *shared.lock().unwrap_or_else(|e| e.into_inner()) = UpdateUi::Installing;
+        *shared.lock().unwrap_or_else(|e| e.into_inner()) = UpdateUi::Installing(version.clone());
         std::thread::spawn(move || {
             let result = rivulet_updater::install_asset(&path);
             let quit_after = result.as_ref().map(|quit| *quit).unwrap_or(false);
             let state = match result {
-                Ok(_) => UpdateUi::Installed,
+                Ok(_) => UpdateUi::Installed(version),
                 Err(e) => UpdateUi::Error(e.to_string()),
             };
             *shared.lock().unwrap_or_else(|e| e.into_inner()) = state;
@@ -1216,8 +1232,9 @@ impl RivuletApp {
                     ui.hyperlink_to(self.tr("update_release_notes"), &info.html_url);
                 });
             }
-            UpdateUi::Downloading(name) => {
+            UpdateUi::Downloading { name, version } => {
                 ui.label(self.tr_fmt("update_downloading", &[name]));
+                ui.label(self.tr_fmt("updates_new_version", &[version]));
                 let downloaded = self.download_progress.load(Ordering::Relaxed);
                 let fraction = if self.download_total > 0 {
                     (downloaded as f32 / self.download_total as f32).min(1.0)
@@ -1232,26 +1249,29 @@ impl RivuletApp {
                 );
                 ui.ctx().request_repaint();
             }
-            UpdateUi::Downloaded(_path) => {
+            UpdateUi::Downloaded { version, .. } => {
                 ui.colored_label(
                     egui::Color32::LIGHT_GREEN,
                     self.tr("update_downloaded").to_string(),
                 );
+                ui.label(self.tr_fmt("updates_new_version", &[version]));
                 if ui.button(self.tr("update_install")).clicked() {
                     self.update_install_clicked = true;
                 }
             }
-            UpdateUi::Installing => {
+            UpdateUi::Installing(version) => {
                 ui.horizontal(|ui| {
                     ui.spinner();
                     ui.label(self.tr("update_installing"));
                 });
+                ui.label(self.tr_fmt("updates_new_version", &[version]));
             }
-            UpdateUi::Installed => {
+            UpdateUi::Installed(version) => {
                 ui.colored_label(
                     egui::Color32::LIGHT_GREEN,
                     self.tr("update_installed_restart").to_string(),
                 );
+                ui.label(self.tr_fmt("updates_new_version", &[version]));
             }
             UpdateUi::Error(err) => {
                 ui.colored_label(egui::Color32::RED, self.tr_fmt("update_error", &[err]));
@@ -1423,7 +1443,7 @@ impl RivuletApp {
     fn handle_update_actions(&mut self, ctx: egui::Context) {
         let busy = matches!(
             self.update_ui_snapshot(),
-            UpdateUi::Checking | UpdateUi::Downloading(_) | UpdateUi::Installing
+            UpdateUi::Checking | UpdateUi::Downloading { .. } | UpdateUi::Installing(_)
         );
 
         if !self.update_auto_checked && !busy {
@@ -1438,14 +1458,14 @@ impl RivuletApp {
             self.update_download_clicked = false;
             if let UpdateUi::Available(info) = self.update_ui_snapshot() {
                 if let Some(asset) = info.asset {
-                    self.spawn_update_download(ctx.clone(), asset);
+                    self.spawn_update_download(ctx.clone(), asset, info.version);
                 }
             }
         }
         if self.update_install_clicked && !busy {
             self.update_install_clicked = false;
-            if let UpdateUi::Downloaded(path) = self.update_ui_snapshot() {
-                self.spawn_update_install(ctx, path);
+            if let UpdateUi::Downloaded { path, version } = self.update_ui_snapshot() {
+                self.spawn_update_install(ctx, path, version);
             }
         }
     }
