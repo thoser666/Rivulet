@@ -85,10 +85,10 @@ pub fn check_for_update_from(
         source.api_base, source.owner, source.repo
     );
     let response = ureq::get(&url)
-        .set("Accept", "application/vnd.github+json")
-        .set("User-Agent", "rivulet-updater")
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "rivulet-updater")
         .call()?;
-    let body = response.into_string()?;
+    let body = response.into_body().read_to_string()?;
     parse_latest_release(body.as_bytes(), current)
 }
 
@@ -140,9 +140,9 @@ fn asset_matches_platform(name: &str, os: &str) -> bool {
 /// Download the asset to `dest`.
 pub fn download_asset(asset: &Asset, dest: &Path) -> anyhow::Result<()> {
     let response = ureq::get(&asset.url)
-        .set("User-Agent", "rivulet-updater")
+        .header("User-Agent", "rivulet-updater")
         .call()?;
-    let mut reader = response.into_reader();
+    let mut reader = response.into_body().into_reader();
     let mut file = std::fs::File::create(dest)?;
     std::io::copy(&mut reader, &mut file)?;
     Ok(())
@@ -155,9 +155,9 @@ pub fn download_asset_with_progress(
     progress: Arc<AtomicU64>,
 ) -> anyhow::Result<()> {
     let response = ureq::get(&asset.url)
-        .set("User-Agent", "rivulet-updater")
+        .header("User-Agent", "rivulet-updater")
         .call()?;
-    let mut reader = response.into_reader();
+    let mut reader = response.into_body().into_reader();
     let mut file = std::fs::File::create(dest)?;
     let mut buf = [0u8; 64 * 1024];
     loop {
