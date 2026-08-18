@@ -10,9 +10,10 @@ use gstreamer as gst;
 use serde::{Deserialize, Serialize};
 
 /// Supported video codecs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum VideoCodec {
     /// H.264 / AVC — universal compatibility, required for RTMP/FLV streaming.
+    #[default]
     H264,
     /// H.265 / HEVC — better compression, supported by MP4 muxer.
     H265,
@@ -52,12 +53,6 @@ impl VideoCodec {
     /// RTMP/RTMPS.
     pub fn is_rtmp_compatible(self) -> bool {
         matches!(self, Self::H264)
-    }
-}
-
-impl Default for VideoCodec {
-    fn default() -> Self {
-        Self::H264
     }
 }
 
