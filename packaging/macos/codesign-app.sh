@@ -40,6 +40,8 @@ security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k temp "$KEY
 # identity's keychain hash, which is always stable.
 echo "Available signing identities:"
 security find-identity -v -p codesigning "$KEYCHAIN_PATH" 2>/dev/null || true
+echo "All imported identities (any policy):"
+security find-identity -v "$KEYCHAIN_PATH" 2>/dev/null || true
 SIGN_IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" 2>/dev/null | grep -F "\"$IDENTITY\"" | awk '{print $2}' | head -1 || true)"
 if [[ -z "$SIGN_IDENTITY" ]]; then
   SIGN_IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" 2>/dev/null | awk '/^[[:space:]]*[0-9]+\)/{print $2; exit}')"

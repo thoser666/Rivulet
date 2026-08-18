@@ -18,11 +18,13 @@ trap cleanup EXIT
 
 # 1. Self-signed code signing certificate wrapped in a p12.
 #
-# The certificate needs the Code Signing extended key usage: without it
-# `security find-identity -p codesigning` reports "0 valid identities"
-# and codesign refuses to use it.
+# The certificate needs the Code Signing extended key usage and must be a
+# leaf (CA:FALSE) cert: `openssl req -x509` defaults to CA:TRUE, and a CA
+# cert is never listed by `security find-identity -p codesigning` ("0 valid
+# identities").
 openssl req -x509 -newkey rsa:2048 -keyout "$CERT_DIR/key.pem" \
   -out "$CERT_DIR/cert.pem" -days 1 -nodes -subj "/CN=Rivulet CI Test" \
+  -addext "basicConstraints=critical,CA:FALSE" \
   -addext "extendedKeyUsage=codeSigning" -addext "keyUsage=digitalSignature"
 # Export with -legacy so the p12 uses RC2-40-CBC + SHA-1 MAC — the exact
 # format Keychain Access produces. macOS 26 `security import` rejects
