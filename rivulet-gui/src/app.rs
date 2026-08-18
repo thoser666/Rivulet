@@ -1,5 +1,6 @@
 #![allow(unused_imports, dead_code, unused_variables)]
 
+use crate::theme;
 use eframe::egui;
 use rivulet_core::{CaptureRegion, Locale, RivuletEngine, SkippedFilter};
 use std::sync::{
@@ -314,6 +315,13 @@ pub struct RivuletApp {
     /// User interface language. Persisted across sessions.
     locale: Locale,
 
+    /// User color-scheme preference. Persisted across sessions.
+    theme: theme::ThemePreference,
+    /// Last theme applied to the egui context (so `ui()` only reapplies on
+    /// change). Not persisted.
+    #[serde(skip)]
+    theme_applied: Option<theme::ThemePreference>,
+
     // Linux Fields
     #[cfg(target_os = "linux")]
     #[serde(skip)]
@@ -515,6 +523,8 @@ impl Default for RivuletApp {
         Self {
             engine: Default::default(),
             locale: Locale::default(),
+            theme: theme::ThemePreference::default(),
+            theme_applied: None,
 
             #[cfg(target_os = "linux")]
             is_previewing: false,
@@ -1261,6 +1271,7 @@ impl RivuletApp {
 
     /// Render the auto-update section below the recording controls.
     fn draw_update_status(&mut self, ui: &mut egui::Ui) {
+        let colors = theme::StatusColors::for_ui(ui);
         match self.update_ui_snapshot() {
             UpdateUi::Checking => {
                 ui.horizontal(|ui| {
@@ -1269,11 +1280,11 @@ impl RivuletApp {
                 });
             }
             UpdateUi::UpToDate => {
-                ui.colored_label(egui::Color32::LIGHT_GREEN, self.tr("update_up_to_date"));
+                ui.colored_label(colors.success, self.tr("update_up_to_date"));
             }
             UpdateUi::Available(info) => {
                 ui.colored_label(
-                    egui::Color32::YELLOW,
+                    colors.warning,
                     self.tr_fmt("update_available", &[info.version]),
                 );
                 if let Some(asset) = &info.asset {
@@ -1304,10 +1315,7 @@ impl RivuletApp {
                 ui.ctx().request_repaint();
             }
             UpdateUi::Downloaded { version, .. } => {
-                ui.colored_label(
-                    egui::Color32::LIGHT_GREEN,
-                    self.tr("update_downloaded").to_string(),
-                );
+                ui.colored_label(colors.success, self.tr("update_downloaded").to_string());
                 ui.label(self.tr_fmt("updates_new_version", &[version]));
                 if ui.button(self.tr("update_install")).clicked() {
                     self.update_install_clicked = true;
@@ -1322,13 +1330,13 @@ impl RivuletApp {
             }
             UpdateUi::Installed(version) => {
                 ui.colored_label(
-                    egui::Color32::LIGHT_GREEN,
+                    colors.success,
                     self.tr("update_installed_restart").to_string(),
                 );
                 ui.label(self.tr_fmt("updates_new_version", &[version]));
             }
             UpdateUi::Error(err) => {
-                ui.colored_label(egui::Color32::RED, self.tr_fmt("update_error", &[err]));
+                ui.colored_label(colors.error, self.tr_fmt("update_error", &[err]));
             }
             UpdateUi::Idle => {}
         }
@@ -1356,8 +1364,9 @@ impl RivuletApp {
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
+                let colors = theme::StatusColors::for_ui(ui);
                 if let Some(err) = &error {
-                    ui.colored_label(egui::Color32::RED, err);
+                    ui.colored_label(colors.error, err);
                 }
                 ui.label(self.tr("region_hint"));
                 let Some((full_width, full_height)) = dims else {
@@ -1392,7 +1401,7 @@ impl RivuletApp {
                             ui.painter().rect_stroke(
                                 drag_rect,
                                 0.0,
-                                egui::Stroke::new(2.0, egui::Color32::RED),
+                                egui::Stroke::new(2.0, colors.error),
                                 egui::StrokeKind::Middle,
                             );
                         }
@@ -1401,7 +1410,7 @@ impl RivuletApp {
                         ui.painter().rect_stroke(
                             sel_rect,
                             0.0,
-                            egui::Stroke::new(2.0, egui::Color32::RED),
+                            egui::Stroke::new(2.0, colors.error),
                             egui::StrokeKind::Middle,
                         );
                     }
@@ -1535,6 +1544,10 @@ impl RivuletApp {
             no_frame_timeout,
             ..Default::default()
         };
+        // Apply the persisted color scheme immediately, so the first frame
+        // already renders with the right theme.
+        app.theme.apply(&cc.egui_ctx);
+        app.theme_applied = Some(app.theme);
         #[cfg(target_os = "windows")]
         {
             app.refresh_capture_sources();
@@ -1555,6 +1568,14 @@ impl eframe::App for RivuletApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // ── Hotkey handling ────────────────────────────────────────
         let ctx = ui.ctx();
+
+        // Apply the color scheme on startup and whenever the user changes
+        // it in Settings.
+        if self.theme_applied != Some(self.theme) {
+            self.theme.apply(ctx);
+            self.theme_applied = Some(self.theme);
+        }
+
         ctx.input(|i| {
             #[cfg(target_os = "linux")]
             let any_recording = self.is_recording;
@@ -1692,6 +1713,7 @@ impl eframe::App for RivuletApp {
             });
 
         egui::CentralPanel::default().show(ui, |ui| {
+            let colors = theme::StatusColors::for_ui(ui);
             ui.heading(self.tr(self.view.nav_key()));
             ui.separator();
 
@@ -1709,7 +1731,7 @@ impl eframe::App for RivuletApp {
                             self.hotkeys.label_for("mute"),
                         ))
                         .small()
-                        .color(egui::Color32::GRAY),
+                        .color(colors.hint),
                     );
                 });
                 ui.add_space(4.0);
@@ -1746,14 +1768,14 @@ impl eframe::App for RivuletApp {
                     if self.is_paused {
                         ui.label(
                             egui::RichText::new(self.tr("paused"))
-                                .color(egui::Color32::YELLOW)
+                                .color(colors.warning)
                                 .strong(),
                         );
                     }
                     if self.is_muted {
                         ui.label(
                             egui::RichText::new(self.tr("muted"))
-                                .color(egui::Color32::LIGHT_BLUE)
+                                .color(colors.info)
                                 .strong(),
                         );
                     }
@@ -1914,7 +1936,7 @@ impl eframe::App for RivuletApp {
                     };
                 }
                 if let Some(err) = &self.last_error {
-                    ui.colored_label(egui::Color32::RED, err);
+                    ui.colored_label(colors.error, err);
                 }
             }
 
@@ -1961,7 +1983,7 @@ impl eframe::App for RivuletApp {
                                 egui::RichText::new(
                                     self.tr_fmt("recording_in_progress", &[elapsed.to_string()]),
                                 )
-                                .color(egui::Color32::LIGHT_RED),
+                                .color(colors.active),
                             );
                             if ui
                                 .button(format!("⏹ {}", self.tr("stop_recording")))
@@ -1991,14 +2013,14 @@ impl eframe::App for RivuletApp {
                         if self.is_paused {
                             ui.label(
                                 egui::RichText::new(self.tr("paused"))
-                                    .color(egui::Color32::YELLOW)
+                                    .color(colors.warning)
                                     .strong(),
                             );
                         }
                         if self.is_muted {
                             ui.label(
                                 egui::RichText::new(self.tr("muted"))
-                                    .color(egui::Color32::LIGHT_BLUE)
+                                    .color(colors.info)
                                     .strong(),
                             );
                         }
@@ -2177,7 +2199,7 @@ impl eframe::App for RivuletApp {
                         }
                     }
                     if let Some(status) = &self.record_status {
-                        ui.colored_label(egui::Color32::LIGHT_BLUE, status);
+                        ui.colored_label(colors.info, status);
                     }
                 }
 
@@ -2192,7 +2214,7 @@ impl eframe::App for RivuletApp {
                             }
                             ui.label(
                                 egui::RichText::new(format!("● {}", self.tr("running")))
-                                    .color(egui::Color32::LIGHT_GREEN),
+                                    .color(colors.success),
                             );
                         } else if ui.button(format!("▶ {}", self.tr("start_audio"))).clicked() {
                             self.start_audio_capture();
@@ -2325,10 +2347,10 @@ impl eframe::App for RivuletApp {
                     );
 
                     if let Some(status) = &self.audio_status {
-                        ui.colored_label(egui::Color32::RED, status);
+                        ui.colored_label(colors.error, status);
                     }
                     if let Some(warning) = &self.audio_warning {
-                        ui.colored_label(egui::Color32::YELLOW, warning);
+                        ui.colored_label(colors.warning, warning);
                     }
                 }
             }
@@ -2367,6 +2389,20 @@ impl eframe::App for RivuletApp {
                 });
                 self.draw_update_status(ui);
                 self.handle_update_actions(ui.ctx().clone());
+
+                // Settings: appearance (color scheme)
+                ui.separator();
+                ui.label(egui::RichText::new(self.tr("theme")).strong());
+                ui.horizontal(|ui| {
+                    for preference in theme::ThemePreference::all() {
+                        if ui
+                            .selectable_label(self.theme == *preference, self.tr(preference.key()))
+                            .clicked()
+                        {
+                            self.theme = *preference;
+                        }
+                    }
+                });
             }
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {

@@ -209,6 +209,11 @@ impl Locale {
                 ("nav_settings", "Settings"),
                 ("section_planned", "This section is planned for milestone {0}."),
                 ("mixer_unavailable", "The audio mixer is currently only available on Linux."),
+                // Theme
+                ("theme", "Theme"),
+                ("theme_system", "System"),
+                ("theme_dark", "Dark"),
+                ("theme_light", "Light"),
             ],
             Locale::De => &[
                 // Recording
@@ -311,6 +316,11 @@ impl Locale {
                 ("nav_settings", "Einstellungen"),
                 ("section_planned", "Dieser Bereich ist für Meilenstein {0} geplant."),
                 ("mixer_unavailable", "Der Audio-Mixer ist derzeit nur unter Linux verfügbar."),
+                // Theme
+                ("theme", "Farbschema"),
+                ("theme_system", "System"),
+                ("theme_dark", "Dunkel"),
+                ("theme_light", "Hell"),
             ],
         }
     }
@@ -407,6 +417,18 @@ mod tests {
         assert_eq!(Locale::De.tr("nav_assistant"), "Assistant");
         assert_eq!(Locale::En.tr("nav_settings"), "Settings");
         assert_eq!(Locale::De.tr("nav_settings"), "Einstellungen");
+    }
+
+    #[test]
+    fn theme_keys_translate_in_both_locales() {
+        assert_eq!(Locale::En.tr("theme"), "Theme");
+        assert_eq!(Locale::De.tr("theme"), "Farbschema");
+        assert_eq!(Locale::En.tr("theme_system"), "System");
+        assert_eq!(Locale::De.tr("theme_system"), "System");
+        assert_eq!(Locale::En.tr("theme_dark"), "Dark");
+        assert_eq!(Locale::De.tr("theme_dark"), "Dunkel");
+        assert_eq!(Locale::En.tr("theme_light"), "Light");
+        assert_eq!(Locale::De.tr("theme_light"), "Hell");
     }
 
     #[test]

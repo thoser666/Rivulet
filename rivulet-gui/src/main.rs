@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod theme;
 
 use crate::app::{parse_no_frame_timeout, RivuletApp, DEFAULT_NO_FRAME_TIMEOUT};
 use eframe::egui::{self, IconData};
