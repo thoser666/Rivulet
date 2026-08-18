@@ -97,6 +97,9 @@ See [Roadmap](#-roadmap) for detailed timeline.
 > **Goal:** OBS core parity *and* the architectural strengths OBS cannot offer (determinism, embeddability, modernity).
 > **Strategy:** First a stable, embeddable engine, then scenes & streaming, then the differentiation features (M6–M9) as product identity.
 
+> **UI development:** new features should follow the navigation structure and
+> egui conventions in [`docs/ui-design.md`](docs/ui-design.md).
+
 ### Milestone overview
 
 | Milestone | Focus | Status |
