@@ -73,6 +73,9 @@ jobs:
             dpokidov/imagemagick:7.1.2-12@sha256:87998ec1b8127b2f73f626f74f7b05e8827f9d7605fa52da5370588f7e53cee1 \
             -c 'apt-get update -qq && apt-get install -y -qq python3 git >/dev/null 2>&1 && git config --global --add safe.directory /work && bash scripts/generate-assets.sh && python3 scripts/check-assets.py'
 
+      - name: Check status color contrast (WCAG AA)
+        run: python3 scripts/check-theme-contrast.py
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
