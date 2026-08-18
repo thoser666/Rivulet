@@ -414,8 +414,8 @@ def main():
 
     results, verdict = evaluate(repo, ref, token)
     safe_results = redact_sensitive_details(results)
-    not_met = [r for r in results if r["status"] == "not-met"]
-    unverified = [r for r in results if r["status"] == "unverified"]
+    not_met = [r for r in safe_results if r["status"] == "not-met"]
+    unverified = [r for r in safe_results if r["status"] == "unverified"]
     failed = bool(fail and (not_met or unverified))
 
     if as_json:
@@ -436,7 +436,7 @@ def main():
     elif as_comment:
         print(render_comment(safe_results, verdict, repo, ref))
     else:
-        for r in results:
+        for r in safe_results:
             print(f"[{r['criterion']}] {r['name']}: {r['status']} — {r['detail']}")
         print(
             f"\nVerdict: {verdict} ({len(not_met)} not met, "
