@@ -401,6 +401,9 @@ pub struct RivuletApp {
     // Codec selection
     #[serde(skip)]
     selected_codec: rivulet_core::VideoCodec,
+    // Preset selection
+    #[serde(skip)]
+    selected_preset: rivulet_core::RecordingPreset,
 }
 
 impl Default for RivuletApp {
@@ -521,6 +524,7 @@ impl Default for RivuletApp {
             is_paused: false,
             is_muted: false,
             selected_codec: rivulet_core::VideoCodec::default(),
+            selected_preset: rivulet_core::RecordingPreset::default(),
         }
     }
 }
@@ -568,6 +572,7 @@ impl RivuletApp {
             };
 
             self.engine.set_video_codec(self.selected_codec);
+            self.engine.set_preset(self.selected_preset);
             self.engine.start_local_recording(path.clone());
 
             let (sender, receiver) = mpsc::channel();
@@ -616,6 +621,7 @@ impl RivuletApp {
             };
 
             self.engine.set_video_codec(self.selected_codec);
+            self.engine.set_preset(self.selected_preset);
             self.engine.start_local_recording(path.clone());
 
             let (sender, receiver) = mpsc::channel();
@@ -859,6 +865,7 @@ impl RivuletApp {
             self.start_audio_capture();
         }
         self.engine.set_video_codec(self.selected_codec);
+        self.engine.set_preset(self.selected_preset);
         self.engine.set_audio_enabled(self.audio_preview);
         self.engine
             .set_separate_audio_tracks(self.separate_tracks && self.audio_preview);
@@ -890,7 +897,7 @@ impl RivuletApp {
             ),
         };
 
-        let fps = 30u64;
+        let fps = self.selected_preset.effective_fps(30) as u64;
         let frame_duration = std::time::Duration::from_millis(1000 / fps);
         thread::spawn(move || {
             let mut next = Instant::now();
@@ -1451,6 +1458,24 @@ impl eframe::App for RivuletApp {
                                 }
                             });
                     });
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("recording_preset"));
+                        egui::ComboBox::from_id_salt("windows_preset_select")
+                            .selected_text(self.selected_preset.label)
+                            .show_ui(ui, |ui| {
+                                for preset in rivulet_core::RecordingPreset::all() {
+                                    if ui
+                                        .selectable_label(
+                                            self.selected_preset == *preset,
+                                            preset.label,
+                                        )
+                                        .clicked()
+                                    {
+                                        self.selected_preset = *preset;
+                                    }
+                                }
+                            });
+                    });
                     if ui
                         .add_enabled(
                             source_selected,
@@ -1628,6 +1653,24 @@ impl eframe::App for RivuletApp {
                                         .clicked()
                                     {
                                         self.selected_codec = codec;
+                                    }
+                                }
+                            });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("recording_preset"));
+                        egui::ComboBox::from_id_salt("linux_preset_select")
+                            .selected_text(self.selected_preset.label)
+                            .show_ui(ui, |ui| {
+                                for preset in rivulet_core::RecordingPreset::all() {
+                                    if ui
+                                        .selectable_label(
+                                            self.selected_preset == *preset,
+                                            preset.label,
+                                        )
+                                        .clicked()
+                                    {
+                                        self.selected_preset = *preset;
                                     }
                                 }
                             });

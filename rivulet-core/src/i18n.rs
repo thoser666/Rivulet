@@ -141,6 +141,7 @@ impl Locale {
                 ("muted", "Muted"),
                 // Codec selection
                 ("video_codec", "Video codec"),
+                ("recording_preset", "Preset"),
                 // Audio
                 ("audio_mixer", "Audio Mixer"),
                 ("start_audio", "Start audio"),
@@ -214,6 +215,7 @@ impl Locale {
                 ("muted", "Stumm"),
                 // Codec selection
                 ("video_codec", "Video-Codec"),
+                ("recording_preset", "Preset"),
                 // Audio
                 ("audio_mixer", "Audio-Mixer"),
                 ("start_audio", "Audio starten"),

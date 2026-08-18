@@ -68,6 +68,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Stream Health & Network Stats** - Live status (`Connecting`/`Good`/`Warning`/`Poor`) with sent/dropped frame counters, bitrate (kbps) and FPS over a sliding window; derived from drop ratio (>5% Poor, >1% Warning), throughput collapse and stalls; engine API `stream_stats()`, polled in `stream_rtmps`
 - **Recording Performance Metrics** - Live FPS, encoder load (%) and output file size during a recording, measured via GStreamer pad probes (per-frame encode duration paired by PTS, filesink byte counter); engine API `recording_stats()`, shown in the GUI next to the recording timer
 - **Hotkeys** - F9 toggles recording, F10 pauses/resumes, F11 mutes/unmutes audio; pause skips video frames while capture keeps running, mute drops audio frames; hotkey hints shown in the UI and on the Start Recording button
+- **Recording Presets** - Resolution and FPS presets (Original, 1080p60, 1080p30, 720p60, 720p30, 480p30) with automatic videoscale/videorate insertion, per-preset bitrate defaults, and encoder-aware caps; engine API `set_preset(RecordingPreset)`, selectable in the GUI
 - **Auto-Update** - Checks the GitHub Releases API on startup and manually for newer versions, downloads the matching platform package (MSI / AppImage / DMG) with a live progress bar and launches the installer; the alpha channel keeps up with every feature push
 - **Live Preview** - See what you're recording as you record
 - **Tab-Based Interface** - Clean, DaVinci Resolve-style UI
@@ -170,7 +171,7 @@ release channel only describes *how* the tag is built and published.
 - [ ] Recording timer overlay and FPS counter
 - [ ] Region capture and multi-monitor selection
 - [x] Codec selection UI (H264/H265/VP9)
-- [ ] Preset management (1080p60, 720p30, ...)
+- [x] Preset management (1080p60, 720p30, ...)
 
 **Goal:** High-quality recording with audio as a solid foundation for scenes & streaming.
 
@@ -398,7 +399,7 @@ cargo test --workspace
 cargo test -p rivulet-core
 ```
 
-The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4, including separate audio tracks verified via the GStreamer Discoverer), the streaming pipelines (RTMPS/dual output parse and route audio correctly), stream health tracking (status derivation from drop ratio, bitrate/FPS collapse and stalls), the encoder/recorder lifecycle, the video encoder abstraction (element names, detection order, fallback, pipeline fragments, 4:2:0 input caps), the recording performance metrics (FPS estimation, encoder load from a sliding window, file byte accounting, reset semantics), the updater (GitHub release parsing, version comparison, platform asset selection, HTTP fetch against a local test server) and the i18n layer (locale resolution and translation lookups), plus the release code-signing automation (`rivulet-core/tests/ci_signing.rs` — verifies the signing scripts exist, that signing is gated on secret-presence outputs rather than raw secrets in `if:` conditions, and that the Windows MSI is signed after it is built). Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable. The hardware-encoding end-to-end test only runs when the matching GPU plugin is present.
+The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4, including separate audio tracks verified via the GStreamer Discoverer), the streaming pipelines (RTMPS/dual output parse and route audio correctly), stream health tracking (status derivation from drop ratio, bitrate/FPS collapse and stalls), the encoder/recorder lifecycle, the video encoder abstraction (element names, detection order, fallback, pipeline fragments, 4:2:0 input caps), the recording performance metrics (FPS estimation, encoder load from a sliding window, file byte accounting, reset semantics), the recording presets (resolution/FPS presets with caps and transform fragments), the updater (GitHub release parsing, version comparison, platform asset selection, HTTP fetch against a local test server) and the i18n layer (locale resolution and translation lookups), plus the release code-signing automation (`rivulet-core/tests/ci_signing.rs` — verifies the signing scripts exist, that signing is gated on secret-presence outputs rather than raw secrets in `if:` conditions, and that the Windows MSI is signed after it is built). Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable. The hardware-encoding end-to-end test only runs when the matching GPU plugin is present.
 
 ### Linting & Formatting
 

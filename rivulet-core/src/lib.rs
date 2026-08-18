@@ -32,6 +32,9 @@ pub use stream::{StreamPlatform, StreamSettings};
 pub mod i18n;
 pub use i18n::Locale;
 
+pub mod preset;
+pub use preset::RecordingPreset;
+
 // GStreamer initialization
 static GSTREAMER_INIT: Lazy<()> = Lazy::new(|| {
     gst::init().expect("GStreamer initialization failed.");
@@ -59,6 +62,8 @@ pub struct RivuletEngine {
     video_encoder: VideoEncoder,
     /// Video codec selected for recording (H.264, H.265, or VP9).
     video_codec: VideoCodec,
+    /// Recording preset controlling resolution, FPS, and bitrate.
+    preset: RecordingPreset,
     /// Target video bitrate in kbit/s applied to the selected encoder.
     encoder_bitrate_kbps: u32,
     /// Tracks stream health while a streaming pipeline is active. Always
@@ -92,6 +97,7 @@ impl Default for RivuletEngine {
             stream_settings: None,
             video_encoder: best_encoder(),
             video_codec: VideoCodec::default(),
+            preset: RecordingPreset::default(),
             encoder_bitrate_kbps: 5_000,
             stream_health: None,
             recording_metrics: None,
@@ -175,6 +181,24 @@ impl RivuletEngine {
         self.video_codec
     }
 
+    /// Select a recording preset that controls resolution, FPS, and bitrate.
+    ///
+    /// Must be called before recording starts. Defaults to
+    /// [`RecordingPreset::ORIGINAL`] (no transformation). If the preset
+    /// specifies a bitrate, it overrides the value set via
+    /// [`set_video_bitrate`](Self::set_video_bitrate).
+    pub fn set_preset(&mut self, preset: RecordingPreset) {
+        if let Some(bitrate) = preset.bitrate_kbps {
+            self.encoder_bitrate_kbps = bitrate;
+        }
+        self.preset = preset;
+    }
+
+    /// The currently selected recording preset.
+    pub fn preset(&self) -> RecordingPreset {
+        self.preset
+    }
+
     /// Set the target video bitrate in kbit/s applied to the encoder.
     ///
     /// Must be called before recording starts. Defaults to 5000 kbit/s.
@@ -196,14 +220,30 @@ impl RivuletEngine {
     }
 
     fn video_branch_str(&self) -> String {
-        format!(
-            "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-             ! videoconvert ! {} ! {} ! queue ! mux. ",
-            self.video_encoder
-                .input_caps_fragment_for_codec(self.video_codec),
-            self.video_encoder
-                .branch_fragment_for_codec(self.video_codec, self.encoder_bitrate_kbps)
-        )
+        let transform = self.preset.transform_fragment();
+        let caps = self
+            .video_encoder
+            .input_caps_fragment_for_codec(self.video_codec);
+        let encoder = self
+            .video_encoder
+            .branch_fragment_for_codec(self.video_codec, self.encoder_bitrate_kbps);
+        if transform.is_empty() {
+            format!(
+                "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
+                 ! videoconvert ! {} ! {} ! queue ! mux. ",
+                caps, encoder
+            )
+        } else {
+            // Transform includes videoscale/videorate and target resolution/FPS.
+            // We need to append the format (I420/NV12) so the encoder gets the
+            // right input format.
+            let transform_caps = format!("{}!{}", transform.trim_end(), caps.trim_start());
+            format!(
+                "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
+                 ! videoconvert ! {} ! {} ! queue ! mux. ",
+                transform_caps, encoder
+            )
+        }
     }
 
     /// Build the audio branch of the pipeline. With `force_mixed` the sources
@@ -284,16 +324,32 @@ impl RivuletEngine {
         );
 
         let muxer = self.video_codec.muxer_element();
+        let transform = self.preset.transform_fragment();
+        let caps = self
+            .video_encoder
+            .input_caps_fragment_for_codec(self.video_codec);
+        let encoder = self
+            .video_encoder
+            .branch_fragment_for_codec(self.video_codec, self.encoder_bitrate_kbps);
+        let video_part = if transform.is_empty() {
+            format!(
+                "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
+                 ! videoconvert ! {} ! {} ",
+                caps, encoder
+            )
+        } else {
+            let transform_caps = format!("{}!{}", transform.trim_end(), caps.trim_start());
+            format!(
+                "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
+                 ! videoconvert ! {} ! {} ",
+                transform_caps, encoder
+            )
+        };
         let mut s = String::new();
         s.push_str(&format!(
-            "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-             ! videoconvert ! {} ! {} \
-             ! tee name=video_tee ! queue ! mux_rec. \
+            "{} ! tee name=video_tee ! queue ! mux_rec. \
              video_tee. ! queue ! mux_stream. ",
-            self.video_encoder
-                .input_caps_fragment_for_codec(self.video_codec),
-            self.video_encoder
-                .branch_fragment_for_codec(self.video_codec, self.encoder_bitrate_kbps)
+            video_part
         ));
         if self.audio_enabled {
             s.push_str(
@@ -369,10 +425,12 @@ impl RivuletEngine {
             .downcast::<gst_app::AppSrc>()
             .unwrap();
 
-        let video_info = gst_video::VideoInfo::builder(gst_video::VideoFormat::Rgba, width, height)
-            .fps((30, 1))
-            .build()
-            .unwrap();
+        let target_fps = self.preset.effective_fps(30) as i32;
+        let video_info =
+            gst_video::VideoInfo::builder(gst_video::VideoFormat::Rgba, width, height)
+                .fps((target_fps, 1))
+                .build()
+                .unwrap();
         appsrc.set_caps(Some(&video_info.to_caps().unwrap()));
         appsrc.set_property("format", gst::Format::Time);
         appsrc.set_property("is-live", true);
