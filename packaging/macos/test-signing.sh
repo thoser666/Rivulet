@@ -28,8 +28,7 @@ openssl req -x509 -newkey rsa:2048 -keyout "$CERT_DIR/key.pem" \
   -addext "extendedKeyUsage=codeSigning" -addext "keyUsage=digitalSignature"
 # Export with -legacy so the p12 uses RC2-40-CBC + SHA-1 MAC — the exact
 # format Keychain Access produces. macOS 26 `security import` rejects
-# OpenSSL 3's modern defaults ("MAC verification failed") and does not
-# make the 3DES-shrouded key usable ("0 valid identities").
+# OpenSSL 3's modern defaults ("MAC verification failed").
 openssl pkcs12 -export -legacy -out "$CERT_DIR/cert.p12" \
   -inkey "$CERT_DIR/key.pem" -in "$CERT_DIR/cert.pem" -passout pass:rivulet-test
 
@@ -52,7 +51,9 @@ PLIST
 MACOS_CERT_BASE64="$(base64 < "$CERT_DIR/cert.p12")"
 MACOS_CERT_PASSWORD="rivulet-test"
 MACOS_SIGN_IDENTITY="Rivulet CI Test"
-export MACOS_CERT_BASE64 MACOS_CERT_PASSWORD MACOS_SIGN_IDENTITY
+# Skip the RFC3161 timestamp request so the smoke test stays offline.
+MACOS_SIGN_TIMESTAMP="0"
+export MACOS_CERT_BASE64 MACOS_CERT_PASSWORD MACOS_SIGN_IDENTITY MACOS_SIGN_TIMESTAMP
 
 bash packaging/macos/codesign-app.sh "$APP"
 
