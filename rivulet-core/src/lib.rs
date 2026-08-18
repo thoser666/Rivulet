@@ -15,7 +15,10 @@ pub mod audio;
 pub use audio::{AudioFrame, AudioTrack, SkippedFilter};
 
 pub mod encoder;
-pub use encoder::{best_encoder, detect_available_encoders, VideoEncoder};
+pub use encoder::{
+    best_encoder, best_encoder_for_codec, detect_available_encoders,
+    detect_available_encoders_for_codec, VideoCodec, VideoEncoder,
+};
 
 pub mod health;
 pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
@@ -54,6 +57,8 @@ pub struct RivuletEngine {
     /// Video encoder used for the H.264 video branch. Defaults to the best
     /// available encoder detected at construction time.
     video_encoder: VideoEncoder,
+    /// Video codec selected for recording (H.264, H.265, or VP9).
+    video_codec: VideoCodec,
     /// Target video bitrate in kbit/s applied to the selected encoder.
     encoder_bitrate_kbps: u32,
     /// Tracks stream health while a streaming pipeline is active. Always
@@ -86,6 +91,7 @@ impl Default for RivuletEngine {
             output_path: None,
             stream_settings: None,
             video_encoder: best_encoder(),
+            video_codec: VideoCodec::default(),
             encoder_bitrate_kbps: 5_000,
             stream_health: None,
             recording_metrics: None,
@@ -155,6 +161,20 @@ impl RivuletEngine {
         self.video_encoder
     }
 
+    /// Select the video codec for recording.
+    ///
+    /// Must be called before recording starts. Defaults to H.264. Changing the
+    /// codec also selects the best available encoder backend for that codec.
+    pub fn set_video_codec(&mut self, codec: VideoCodec) {
+        self.video_codec = codec;
+        self.video_encoder = best_encoder_for_codec(codec);
+    }
+
+    /// The currently selected video codec.
+    pub fn video_codec(&self) -> VideoCodec {
+        self.video_codec
+    }
+
     /// Set the target video bitrate in kbit/s applied to the encoder.
     ///
     /// Must be called before recording starts. Defaults to 5000 kbit/s.
@@ -179,9 +199,10 @@ impl RivuletEngine {
         format!(
             "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
              ! videoconvert ! {} ! {} ! queue ! mux. ",
-            self.video_encoder.input_caps_fragment(),
             self.video_encoder
-                .branch_fragment(self.encoder_bitrate_kbps)
+                .input_caps_fragment_for_codec(self.video_codec),
+            self.video_encoder
+                .branch_fragment_for_codec(self.video_codec, self.encoder_bitrate_kbps)
         )
     }
 
@@ -218,9 +239,10 @@ impl RivuletEngine {
         let mut s = self.video_branch_str();
         s.push_str(&self.audio_branch_str(false));
         let escaped = Self::escape_location(location);
+        let muxer = self.video_codec.muxer_element();
         s.push_str(&format!(
-            "mp4mux name=mux ! filesink name=file_sink location=\"{}\"",
-            escaped
+            "{} name=mux ! filesink name=file_sink location=\"{}\"",
+            muxer, escaped
         ));
         s
     }
@@ -244,9 +266,10 @@ impl RivuletEngine {
     /// Build a pipeline that records locally **and** streams at the same time.
     ///
     /// Video and audio are encoded once and split via `tee` into two branches,
-    /// one feeding the MP4 muxer (local file) and one feeding the FLV muxer
+    /// one feeding the local file muxer and one feeding the FLV muxer
     /// (RTMP/RTMPS sink). Audio is always mixed into a single track because FLV
-    /// only supports one audio track.
+    /// only supports one audio track. Streaming requires H.264; for non-H.264
+    /// codecs only the local recording branch is built.
     fn build_dual_output_pipeline_str(&self) -> String {
         let stream_location = self
             .stream_settings
@@ -260,15 +283,17 @@ impl RivuletEngine {
             stream_location
         );
 
+        let muxer = self.video_codec.muxer_element();
         let mut s = String::new();
         s.push_str(&format!(
             "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
              ! videoconvert ! {} ! {} \
              ! tee name=video_tee ! queue ! mux_rec. \
              video_tee. ! queue ! mux_stream. ",
-            self.video_encoder.input_caps_fragment(),
             self.video_encoder
-                .branch_fragment(self.encoder_bitrate_kbps)
+                .input_caps_fragment_for_codec(self.video_codec),
+            self.video_encoder
+                .branch_fragment_for_codec(self.video_codec, self.encoder_bitrate_kbps)
         ));
         if self.audio_enabled {
             s.push_str(
@@ -279,7 +304,8 @@ impl RivuletEngine {
             );
         }
         s.push_str(&format!(
-            "mp4mux name=mux_rec ! filesink name=file_sink location=\"{}\" ",
+            "{} name=mux_rec ! filesink name=file_sink location=\"{}\" ",
+            muxer,
             Self::escape_location(location)
         ));
         s.push_str(&format!(
@@ -485,8 +511,8 @@ impl RivuletEngine {
             return false;
         }
         eprintln!(
-            "[Engine] Encoder {:?} not initializable ({}), falling back to x264.",
-            self.video_encoder, reason
+            "[Engine] Encoder {:?} for {:?} not initializable ({}), falling back to software.",
+            self.video_encoder, self.video_codec, reason
         );
         self.video_encoder = VideoEncoder::Software;
         *pipeline_str = self

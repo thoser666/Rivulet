@@ -58,7 +58,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Screen Capture** - Capture your primary monitor in real-time
 - **Window Capture** - Capture a single application window (games, etc.) in addition to full monitors, with a window picker in the GUI (Linux & Windows)
 - **Screen + Audio Recording (Linux GUI)** - Full recording flow in the GUI: monitor selection, start/stop, recording timer; system audio + microphone are captured and mixed into the MP4
-- **Video Encoding** - H.264 encoding via GStreamer (`x264enc`, low-latency tuning) or hardware-accelerated encoders
+- **Video Encoding** - H.264/H.265/VP9 encoding via GStreamer with codec selection UI; hardware-accelerated encoders (NVENC, QuickSync, AMF) with automatic detection and software fallback
 - **Hardware Encoding** - NVIDIA NVENC (`nvh264enc`), Intel QuickSync (`qsvh264enc`) and AMD AMF (`amfh264enc`) with automatic detection of the best available encoder and fallback to software x264; engine API `set_video_encoder(VideoEncoder)` / `set_video_bitrate(kbps)`
 - **Audio Capture (engine, Linux)** - Desktop sound and microphone, mixed in real time via GStreamer (48 kHz stereo, per-source volume); usable via the `rivulet-audio` crate and the `record_screen_audio` example
 - **Audio Mixer UI (Linux GUI)** - Start/stop audio capture with live level meter (dB), per-source volume sliders for system/mic
@@ -169,7 +169,7 @@ release channel only describes *how* the tag is built and published.
 - [x] Hotkeys (record, pause, mute)
 - [ ] Recording timer overlay and FPS counter
 - [ ] Region capture and multi-monitor selection
-- [ ] Codec selection UI (H264/H265/VP9)
+- [x] Codec selection UI (H264/H265/VP9)
 - [ ] Preset management (1080p60, 720p30, ...)
 
 **Goal:** High-quality recording with audio as a solid foundation for scenes & streaming.
@@ -329,7 +329,7 @@ The core concept of OBS: scenes, sources, and transitions.
 | Capture sources (display, window, webcam) | Partial (display + window) |
 | Scenes & transitions | Open |
 | Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks) |
-| Recording & encoding | Partial (H.264 hardware + software) |
+| Recording & encoding | Partial (H.264/H.265/VP9, HW + SW) |
 | Streaming (RTMP, platforms) | Partial (RTMPS Twitch/Kick/YouTube) |
 | Virtual camera | Open |
 | Replay buffer | Open |

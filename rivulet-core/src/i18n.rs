@@ -139,6 +139,8 @@ impl Locale {
                 ("hotkey_mute", "Mute/Unmute audio"),
                 ("paused", "Paused"),
                 ("muted", "Muted"),
+                // Codec selection
+                ("video_codec", "Video codec"),
                 // Audio
                 ("audio_mixer", "Audio Mixer"),
                 ("start_audio", "Start audio"),
@@ -210,6 +212,8 @@ impl Locale {
                 ("hotkey_mute", "Audio stummschalten"),
                 ("paused", "Pausiert"),
                 ("muted", "Stumm"),
+                // Codec selection
+                ("video_codec", "Video-Codec"),
                 // Audio
                 ("audio_mixer", "Audio-Mixer"),
                 ("start_audio", "Audio starten"),

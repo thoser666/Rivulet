@@ -397,6 +397,10 @@ pub struct RivuletApp {
     is_paused: bool,
     #[serde(skip)]
     is_muted: bool,
+
+    // Codec selection
+    #[serde(skip)]
+    selected_codec: rivulet_core::VideoCodec,
 }
 
 impl Default for RivuletApp {
@@ -516,6 +520,7 @@ impl Default for RivuletApp {
             hotkeys: HotkeyConfig::default(),
             is_paused: false,
             is_muted: false,
+            selected_codec: rivulet_core::VideoCodec::default(),
         }
     }
 }
@@ -540,11 +545,13 @@ impl RivuletApp {
     }
 
     fn start_windows_recording(&mut self) {
+        let ext = self.selected_codec.file_extension();
         let file_path = rfd::FileDialog::new()
-            .add_filter("MP4 Video", &["mp4", "mov"])
+            .add_filter("Video", &[ext, "mov"])
             .set_file_name(&format!(
-                "rivulet-recording-{}.mp4",
-                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
+                "rivulet-recording-{}.{}",
+                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S"),
+                ext
             ))
             .save_file();
 
@@ -560,6 +567,7 @@ impl RivuletApp {
                 return;
             };
 
+            self.engine.set_video_codec(self.selected_codec);
             self.engine.start_local_recording(path.clone());
 
             let (sender, receiver) = mpsc::channel();
@@ -607,6 +615,7 @@ impl RivuletApp {
                 return;
             };
 
+            self.engine.set_video_codec(self.selected_codec);
             self.engine.start_local_recording(path.clone());
 
             let (sender, receiver) = mpsc::channel();
@@ -832,11 +841,13 @@ impl RivuletApp {
             return;
         };
 
+        let ext = self.selected_codec.file_extension();
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("MP4 Video", &["mp4"])
+            .add_filter("Video", &[ext])
             .set_file_name(format!(
-                "rivulet-recording-{}.mp4",
-                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
+                "rivulet-recording-{}.{}",
+                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S"),
+                ext
             ))
             .save_file()
         else {
@@ -847,6 +858,7 @@ impl RivuletApp {
         if (self.capture_system || self.capture_mic) && !self.audio_preview {
             self.start_audio_capture();
         }
+        self.engine.set_video_codec(self.selected_codec);
         self.engine.set_audio_enabled(self.audio_preview);
         self.engine
             .set_separate_audio_tracks(self.separate_tracks && self.audio_preview);
@@ -1420,6 +1432,25 @@ impl eframe::App for RivuletApp {
                     });
                     let source_selected =
                         self.selected_monitor_idx.is_some() || self.selected_window_idx.is_some();
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("video_codec"));
+                        egui::ComboBox::from_id_salt("windows_codec_select")
+                            .selected_text(self.selected_codec.label())
+                            .show_ui(ui, |ui| {
+                                for codec in [
+                                    rivulet_core::VideoCodec::H264,
+                                    rivulet_core::VideoCodec::H265,
+                                    rivulet_core::VideoCodec::VP9,
+                                ] {
+                                    if ui
+                                        .selectable_label(self.selected_codec == codec, codec.label())
+                                        .clicked()
+                                    {
+                                        self.selected_codec = codec;
+                                    }
+                                }
+                            });
+                    });
                     if ui
                         .add_enabled(
                             source_selected,
@@ -1582,6 +1613,25 @@ impl eframe::App for RivuletApp {
                     });
                     let source_selected =
                         self.selected_monitor_idx.is_some() || self.selected_window_idx.is_some();
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("video_codec"));
+                        egui::ComboBox::from_id_salt("linux_codec_select")
+                            .selected_text(self.selected_codec.label())
+                            .show_ui(ui, |ui| {
+                                for codec in [
+                                    rivulet_core::VideoCodec::H264,
+                                    rivulet_core::VideoCodec::H265,
+                                    rivulet_core::VideoCodec::VP9,
+                                ] {
+                                    if ui
+                                        .selectable_label(self.selected_codec == codec, codec.label())
+                                        .clicked()
+                                    {
+                                        self.selected_codec = codec;
+                                    }
+                                }
+                            });
+                    });
                     if ui
                         .add_enabled(
                             source_selected,
