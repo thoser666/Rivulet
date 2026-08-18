@@ -25,7 +25,7 @@ fi
 KEYCHAIN="rivulet-release.keychain"
 CERT="/tmp/rivulet-cert.p12"
 
-echo "$MACOS_CERT_BASE64" | base64 -d > "$CERT"
+echo "$MACOS_CERT_BASE64" | base64 -D > "$CERT"
 security create-keychain -p temp "$KEYCHAIN"
 security default-keychain -s "$KEYCHAIN"
 security unlock-keychain -p temp "$KEYCHAIN"
