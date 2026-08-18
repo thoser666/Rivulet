@@ -170,6 +170,10 @@ fn signing_e2e_smoke_tests_are_wired_up() {
         "macOS smoke test must generate a self-signed cert"
     );
     assert!(
+        macos.contains("extendedKeyUsage=codeSigning"),
+        "macOS smoke-test cert must carry the Code Signing EKU"
+    );
+    assert!(
         macos.contains("codesign --verify"),
         "macOS smoke test must verify the signature"
     );

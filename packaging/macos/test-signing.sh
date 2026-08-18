@@ -22,8 +22,12 @@ trap cleanup EXIT
 # Keychain Access also produces: OpenSSL 3.x defaults (AES-256 + PBKDF2 +
 # SHA-256 MAC) are rejected by macOS `security import` with
 # "MAC verification failed during PKCS12 import (wrong password?)".
+# The certificate needs the Code Signing extended key usage: without it
+# `security find-identity -p codesigning` reports "0 valid identities"
+# and codesign refuses to use it.
 openssl req -x509 -newkey rsa:2048 -keyout "$CERT_DIR/key.pem" \
-  -out "$CERT_DIR/cert.pem" -days 1 -nodes -subj "/CN=Rivulet CI Test"
+  -out "$CERT_DIR/cert.pem" -days 1 -nodes -subj "/CN=Rivulet CI Test" \
+  -addext "extendedKeyUsage=codeSigning" -addext "keyUsage=digitalSignature"
 openssl pkcs12 -export -out "$CERT_DIR/cert.p12" \
   -inkey "$CERT_DIR/key.pem" -in "$CERT_DIR/cert.pem" -passout pass:rivulet-test \
   -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
