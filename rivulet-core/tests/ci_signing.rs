@@ -164,8 +164,8 @@ fn signing_e2e_smoke_tests_are_wired_up() {
         "Windows Pester tests must verify the signature"
     );
     assert!(
-        windows.contains("remove /s"),
-        "Windows Pester tests must strip the pre-existing signature first"
+        windows.contains("verify /all"),
+        "Windows Pester tests must verify the applied (nested) signature"
     );
 
     let macos = read("packaging/macos/test-signing.sh");

@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 - ci(signing-e2e): fix macOS smoke test — a self-signed test cert is never *trusted*, so `security find-identity -v` reported "0 valid identities" and signing aborted; the signer now lists every codesigning identity (no `-v`), imports via the canonical `-A -t cert -f pkcs12` recipe, and skips the RFC3161 timestamp so the test stays offline (p12 is generated with legacy algorithms and a CA:FALSE leaf cert because macOS 26 rejects OpenSSL 3's modern defaults)
-- ci(signing-e2e): fix Windows Pester test — cert generation and root-store trust both hang on the runner, so a throwaway cert is committed as a fixture and the signature is verified with `Get-AuthenticodeSignature`; strip cmd.exe's pre-existing Microsoft signature first so the applied signature is the outer one; make the RFC3161 timestamp skippable; fix Pester 5 scoping; add job timeouts; test renamed to `sign-pester.tests.ps1`
+- ci(signing-e2e): fix Windows Pester test — cert generation and root-store trust both hang on the runner, so a throwaway cert is committed as a fixture; cmd.exe's Microsoft signature can't be stripped (`signtool remove` fails with 0x57), so the applied signature is nested and is verified with `signtool verify /all /v`; make the RFC3161 timestamp skippable; fix Pester 5 scoping; add job timeouts; test renamed to `sign-pester.tests.ps1`
 - ci(security): redact signing-secret details from the beta-gate JSON/comment output (CodeQL alert #45)
 
 ## [0.19.0-alpha.1] - 2026-08-18

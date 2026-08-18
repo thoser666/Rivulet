@@ -8,6 +8,10 @@ BeforeAll {
     $testRoot = Join-Path ([IO.Path]::GetTempPath()) ("rivulet-sign-tests-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 
+    # signtool only signs real PE/MSI payloads, so use a copy of cmd.exe.
+    $testExe = Join-Path $testRoot "test.exe"
+    Copy-Item "$env:SystemRoot\System32\cmd.exe" $testExe -Force
+
     # Use the committed throwaway self-signed code-signing certificate
     # (test-cert.pfx, password "rivulet-test"). Generating a certificate or
     # trusting one in the root store hangs on GitHub runners, so the cert is
@@ -35,15 +39,6 @@ BeforeAll {
     }
     if (-not $signtoolPath) { throw "signtool.exe not found - install the Windows SDK or set SIGNTOOL_PATH" }
     Write-Host "[sign.tests] using signtool: $signtoolPath"
-
-    # signtool only signs real PE/MSI payloads, so use a copy of cmd.exe.
-    # cmd.exe ships with Microsoft's own Authenticode signature; strip it
-    # first so the signature our test applies becomes the outer (and only)
-    # one. Get-AuthenticodeSignature only reports the outermost signature.
-    $testExe = Join-Path $testRoot "test.exe"
-    Copy-Item "$env:SystemRoot\System32\cmd.exe" $testExe -Force
-    & $signtoolPath remove /s $testExe | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "signtool remove failed for $testExe" }
 
     # Pester 5 does not expose top-level functions to `It` blocks, so the
     # helper that drives sign.ps1 must live in BeforeAll.
@@ -100,7 +95,14 @@ Describe "sign.ps1" {
             $sig = Get-AuthenticodeSignature $testExe
             $sig.Status | Should -Not -Be "NotSigned"
             $sig.Status | Should -Not -Be "HashMismatch"
-            $sig.SignerCertificate.Subject | Should -Match "Rivulet Pester Test"
+
+            # cmd.exe ships with Microsoft's own signature which cannot be
+            # stripped on the runner (`signtool remove` fails with 0x57), so
+            # our signature becomes a *nested* one that
+            # Get-AuthenticodeSignature never surfaces. Confirm it via
+            # `signtool verify /all /v`, which lists every signature.
+            $verify = & $signtoolPath verify /all /v $testExe 2>&1 | Out-String
+            $verify | Should -Match "Rivulet Pester Test"
         }
     }
 }
