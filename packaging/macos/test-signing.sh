@@ -17,10 +17,16 @@ cleanup() {
 trap cleanup EXIT
 
 # 1. Self-signed code signing certificate wrapped in a p12.
+#
+# Use the legacy PKCS#12 algorithms (3DES key/cert PBE + SHA-1 MAC) that
+# Keychain Access also produces: OpenSSL 3.x defaults (AES-256 + PBKDF2 +
+# SHA-256 MAC) are rejected by macOS `security import` with
+# "MAC verification failed during PKCS12 import (wrong password?)".
 openssl req -x509 -newkey rsa:2048 -keyout "$CERT_DIR/key.pem" \
   -out "$CERT_DIR/cert.pem" -days 1 -nodes -subj "/CN=Rivulet CI Test"
 openssl pkcs12 -export -out "$CERT_DIR/cert.p12" \
-  -inkey "$CERT_DIR/key.pem" -in "$CERT_DIR/cert.pem" -passout pass:rivulet-test
+  -inkey "$CERT_DIR/key.pem" -in "$CERT_DIR/cert.pem" -passout pass:rivulet-test \
+  -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
 
 # 2. Minimal app bundle with a real Mach-O executable.
 mkdir -p "$APP/Contents/MacOS"

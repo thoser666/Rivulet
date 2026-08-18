@@ -18,18 +18,24 @@ if (-not $certBase64) { throw "WINDOWS_CERT_BASE64 not set" }
 if (-not $certPassword) { throw "WINDOWS_CERT_PASSWORD not set" }
 
 # Locate signtool.exe. The Windows SDK is preinstalled on the GitHub Windows
-# runners but signtool is not necessarily on PATH.
-$signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
-if ($signtool) {
-  $signtoolPath = $signtool.Source
-} else {
-  $kitRoot = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) "Windows Kits\10\bin"
-  $signtoolPath = Get-ChildItem -Path $kitRoot -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -match '\\x64\\' } |
-    Sort-Object FullName -Descending |
-    Select-Object -First 1 -ExpandProperty FullName
-  if (-not $signtoolPath) { throw "signtool.exe not found - install the Windows SDK" }
+# runners but signtool is not necessarily on PATH. A recursive scan over all
+# SDK versions is very slow on CI, so probe the standard layout directly;
+# SIGNTOOL_PATH overrides everything.
+$signtoolPath = $env:SIGNTOOL_PATH
+if (-not $signtoolPath) {
+  $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
+  if ($signtool) {
+    $signtoolPath = $signtool.Source
+  } else {
+    $kitRoot = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) "Windows Kits\10\bin"
+    $signtoolPath = Get-ChildItem -Path $kitRoot -Directory -ErrorAction SilentlyContinue |
+      Sort-Object Name -Descending |
+      ForEach-Object { Join-Path $_.FullName "x64\signtool.exe" } |
+      Where-Object { Test-Path $_ } |
+      Select-Object -First 1
+  }
 }
+if (-not $signtoolPath) { throw "signtool.exe not found - install the Windows SDK or set SIGNTOOL_PATH" }
 Write-Host "Using signtool: $signtoolPath"
 
 $certPath = Join-Path $env:TEMP "rivulet-cert.pfx"

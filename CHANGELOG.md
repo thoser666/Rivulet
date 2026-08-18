@@ -1,7 +1,10 @@
 # Changelog
 
-## [0.19.0-alpha.1] - 2026-08-18
-- feat(region): add region capture with interactive drag selection and multi-monitor selection (Linux & Windows)
+## [Unreleased]
+
+- ci(signing-e2e): fix macOS smoke test by generating the p12 with legacy algorithms (OpenSSL 3 defaults are rejected by `security import` on macOS 26)
+- ci(signing-e2e): fix Windows Pester hang (root-store import triggered a UI prompt) and Pester 5 function scoping; fast signtool discovery + `SIGNTOOL_PATH` override; add job timeouts
+- ci(security): redact signing-secret details from the beta-gate JSON/comment output (CodeQL alert #45)
 
 ## [0.19.0-alpha.1] - 2026-08-18
 

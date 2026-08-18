@@ -17,6 +17,9 @@ jobs:
   windows:
     name: Windows signing (self-signed)
     runs-on: windows-latest
+    # A hung step previously burned the full 6h job timeout on every run;
+    # this keeps failures loud and fast.
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -28,6 +31,7 @@ jobs:
   macos:
     name: macOS codesign (self-signed)
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
