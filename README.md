@@ -548,6 +548,11 @@ a new alpha release:
 
 Dependabot pushes are skipped (no release build for merged bot PRs).
 
+> **Orphaned tags:** if a platform build fails, the tag is still pushed but no
+> GitHub Release is created. `scripts/backfill-releases.sh --check` detects
+> such orphaned tags and backfills them from the original workflow artifacts;
+> see [docs/release-backfill.md](docs/release-backfill.md).
+
 ### Beta/RC/stable channel (`ci.yml`)
 
 A manually set tag `vX.Y.Z` (without `-alpha.*`) builds the same packages and
