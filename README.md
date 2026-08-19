@@ -93,6 +93,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 
 > **Goal:** OBS core parity *and* the architectural strengths OBS cannot offer (determinism, embeddability, modernity).
 > **Strategy:** First a stable, embeddable engine, then scenes & streaming, then the differentiation features (M6–M9) as product identity.
+> **Priority:** Gaming streamers are a primary audience — Game Capture (M2) and Replay Buffer (M4) are prioritized accordingly.
 
 > **UI development:** new features should follow the navigation structure and
 > egui conventions in [`docs/ui-design.md`](docs/ui-design.md).
@@ -185,14 +186,17 @@ release channel only describes *how* the tag is built and published.
 
 The core concept of OBS: scenes, sources, and transitions.
 
+**Priority for gaming streamers:**
+- [ ] **Game capture** (D3D/Vulkan/OpenGL hook, zero-overhead) — *#1 priority: without this, Rivulet cannot replace OBS for gaming*
+- [ ] Sources (image, text, webcam, browser/embedded Chromium)
+
+**Scene system:**
 - [ ] Scene management (multiple scenes, switching)
 - [x] Sources — window capture (monitor + individual windows, Linux & Windows)
-- [ ] Sources (image, text, webcam, browser/embedded Chromium)
 - [ ] Source composition (layers, position, scaling, cropping)
 - [ ] Transitions (fade, cut, stinger)
 - [ ] Overlays (picture-in-picture, banners)
 - [ ] Chroma key / green screen
-- [ ] Game capture (D3D/Vulkan/OpenGL hook, zero-overhead)
 - [ ] Studio mode (preview/program)
 
 **Goal:** The composable workspace OBS users expect.
@@ -224,8 +228,8 @@ The core concept of OBS: scenes, sources, and transitions.
 
 **Status: Planned**
 
+- [ ] **Replay buffer / instant replay** — *essential for gaming streamers (clip moments without recording the whole session)*
 - [ ] Virtual camera output
-- [ ] Replay buffer / instant replay
 - [ ] Video filters & effects (color correction, LUT, blur, chroma key refinement)
 - [ ] Audio filters (noise suppression RNNoise/NVIDIA, compressor, limiter, expander, VST)
 - [ ] Additional recording formats (MKV, MOV, TS — crash-safe alternatives to MP4)
