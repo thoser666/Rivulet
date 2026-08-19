@@ -3,10 +3,12 @@
 use crate::theme;
 use eframe::egui;
 use rivulet_core::{CaptureRegion, Locale, RivuletEngine, SkippedFilter};
+use std::sync::mpsc::Receiver;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
+use std::time::Instant;
 
 // --- Linux-specific imports ---
 #[cfg(target_os = "linux")]
@@ -20,7 +22,6 @@ use {
     std::sync::atomic::AtomicU32,
     std::sync::mpsc as std_mpsc,
     std::thread,
-    std::time::Instant,
     tokio::runtime::Runtime,
 };
 
@@ -28,9 +29,8 @@ use {
 #[cfg(target_os = "windows")]
 use {
     rfd,
-    std::sync::mpsc::{self, Receiver, Sender},
+    std::sync::mpsc::{self, Sender},
     std::thread,
-    std::time::Instant,
     windows_capture::{
         // Import only the types that are available from capture
         capture::{Context, GraphicsCaptureApiHandler},
@@ -620,6 +620,7 @@ impl Default for RivuletApp {
             selected_window_idx: None,
 
             // Platform-agnostic fields (used by camera/game capture)
+            #[cfg(target_os = "windows")]
             frame_receiver: None,
             error_receiver: None,
             stop_signal: None,
@@ -1347,10 +1348,6 @@ impl RivuletApp {
 
     /// Format a duration in seconds as `HH:MM:SS` or `MM:SS` when under an
     /// hour.
-    /// Only used by the recording overlay (Linux/Windows) and by the unit
-    /// tests; macOS has no recording backend yet, so it is allowed as dead
-    /// code there (the tests still exercise it on every platform).
-    #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
     fn format_duration(secs: u64) -> String {
         let h = secs / 3600;
         let m = (secs % 3600) / 60;
@@ -1363,10 +1360,6 @@ impl RivuletApp {
     }
 
     /// Build the overlay text string for the current recording state.
-    /// Only the platforms with an active recording pipeline can produce a
-    /// meaningful timer/FPS line; macOS has no recording backend yet, so the
-    /// method (and its call sites) is gated away there.
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn overlay_text(&mut self) -> String {
         let elapsed = self.record_started.elapsed().as_secs();
         let m = self.engine.recording_stats();
@@ -2127,7 +2120,9 @@ impl eframe::App for RivuletApp {
                                     self.selected_game_window_idx
                                         .and_then(|idx| self.game_windows.get(idx))
                                         .map(|w| w.title.clone())
-                                        .unwrap_or_else(|| self.tr("select_game_window").to_string()),
+                                        .unwrap_or_else(|| {
+                                            self.tr("select_game_window").to_string()
+                                        }),
                                 )
                                 .show_ui(ui, |ui| {
                                     for (i, window) in self.game_windows.iter().enumerate() {
@@ -2177,11 +2172,10 @@ impl eframe::App for RivuletApp {
                             ));
                         }
                     });
-                    let source_selected =
-                        self.selected_monitor_idx.is_some()
-                            || self.selected_window_idx.is_some()
-                            || self.selected_camera_idx.is_some()
-                            || (self.use_game_capture && self.selected_game_window_idx.is_some());
+                    let source_selected = self.selected_monitor_idx.is_some()
+                        || self.selected_window_idx.is_some()
+                        || self.selected_camera_idx.is_some()
+                        || (self.use_game_capture && self.selected_game_window_idx.is_some());
                     ui.horizontal(|ui| {
                         ui.label(self.tr("video_codec"));
                         egui::ComboBox::from_id_salt("windows_codec_select")

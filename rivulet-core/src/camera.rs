@@ -119,10 +119,7 @@ pub fn start_camera_capture(
         appsink.set_property("drop", true);
         appsink.set_property("max-buffers", 1u32);
 
-        if pipeline
-            .set_state(gst::State::Playing)
-            .is_err()
-        {
+        if pipeline.set_state(gst::State::Playing).is_err() {
             eprintln!("[Camera] Failed to set pipeline to Playing state");
             return;
         }
