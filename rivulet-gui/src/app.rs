@@ -513,6 +513,9 @@ pub struct RivuletApp {
     // Preset selection
     #[serde(skip)]
     selected_preset: rivulet_core::RecordingPreset,
+    // Overlay (timer + FPS counter)
+    #[serde(skip)]
+    show_overlay: bool,
 }
 
 impl Default for RivuletApp {
@@ -645,6 +648,7 @@ impl Default for RivuletApp {
             is_muted: false,
             selected_codec: rivulet_core::VideoCodec::default(),
             selected_preset: rivulet_core::RecordingPreset::default(),
+            show_overlay: false,
         }
     }
 }
@@ -719,6 +723,7 @@ impl RivuletApp {
 
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_preset(self.selected_preset);
+            self.engine.set_overlay_enabled(self.show_overlay);
             self.engine.start_local_recording(path.clone());
 
             let (sender, receiver) = mpsc::channel();
@@ -768,6 +773,7 @@ impl RivuletApp {
 
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_preset(self.selected_preset);
+            self.engine.set_overlay_enabled(self.show_overlay);
             self.engine.start_local_recording(path.clone());
 
             let (sender, receiver) = mpsc::channel();
@@ -1037,6 +1043,7 @@ impl RivuletApp {
         }
         self.engine.set_video_codec(self.selected_codec);
         self.engine.set_preset(self.selected_preset);
+        self.engine.set_overlay_enabled(self.show_overlay);
         self.engine.set_audio_enabled(self.audio_preview);
         self.engine
             .set_separate_audio_tracks(self.separate_tracks && self.audio_preview);
@@ -1139,6 +1146,11 @@ impl RivuletApp {
                 self.last_frame_at = Some(Instant::now());
             }
         }
+        // Update the text overlay (timer + FPS) once per UI tick.
+        if self.show_overlay && self.is_recording && !paused {
+            let text = self.overlay_text();
+            self.engine.update_overlay_text(&text);
+        }
         if self.separate_tracks && self.audio_preview {
             if self.is_recording && !muted {
                 if let Some(rx) = &self.audio_system_rx {
@@ -1190,6 +1202,26 @@ impl RivuletApp {
         let load = format!("{:.0}%", m.encode_load_percent);
         let size = format_bytes(m.file_size_bytes);
         self.tr_fmt("recording_metrics", &[fps, load, size])
+    }
+
+    /// Format a duration in seconds as `HH:MM:SS` or `MM:SS` when under an
+    /// hour.
+    fn format_duration(secs: u64) -> String {
+        let h = secs / 3600;
+        let m = (secs % 3600) / 60;
+        let s = secs % 60;
+        if h > 0 {
+            format!("{:02}:{:02}:{:02}", h, m, s)
+        } else {
+            format!("{:02}:{:02}", m, s)
+        }
+    }
+
+    /// Build the overlay text string for the current recording state.
+    fn overlay_text(&mut self) -> String {
+        let elapsed = self.record_started.elapsed().as_secs();
+        let m = self.engine.recording_stats();
+        format!("{} | FPS {:.1}", Self::format_duration(elapsed), m.fps)
     }
 
     /// Snapshot of the current auto-update state.
@@ -1638,6 +1670,11 @@ impl eframe::App for RivuletApp {
                         self.stop_windows_recording();
                     }
                 }
+                // Update the text overlay (timer + FPS) once per UI tick.
+                if self.show_overlay && self.is_windows_recording && !self.is_paused {
+                    let text = self.overlay_text();
+                    self.engine.update_overlay_text(&text);
+                }
                 // Abort when the capture delivers no frames at all within the
                 // timeout: the pipeline is only initialized by the first frame,
                 // so the recording would run forever while writing nothing.
@@ -1921,6 +1958,10 @@ impl eframe::App for RivuletApp {
                                 }
                             });
                     });
+                    ui.horizontal(|ui| {
+                        let label = self.tr("overlay_toggle").to_string();
+                        ui.checkbox(&mut self.show_overlay, label);
+                    });
                     if ui
                         .add_enabled(
                             source_selected,
@@ -2183,6 +2224,10 @@ impl eframe::App for RivuletApp {
                                         }
                                     }
                                 });
+                        });
+                        ui.horizontal(|ui| {
+                            let label = self.tr("overlay_toggle").to_string();
+                            ui.checkbox(&mut self.show_overlay, label);
                         });
                         if ui
                             .add_enabled(
@@ -3175,5 +3220,27 @@ mod tests {
     fn drag_region_rejects_degenerate_surfaces() {
         let region = region_from_pixel_points(0.0, 0.0, 10.0, 10.0, 1, 1);
         assert!(region.is_empty());
+    }
+
+    // ── format_duration ──────────────────────────────────────────
+
+    #[test]
+    fn format_duration_zero() {
+        assert_eq!(RivuletApp::format_duration(0), "00:00");
+    }
+
+    #[test]
+    fn format_duration_minutes_only() {
+        assert_eq!(RivuletApp::format_duration(90), "01:30");
+    }
+
+    #[test]
+    fn format_duration_hours_minutes_seconds() {
+        assert_eq!(RivuletApp::format_duration(3661), "01:01:01");
+    }
+
+    #[test]
+    fn format_duration_exact_hour() {
+        assert_eq!(RivuletApp::format_duration(3600), "01:00:00");
     }
 }

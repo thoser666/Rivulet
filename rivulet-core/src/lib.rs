@@ -80,6 +80,9 @@ pub struct RivuletEngine {
     /// Consumed by the GUI via [`RivuletEngine::take_error`] so failures are
     /// shown in the UI instead of only on the console.
     last_error: Option<String>,
+    /// When `true`, a `textoverlay` element is included in the video branch
+    /// that burns a timer and FPS counter into the recorded video.
+    show_overlay: bool,
 }
 
 impl Default for RivuletEngine {
@@ -105,6 +108,7 @@ impl Default for RivuletEngine {
             stream_health: None,
             recording_metrics: None,
             last_error: None,
+            show_overlay: false,
         }
     }
 }
@@ -214,6 +218,30 @@ impl RivuletEngine {
         self.encoder_bitrate_kbps
     }
 
+    /// Enable or disable the recording overlay (timer + FPS counter burned
+    /// into the video). Must be called before recording starts.
+    pub fn set_overlay_enabled(&mut self, enabled: bool) {
+        self.show_overlay = enabled;
+    }
+
+    /// Whether the recording overlay is enabled.
+    pub fn overlay_enabled(&self) -> bool {
+        self.show_overlay
+    }
+
+    /// Update the text shown by the `textoverlay` element in a running
+    /// pipeline. The `text` is rendered directly into the recorded video.
+    ///
+    /// Does nothing when the overlay is disabled or no pipeline is active.
+    pub fn update_overlay_text(&self, text: &str) {
+        let Some(pipeline) = self.pipeline.as_ref() else {
+            return;
+        };
+        if let Some(overlay) = pipeline.by_name("overlay") {
+            overlay.set_property("text", text);
+        }
+    }
+
     /// Escape a location string for embedding into a `parse_launch` pipeline
     /// description. GStreamer treats `\` as an escape character in quoted
     /// property values; on Windows paths like `C:\Users\...` would otherwise be
@@ -230,11 +258,17 @@ impl RivuletEngine {
         let encoder = self
             .video_encoder
             .branch_fragment_for_codec(self.video_codec, self.encoder_bitrate_kbps);
+        let overlay = if self.show_overlay {
+            " ! textoverlay name=overlay text=\"\" valignment=top halignment=right \
+             font-desc=\"Sans, 24\" background-color=0x000000AA "
+        } else {
+            ""
+        };
         if transform.is_empty() {
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert ! {} ! {} ! queue ! mux. ",
-                caps, encoder
+                 ! videoconvert ! {}{} ! {} ! queue ! mux. ",
+                caps, overlay, encoder
             )
         } else {
             // Transform includes videoscale/videorate and target resolution/FPS.
@@ -243,8 +277,8 @@ impl RivuletEngine {
             let transform_caps = format!("{}!{}", transform.trim_end(), caps.trim_start());
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert ! {} ! {} ! queue ! mux. ",
-                transform_caps, encoder
+                 ! videoconvert ! {}{} ! {} ! queue ! mux. ",
+                transform_caps, overlay, encoder
             )
         }
     }
@@ -334,18 +368,24 @@ impl RivuletEngine {
         let encoder = self
             .video_encoder
             .branch_fragment_for_codec(self.video_codec, self.encoder_bitrate_kbps);
+        let overlay = if self.show_overlay {
+            " ! textoverlay name=overlay text=\"\" valignment=top halignment=right \
+             font-desc=\"Sans, 24\" background-color=0x000000AA "
+        } else {
+            ""
+        };
         let video_part = if transform.is_empty() {
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert ! {} ! {} ",
-                caps, encoder
+                 ! videoconvert ! {}{} ! {} ",
+                caps, overlay, encoder
             )
         } else {
             let transform_caps = format!("{}!{}", transform.trim_end(), caps.trim_start());
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert ! {} ! {} ",
-                transform_caps, encoder
+                 ! videoconvert ! {}{} ! {} ",
+                transform_caps, overlay, encoder
             )
         };
         let mut s = String::new();
@@ -1597,6 +1637,73 @@ mod tests {
             metrics.encode_load_percent
         );
 
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn overlay_enabled_is_false_by_default() {
+        let engine = RivuletEngine::default();
+        assert!(!engine.overlay_enabled());
+    }
+
+    #[test]
+    fn set_overlay_enabled_toggles_flag() {
+        let mut engine = RivuletEngine::default();
+        engine.set_overlay_enabled(true);
+        assert!(engine.overlay_enabled());
+        engine.set_overlay_enabled(false);
+        assert!(!engine.overlay_enabled());
+    }
+
+    #[test]
+    fn overlay_in_pipeline_string_when_enabled() {
+        let mut engine = RivuletEngine::default();
+        engine.set_overlay_enabled(true);
+        let path = std::env::temp_dir().join("rivulet_test_overlay.mp4");
+        engine.start_local_recording(path.clone());
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            pipeline_str.contains("textoverlay name=overlay"),
+            "pipeline should contain textoverlay when overlay is enabled: {}",
+            pipeline_str
+        );
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn no_overlay_in_pipeline_string_when_disabled() {
+        let mut engine = RivuletEngine::default();
+        let path = std::env::temp_dir().join("rivulet_test_no_overlay.mp4");
+        engine.start_local_recording(path.clone());
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            !pipeline_str.contains("textoverlay"),
+            "pipeline should not contain textoverlay when overlay is disabled: {}",
+            pipeline_str
+        );
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn overlay_in_dual_output_pipeline_when_enabled() {
+        let mut engine = RivuletEngine::default();
+        engine.set_overlay_enabled(true);
+        engine.set_stream_settings(Some(StreamSettings {
+            platform: StreamPlatform::Twitch,
+            ingest_url: "rtmps://live.twitch.tv/app/test_key".into(),
+            stream_key: String::new(),
+        }));
+        let path = std::env::temp_dir().join("rivulet_test_overlay_dual.mp4");
+        engine.start_local_recording(path.clone());
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            pipeline_str.contains("textoverlay name=overlay"),
+            "dual output pipeline should contain textoverlay: {}",
+            pipeline_str
+        );
         engine.stop_recording();
         let _ = std::fs::remove_file(&path);
     }

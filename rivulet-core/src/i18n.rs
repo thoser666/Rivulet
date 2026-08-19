@@ -142,6 +142,8 @@ impl Locale {
                 // Codec selection
                 ("video_codec", "Video codec"),
                 ("recording_preset", "Preset"),
+                // Overlay
+                ("overlay_toggle", "Overlay (timer + FPS)"),
                 // Region capture
                 ("capture_region", "Capture region"),
                 ("region_select", "Select region…"),
@@ -249,6 +251,8 @@ impl Locale {
                 // Codec selection
                 ("video_codec", "Video-Codec"),
                 ("recording_preset", "Preset"),
+                // Overlay
+                ("overlay_toggle", "Overlay (Timer + FPS)"),
                 // Region capture
                 ("capture_region", "Bereich aufnehmen"),
                 ("region_select", "Bereich auswählen…"),
