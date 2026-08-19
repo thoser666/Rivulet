@@ -1206,6 +1206,10 @@ impl RivuletApp {
 
     /// Format a duration in seconds as `HH:MM:SS` or `MM:SS` when under an
     /// hour.
+    /// Only used by the recording overlay (Linux/Windows) and by the unit
+    /// tests; macOS has no recording backend yet, so it is allowed as dead
+    /// code there (the tests still exercise it on every platform).
+    #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
     fn format_duration(secs: u64) -> String {
         let h = secs / 3600;
         let m = (secs % 3600) / 60;
@@ -1218,6 +1222,10 @@ impl RivuletApp {
     }
 
     /// Build the overlay text string for the current recording state.
+    /// Only the platforms with an active recording pipeline can produce a
+    /// meaningful timer/FPS line; macOS has no recording backend yet, so the
+    /// method (and its call sites) is gated away there.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn overlay_text(&mut self) -> String {
         let elapsed = self.record_started.elapsed().as_secs();
         let m = self.engine.recording_stats();
