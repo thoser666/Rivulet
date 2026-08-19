@@ -414,15 +414,6 @@ pub struct RivuletApp {
     raw_rx: Option<std_mpsc::Receiver<RawFrame>>,
     #[cfg(target_os = "linux")]
     #[serde(skip)]
-    stop_signal: Option<Arc<AtomicBool>>,
-    #[cfg(target_os = "linux")]
-    #[serde(skip)]
-    record_started: Instant,
-    #[cfg(target_os = "linux")]
-    #[serde(skip)]
-    last_frame_at: Option<Instant>,
-    #[cfg(target_os = "linux")]
-    #[serde(skip)]
     record_status: Option<String>,
 
     // Windows Fields
@@ -444,19 +435,14 @@ pub struct RivuletApp {
     #[cfg(target_os = "windows")]
     #[serde(skip)]
     frame_receiver: Option<Receiver<RawFrame>>,
-    #[cfg(target_os = "windows")]
     #[serde(skip)]
     error_receiver: Option<Receiver<String>>,
-    #[cfg(target_os = "windows")]
     #[serde(skip)]
     stop_signal: Option<Arc<AtomicBool>>,
-    #[cfg(target_os = "windows")]
     #[serde(skip)]
     last_error: Option<String>,
-    #[cfg(target_os = "windows")]
     #[serde(skip)]
     record_started: Instant,
-    #[cfg(target_os = "windows")]
     #[serde(skip)]
     last_frame_at: Option<Instant>,
 
@@ -516,6 +502,32 @@ pub struct RivuletApp {
     // Overlay (timer + FPS counter)
     #[serde(skip)]
     show_overlay: bool,
+
+    // Camera (webcam) source
+    #[serde(skip)]
+    camera_devices: Vec<rivulet_core::CameraDevice>,
+    #[serde(skip)]
+    selected_camera_idx: Option<usize>,
+    #[serde(skip)]
+    camera_rx: Option<std::sync::mpsc::Receiver<rivulet_core::CameraFrame>>,
+    #[serde(skip)]
+    camera_handle: Option<rivulet_core::camera::CameraCaptureHandle>,
+
+    // Game capture source
+    #[serde(skip)]
+    game_windows: Vec<rivulet_core::GameWindow>,
+    #[serde(skip)]
+    selected_game_window_idx: Option<usize>,
+    #[serde(skip)]
+    game_capture_rx: Option<std::sync::mpsc::Receiver<rivulet_core::GameCaptureFrame>>,
+    #[serde(skip)]
+    game_capture_handle: Option<rivulet_core::game_capture::GameCaptureHandle>,
+    #[serde(skip)]
+    use_game_capture: bool,
+
+    // Platform-agnostic recording flag (used by camera + game capture)
+    #[serde(skip)]
+    is_aux_recording: bool,
 }
 
 impl Default for RivuletApp {
@@ -594,12 +606,6 @@ impl Default for RivuletApp {
             #[cfg(target_os = "linux")]
             raw_rx: None,
             #[cfg(target_os = "linux")]
-            stop_signal: None,
-            #[cfg(target_os = "linux")]
-            record_started: Instant::now(),
-            #[cfg(target_os = "linux")]
-            last_frame_at: None,
-            #[cfg(target_os = "linux")]
             record_status: None,
 
             #[cfg(target_os = "windows")]
@@ -612,17 +618,13 @@ impl Default for RivuletApp {
             selected_monitor_idx: None,
             #[cfg(target_os = "windows")]
             selected_window_idx: None,
-            #[cfg(target_os = "windows")]
+
+            // Platform-agnostic fields (used by camera/game capture)
             frame_receiver: None,
-            #[cfg(target_os = "windows")]
             error_receiver: None,
-            #[cfg(target_os = "windows")]
             stop_signal: None,
-            #[cfg(target_os = "windows")]
             last_error: None,
-            #[cfg(target_os = "windows")]
             record_started: Instant::now(),
-            #[cfg(target_os = "windows")]
             last_frame_at: None,
 
             no_frame_timeout: DEFAULT_NO_FRAME_TIMEOUT,
@@ -649,6 +651,20 @@ impl Default for RivuletApp {
             selected_codec: rivulet_core::VideoCodec::default(),
             selected_preset: rivulet_core::RecordingPreset::default(),
             show_overlay: false,
+
+            // Camera
+            camera_devices: Vec::new(),
+            selected_camera_idx: None,
+            camera_rx: None,
+            camera_handle: None,
+
+            // Game capture
+            game_windows: Vec::new(),
+            selected_game_window_idx: None,
+            game_capture_rx: None,
+            game_capture_handle: None,
+            use_game_capture: false,
+            is_aux_recording: false,
         }
     }
 }
@@ -670,6 +686,18 @@ impl RivuletApp {
 
         self.selected_monitor_idx = None;
         self.selected_window_idx = None;
+    }
+
+    /// Refresh the list of available camera devices.
+    fn refresh_camera_devices(&mut self) {
+        self.camera_devices = rivulet_core::camera::list_cameras();
+        self.selected_camera_idx = None;
+    }
+
+    /// Refresh the list of game-like windows for game capture mode.
+    fn refresh_game_windows(&mut self) {
+        self.game_windows = rivulet_core::game_capture::list_game_windows();
+        self.selected_game_window_idx = None;
     }
 
     /// Open the region editor for the currently selected monitor, capturing
@@ -816,6 +844,79 @@ impl RivuletApp {
                 }
                 println!("Capture thread stopped.");
             });
+        } else if self.use_game_capture {
+            // Game capture mode
+            let Some(idx) = self.selected_game_window_idx else {
+                self.last_error = Some(self.tr("no_source_selected").to_string());
+                return;
+            };
+            let Some(game_window) = self.game_windows.get(idx).cloned() else {
+                self.last_error = Some(self.tr("invalid_source").to_string());
+                return;
+            };
+
+            self.engine.set_video_codec(self.selected_codec);
+            self.engine.set_preset(self.selected_preset);
+            self.engine.set_overlay_enabled(self.show_overlay);
+            self.engine.start_local_recording(path.clone());
+
+            let (sender, receiver) = mpsc::channel();
+            self.frame_receiver = Some(receiver);
+
+            let (error_sender, error_receiver) = mpsc::channel::<String>();
+            self.error_receiver = Some(error_receiver);
+
+            let stop_signal = Arc::new(AtomicBool::new(false));
+            self.stop_signal = Some(stop_signal.clone());
+
+            self.is_aux_recording = true;
+            self.last_error = None;
+            self.record_started = Instant::now();
+            self.last_frame_at = None;
+
+            thread::spawn(move || {
+                let settings = Settings::new(
+                    Window::from_raw_hwnd(game_window.id as *mut _),
+                    CursorCaptureSettings::Default,
+                    DrawBorderSettings::Default,
+                    SecondaryWindowSettings::Default,
+                    MinimumUpdateIntervalSettings::Default,
+                    DirtyRegionSettings::Default,
+                    ColorFormat::Rgba8,
+                    (sender, stop_signal),
+                );
+                println!("Starting game capture thread...");
+                if let Err(e) = CaptureHandler::start(settings) {
+                    if !e.to_string().contains("user stopped")
+                        && !e.to_string().contains("GUI channel closed")
+                    {
+                        let message = format!("Game capture error: {}", e);
+                        eprintln!("{}", message);
+                        let _ = error_sender.send(message);
+                    }
+                }
+                println!("Game capture thread stopped.");
+            });
+        } else if let Some(idx) = self.selected_camera_idx {
+            // Camera capture mode
+            let Some(device) = self.camera_devices.get(idx).cloned() else {
+                self.last_error = Some(self.tr("invalid_source").to_string());
+                return;
+            };
+
+            self.engine.set_video_codec(self.selected_codec);
+            self.engine.set_preset(self.selected_preset);
+            self.engine.set_overlay_enabled(self.show_overlay);
+            self.engine.start_local_recording(path.clone());
+
+            let config = rivulet_core::CameraConfig::default();
+            let (camera_rx, handle) = rivulet_core::camera::start_camera_capture(&device, &config);
+            self.camera_rx = Some(camera_rx);
+            self.camera_handle = Some(handle);
+            self.is_aux_recording = true;
+            self.last_error = None;
+            self.record_started = Instant::now();
+            self.last_frame_at = None;
         } else {
             self.last_error = Some(self.tr("no_source_selected").to_string());
             return;
@@ -1150,6 +1251,26 @@ impl RivuletApp {
                 self.last_frame_at = Some(Instant::now());
             }
         }
+        // Drain camera frames if camera capture is active
+        if let Some(rx) = &self.camera_rx {
+            while let Ok(frame) = rx.try_recv() {
+                if !paused {
+                    self.engine
+                        .process_raw_frame(&frame.data, frame.width, frame.height);
+                }
+                self.last_frame_at = Some(Instant::now());
+            }
+        }
+        // Drain game capture frames if game capture is active
+        if let Some(rx) = &self.game_capture_rx {
+            while let Ok(frame) = rx.try_recv() {
+                if !paused {
+                    self.engine
+                        .process_raw_frame(&frame.data, frame.width, frame.height);
+                }
+                self.last_frame_at = Some(Instant::now());
+            }
+        }
         // Update the text overlay (timer + FPS) once per UI tick.
         if self.show_overlay && self.is_recording && !paused {
             let text = self.overlay_text();
@@ -1184,6 +1305,22 @@ impl RivuletApp {
                 while rx.try_recv().is_ok() {}
             }
         }
+    }
+}
+
+impl RivuletApp {
+    /// Stop camera or game-capture recording (platform-agnostic).
+    fn stop_aux_recording(&mut self) {
+        if let Some(signal) = &self.stop_signal {
+            signal.store(true, Ordering::SeqCst);
+        }
+        self.engine.stop_recording();
+        self.camera_rx = None;
+        self.camera_handle = None;
+        self.game_capture_rx = None;
+        self.game_capture_handle = None;
+        self.stop_signal = None;
+        self.is_aux_recording = false;
     }
 }
 
@@ -1622,21 +1759,25 @@ impl eframe::App for RivuletApp {
 
         ctx.input(|i| {
             #[cfg(target_os = "linux")]
-            let any_recording = self.is_recording;
+            let any_recording = self.is_recording || self.is_aux_recording;
             #[cfg(target_os = "windows")]
-            let any_recording = self.is_windows_recording;
+            let any_recording = self.is_windows_recording || self.is_aux_recording;
             // macOS has no recording engine yet; keep the hotkey block
             // compiling with a constant so the GUI builds on all platforms.
             #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-            let any_recording = false;
+            let any_recording = self.is_aux_recording;
 
             // F9: Toggle recording
             if i.key_pressed(self.hotkeys.record) {
                 if any_recording {
-                    #[cfg(target_os = "windows")]
-                    self.stop_windows_recording();
-                    #[cfg(target_os = "linux")]
-                    self.stop_linux_recording();
+                    if self.is_aux_recording {
+                        self.stop_aux_recording();
+                    } else {
+                        #[cfg(target_os = "windows")]
+                        self.stop_windows_recording();
+                        #[cfg(target_os = "linux")]
+                        self.stop_linux_recording();
+                    }
                     self.is_paused = false;
                     self.is_muted = false;
                 } else {
@@ -1724,6 +1865,51 @@ impl eframe::App for RivuletApp {
             }
         }
 
+        // ── Aux recording drain (camera / game capture) ─────────────
+        if self.is_aux_recording {
+            let paused = self.is_paused;
+            // Drain camera frames
+            if let Some(rx) = &self.camera_rx {
+                while let Ok(frame) = rx.try_recv() {
+                    if !paused {
+                        self.engine
+                            .process_raw_frame(&frame.data, frame.width, frame.height);
+                    }
+                    self.last_frame_at = Some(Instant::now());
+                }
+            }
+            // Drain game capture frames
+            if let Some(rx) = &self.game_capture_rx {
+                while let Ok(frame) = rx.try_recv() {
+                    if !paused {
+                        self.engine
+                            .process_raw_frame(&frame.data, frame.width, frame.height);
+                    }
+                    self.last_frame_at = Some(Instant::now());
+                }
+            }
+            // Update overlay
+            if self.show_overlay && !paused {
+                let text = self.overlay_text();
+                self.engine.update_overlay_text(&text);
+            }
+            // Abort if no frames arrive within timeout
+            if should_abort_for_no_frames(
+                self.record_started,
+                self.last_frame_at,
+                Instant::now(),
+                self.no_frame_timeout,
+            ) {
+                let secs = self.no_frame_timeout.as_secs();
+                self.last_error = Some(self.tr_fmt("recording_no_frames", &[secs.to_string()]));
+                self.stop_aux_recording();
+            }
+            // Surface engine errors
+            if let Some(err) = self.engine.take_error() {
+                self.last_error = Some(err);
+            }
+        }
+
         egui::Panel::top("top_panel").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
@@ -1790,10 +1976,14 @@ impl eframe::App for RivuletApp {
             if self.view == AppView::Record {
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new(self.tr("windows_screen_recording")).strong());
-                if self.is_windows_recording {
+                if self.is_windows_recording || self.is_aux_recording {
                     ui.horizontal(|ui| {
                         if ui.button("⏹ Stop Recording").clicked() {
-                            self.stop_windows_recording();
+                            if self.is_aux_recording {
+                                self.stop_aux_recording();
+                            } else {
+                                self.stop_windows_recording();
+                            }
                             self.is_paused = false;
                             self.is_muted = false;
                         }
@@ -1896,6 +2086,65 @@ impl eframe::App for RivuletApp {
                             .clicked()
                         {
                             self.refresh_capture_sources();
+                            self.refresh_camera_devices();
+                            self.refresh_game_windows();
+                        }
+                    });
+                    // Camera source selection
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("camera_source"));
+                        egui::ComboBox::from_id_salt("camera_select")
+                            .selected_text(
+                                self.selected_camera_idx
+                                    .and_then(|idx| self.camera_devices.get(idx))
+                                    .map(|c| c.name.clone())
+                                    .unwrap_or_else(|| self.tr("select_camera").to_string()),
+                            )
+                            .show_ui(ui, |ui| {
+                                for (i, device) in self.camera_devices.iter().enumerate() {
+                                    if ui
+                                        .selectable_label(
+                                            self.selected_camera_idx == Some(i),
+                                            &device.name,
+                                        )
+                                        .clicked()
+                                    {
+                                        self.selected_camera_idx = Some(i);
+                                        self.selected_monitor_idx = None;
+                                        self.selected_window_idx = None;
+                                        self.selected_game_window_idx = None;
+                                    }
+                                }
+                            });
+                    });
+                    // Game capture toggle + window selection
+                    ui.horizontal(|ui| {
+                        let gc_label = self.tr("game_capture");
+                        ui.checkbox(&mut self.use_game_capture, gc_label);
+                        if self.use_game_capture {
+                            egui::ComboBox::from_id_salt("game_window_select")
+                                .selected_text(
+                                    self.selected_game_window_idx
+                                        .and_then(|idx| self.game_windows.get(idx))
+                                        .map(|w| w.title.clone())
+                                        .unwrap_or_else(|| self.tr("select_game_window").to_string()),
+                                )
+                                .show_ui(ui, |ui| {
+                                    for (i, window) in self.game_windows.iter().enumerate() {
+                                        if ui
+                                            .selectable_label(
+                                                self.selected_game_window_idx == Some(i),
+                                                &window.title,
+                                            )
+                                            .clicked()
+                                        {
+                                            self.selected_game_window_idx = Some(i);
+                                            self.selected_monitor_idx = None;
+                                            self.selected_window_idx = None;
+                                            self.selected_camera_idx = None;
+                                        }
+                                    }
+                                });
                         }
                     });
                     // Region capture controls (monitor capture only)
@@ -1929,7 +2178,10 @@ impl eframe::App for RivuletApp {
                         }
                     });
                     let source_selected =
-                        self.selected_monitor_idx.is_some() || self.selected_window_idx.is_some();
+                        self.selected_monitor_idx.is_some()
+                            || self.selected_window_idx.is_some()
+                            || self.selected_camera_idx.is_some()
+                            || (self.use_game_capture && self.selected_game_window_idx.is_some());
                     ui.horizontal(|ui| {
                         ui.label(self.tr("video_codec"));
                         egui::ComboBox::from_id_salt("windows_codec_select")
@@ -2029,7 +2281,7 @@ impl eframe::App for RivuletApp {
                     ui.add_space(10.0);
                     ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
 
-                    if self.is_recording {
+                    if self.is_recording || self.is_aux_recording {
                         ui.horizontal(|ui| {
                             let elapsed = self.record_started.elapsed().as_secs();
                             ui.label(
@@ -2042,7 +2294,11 @@ impl eframe::App for RivuletApp {
                                 .button(format!("⏹ {}", self.tr("stop_recording")))
                                 .clicked()
                             {
-                                self.stop_linux_recording();
+                                if self.is_aux_recording {
+                                    self.stop_aux_recording();
+                                } else {
+                                    self.stop_linux_recording();
+                                }
                                 self.is_paused = false;
                                 self.is_muted = false;
                             }
@@ -2196,7 +2452,9 @@ impl eframe::App for RivuletApp {
                             }
                         });
                         let source_selected = self.selected_monitor_idx.is_some()
-                            || self.selected_window_idx.is_some();
+                            || self.selected_window_idx.is_some()
+                            || self.selected_camera_idx.is_some()
+                            || (self.use_game_capture && self.selected_game_window_idx.is_some());
                         ui.horizontal(|ui| {
                             ui.label(self.tr("video_codec"));
                             egui::ComboBox::from_id_salt("linux_codec_select")

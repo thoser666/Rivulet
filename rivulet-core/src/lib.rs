@@ -14,6 +14,12 @@ use gst::prelude::*;
 pub mod audio;
 pub use audio::{AudioFrame, AudioTrack, SkippedFilter};
 
+pub mod camera;
+pub use camera::{CameraConfig, CameraDevice, CameraFrame};
+
+pub mod game_capture;
+pub use game_capture::{GameCaptureConfig, GameCaptureFrame, GameWindow};
+
 pub mod encoder;
 pub use encoder::{
     best_encoder, best_encoder_for_codec, detect_available_encoders,

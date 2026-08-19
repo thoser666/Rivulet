@@ -57,6 +57,8 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 
 - **Screen Capture** - Capture your primary monitor in real-time
 - **Window Capture** - Capture a single application window (games, etc.) in addition to full monitors, with a window picker in the GUI (Linux & Windows)
+- **Camera Capture** - Capture from USB/webcam devices via GStreamer's device provider API; dropdown selection of available cameras with configurable resolution and FPS
+- **Game Capture** - Capture a specific game window using Windows Graphics Capture (Windows) or xcap window capture (Linux), with a checkbox toggle and window picker in the GUI
 - **Multi-Monitor Selection** - Pick any connected monitor from a dropdown instead of being limited to the primary display (Linux & Windows)
 - **Region Capture** - Record a rectangular area of a monitor with an interactive drag selector over a live preview, plus precise X/Y/W/H inputs and a one-click "full monitor" reset (Linux & Windows)
 - **Screen + Audio Recording (Linux GUI)** - Full recording flow in the GUI: monitor selection, start/stop, recording timer; system audio + microphone are captured and mixed into the MP4
@@ -104,7 +106,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 | --- | --- | --- |
 | M0 – Recording Foundation | Capture, Encoding, Audio, GUI | ✅ Done |
 | M1 – Solid Recording | Audio tracks, Hardware encoding, QoL, Overlay | ✅ Done |
-| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Transitions, Studio Mode | 📅 Planned |
+| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Transitions, Studio Mode | 🚧 Game Capture in progress |
 | M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | 🚧 In progress |
 | M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 📅 Planned |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 📅 Planned |
