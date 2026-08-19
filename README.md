@@ -87,10 +87,6 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Modern UI** - Clean interface built with egui
 - **Internationalized UI** - All visible strings are driven by locale files (English by default, German included)
 
-### 🚧 In Development (v0.4+)
-
-See [Roadmap](#-roadmap) for detailed timeline.
-
 ---
 
 ## 🚀 Roadmap
