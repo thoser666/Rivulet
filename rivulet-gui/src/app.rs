@@ -698,6 +698,7 @@ impl RivuletApp {
         self.region_editor_open = true;
     }
 
+    #[cfg(target_os = "windows")]
     fn start_windows_recording(&mut self) {
         let ext = self.selected_codec.file_extension();
         let file_path = rfd::FileDialog::new()
@@ -821,6 +822,7 @@ impl RivuletApp {
         }
     }
 
+    #[cfg(target_os = "windows")]
     fn stop_windows_recording(&mut self) {
         println!("Sending stop signal.");
         if let Some(signal) = &self.stop_signal {
@@ -992,6 +994,7 @@ impl RivuletApp {
         self.region_editor_open = true;
     }
 
+    #[cfg(target_os = "linux")]
     fn start_linux_recording(&mut self) {
         if self.is_recording {
             return;
@@ -1117,6 +1120,7 @@ impl RivuletApp {
         println!("Linux recording started: {source_desc}");
     }
 
+    #[cfg(target_os = "linux")]
     fn stop_linux_recording(&mut self) {
         if !self.is_recording {
             return;
