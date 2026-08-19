@@ -195,7 +195,7 @@ The core concept of OBS: scenes, sources, and transitions.
 - [ ] **Scene organisation** (folders, search/filter, color coding) — *top community request, active PRs in OBS*
 - [ ] **Undo/Redo** (Ctrl+Z / Ctrl+Y) — *requested since OBS v23, implemented in v27*
 - [x] Sources — window capture (monitor + individual windows, Linux & Windows)
-- [ ] Source composition (layers, position, scaling, cropping)
+- [ ] **Source composition** (layers, position, scaling, cropping — each scene stores its own layout per source; switching scenes auto-moves sources to their saved positions)
 - [ ] Transitions (fade, cut, stinger)
 - [ ] Overlays (picture-in-picture, banners)
 - [ ] Chroma key / green screen
