@@ -53,7 +53,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 
 ## ✨ Features
 
-### ✅ Currently Available (v0.2/v0.3)
+### ✅ Currently Available
 
 - **Screen Capture** - Capture your primary monitor in real-time
 - **Window Capture** - Capture a single application window (games, etc.) in addition to full monitors, with a window picker in the GUI (Linux & Windows)
@@ -79,8 +79,8 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
   - Settings Tab - All configuration options
   - About Tab - Project information
 - **Customizable Settings**
-  - Adjustable FPS (15-60)
-  - Bitrate control (1-50 Mbps)
+  - Recording presets (1080p60, 720p30, ...) or original resolution
+  - Codec selection (H.264, H.265, VP9)
   - Custom output path with file picker
   - Auto-timestamped filenames
 - **Cross-Platform** - Windows, macOS, and Linux support (via xcap)
