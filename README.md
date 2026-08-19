@@ -102,15 +102,15 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 | Milestone | Focus | Status |
 | --- | --- | --- |
 | M0 – Recording Foundation | Capture, Encoding, Audio, GUI | ✅ Done |
-| M1 – Solid Recording | Audio tracks, Hardware encoding, QoL | 🚧 In progress |
-| M2 – Scenes & Composition | OBS core: scenes, sources, transitions | 📅 Planned |
-| M3 – Streaming | RTMP/RTMPS, Dual output, WebRTC/SRT | 🚧 In progress |
-| M4 – Advanced Output | Virtual camera, Replay buffer, Filters | 📅 Planned |
-| M5 – Ecosystem & Parity | WASM plugins, OBS compat, platform parity | 📅 Planned |
-| M6 – Automation & Determinism | Headless, CI rendering, reproducible pipelines | 📅 Planned |
-| M7 – Embeddable Engine | Stable `rivulet-core` API, docs, tooling | 📅 Planned |
-| M8 – Modern Architecture | WebGPU renderer, zero-copy, lightweight | 📅 Planned |
-| M9 – AI Chat Assistant | Local-first LLM chat bot for streamers | 📅 Planned |
+| M1 – Solid Recording | Audio tracks, Hardware encoding, QoL, Overlay | ✅ Done |
+| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Transitions, Studio Mode | 📅 Planned |
+| M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | 🚧 In progress |
+| M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 📅 Planned |
+| M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 📅 Planned |
+| M6 – Automation & Determinism | Headless CLI, CI Rendering, Reproducible Pipelines | 📅 Planned |
+| M7 – Embeddable Engine | Stable `rivulet-core` API, Docs, Tooling | 📅 Planned |
+| M8 – Modern Architecture | WebGPU, Zero-copy, Compute Filters | 📅 Planned |
+| M9 – AI Chat Assistant | Local-first LLM Chat Bot for Streamers | 📅 Planned |
 
 ---
 
@@ -123,7 +123,7 @@ are met:
 
 | # | Criterion | Verifiable via |
 | --- | --- | --- |
-| 1 | **M1 – Solid Recording complete** | All M1 checklist items checked (audio filters/monitoring, hardware encoding, hotkeys, timer overlay, region capture, codec UI, presets) |
+| 1 | **M1 – Solid Recording complete** | ✅ All M1 items checked (audio filters/monitoring, hardware encoding, hotkeys, timer overlay, region capture, codec UI, presets) |
 | 2 | **M3 – Streaming complete** | All M3 checklist items checked (RTMP/RTMPS, dual output, adaptive bitrate, stream-key management, WebRTC/WHIP, SRT/RIST) |
 | 3 | **Platform parity (M5 release blocker)** | Recording + streaming verified on **Windows and Linux**; macOS capture implemented and verified (currently open) |
 | 4 | **Code-signing secrets configured** | `WINDOWS_CERT_*` and `MACOS_CERT_*`/`APPLE_*` secrets set in the repo so a beta build produces **signed** packages (the automation itself is already smoke-tested without secrets by `signing-e2e.yml`) |
@@ -150,9 +150,9 @@ release channel only describes *how* the tag is built and published.
 
 ---
 
-### 🚧 M1 – Solid Recording
+### ✅ M1 – Solid Recording
 
-**Status: In progress**
+**Status: Done**
 
 **Audio**
 - [x] Separate audio tracks (system/mic)
@@ -187,11 +187,12 @@ The core concept of OBS: scenes, sources, and transitions.
 
 - [ ] Scene management (multiple scenes, switching)
 - [x] Sources — window capture (monitor + individual windows, Linux & Windows)
-- [ ] Sources (image, text, webcam, mute)
+- [ ] Sources (image, text, webcam, browser/embedded Chromium)
 - [ ] Source composition (layers, position, scaling, cropping)
 - [ ] Transitions (fade, cut, stinger)
 - [ ] Overlays (picture-in-picture, banners)
 - [ ] Chroma key / green screen
+- [ ] Game capture (D3D/Vulkan/OpenGL hook, zero-overhead)
 - [ ] Studio mode (preview/program)
 
 **Goal:** The composable workspace OBS users expect.
@@ -206,10 +207,12 @@ The core concept of OBS: scenes, sources, and transitions.
 - [x] TLS-encrypted streaming (RTMPS) with certificate validation
 - [x] Dual output (stream + recording in parallel; encoded once, split via `tee`)
 - [x] Stream health and network stats (status via drop ratio/throughput, `stream_stats()` API)
-- [ ] Adaptive bitrate
 - [x] Platform integrations (Twitch, Kick, YouTube via RTMPS; custom)
-- [ ] Stream key management and stream presets
 - [x] Custom RTMP server support (arbitrary `rtmp://`/`rtmps://` URLs)
+- [ ] Stream key management and stream presets
+- [ ] Adaptive bitrate
+- [ ] Stream delay (configurable delay with reconnect)
+- [ ] Multitrack Video (adaptive bitrate streaming with multiple quality levels, TCP pacing)
 - [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible)
 - [ ] **SRT/RIST** for professional contribution/relay
 
@@ -223,9 +226,11 @@ The core concept of OBS: scenes, sources, and transitions.
 
 - [ ] Virtual camera output
 - [ ] Replay buffer / instant replay
-- [ ] Browser sources (CEF integration)
+- [ ] Video filters & effects (color correction, LUT, blur, chroma key refinement)
+- [ ] Audio filters (noise suppression RNNoise/NVIDIA, compressor, limiter, expander, VST)
+- [ ] Additional recording formats (MKV, MOV, TS — crash-safe alternatives to MP4)
+- [ ] Advanced rate control (VBR, CQ, CQVBR, custom encoder options)
 - [ ] Multi-track audio export
-- [ ] Video filters & effects
 - [ ] Cloud integration (cloud recordings)
 
 **Goal:** The advanced output and production features of OBS.
