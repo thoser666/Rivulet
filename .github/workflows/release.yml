@@ -1,11 +1,15 @@
 name: Release (Alpha)
 
-# ALPHA CHANNEL: Builds the release binaries as soon as a new feature
-# (Conventional Commit "feat:..." / "feat(...):...") is pushed to the develop
-# branch. Every feature push produces a versioned alpha release
-# (tag vX.Y.Z-alpha.N) including installable packages (portable/MSI, AppImage,
-# DMG) and a formal GitHub release. Merged Dependabot pull requests do not
-# trigger the build.
+# ALPHA CHANNEL: Builds release binaries as soon as a releasable Conventional
+# Commit is pushed to the develop branch:
+#
+#   feat(...)   → minor bump   (e.g. 0.20 → 0.21)
+#   fix(...)    → patch bump    (e.g. 0.20.0 → 0.20.1)
+#   feat!(...)  → major bump    (e.g. 0.x → 1.0)
+#
+# Every qualifying push produces a versioned alpha release (tag vX.Y.Z-alpha.N)
+# including installable packages (portable/MSI, AppImage, DMG) and a formal
+# GitHub release. Merged Dependabot pull requests do not trigger the build.
 #
 # For the higher maturity levels (beta/rc/stable) see the tag-based release
 # path in ci.yml ("refs/tags/v*").
@@ -25,15 +29,15 @@ env:
 
 jobs:
   ################################################################
-  # CHECK: feature commit? (excludes Dependabot)
+  # CHECK: feature or fix commit? (excludes Dependabot)
   ################################################################
   check:
-    name: Check for feature push
+    name: Check for releasable commit
     runs-on: ubuntu-latest
     outputs:
       should_release: ${{ steps.detect.outputs.should_release }}
     steps:
-      - name: Detect feature commit
+      - name: Detect releasable commit
         id: detect
         env:
           ACTOR: ${{ github.actor }}
@@ -61,13 +65,13 @@ jobs:
             exit 0
           fi
 
-          # Feature detection: at least one commit must start with "feat"
-          # according to the Conventional Commits convention.
-          if echo "$COMMITS" | jq -r '.[].message' | grep -qE '^feat(\(.*\))?:'; then
+          # Releasable commit detection: feat (minor/major) or fix (patch).
+          # Both trigger an alpha release with the appropriate SemVer bump.
+          if echo "$COMMITS" | jq -r '.[].message' | grep -qE '^(feat|fix)(\(.*\))?!?:'; then
             SHOULD_RELEASE="true"
-            echo "Feature commit found - release build will run."
+            echo "Releasable commit found (feat/fix) - release build will run."
           else
-            echo "No feature commit in the push - release build will be skipped."
+            echo "No feat/fix commit in the push - release build will be skipped."
           fi
 
           echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
@@ -126,7 +130,7 @@ jobs:
           echo "Release tag $TAG set and pushed."
 
   ################################################################
-  # ALPHA BINARIES + PACKAGES (only on feature push)
+  # ALPHA BINARIES + PACKAGES
   ################################################################
   build:
     name: Build Alpha Binaries (${{ matrix.artifact_name }})

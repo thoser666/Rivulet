@@ -531,11 +531,17 @@ Releases are fully automated via GitHub Actions:
 
 ### Alpha channel (`release.yml`)
 
-Every push with a `feat:` commit (Conventional Commits) to `develop` produces
-a new alpha release:
+Every push with a `feat:` or `fix:` commit (Conventional Commits) to `develop`
+produces a new alpha release:
 
-1. **Versioning**: The next version is computed via SemVer from the commits
-   since the last tag (`scripts/release-version.sh`), plus `-alpha.N`
+| Commit type | SemVer bump | Example |
+| --- | --- | --- |
+| `fix(...)` | Patch | `0.20.0` → `0.20.1-alpha.1` |
+| `feat(...)` | Minor | `0.20.0` → `0.21.0-alpha.1` |
+| `feat!(...)` | Major | `0.x.y` → `1.0.0-alpha.1` |
+
+1. **Versioning**: The next version is computed via SemVer from the `feat:`/`fix:`
+   commits since the last tag (`scripts/release-version.sh`), plus `-alpha.N`
    (N = next free number). `Cargo.toml` and `CHANGELOG.md` are bumped and
    committed as `chore(release): prepare vX.Y.Z-alpha.N`.
 2. **Tag**: `vX.Y.Z-alpha.N` is set and pushed.
