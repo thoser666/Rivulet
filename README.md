@@ -192,6 +192,8 @@ The core concept of OBS: scenes, sources, and transitions.
 
 **Scene system:**
 - [ ] Scene management (multiple scenes, switching)
+- [ ] **Scene organisation** (folders, search/filter, color coding) — *top community request, active PRs in OBS*
+- [ ] **Undo/Redo** (Ctrl+Z / Ctrl+Y) — *requested since OBS v23, implemented in v27*
 - [x] Sources — window capture (monitor + individual windows, Linux & Windows)
 - [ ] Source composition (layers, position, scaling, cropping)
 - [ ] Transitions (fade, cut, stinger)
@@ -231,7 +233,9 @@ The core concept of OBS: scenes, sources, and transitions.
 - [ ] **Replay buffer / instant replay** — *essential for gaming streamers (clip moments without recording the whole session)*
 - [ ] Virtual camera output
 - [ ] Video filters & effects (color correction, LUT, blur, chroma key refinement)
-- [ ] Audio filters (noise suppression RNNoise/NVIDIA, compressor, limiter, expander, VST)
+- [ ] **Audio filters** (noise suppression RNNoise/NVIDIA, compressor, limiter, expander)
+- [ ] **VST 3.x support** — *231 votes on OBS Ideas, $3000 bounty; most modern plugins are VST3-only*
+- [ ] **Master audio mix** (output VU meter, master volume control, monitoring) — *highly requested, PR rejected in OBS due to complexity*
 - [ ] Additional recording formats (MKV, MOV, TS — crash-safe alternatives to MP4)
 - [ ] Advanced rate control (VBR, CQ, CQVBR, custom encoder options)
 - [ ] Multi-track audio export
@@ -254,6 +258,7 @@ The core concept of OBS: scenes, sources, and transitions.
 - [x] Code signing (signing automation present, secrets needed)
 - [ ] Telemetry (opt-in, privacy-friendly)
 - [ ] Multi-language support (locale files fully wired)
+- [ ] **MIDI device support** (map controllers like Korg NanoKontrol to scene switches, volume faders, filter toggles) — *frequently requested for live production and music streams*
 
 **Goal:** OBS core parity across all platforms, with a plugin model structurally superior to OBS (WASM instead of a C ABI), plus OBS compat as a transition bridge.
 
