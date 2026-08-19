@@ -8,6 +8,7 @@ This guide covers building Rivulet from source on various Linux distributions.
 - **GStreamer**: For video/audio encoding and muxing
 - **PipeWire**: For desktop audio capture
 - **X11/Wayland**: Display server libraries
+- **xdotool** (runtime): Used by game capture to enumerate windows (via `list_game_windows()`); without it, game capture shows an empty window list
 
 ## Installation by Distribution
 
@@ -38,7 +39,8 @@ sudo apt-get install -y \
   libxrandr-dev \
   libxi-dev \
   libgl1-mesa-dev \
-  libasound2-dev
+  libasound2-dev \
+  xdotool
 
 # Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -71,7 +73,8 @@ sudo dnf install -y \
   mesa-libGL-devel \
   alsa-lib-devel \
   openssl-devel \
-  dbus-devel
+  dbus-devel \
+  xdotool
 
 cargo build --release
 ```
@@ -95,7 +98,8 @@ sudo pacman -S --needed \
   mesa \
   alsa-lib \
   openssl \
-  dbus
+  dbus \
+  xdotool
 
 cargo build --release
 ```

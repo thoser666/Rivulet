@@ -29,7 +29,7 @@ central panel renders a `match` on it.
 
 | Sidebar section | AppView | Milestone | Content |
 | --- | --- | --- | --- |
-| Record | `Record` | M0/M1 | capture source, region, codec, preset, timer/FPS overlay |
+| Record | `Record` | M0/M1 | capture source (screen/window/camera/game), region, codec, preset, timer/FPS overlay |
 | Mixer | `Mixer` | M1 | audio filters, monitoring, levels |
 | Scenes | `Scenes` | M2 | placeholder (scenes, sources, transitions) |
 | Stream | `Stream` | M3 | placeholder (RTMP, stream keys, dual output) |

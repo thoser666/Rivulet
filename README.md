@@ -57,8 +57,8 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 
 - **Screen Capture** - Capture your primary monitor in real-time
 - **Window Capture** - Capture a single application window (games, etc.) in addition to full monitors, with a window picker in the GUI (Linux & Windows)
-- **Camera Capture** - Capture from USB/webcam devices via GStreamer's device provider API; dropdown selection of available cameras with configurable resolution and FPS
-- **Game Capture** - Capture a specific game window using Windows Graphics Capture (Windows) or xcap window capture (Linux), with a checkbox toggle and window picker in the GUI
+- **Camera Capture** - Capture from USB/webcam devices via GStreamer's device provider API; dropdown selection of available cameras with configurable resolution and FPS; engine API `list_cameras()` / `start_camera_capture()`
+- **Game Capture** - Capture a specific game window using Windows Graphics Capture (Windows) or xcap window capture (Linux), with a checkbox toggle and window picker in the GUI; engine API `list_game_windows()` / `start_game_capture()` (window listing uses `xdotool` on Linux)
 - **Multi-Monitor Selection** - Pick any connected monitor from a dropdown instead of being limited to the primary display (Linux & Windows)
 - **Region Capture** - Record a rectangular area of a monitor with an interactive drag selector over a live preview, plus precise X/Y/W/H inputs and a one-click "full monitor" reset (Linux & Windows)
 - **Screen + Audio Recording (Linux GUI)** - Full recording flow in the GUI: monitor selection, start/stop, recording timer; system audio + microphone are captured and mixed into the MP4
@@ -190,7 +190,9 @@ The core concept of OBS: scenes, sources, and transitions.
 
 **Priority for gaming streamers:**
 - [ ] **Game capture** (D3D/Vulkan/OpenGL hook, zero-overhead) — *#1 priority: without this, Rivulet cannot replace OBS for gaming*
+- [x] Game capture (window-based) — Windows Graphics Capture (Windows) / xcap (Linux), with checkbox toggle and window picker in the GUI
 - [ ] Sources (image, text, webcam, browser/embedded Chromium)
+- [x] Sources — camera capture (webcam via GStreamer)
 
 **Scene system:**
 - [ ] Scene management (multiple scenes, switching)
