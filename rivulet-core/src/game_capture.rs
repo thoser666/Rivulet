@@ -156,14 +156,18 @@ pub fn start_game_capture(
                     break;
                 }
                 if let Ok(windows) = Window::all() {
-                    if let Some(w) = windows.iter().find(|w| w.id() == window_id) {
+                    if let Some(w) = windows
+                        .iter()
+                        .find(|w| w.id().map(|id| id as u64).unwrap_or(0) == window_id)
+                    {
                         if let Ok(image) = w.capture_image() {
-                            let rgba = image.to_rgba8();
-                            let raw = rgba.into_raw();
+                            // xcap 0.9 returns an RGBA8 ImageBuffer directly.
+                            let (width, height) = (image.width(), image.height());
+                            let raw = image.into_raw();
                             let _ = tx.send(GameCaptureFrame {
                                 data: raw,
-                                width: image.width(),
-                                height: image.height(),
+                                width,
+                                height,
                             });
                         }
                     }
