@@ -111,7 +111,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 | M1 – Solid Recording | Audio tracks, Hardware encoding, QoL, Overlay | ✅ Done |
 | M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 Scene organisation in progress |
 | M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | 🚧 In progress |
-| M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 📅 Planned |
+| M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 🚧 Replay Buffer done |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 📅 Planned |
 | M6 – Automation & Determinism | Headless CLI, CI Rendering, Reproducible Pipelines | 📅 Planned |
 | M7 – Embeddable Engine | Stable `rivulet-core` API, Docs, Tooling | 📅 Planned |
@@ -192,9 +192,23 @@ release channel only describes *how* the tag is built and published.
 The core concept of OBS: scenes, sources, and transitions.
 
 **Priority for gaming streamers:**
-- [ ] **Game capture** (D3D/Vulkan/OpenGL hook, zero-overhead) — *#1 priority: without this, Rivulet cannot replace OBS for gaming*
+
+*Game capture (D3D/Vulkan/OpenGL hook, zero-overhead) — #1 priority: without this, Rivulet cannot replace OBS for gaming. Split into work packages G1–G6:*
+- [x] **G1 – Capture strategy spike** — evaluate the capture approach per graphics API (DXGI Desktop Duplication, Vulkan layer, wgl hook; OBS backends as reference) and define the overhead budget (<1% frame time) and abort criteria. *DoD: decision document in docs/ with per-API recommendation and feasibility assessment — [docs/game-capture-strategy.md](docs/game-capture-strategy.md).*
+- [ ] **G2 – Windows DXGI backend** — Desktop Duplication for fullscreen/exclusive fullscreen with Graphics Capture fallback; GPU-texture path instead of CPU copy; usable as a scene source. *DoD: DX9/11/12 fullscreen captured via zero-copy path, tests + docs.*
+- [ ] **G3 – Vulkan hook** — VK_LAYER-based capture (OBS vulkan-capture approach) for fullscreen Vulkan games. *DoD: Vulkan fullscreen captured within the overhead budget, tests + docs.*
+- [ ] **G4 – OpenGL hook** — wglSwapBuffers interception for OpenGL games. *DoD: OpenGL fullscreen captured within the overhead budget, tests + docs.*
+- [ ] **G5 – Performance verification** — FPS/frame-time comparison with vs. without capture, benchmarked against OBS, with a CI regression guard. *DoD: benchmark script in scripts/, overhead budget verified for all three backends.*
+- [ ] **G6 – Linux fullscreen path** (optional) — PipeWire/portal capture on Wayland with X11 fallback. *DoD: fullscreen capture on Wayland and X11, tests + docs.*
 - [x] Game capture (window-based) — Windows Graphics Capture (Windows) / xcap (Linux), with checkbox toggle and window picker in the GUI
-- [ ] Sources (image, text, webcam, browser/embedded Chromium)
+
+*Sources (image, text, webcam, browser/embedded Chromium). Split into work packages S1–S5b:*
+- [ ] **S1 – Source abstraction** — complete the Source trait, properties UI, and per-source transforms. *DoD: any source type renders in a scene with a configurable transform, tests.*
+- [ ] **S2 – Image source** — PNG/JPEG/GIF, folder loop/slideshow. *DoD: static and slideshow image sources usable in scenes, tests + docs.*
+- [ ] **S3 – Text source** — rich text, scrolling, outline/background. *DoD: styled text source usable in scenes, tests + docs.*
+- [ ] **S4 – Webcam as scene source** — expose the existing camera capture as a scene source with a properties panel. *DoD: webcam selectable per scene with resolution/framerate settings, tests + docs.*
+- [ ] **S5a – Browser spike** — evaluate platform webviews (WebView2 / WebKitGTK / WKWebView) and render into a GPU texture. *DoD: spike document with per-platform recommendation and a rendered-frame proof.*
+- [ ] **S5b – Browser source** — URL, interaction, transparency, config UI. *DoD: interactive browser source in scenes on all platforms, tests + docs.*
 - [x] Sources — camera capture (webcam via GStreamer)
 
 **Scene system:**
@@ -237,7 +251,7 @@ The core concept of OBS: scenes, sources, and transitions.
 
 **Status: Planned**
 
-- [ ] **Replay buffer / instant replay** — *essential for gaming streamers (clip moments without recording the whole session)*
+- [x] **Replay buffer / instant replay** — *essential for gaming streamers (clip moments without recording the whole session); ring buffer (H.264+AAC) with instant replay save via F12 hotkey or GUI button*
 - [ ] Virtual camera output
 - [ ] Video filters & effects (color correction, LUT, blur, chroma key refinement)
 - [ ] **Audio filters** (noise suppression RNNoise/NVIDIA, compressor, limiter, expander)
@@ -356,7 +370,7 @@ The core concept of OBS: scenes, sources, and transitions.
 | Recording & encoding | Partial (H.264/H.265/VP9, HW + SW) |
 | Streaming (RTMP, platforms) | Partial (RTMPS Twitch/Kick/YouTube) |
 | Virtual camera | Open |
-| Replay buffer | Open |
+| Replay buffer | Done (ring buffer, F12 hotkey, save-to-MP4) |
 | Browser sources | Open |
 | Studio mode & hotkeys | Partial (hotkeys: record/pause/mute) |
 | Plugin ecosystem & OBS compatibility | Open |
