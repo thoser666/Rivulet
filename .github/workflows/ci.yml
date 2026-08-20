@@ -152,7 +152,41 @@ jobs:
             gstreamer1.0-tools \
             libglib2.0-dev \
             libpipewire-0.3-dev \
-            libspa-0.2-dev
+            libspa-0.2-dev \
+            xdotool \
+            xvfb \
+            x11-apps
+
+      - name: Verify Linux game-window enumeration (xdotool)
+        if: runner.os == 'Linux'
+        env:
+          DISPLAY: :99
+          RIVULET_TEST_XDOTOOL: "1"
+        run: |
+          set -euo pipefail
+          Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp >/tmp/rivulet-xvfb.log 2>&1 &
+          xvfb_pid=$!
+          test_window_pid=""
+          cleanup() {
+            if [ -n "$test_window_pid" ]; then kill "$test_window_pid" 2>/dev/null || true; fi
+            kill "$xvfb_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 20); do
+            if xdpyinfo >/dev/null 2>&1; then break; fi
+            sleep 0.5
+          done
+          xdpyinfo >/dev/null
+
+          xmessage -display "$DISPLAY" -geometry 800x600+0+0 \
+            -name RivuletGameCaptureTest \
+            "Rivulet game capture CI test window" &
+          test_window_pid=$!
+          sleep 1
+
+          xdotool search --name RivuletGameCaptureTest
+          cargo test -p rivulet-core list_game_windows_finds_the_ci_window -- --exact --nocapture
 
       # --- Install Windows dependencies ---
       - name: Install Windows dependencies (if applicable)

@@ -217,4 +217,27 @@ mod tests {
     fn list_game_windows_does_not_panic() {
         let _windows = list_game_windows();
     }
+
+    /// The Linux CI job starts Xvfb and an xmessage window before running this
+    /// opt-in test. Keeping it opt-in lets developers run the normal test
+    /// suite without requiring an X11 session or xdotool locally.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn list_game_windows_finds_the_ci_window() {
+        if std::env::var_os("RIVULET_TEST_XDOTOOL").is_none() {
+            return;
+        }
+
+        let windows = list_game_windows();
+        assert!(
+            !windows.is_empty(),
+            "list_game_windows() returned no windows; verify DISPLAY, Xvfb and xdotool"
+        );
+        assert!(
+            windows
+                .iter()
+                .any(|window| window.title.contains("RivuletGameCaptureTest")),
+            "the CI test window was not enumerated: {windows:?}"
+        );
+    }
 }
