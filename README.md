@@ -97,6 +97,8 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 > **Goal:** OBS core parity *and* the architectural strengths OBS cannot offer (determinism, embeddability, modernity).
 > **Strategy:** First a stable, embeddable engine, then scenes & streaming, then the differentiation features (M6–M9) as product identity.
 > **Priority:** Gaming streamers are a primary audience — Game Capture (M2) and Replay Buffer (M4) are prioritized accordingly.
+> 
+> **#1 Priority**: Game capture (D3D/Vulkan/OpenGL hook, zero-overhead) — without this, Rivulet cannot replace OBS for gaming. Current: Window capture via WGC (Windows) / xcap (Linux) for gaming window selection. Roadmap: D3D11/D3D12 interposition (M3), Vulkan interposition (M3), OpenGL hook (M3) as architecture steps after M2.
 
 > **UI development:** new features should follow the navigation structure and
 > egui conventions in [`docs/ui-design.md`](docs/ui-design.md).

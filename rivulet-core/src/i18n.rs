@@ -137,10 +137,22 @@ impl Locale {
                     "recording_no_frames",
                     "No frames received for {0} seconds — recording stopped.",
                 ),
+                // Replay buffer
+                ("replay_buffer", "Replay buffer"),
+                ("replay_off", "Off"),
+                ("replay_seconds", "{0} seconds"),
+                (
+                    "replay_hint",
+                    "Keeps the last {0} seconds of video in memory while recording. Press {1} (or the button below) to save them as an MP4 clip.",
+                ),
+                ("save_replay", "Save Replay"),
+                ("replay_saved", "Replay saved: {0}"),
+                ("replay_save_failed", "Could not save replay: {0}"),
                 // Hotkeys
                 ("hotkey_record", "Start/Stop recording"),
                 ("hotkey_pause", "Pause/Resume recording"),
                 ("hotkey_mute", "Mute/Unmute audio"),
+                ("hotkey_save_replay", "Save replay"),
                 ("paused", "Paused"),
                 ("muted", "Muted"),
                 // Codec selection
@@ -250,10 +262,22 @@ impl Locale {
                     "recording_no_frames",
                     "{0} Sekunden lang keine Frames empfangen — Aufnahme gestoppt.",
                 ),
+                // Replay buffer
+                ("replay_buffer", "Replay-Puffer"),
+                ("replay_off", "Aus"),
+                ("replay_seconds", "{0} Sekunden"),
+                (
+                    "replay_hint",
+                    "Hält die letzten {0} Sekunden des Videos im Speicher, während du aufnimmst. Drücke {1} (oder den Button), um sie als MP4-Clip zu speichern.",
+                ),
+                ("save_replay", "Replay speichern"),
+                ("replay_saved", "Replay gespeichert: {0}"),
+                ("replay_save_failed", "Replay konnte nicht gespeichert werden: {0}"),
                 // Hotkeys
                 ("hotkey_record", "Aufnahme starten/stoppen"),
                 ("hotkey_pause", "Aufnahme pausieren/fortsetzen"),
                 ("hotkey_mute", "Audio stummschalten"),
+                ("hotkey_save_replay", "Replay speichern"),
                 ("paused", "Pausiert"),
                 ("muted", "Stumm"),
                 // Codec selection
@@ -441,6 +465,31 @@ mod tests {
         assert_eq!(Locale::De.tr("theme_dark"), "Dunkel");
         assert_eq!(Locale::En.tr("theme_light"), "Light");
         assert_eq!(Locale::De.tr("theme_light"), "Hell");
+    }
+
+    #[test]
+    fn replay_keys_translate_in_both_locales() {
+        assert_eq!(Locale::En.tr("replay_buffer"), "Replay buffer");
+        assert_eq!(Locale::De.tr("replay_buffer"), "Replay-Puffer");
+        assert_eq!(Locale::En.tr("replay_off"), "Off");
+        assert_eq!(Locale::De.tr("replay_off"), "Aus");
+        assert_eq!(Locale::En.tr_fmt("replay_seconds", &["30".to_string()]), "30 seconds");
+        assert_eq!(
+            Locale::De.tr_fmt("replay_seconds", &["30".to_string()]),
+            "30 Sekunden"
+        );
+        assert_eq!(Locale::En.tr("save_replay"), "Save Replay");
+        assert_eq!(Locale::De.tr("save_replay"), "Replay speichern");
+        assert_eq!(Locale::En.tr("hotkey_save_replay"), "Save replay");
+        assert_eq!(Locale::De.tr("hotkey_save_replay"), "Replay speichern");
+        let en = Locale::En.tr_fmt("replay_saved", &["/tmp/clip.mp4".to_string()]);
+        assert_eq!(en, "Replay saved: /tmp/clip.mp4");
+        let de = Locale::De.tr_fmt("replay_saved", &["/tmp/clip.mp4".to_string()]);
+        assert_eq!(de, "Replay gespeichert: /tmp/clip.mp4");
+        let en_fail = Locale::En.tr_fmt("replay_save_failed", &["boom".to_string()]);
+        assert_eq!(en_fail, "Could not save replay: boom");
+        let de_fail = Locale::De.tr_fmt("replay_save_failed", &["boom".to_string()]);
+        assert_eq!(de_fail, "Replay konnte nicht gespeichert werden: boom");
     }
 
     #[test]
