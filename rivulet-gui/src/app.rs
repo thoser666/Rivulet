@@ -1396,8 +1396,10 @@ impl RivuletApp {
         };
         match self.engine.save_replay(path.clone()) {
             Ok(_) => {
-                self.replay_status =
-                    Some((true, self.tr_fmt("replay_saved", &[path.display().to_string()])));
+                self.replay_status = Some((
+                    true,
+                    self.tr_fmt("replay_saved", &[path.display().to_string()]),
+                ));
             }
             Err(e) => {
                 self.replay_status =
@@ -3600,5 +3602,14 @@ mod tests {
     #[test]
     fn format_duration_exact_hour() {
         assert_eq!(RivuletApp::format_duration(3600), "01:00:00");
+    }
+
+    // ── replay buffer hotkey ─────────────────────────────────────
+
+    #[test]
+    fn replay_hotkey_defaults_to_f12_and_labels_it() {
+        let hotkeys = HotkeyConfig::default();
+        assert_eq!(hotkeys.save_replay, egui::Key::F12);
+        assert_eq!(hotkeys.label_for("save_replay"), "F12");
     }
 }

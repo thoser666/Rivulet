@@ -446,9 +446,7 @@ impl RivuletEngine {
         ));
         // Replay capture branch (third output of the video tee).
         if self.replay.is_some() {
-            s.push_str(
-                "video_tee. ! queue ! h264parse ! appsink name=replay_video_sink ",
-            );
+            s.push_str("video_tee. ! queue ! h264parse ! appsink name=replay_video_sink ");
         }
         if self.audio_enabled {
             s.push_str(
@@ -458,9 +456,7 @@ impl RivuletEngine {
                  audio_tee. ! queue ! mux_stream. ",
             );
             if self.replay.is_some() {
-                s.push_str(
-                    "audio_tee. ! queue ! appsink name=replay_audio_sink_0 ",
-                );
+                s.push_str("audio_tee. ! queue ! appsink name=replay_audio_sink_0 ");
             }
         }
         s.push_str(&format!(
@@ -611,13 +607,9 @@ impl RivuletEngine {
                         if let Ok(sample) = sink.pull_sample() {
                             if let Some(buf) = sample.buffer() {
                                 let pts = buf.pts().map(|t| t.nseconds()).unwrap_or(0);
-                                let dts = buf
-                                    .dts()
-                                    .or(buf.pts())
-                                    .map(|t| t.nseconds())
-                                    .unwrap_or(pts);
-                                let keyframe =
-                                    !buf.flags().contains(gst::BufferFlags::DELTA_UNIT);
+                                let dts =
+                                    buf.dts().or(buf.pts()).map(|t| t.nseconds()).unwrap_or(pts);
+                                let keyframe = !buf.flags().contains(gst::BufferFlags::DELTA_UNIT);
                                 let data = buf
                                     .map_readable()
                                     .map(|m| m.as_slice().to_vec())
@@ -654,11 +646,7 @@ impl RivuletEngine {
                     if let Ok(sample) = sink.pull_sample() {
                         if let Some(buf) = sample.buffer() {
                             let pts = buf.pts().map(|t| t.nseconds()).unwrap_or(0);
-                            let dts = buf
-                                .dts()
-                                .or(buf.pts())
-                                .map(|t| t.nseconds())
-                                .unwrap_or(pts);
+                            let dts = buf.dts().or(buf.pts()).map(|t| t.nseconds()).unwrap_or(pts);
                             let data = buf
                                 .map_readable()
                                 .map(|m| m.as_slice().to_vec())
@@ -967,10 +955,7 @@ impl RivuletEngine {
         // session that produced it is running. The replay setting itself
         // (duration/enabled) is kept for the next recording.
         if let Some(replay) = &self.replay {
-            replay
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clear();
+            replay.lock().unwrap_or_else(|e| e.into_inner()).clear();
         }
         println!("[Engine] Recording stopped and file saved.");
     }
@@ -1082,9 +1067,9 @@ impl RivuletEngine {
     /// (0 when empty or disabled). Useful for a "~30s buffered" hint in the
     /// GUI.
     pub fn replay_retained_secs(&self) -> Option<u64> {
-        self.replay.as_ref().map(|r| {
-            r.lock().unwrap_or_else(|e| e.into_inner()).retained_ns() / 1_000_000_000
-        })
+        self.replay
+            .as_ref()
+            .map(|r| r.lock().unwrap_or_else(|e| e.into_inner()).retained_ns() / 1_000_000_000)
     }
 
     /// Save the currently buffered replay clip to `path` as an MP4 file.
@@ -1096,10 +1081,7 @@ impl RivuletEngine {
         let Some(replay) = &self.replay else {
             anyhow::bail!("replay buffer is disabled");
         };
-        let snapshot = replay
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .snapshot();
+        let snapshot = replay.lock().unwrap_or_else(|e| e.into_inner()).snapshot();
         replay::save_replay(&snapshot, &path)?;
         Ok(path)
     }
@@ -1244,8 +1226,10 @@ mod tests {
         engine.set_audio_enabled(true);
         engine.set_replay_duration(std::time::Duration::from_secs(30));
 
-        let path = std::env::temp_dir()
-            .join(format!("rivulet_engine_replay_test_{}.mp4", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "rivulet_engine_replay_test_{}.mp4",
+            std::process::id()
+        ));
         engine.start_local_recording(path.clone());
 
         let (width, height) = (320u32, 240u32);
@@ -2004,10 +1988,16 @@ mod tests {
         let mut engine = RivuletEngine::default();
         engine.set_replay_duration(std::time::Duration::from_secs(30));
         assert!(engine.replay_enabled());
-        assert_eq!(engine.replay_duration(), Some(std::time::Duration::from_secs(30)));
+        assert_eq!(
+            engine.replay_duration(),
+            Some(std::time::Duration::from_secs(30))
+        );
 
         engine.set_replay_duration(std::time::Duration::from_secs(60));
-        assert_eq!(engine.replay_duration(), Some(std::time::Duration::from_secs(60)));
+        assert_eq!(
+            engine.replay_duration(),
+            Some(std::time::Duration::from_secs(60))
+        );
 
         engine.disable_replay();
         assert!(!engine.replay_enabled());

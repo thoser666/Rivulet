@@ -473,7 +473,10 @@ mod tests {
         assert_eq!(Locale::De.tr("replay_buffer"), "Replay-Puffer");
         assert_eq!(Locale::En.tr("replay_off"), "Off");
         assert_eq!(Locale::De.tr("replay_off"), "Aus");
-        assert_eq!(Locale::En.tr_fmt("replay_seconds", &["30".to_string()]), "30 seconds");
+        assert_eq!(
+            Locale::En.tr_fmt("replay_seconds", &["30".to_string()]),
+            "30 seconds"
+        );
         assert_eq!(
             Locale::De.tr_fmt("replay_seconds", &["30".to_string()]),
             "30 Sekunden"
