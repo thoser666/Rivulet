@@ -13,6 +13,9 @@ Cargo.lock
 **/*.rs.bk
 *.pdb
 
+# Freebuff tool artifacts
+.freebuff/
+
 # IDE / Editors
 .idea/
 .vscode/
