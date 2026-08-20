@@ -109,7 +109,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 | --- | --- | --- | --- | --- |
 | M0 – Recording Foundation | Capture, Encoding, Audio, GUI | ✅ Done | — | [![M0](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F3&query=open_issues&label=M0&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/3) |
 | M1 – Solid Recording | Audio tracks, Hardware encoding, QoL, Overlay | ✅ Done | 2026-09-15 | [![M1](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F4&query=open_issues&label=M1&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/4) |
-| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 Scene organisation in progress | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
+| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 In progress (G2–G6 hooks, S1–S5b sources open) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
 | M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | 🚧 In progress | — | [![M3](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F5&query=open_issues&label=M3&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/5) |
 | M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 🚧 Replay Buffer done | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 📅 Planned | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
@@ -187,7 +187,7 @@ release channel only describes *how* the tag is built and published.
 
 ### 🎨 M2 – Scenes & Composition
 
-**Status: Planned**
+**Status: In progress**
 
 The core concept of OBS: scenes, sources, and transitions.
 
@@ -213,7 +213,7 @@ The core concept of OBS: scenes, sources, and transitions.
 
 **Scene system:**
 - [ ] Scene management (multiple scenes, switching)
-- [ ] **Scene organisation** (folders, search/filter, color coding) — *top community request, active PRs in OBS*
+- [x] **Scene organisation** (folders, search/filter, color coding) — *top community request, active PRs in OBS; `Scene` model with parent UUIDs and ARGB color coding (folders via hierarchy), tested in `rivulet-core/src/scene.rs`*
 - [ ] **Undo/Redo** (Ctrl+Z / Ctrl+Y) — *requested since OBS v23, implemented in v27*
 - [x] Sources — window capture (monitor + individual windows, Linux & Windows)
 - [ ] **Source composition** (layers, position, scaling, cropping — each scene stores its own layout per source; switching scenes auto-moves sources to their saved positions)
