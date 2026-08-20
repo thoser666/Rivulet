@@ -164,6 +164,7 @@ struct HotkeyConfig {
     record: egui::Key,
     pause: egui::Key,
     mute: egui::Key,
+    save_replay: egui::Key,
 }
 
 impl Default for HotkeyConfig {
@@ -172,6 +173,7 @@ impl Default for HotkeyConfig {
             record: egui::Key::F9,
             pause: egui::Key::F10,
             mute: egui::Key::F11,
+            save_replay: egui::Key::F12,
         }
     }
 }
@@ -209,21 +211,27 @@ impl HotkeyConfig {
                 egui::Key::F12 => "F12",
                 _ => "?",
             },
-            "mute" => match self.mute {
-                egui::Key::F1 => "F1",
-                egui::Key::F2 => "F2",
-                egui::Key::F3 => "F3",
-                egui::Key::F4 => "F4",
-                egui::Key::F5 => "F5",
-                egui::Key::F6 => "F6",
-                egui::Key::F7 => "F7",
-                egui::Key::F8 => "F8",
-                egui::Key::F9 => "F9",
-                egui::Key::F10 => "F10",
-                egui::Key::F11 => "F11",
-                egui::Key::F12 => "F12",
-                _ => "?",
-            },
+            "mute" => Self::key_label(self.mute),
+            "save_replay" => Self::key_label(self.save_replay),
+            _ => "?",
+        }
+    }
+
+    /// Human-readable label for a function key (F1..F12).
+    fn key_label(key: egui::Key) -> &'static str {
+        match key {
+            egui::Key::F1 => "F1",
+            egui::Key::F2 => "F2",
+            egui::Key::F3 => "F3",
+            egui::Key::F4 => "F4",
+            egui::Key::F5 => "F5",
+            egui::Key::F6 => "F6",
+            egui::Key::F7 => "F7",
+            egui::Key::F8 => "F8",
+            egui::Key::F9 => "F9",
+            egui::Key::F10 => "F10",
+            egui::Key::F11 => "F11",
+            egui::Key::F12 => "F12",
             _ => "?",
         }
     }
@@ -493,6 +501,13 @@ pub struct RivuletApp {
     #[serde(skip)]
     is_muted: bool,
 
+    // Replay buffer (instant replay): `None` = off, `Some(secs)` = clip
+    // length. Applied to the engine before every recording start.
+    replay_duration_secs: Option<u64>,
+    /// Transient, localized outcome of the last replay save (ok?, message).
+    #[serde(skip)]
+    replay_status: Option<(bool, String)>,
+
     // Codec selection
     #[serde(skip)]
     selected_codec: rivulet_core::VideoCodec,
@@ -649,6 +664,8 @@ impl Default for RivuletApp {
             hotkeys: HotkeyConfig::default(),
             is_paused: false,
             is_muted: false,
+            replay_duration_secs: Some(30),
+            replay_status: None,
             selected_codec: rivulet_core::VideoCodec::default(),
             selected_preset: rivulet_core::RecordingPreset::default(),
             show_overlay: false,
@@ -754,6 +771,7 @@ impl RivuletApp {
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
+            self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
 
             let (sender, receiver) = mpsc::channel();
@@ -804,6 +822,7 @@ impl RivuletApp {
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
+            self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
 
             let (sender, receiver) = mpsc::channel();
@@ -859,6 +878,7 @@ impl RivuletApp {
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
+            self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
 
             let (sender, receiver) = mpsc::channel();
@@ -908,6 +928,7 @@ impl RivuletApp {
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
+            self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
 
             let config = rivulet_core::CameraConfig::default();
@@ -1149,6 +1170,7 @@ impl RivuletApp {
         self.engine.set_video_codec(self.selected_codec);
         self.engine.set_preset(self.selected_preset);
         self.engine.set_overlay_enabled(self.show_overlay);
+        self.apply_replay_setting();
         self.engine.set_audio_enabled(self.audio_preview);
         self.engine
             .set_separate_audio_tracks(self.separate_tracks && self.audio_preview);
@@ -1344,6 +1366,71 @@ impl RivuletApp {
         let load = format!("{:.0}%", m.encode_load_percent);
         let size = format_bytes(m.file_size_bytes);
         self.tr_fmt("recording_metrics", &[fps, load, size])
+    }
+
+    /// Apply the configured replay buffer setting to the engine. Called
+    /// before every recording start so the capture branches are part of the
+    /// pipeline, and whenever the user changes the setting (even mid-
+    /// recording).
+    fn apply_replay_setting(&mut self) {
+        match self.replay_duration_secs {
+            Some(secs) => self
+                .engine
+                .set_replay_duration(std::time::Duration::from_secs(secs)),
+            None => self.engine.disable_replay(),
+        }
+    }
+
+    /// Save the currently buffered replay clip through a file dialog and
+    /// report the outcome (localized) in `replay_status`.
+    fn save_replay_now(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Video", &["mp4"])
+            .set_file_name(format!(
+                "rivulet-replay-{}.mp4",
+                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
+            ))
+            .save_file()
+        else {
+            return;
+        };
+        match self.engine.save_replay(path.clone()) {
+            Ok(_) => {
+                self.replay_status =
+                    Some((true, self.tr_fmt("replay_saved", &[path.display().to_string()])));
+            }
+            Err(e) => {
+                self.replay_status =
+                    Some((false, self.tr_fmt("replay_save_failed", &[e.to_string()])));
+            }
+        }
+    }
+
+    /// Draw the "Save Replay" button plus the outcome of the last save while
+    /// a recording is active and the replay buffer is enabled.
+    fn draw_replay_save_controls(&mut self, ui: &mut egui::Ui, colors: theme::StatusColors) {
+        if self.replay_duration_secs.is_none() {
+            return;
+        }
+        ui.horizontal(|ui| {
+            if ui
+                .button(format!("💾 {}", self.tr("save_replay")))
+                .clicked()
+            {
+                self.save_replay_now();
+            }
+            if let Some(secs) = self.engine.replay_retained_secs() {
+                ui.label(
+                    egui::RichText::new(format!("~{secs}s buffered"))
+                        .small()
+                        .color(colors.hint),
+                );
+            }
+        });
+        if let Some((ok, message)) = &self.replay_status {
+            let color = if *ok { colors.success } else { colors.error };
+            ui.label(egui::RichText::new(message).color(color).small());
+        }
     }
 
     /// Format a duration in seconds as `HH:MM:SS` or `MM:SS` when under an
@@ -1790,6 +1877,11 @@ impl eframe::App for RivuletApp {
             if i.key_pressed(self.hotkeys.mute) && any_recording {
                 self.is_muted = !self.is_muted;
             }
+
+            // F12: Save the replay buffer as a clip (only while recording)
+            if i.key_pressed(self.hotkeys.save_replay) && any_recording {
+                self.save_replay_now();
+            }
         });
 
         #[cfg(target_os = "windows")]
@@ -1950,13 +2042,15 @@ impl eframe::App for RivuletApp {
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(format!(
-                            "Hotkeys: {} [{}] · {} [{}] · {} [{}]",
+                            "Hotkeys: {} [{}] · {} [{}] · {} [{}] · {} [{}]",
                             self.tr("hotkey_record"),
                             self.hotkeys.label_for("record"),
                             self.tr("hotkey_pause"),
                             self.hotkeys.label_for("pause"),
                             self.tr("hotkey_mute"),
                             self.hotkeys.label_for("mute"),
+                            self.tr("hotkey_save_replay"),
+                            self.hotkeys.label_for("save_replay"),
                         ))
                         .small()
                         .color(colors.hint),

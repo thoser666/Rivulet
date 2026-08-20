@@ -7,7 +7,7 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 // Important: The prelude is still needed for methods like .set_state(), .by_name(), etc.
 use gst::prelude::*;
 
@@ -19,6 +19,9 @@ pub use camera::{CameraConfig, CameraDevice, CameraFrame};
 
 pub mod game_capture;
 pub use game_capture::{GameCaptureConfig, GameCaptureFrame, GameWindow};
+
+pub mod replay;
+pub use replay::{save_replay, ReplayBuffer, ReplaySegment, ReplaySnapshot};
 
 pub mod encoder;
 pub use encoder::{
@@ -89,6 +92,12 @@ pub struct RivuletEngine {
     /// When `true`, a `textoverlay` element is included in the video branch
     /// that burns a timer and FPS counter into the recorded video.
     show_overlay: bool,
+    /// RAM ring buffer keeping the last N seconds of encoded video/audio so
+    /// the user can save an "instant replay" clip. `None` disables the
+    /// replay buffer (and the tee/appsink branches it adds to the pipeline).
+    /// The buffer itself is written from the GStreamer streaming thread, so
+    /// it lives behind an `Arc<Mutex<..>>`.
+    replay: Option<Arc<Mutex<ReplayBuffer>>>,
 }
 
 impl Default for RivuletEngine {
@@ -115,6 +124,7 @@ impl Default for RivuletEngine {
             recording_metrics: None,
             last_error: None,
             show_overlay: false,
+            replay: None,
         }
     }
 }
@@ -256,6 +266,20 @@ impl RivuletEngine {
         location.replace('\\', "\\\\")
     }
 
+    /// Fragment appended after the video encoder: either a plain queue into
+    /// the muxer, or (when the replay buffer is enabled) a tee that also
+    /// feeds a parsing appsink so encoded packets can be captured into the
+    /// ring. The `h264parse` in the capture branch yields AVC caps carrying
+    /// `codec_data`, which lets a replay clip start mid-stream.
+    fn replay_video_branch(&self) -> &'static str {
+        if self.replay.is_some() {
+            " ! tee name=replay_vtee ! queue ! mux. \
+             replay_vtee. ! queue ! h264parse ! appsink name=replay_video_sink"
+        } else {
+            " ! queue ! mux."
+        }
+    }
+
     fn video_branch_str(&self) -> String {
         let transform = self.preset.transform_fragment();
         let caps = self
@@ -273,8 +297,11 @@ impl RivuletEngine {
         if transform.is_empty() {
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert ! {}{} ! {} ! queue ! mux. ",
-                caps, overlay, encoder
+                 ! videoconvert ! {}{} ! {}{} ",
+                caps,
+                overlay,
+                encoder,
+                self.replay_video_branch()
             )
         } else {
             // Transform includes videoscale/videorate and target resolution/FPS.
@@ -283,8 +310,11 @@ impl RivuletEngine {
             let transform_caps = format!("{}!{}", transform.trim_end(), caps.trim_start());
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert ! {}{} ! {} ! queue ! mux. ",
-                transform_caps, overlay, encoder
+                 ! videoconvert ! {}{} ! {}{} ",
+                transform_caps,
+                overlay,
+                encoder,
+                self.replay_video_branch()
             )
         }
     }
@@ -292,30 +322,44 @@ impl RivuletEngine {
     /// Build the audio branch of the pipeline. With `force_mixed` the sources
     /// are mixed into a single track regardless of `separate_audio_tracks`; the
     /// FLV muxer used for streaming only supports a single audio track.
+    ///
+    /// When the replay buffer is enabled, every audio branch additionally
+    /// feeds a tee into a dedicated appsink (`replay_audio_sink_<n>`) so the
+    /// encoded AAC frames can be captured into the ring.
     fn audio_branch_str(&self, force_mixed: bool) -> String {
         if !self.audio_enabled {
             return String::new();
         }
+        let replay_enabled = self.replay.is_some();
+        let mut branch_idx = 0usize;
+        let mut push_branch = |out: &mut String, appsrc_name: &str| {
+            let idx = branch_idx;
+            branch_idx += 1;
+            let replay = if replay_enabled {
+                format!(
+                    " ! tee name=replay_atee{idx} ! queue ! mux. \
+                     replay_atee{idx}. ! queue ! appsink name=replay_audio_sink_{idx}"
+                )
+            } else {
+                " ! queue ! mux.".to_string()
+            };
+            out.push_str(&format!(
+                "appsrc name={appsrc_name} format=time is-live=true do-timestamp=true \
+                 ! audioconvert ! audioresample ! avenc_aac{replay} "
+            ));
+        };
+        let mut s = String::new();
         if self.separate_audio_tracks && !force_mixed {
-            let mut s = String::new();
             if self.audio_sys_enabled {
-                s.push_str(
-                    "appsrc name=audio_src_sys format=time is-live=true do-timestamp=true \
-                     ! audioconvert ! audioresample ! avenc_aac ! queue ! mux. ",
-                );
+                push_branch(&mut s, "audio_src_sys");
             }
             if self.audio_mic_enabled {
-                s.push_str(
-                    "appsrc name=audio_src_mic format=time is-live=true do-timestamp=true \
-                     ! audioconvert ! audioresample ! avenc_aac ! queue ! mux. ",
-                );
+                push_branch(&mut s, "audio_src_mic");
             }
-            s
         } else {
-            "appsrc name=audio_src format=time is-live=true do-timestamp=true \
-             ! audioconvert ! audioresample ! avenc_aac ! queue ! mux. "
-                .to_string()
+            push_branch(&mut s, "audio_src");
         }
+        s
     }
 
     fn build_recording_pipeline_str(&self, location: &str) -> String {
@@ -400,6 +444,12 @@ impl RivuletEngine {
              video_tee. ! queue ! mux_stream. ",
             video_part
         ));
+        // Replay capture branch (third output of the video tee).
+        if self.replay.is_some() {
+            s.push_str(
+                "video_tee. ! queue ! h264parse ! appsink name=replay_video_sink ",
+            );
+        }
         if self.audio_enabled {
             s.push_str(
                 "appsrc name=audio_src format=time is-live=true do-timestamp=true \
@@ -407,6 +457,11 @@ impl RivuletEngine {
                  ! queue ! mux_rec. \
                  audio_tee. ! queue ! mux_stream. ",
             );
+            if self.replay.is_some() {
+                s.push_str(
+                    "audio_tee. ! queue ! appsink name=replay_audio_sink_0 ",
+                );
+            }
         }
         s.push_str(&format!(
             "{} name=mux_rec ! filesink name=file_sink location=\"{}\" ",
@@ -520,6 +575,7 @@ impl RivuletEngine {
             }
         }
 
+        self.install_replay_capture(&pipeline);
         self.pipeline = Some(pipeline);
         self.appsrc = Some(appsrc);
         self.install_performance_probes();
@@ -529,6 +585,97 @@ impl RivuletEngine {
             println!("[Engine] Streaming pipeline running.");
         } else {
             println!("[Engine] Recording pipeline running.");
+        }
+    }
+
+    /// Attach appsink callbacks that capture the encoded video/audio packets
+    /// into the replay ring buffer.
+    ///
+    /// The capture branches only exist when the replay buffer is enabled (see
+    /// [`RivuletEngine::replay_video_branch`] and [`RivuletEngine::audio_branch_str`]);
+    /// the callbacks run on the GStreamer streaming thread and write into the
+    /// shared `Arc<Mutex<ReplayBuffer>>`. They are installed before the first
+    /// frame is pushed, so no encoded packet can slip past the ring.
+    fn install_replay_capture(&mut self, pipeline: &gst::Pipeline) {
+        let Some(replay) = self.replay.clone() else {
+            return;
+        };
+
+        // Video capture. The branch includes `h264parse`, so the recorded
+        // caps carry `codec_data` and the ring can start mid-stream.
+        if let Some(sink) = pipeline.by_name("replay_video_sink") {
+            if let Ok(sink) = sink.downcast::<gst_app::AppSink>() {
+                let replay = replay.clone();
+                let callbacks = gst_app::AppSinkCallbacks::builder()
+                    .new_sample(move |sink| {
+                        if let Ok(sample) = sink.pull_sample() {
+                            if let Some(buf) = sample.buffer() {
+                                let pts = buf.pts().map(|t| t.nseconds()).unwrap_or(0);
+                                let dts = buf
+                                    .dts()
+                                    .or(buf.pts())
+                                    .map(|t| t.nseconds())
+                                    .unwrap_or(pts);
+                                let keyframe =
+                                    !buf.flags().contains(gst::BufferFlags::DELTA_UNIT);
+                                let data = buf
+                                    .map_readable()
+                                    .map(|m| m.as_slice().to_vec())
+                                    .unwrap_or_default();
+                                let mut rb = replay.lock().unwrap_or_else(|e| e.into_inner());
+                                if rb.video_caps().is_none() {
+                                    if let Some(caps) = sample.caps() {
+                                        rb.set_video_caps(caps.to_string());
+                                    }
+                                }
+                                rb.push_video(pts, dts, data, keyframe);
+                            }
+                        }
+                        Ok(gst::FlowSuccess::Ok)
+                    })
+                    .build();
+                sink.set_callbacks(callbacks);
+            }
+        }
+
+        // Audio capture: one appsink per audio branch (mixed track, or
+        // system + microphone when separate tracks are enabled).
+        for i in 0..2usize {
+            let name = format!("replay_audio_sink_{i}");
+            let Some(sink) = pipeline.by_name(&name) else {
+                continue;
+            };
+            let Ok(sink) = sink.downcast::<gst_app::AppSink>() else {
+                continue;
+            };
+            let replay = replay.clone();
+            let callbacks = gst_app::AppSinkCallbacks::builder()
+                .new_sample(move |sink| {
+                    if let Ok(sample) = sink.pull_sample() {
+                        if let Some(buf) = sample.buffer() {
+                            let pts = buf.pts().map(|t| t.nseconds()).unwrap_or(0);
+                            let dts = buf
+                                .dts()
+                                .or(buf.pts())
+                                .map(|t| t.nseconds())
+                                .unwrap_or(pts);
+                            let data = buf
+                                .map_readable()
+                                .map(|m| m.as_slice().to_vec())
+                                .unwrap_or_default();
+                            let mut rb = replay.lock().unwrap_or_else(|e| e.into_inner());
+                            if rb.audio_caps(i).is_none() {
+                                if let Some(caps) = sample.caps() {
+                                    rb.set_audio_caps(i, caps.to_string());
+                                }
+                            }
+                            rb.push_audio(i, pts, dts, data);
+                        }
+                    }
+                    Ok(gst::FlowSuccess::Ok)
+                })
+                .build();
+            sink.set_callbacks(callbacks);
         }
     }
 
@@ -816,6 +963,15 @@ impl RivuletEngine {
         self.stream_health = None;
         self.recording_metrics = None;
         self.is_recording = false;
+        // Drop the buffered replay data: a clip is only meaningful while the
+        // session that produced it is running. The replay setting itself
+        // (duration/enabled) is kept for the next recording.
+        if let Some(replay) = &self.replay {
+            replay
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clear();
+        }
         println!("[Engine] Recording stopped and file saved.");
     }
 
@@ -883,6 +1039,69 @@ impl RivuletEngine {
             .as_ref()
             .map(|m| m.lock().unwrap_or_else(|e| e.into_inner()).stats())
             .unwrap_or_default()
+    }
+
+    /// Enable the replay buffer with the given retention window. The encoded
+    /// video/audio of the next recording (or stream) is kept in RAM for the
+    /// last `duration`, so [`RivuletEngine::save_replay`] can write a clip
+    /// without recording the whole session.
+    ///
+    /// Safe to call while a recording is running: the window shrinks/grows
+    /// immediately and old data is evicted.
+    pub fn set_replay_duration(&mut self, duration: Duration) {
+        if let Some(replay) = &self.replay {
+            replay
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .set_duration(duration);
+        } else {
+            self.replay = Some(Arc::new(Mutex::new(ReplayBuffer::new(duration))));
+        }
+    }
+
+    /// Disable the replay buffer. The in-memory ring (and its pipeline
+    /// branches) are dropped; the setting must be re-applied before the next
+    /// recording to capture clips again.
+    pub fn disable_replay(&mut self) {
+        self.replay = None;
+    }
+
+    /// Whether the replay buffer is enabled.
+    pub fn replay_enabled(&self) -> bool {
+        self.replay.is_some()
+    }
+
+    /// The configured replay retention window, if the buffer is enabled.
+    pub fn replay_duration(&self) -> Option<Duration> {
+        self.replay
+            .as_ref()
+            .map(|r| r.lock().unwrap_or_else(|e| e.into_inner()).duration())
+    }
+
+    /// Approximate seconds of video currently retained in the replay buffer
+    /// (0 when empty or disabled). Useful for a "~30s buffered" hint in the
+    /// GUI.
+    pub fn replay_retained_secs(&self) -> Option<u64> {
+        self.replay.as_ref().map(|r| {
+            r.lock().unwrap_or_else(|e| e.into_inner()).retained_ns() / 1_000_000_000
+        })
+    }
+
+    /// Save the currently buffered replay clip to `path` as an MP4 file.
+    ///
+    /// The buffered packets are remuxed (never re-encoded), so saving is
+    /// fast. Fails cleanly when the replay buffer is disabled or empty, or
+    /// when the remux reports an error.
+    pub fn save_replay(&mut self, path: PathBuf) -> anyhow::Result<PathBuf> {
+        let Some(replay) = &self.replay else {
+            anyhow::bail!("replay buffer is disabled");
+        };
+        let snapshot = replay
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .snapshot();
+        replay::save_replay(&snapshot, &path)?;
+        Ok(path)
     }
 }
 
@@ -1013,6 +1232,62 @@ mod tests {
             "successful recording must not record an error"
         );
 
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// End-to-end test with the replay buffer enabled: the same synthetic
+    /// recording must both write a non-empty MP4 AND fill the replay ring
+    /// with encoded packets (including caps), so a clip can be saved.
+    #[test]
+    fn records_synthetic_frames_and_fills_replay_buffer() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_replay_duration(std::time::Duration::from_secs(30));
+
+        let path = std::env::temp_dir()
+            .join(format!("rivulet_engine_replay_test_{}.mp4", std::process::id()));
+        engine.start_local_recording(path.clone());
+
+        let (width, height) = (320u32, 240u32);
+        let video = vec![0u8; (width * height * 4) as usize];
+        for _ in 0..24 {
+            engine.process_raw_frame(&video, width, height);
+        }
+        let audio = AudioFrame::new(vec![0.0f32; 4800], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
+        for _ in 0..24 {
+            let _ = engine.push_audio_frame(&audio);
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        // The ring must have captured encoded packets with caps while the
+        // recording was live.
+        if let Some(replay) = &engine.replay {
+            let rb = replay.lock().unwrap();
+            assert!(!rb.is_empty(), "replay ring should hold encoded packets");
+            assert!(
+                rb.video().len() > 1,
+                "replay ring should hold multiple encoded video packets"
+            );
+            assert!(
+                rb.video_caps().is_some(),
+                "video caps must be captured from the pipeline"
+            );
+            assert!(
+                rb.video().iter().any(|s| s.keyframe),
+                "ring must contain at least one keyframe"
+            );
+            assert!(
+                rb.retained_ns() > 0,
+                "ring must retain a positive span of video"
+            );
+        } else {
+            panic!("replay buffer must be enabled");
+        }
+
+        engine.stop_recording();
+        assert!(path.exists(), "output file should exist");
+        assert!(engine.take_error().is_none());
         let _ = std::fs::remove_file(&path);
     }
 
@@ -1711,6 +1986,200 @@ mod tests {
             pipeline_str
         );
         engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ── Replay buffer ────────────────────────────────────────────────
+
+    #[test]
+    fn replay_buffer_is_disabled_by_default() {
+        let engine = RivuletEngine::default();
+        assert!(!engine.replay_enabled());
+        assert_eq!(engine.replay_duration(), None);
+        assert_eq!(engine.replay_retained_secs(), None);
+    }
+
+    #[test]
+    fn replay_duration_can_be_enabled_updated_and_disabled() {
+        let mut engine = RivuletEngine::default();
+        engine.set_replay_duration(std::time::Duration::from_secs(30));
+        assert!(engine.replay_enabled());
+        assert_eq!(engine.replay_duration(), Some(std::time::Duration::from_secs(30)));
+
+        engine.set_replay_duration(std::time::Duration::from_secs(60));
+        assert_eq!(engine.replay_duration(), Some(std::time::Duration::from_secs(60)));
+
+        engine.disable_replay();
+        assert!(!engine.replay_enabled());
+        assert_eq!(engine.replay_duration(), None);
+    }
+
+    #[test]
+    fn saving_replay_while_disabled_fails_cleanly() {
+        let mut engine = RivuletEngine::default();
+        let path = std::env::temp_dir().join("rivulet_replay_disabled.mp4");
+        let err = engine.save_replay(path.clone()).unwrap_err();
+        assert!(err.to_string().contains("disabled"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn saving_replay_with_empty_buffer_fails_cleanly() {
+        let mut engine = RivuletEngine::default();
+        engine.set_replay_duration(std::time::Duration::from_secs(30));
+        let path = std::env::temp_dir().join("rivulet_replay_empty.mp4");
+        let err = engine.save_replay(path.clone()).unwrap_err();
+        assert!(err.to_string().contains("empty"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recording_pipeline_contains_replay_branches_when_enabled() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_replay_duration(std::time::Duration::from_secs(30));
+        let path = std::env::temp_dir().join("rivulet_replay_pipeline.mp4");
+        engine.start_local_recording(path.clone());
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            pipeline_str.contains("tee name=replay_vtee"),
+            "video branch must tee into the replay capture: {}",
+            pipeline_str
+        );
+        assert!(
+            pipeline_str.contains("appsink name=replay_video_sink"),
+            "video branch must contain the replay appsink: {}",
+            pipeline_str
+        );
+        assert!(
+            pipeline_str.contains("h264parse"),
+            "replay branch must parse H.264 for codec_data caps: {}",
+            pipeline_str
+        );
+        assert!(
+            pipeline_str.contains("appsink name=replay_audio_sink_0"),
+            "audio branch must contain the replay appsink: {}",
+            pipeline_str
+        );
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recording_pipeline_has_no_replay_branches_when_disabled() {
+        let mut engine = RivuletEngine::default();
+        let path = std::env::temp_dir().join("rivulet_no_replay_pipeline.mp4");
+        engine.start_local_recording(path.clone());
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            !pipeline_str.contains("replay_vtee"),
+            "pipeline must not contain replay tee when disabled: {}",
+            pipeline_str
+        );
+        assert!(
+            !pipeline_str.contains("replay_video_sink"),
+            "pipeline must not contain replay appsink when disabled: {}",
+            pipeline_str
+        );
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn streaming_pipeline_contains_replay_branches_when_enabled() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_replay_duration(std::time::Duration::from_secs(30));
+        engine.set_stream_settings(Some(StreamSettings {
+            platform: StreamPlatform::Twitch,
+            ingest_url: "rtmps://live.twitch.tv/app/test_key".into(),
+            stream_key: String::new(),
+        }));
+        engine.start_streaming();
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            pipeline_str.contains("appsink name=replay_video_sink"),
+            "streaming pipeline must contain replay capture: {}",
+            pipeline_str
+        );
+        assert!(
+            pipeline_str.contains("appsink name=replay_audio_sink_0"),
+            "streaming pipeline must contain replay audio capture: {}",
+            pipeline_str
+        );
+        engine.stop_recording();
+    }
+
+    #[test]
+    fn dual_output_pipeline_contains_replay_branches_when_enabled() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_replay_duration(std::time::Duration::from_secs(30));
+        engine.set_stream_settings(Some(StreamSettings {
+            platform: StreamPlatform::Twitch,
+            ingest_url: "rtmps://live.twitch.tv/app/test_key".into(),
+            stream_key: String::new(),
+        }));
+        let path = std::env::temp_dir().join("rivulet_replay_dual.mp4");
+        engine.start_local_recording(path.clone());
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            pipeline_str.contains("appsink name=replay_video_sink"),
+            "dual output pipeline must contain replay capture: {}",
+            pipeline_str
+        );
+        assert!(
+            pipeline_str.contains("appsink name=replay_audio_sink_0"),
+            "dual output pipeline must contain replay audio capture: {}",
+            pipeline_str
+        );
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn separate_audio_tracks_get_individual_replay_sinks() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+        engine.set_replay_duration(std::time::Duration::from_secs(30));
+        let path = std::env::temp_dir().join("rivulet_replay_tracks.mp4");
+        engine.start_local_recording(path.clone());
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            pipeline_str.contains("appsink name=replay_audio_sink_0"),
+            "first audio track must feed replay_audio_sink_0: {}",
+            pipeline_str
+        );
+        assert!(
+            pipeline_str.contains("appsink name=replay_audio_sink_1"),
+            "second audio track must feed replay_audio_sink_1: {}",
+            pipeline_str
+        );
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn stop_recording_clears_the_replay_ring() {
+        let mut engine = RivuletEngine::default();
+        engine.set_replay_duration(std::time::Duration::from_secs(30));
+        let path = std::env::temp_dir().join("rivulet_replay_clear.mp4");
+        engine.start_local_recording(path.clone());
+        // Simulate the streaming thread filling the ring.
+        if let Some(replay) = &engine.replay {
+            let mut rb = replay.lock().unwrap();
+            rb.push_video(0, 0, vec![0], true);
+            rb.push_audio(0, 0, 0, vec![0]);
+            assert!(!rb.is_empty());
+        }
+        engine.stop_recording();
+        // The setting persists, but the buffered data is gone.
+        assert!(engine.replay_enabled());
+        assert_eq!(engine.replay_retained_secs(), Some(0));
+        if let Some(replay) = &engine.replay {
+            assert!(replay.lock().unwrap().is_empty());
+        }
         let _ = std::fs::remove_file(&path);
     }
 }
