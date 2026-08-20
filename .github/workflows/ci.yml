@@ -155,7 +155,8 @@ jobs:
             libspa-0.2-dev \
             xdotool \
             xvfb \
-            x11-apps
+            x11-apps \
+            x11-utils
 
       - name: Verify Linux game-window enumeration (xdotool)
         if: runner.os == 'Linux'
