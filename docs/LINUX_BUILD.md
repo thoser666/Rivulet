@@ -10,6 +10,39 @@ This guide covers building Rivulet from source on various Linux distributions.
 - **X11/Wayland**: Display server libraries
 - **xdotool** (runtime): Used by game capture to enumerate windows (via `list_game_windows()`); without it, game capture shows an empty window list
 
+## Linux game-window verification
+
+The CI installs `xdotool`, `xvfb`, `x11-apps` and `x11-utils`. It starts a
+virtual X11 display plus an 800×600 test window, then runs the opt-in
+`list_game_windows_finds_the_ci_window` test. The test requires
+`RIVULET_TEST_XDOTOOL=1` and asserts both that the result is non-empty and that
+the CI window is present, so a missing `xdotool`, `DISPLAY` or X11 geometry
+query fails explicitly instead of silently skipping the check.
+
+To reproduce the check locally on a Debian/Ubuntu host with Xvfb:
+
+```bash
+sudo apt-get install -y xdotool xvfb x11-apps x11-utils
+export DISPLAY=:99
+Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp >/tmp/rivulet-xvfb.log 2>&1 &
+xvfb_pid=$!
+trap 'kill "$xvfb_pid" 2>/dev/null || true' EXIT
+sleep 1
+xmessage -display "$DISPLAY" -geometry 800x600+0+0 \
+  -name RivuletGameCaptureTest \
+  "Rivulet game capture test window" &
+window_pid=$!
+trap 'kill "$window_pid" "$xvfb_pid" 2>/dev/null || true' EXIT
+sleep 1
+RIVULET_TEST_XDOTOOL=1 cargo test -p rivulet-core \
+  list_game_windows_finds_the_ci_window -- --nocapture
+```
+
+The regular local test suite leaves this environment-dependent test inactive;
+CI enables it explicitly. The CI build cache intentionally stores only Cargo's
+registry/git downloads, not `target/`, because compiler- and dependency-specific
+artifacts can otherwise produce stale `E0460` errors after toolchain updates.
+
 ## Installation by Distribution
 
 ### Ubuntu / Debian

@@ -419,6 +419,20 @@ cargo test --workspace
 cargo test -p rivulet-core
 ```
 
+On Linux, the game-window enumerator has an additional opt-in integration test.
+The CI provisions `xdotool` and an Xvfb test display and runs:
+
+```bash
+RIVULET_TEST_XDOTOOL=1 cargo test -p rivulet-core \
+  list_game_windows_finds_the_ci_window -- --nocapture
+```
+
+It asserts that `list_game_windows()` returns a non-empty list containing the
+known CI window. See [`docs/LINUX_BUILD.md`](docs/LINUX_BUILD.md) for a local
+Xvfb setup. The CI Cargo cache stores registry data only; compiler artifacts in
+`target/` are deliberately not cached to prevent stale `E0460` failures after
+Rust or dependency updates.
+
 The tests cover the pure data structures (`AudioFrame`, `OutputSettings`, `RecordingSettings`, ...), the engine's recording pipeline (synthetic video + audio to MP4, including separate audio tracks verified via the GStreamer Discoverer), the streaming pipelines (RTMPS/dual output parse and route audio correctly), stream health tracking (status derivation from drop ratio, bitrate/FPS collapse and stalls), the encoder/recorder lifecycle, the video encoder abstraction (element names, detection order, fallback, pipeline fragments, 4:2:0 input caps), the recording performance metrics (FPS estimation, encoder load from a sliding window, file byte accounting, reset semantics), the recording presets (resolution/FPS presets with caps and transform fragments), the recording overlay (textoverlay pipeline integration, enable/disable toggle, duration formatting), the updater (GitHub release parsing, version comparison, platform asset selection, HTTP fetch against a local test server) and the i18n layer (locale resolution and translation lookups), plus the release code-signing automation (`rivulet-core/tests/ci_signing.rs` — verifies the signing scripts exist, that signing is gated on secret-presence outputs rather than raw secrets in `if:` conditions, and that the Windows MSI is signed after it is built). Building and running the tests requires GStreamer (dev packages + plugins) and, on Linux, the `LIBCLANG_PATH` environment variable. The hardware-encoding end-to-end test only runs when the matching GPU plugin is present.
 
 ### Linting & Formatting

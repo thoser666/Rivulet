@@ -288,3 +288,26 @@ fn dependabot_auto_merge_workflow_is_wired_up() {
         "auto-merge must authenticate with the workflow token"
     );
 }
+
+#[test]
+fn build_caches_do_not_restore_stale_target_artifacts() {
+    // `target/` contains compiler-version- and dependency-metadata-specific
+    // artifacts. Caching it across stable-toolchain updates caused E0460
+    // failures (for example, cfg_expr/system_deps) before the build started.
+    // Keep only Cargo's downloaded registry/git data in the shared cache.
+    for workflow in ["ci.yml", "nightly.yml"] {
+        let content = read(&format!(".github/workflows/{workflow}"));
+        assert!(
+            !content.contains("            target/"),
+            "{workflow} must not cache target/ build artifacts"
+        );
+        assert!(
+            content.contains("cargo-registry-${{ hashFiles('**/Cargo.toml') }}"),
+            "{workflow} must key registry caches by Cargo manifests"
+        );
+        assert!(
+            !content.contains("restore-keys:"),
+            "{workflow} must not restore an unrelated old Cargo cache"
+        );
+    }
+}
