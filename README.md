@@ -75,12 +75,16 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Hotkeys** - F9 toggles recording, F10 pauses/resumes, F11 mutes/unmutes audio; pause skips video frames while capture keeps running, mute drops audio frames; hotkey hints shown in the UI and on the Start Recording button
 - **Recording Presets** - Resolution and FPS presets (Original, 1080p60, 1080p30, 720p60, 720p30, 480p30) with automatic videoscale/videorate insertion, per-preset bitrate defaults, and encoder-aware caps; engine API `set_preset(RecordingPreset)`, selectable in the GUI
 - **Recording Overlay** - Burn-in timer (HH:MM:SS) and live FPS counter onto the recorded video via GStreamer `textoverlay`; toggle in the GUI, engine API `set_overlay_enabled(bool)` + `update_overlay_text(&str)`
+- **Replay Buffer / Instant Replay** - Ring buffer of the last N seconds (H.264+AAC, keyframe-aligned) kept while recording; save the clip as a standalone MP4 via the F12 hotkey or the GUI button; engine API `set_replay_duration()` / `save_replay()`
 - **Auto-Update** - Checks the GitHub Releases API on startup and manually for newer versions, downloads the matching platform package (MSI / AppImage / DMG) with a live progress bar and launches the installer; the alpha channel keeps up with every feature push
 - **Live Preview** - See what you're recording as you record
-- **Tab-Based Interface** - Clean, DaVinci Resolve-style UI
-  - Record Tab - Main recording controls and preview
-  - Settings Tab - All configuration options
-  - About Tab - Project information
+- **Sidebar Navigation** - Clean, DaVinci Resolve-style UI with a collapsible left sidebar (see [docs/ui-design.md](docs/ui-design.md))
+  - Record - Main recording controls and preview
+  - Mixer - Audio mixer with live level meter and volume sliders
+  - Scenes - Scene composition (M2, planned)
+  - Stream - Live streaming (M3, planned)
+  - Assistant - AI chat assistant (M9, planned)
+  - Settings - All configuration options (recording, codec, presets, hotkeys, replay buffer, language)
 - **Customizable Settings**
   - Recording presets (1080p60, 720p30, ...) or original resolution
   - Codec selection (H.264, H.265, VP9)
@@ -112,7 +116,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 | M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 In progress (G2–G6 hooks, S1–S5b sources open) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
 | M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | 🚧 In progress | — | [![M3](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F5&query=open_issues&label=M3&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/5) |
 | M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 🚧 Replay Buffer done | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
-| M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 📅 Planned | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
+| M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 🚧 In progress (installers, signing, i18n done) | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
 | M6 – Automation & Determinism | Headless CLI, CI Rendering, Reproducible Pipelines | 📅 Planned | — | [![M6](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F7&query=open_issues&label=M6&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/7) |
 | M7 – Embeddable Engine | Stable `rivulet-core` API, Docs, Tooling | 📅 Planned | — | [![M7](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F8&query=open_issues&label=M7&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/8) |
 | M8 – Modern Architecture | WebGPU, Zero-copy, Compute Filters | 📅 Planned | — | [![M8](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F9&query=open_issues&label=M8&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/9) |
@@ -249,7 +253,7 @@ The core concept of OBS: scenes, sources, and transitions.
 
 ### 🎥 M4 – Advanced Output & Capture
 
-**Status: Planned**
+**Status: In progress**
 
 - [x] **Replay buffer / instant replay** — *essential for gaming streamers (clip moments without recording the whole session); ring buffer (H.264+AAC) with instant replay save via F12 hotkey or GUI button*
 - [ ] Virtual camera output
@@ -268,7 +272,7 @@ The core concept of OBS: scenes, sources, and transitions.
 
 ### 🔌 M5 – Ecosystem & Platform Parity
 
-**Status: Planned**
+**Status: In progress**
 
 - [ ] Plugin system (native Rust plugins)
 - [ ] **WASM plugin runtime** (stable ABI, sandboxed: plugins can never crash the app; long-term target plugin model)
@@ -372,7 +376,7 @@ The core concept of OBS: scenes, sources, and transitions.
 | Virtual camera | Open |
 | Replay buffer | Done (ring buffer, F12 hotkey, save-to-MP4) |
 | Browser sources | Open |
-| Studio mode & hotkeys | Partial (hotkeys: record/pause/mute) |
+| Studio mode & hotkeys | Partial (hotkeys: record/pause/mute/save-replay) |
 | Plugin ecosystem & OBS compatibility | Open |
 | Multi-track audio | Partial (2 tracks) |
 | Platform parity (Windows/macOS) | Open |
