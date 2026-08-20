@@ -187,7 +187,7 @@ jobs:
           sleep 1
 
           xdotool search --name RivuletGameCaptureTest
-          cargo test -p rivulet-core list_game_windows_finds_the_ci_window -- --exact --nocapture
+          cargo test -p rivulet-core list_game_windows_finds_the_ci_window -- --nocapture
 
       # --- Install Windows dependencies ---
       - name: Install Windows dependencies (if applicable)
