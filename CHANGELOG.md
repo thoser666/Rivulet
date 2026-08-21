@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.35.0-alpha.1] - 2026-08-21
+- feat: G3 capture channel reader — ShmReader for reading layer frames
+
 ## [0.34.0-alpha.1] - 2026-08-21
 - feat: G3 capture channel — shared memory IPC for frame transfer
 
