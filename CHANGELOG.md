@@ -1,13 +1,13 @@
 # Changelog
 
 ## [0.28.0-alpha.1] - 2026-08-21
-- feat: G3 Vulkan hook compiles with 8 tests, replace vulkan crate with ash 0.38
+- feat: G3 Vulkan hook capture pipeline — staging buffer readback, image transitions, cmd_copy_image_to_buffer
+- feat: G3 VulkanHook::capture_current_frame() — swapchain image → HOST_VISIBLE staging → RGBA pixels
+- feat: G3 capture resource lifecycle — command pool, command buffer, fence, staging buffer init/destroy
+- test: 12 vulkan_hook tests passing (8 base + 4 capture pipeline error paths)
+- chore: replace non-compiling `vulkan` crate with `ash` 0.38 (full features)
 - docs: link the new roadmap items to their GitHub issues
-
-## [0.28.0-alpha.1] - 2026-08-21
-- feat: G3 Vulkan hook compiles, 8 unit tests pass (Entry/Instance/Device/Queue, GPU selection, swapchain lifecycle)
-- chore: replace non-compiling `vulkan` crate with `ash` 0.38 (full features) for raw Vulkan API access
-- docs: update G3 roadmap status from WIP draft to infrastructure done
+- docs: update G3 roadmap — capture pipeline done, next: VK_LAYER integration
 
 ## [0.27.1-alpha.1] - 2026-08-21
 - fix: decouple the non-compiling G3 Vulkan draft from the build
