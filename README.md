@@ -213,16 +213,16 @@ The core concept of OBS: scenes, sources, and transitions.
 - [ ] **S4 – Webcam as scene source** — expose the existing camera capture as a scene source with a properties panel. *DoD: webcam selectable per scene with resolution/framerate settings, tests + docs.*
 - [ ] **S5a – Browser spike** — evaluate platform webviews (WebView2 / WebKitGTK / WKWebView) and render into a GPU texture. *DoD: spike document with per-platform recommendation and a rendered-frame proof.*
 - [ ] **S5b – Browser source** — URL, interaction, transparency, config UI. *DoD: interactive browser source in scenes on all platforms, tests + docs.*
-- [ ] **S6 – Media source** — video/audio file playback in scenes (loop, restart on scene entry, speed). *DoD: media files play in scenes with controls, tests + docs.*
-- [ ] **S7 – Color source** — solid-color background/banner. *DoD: color source usable in scenes, tests + docs.*
-- [ ] **S8 – Audio sources** — per-app audio capture (Windows WASAPI loopback) and audio input/output device capture as scene sources. *DoD: per-app and device audio selectable per scene, tests + docs.*
+- [ ] **S6 – Media source** — video/audio file playback in scenes (loop, restart on scene entry, speed). *DoD: media files play in scenes with controls, tests + docs. Tracked in [#66](https://github.com/thoser666/Rivulet/issues/66).*
+- [ ] **S7 – Color source** — solid-color background/banner. *DoD: color source usable in scenes, tests + docs. Tracked in [#67](https://github.com/thoser666/Rivulet/issues/67).*
+- [ ] **S8 – Audio sources** — per-app audio capture (Windows WASAPI loopback) and audio input/output device capture as scene sources. *DoD: per-app and device audio selectable per scene, tests + docs. Tracked in [#68](https://github.com/thoser666/Rivulet/issues/68).*
 - [x] Sources — camera capture (webcam via GStreamer)
 
 **Scene system:**
 - [x] **Scene management** (multiple scenes, switching, add/rename/remove, switch-back history) — `SceneManager` in `rivulet-core/src/scene.rs`, live Scenes view in the sidebar
 - [x] **Scene organisation** (folders, search/filter, color coding) — *top community request, active PRs in OBS; `Scene` model with parent UUIDs and ARGB color coding (folders via hierarchy), tested in `rivulet-core/src/scene.rs`*
 - [ ] **Undo/Redo** (Ctrl+Z / Ctrl+Y) — *requested since OBS v23, implemented in v27*
-- [ ] **Scene collections & profiles** — switchable sets of scenes/sources (collection) and settings (profile) for different setups (gaming / work / podcast); OBS's core workspace concept
+- [ ] **Scene collections & profiles** — switchable sets of scenes/sources (collection) and settings (profile) for different setups (gaming / work / podcast); OBS's core workspace concept. *Tracked in [#69](https://github.com/thoser666/Rivulet/issues/69).*
 - [ ] **Duplicate scene / source** — one-click copy of a scene or source including its transform; copy/paste transform between sources
 - [ ] **Scene hotkeys & auto-switching** — a hotkey for every scene, plus window-focus-driven auto scene switching (OBS auto-scene-switcher workflow)
 - [x] Sources — window capture (monitor + individual windows, Linux & Windows)
@@ -254,7 +254,7 @@ The core concept of OBS: scenes, sources, and transitions.
 - [ ] Multitrack Video (adaptive bitrate streaming with multiple quality levels, TCP pacing)
 - [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible)
 - [ ] **SRT/RIST** for professional contribution/relay
-- [ ] **Multistreaming** — simultaneous output to multiple platforms (native multi-ingest, Restream-style)
+- [ ] **Multistreaming** — simultaneous output to multiple platforms (native multi-ingest, Restream-style). *Tracked in [#70](https://github.com/thoser666/Rivulet/issues/70).*
 - [ ] **NDI output** — LAN contribution/monitoring for production setups
 - [ ] **VOD track** — separate copyright-safe audio track for the VOD recording while streaming (Twitch VOD workflow)
 
@@ -274,7 +274,7 @@ The core concept of OBS: scenes, sources, and transitions.
 - [ ] **VST 3.x support** — *231 votes on OBS Ideas, $3000 bounty; most modern plugins are VST3-only*
 - [ ] **Master audio mix** (output VU meter, master volume control, monitoring) — *highly requested, PR rejected in OBS due to complexity*
 - [ ] Additional recording formats (MKV, MOV, TS — crash-safe alternatives to MP4)
-- [ ] **Remux recordings** (MKV/MOV → MP4 remux after stop, automatic or manual)
+- [ ] **Remux recordings** (MKV/MOV → MP4 remux after stop, automatic or manual). *Tracked in [#71](https://github.com/thoser666/Rivulet/issues/71).*
 - [ ] **Recording file management** (split by time/size, filename patterns, auto-record alongside stream)
 - [ ] Advanced rate control (VBR, CQ, CQVBR, custom encoder options)
 - [ ] Multi-track audio export
@@ -292,7 +292,7 @@ The core concept of OBS: scenes, sources, and transitions.
 - [ ] **WASM plugin runtime** (stable ABI, sandboxed: plugins can never crash the app; long-term target plugin model)
 - [ ] **OBS plugin compatibility layer** — *temporary bridge*: opt-in "Compatibility Mode" (explicitly marked as unsafe), loads native libobs plugins (encoders/filters/sources without UI); UI plugins (Qt) are out of scope; the goal is migration to the WASM plugin system
 - [ ] Mobile companion app (remote control)
-- [ ] **obs-websocket compatibility** — Streamdeck/TouchPortal ecosystem remote control (bridge to the mobile companion API)
+- [ ] **obs-websocket compatibility** — Streamdeck/TouchPortal ecosystem remote control (bridge to the mobile companion API). *Tracked in [#72](https://github.com/thoser666/Rivulet/issues/72).*
 - [ ] **Windows/macOS feature parity** (currently Linux-first; window capture on Windows exists, macOS still open) — as a release blocker, not an afterthought
 - [x] Installers (Windows MSI, macOS DMG, Linux AppImage) — automated in CI
 - [x] Code signing (signing automation present, secrets needed)
