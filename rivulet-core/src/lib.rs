@@ -51,6 +51,7 @@ pub mod scene;
 pub use scene::{Scene, SceneManager};
 
 pub mod vulkan_hook;
+pub mod vulkan_layer;
 
 // GStreamer initialization
 static GSTREAMER_INIT: Lazy<()> = Lazy::new(|| {
