@@ -8,15 +8,15 @@
 // Currently provides the Vulkan instance/layer infrastructure.
 
 use std::sync::{Arc, Mutex};
-use vulkano::instance::Instance;
 use vulkano::device::{Device, Queue};
-use vulkano::swapchain::{Swapchain, Surface};
-use vulkano::image::SwapchainImage;
-use vulkano::sync::GpuFuture;
-use vulkano::version::V1_0;
 use vulkano::filter::Filter;
+use vulkano::image::SwapchainImage;
+use vulkano::instance::Instance;
 use vulkano::sampler::Sampler;
+use vulkano::swapchain::{Surface, Swapchain};
+use vulkano::sync::GpuFuture;
 use vulkano::sync::SharingMode;
+use vulkano::version::V1_0;
 
 /// Vulkan hook state, holds the instance, device, and swapchain needed
 /// to present/intercept frames for capture.
@@ -38,7 +38,7 @@ pub struct VulkanHook {
 
 /// Creates a Vulkan instance and surface for the given window.
 /// This is the first step in G3 – Vulkan hook infrastructure.
-/// 
+///
 /// # Returns
 /// - `VulkanHook` containing instance, device, queue, swapchain
 /// - Returns error if Vulkan initialization fails or surface not supported
@@ -47,37 +47,43 @@ pub fn create_vulkan_hook(window: &winit::window::Window) -> anyhow::Result<Vulk
     let required_extensions = vulkano::instance::Instance::required_extensions()
         .iter()
         .chain(std::iter::once(
-            std::ffi::CString::new("VK_KHR_surface").unwrap()
+            std::ffi::CString::new("VK_KHR_surface").unwrap(),
         ));
-    
+
     let instance = VulkanInstance::new(required_extensions)?;
-    
+
     // Create surface from window
     let surface = vulkano::swapchain::Surface::from_window(instance.as_raw(), window)?;
-    
+
     // Select physical device and create logical device
     let (physical_device, queue_family) = instance
         .physical_devices()
         .next()
         .ok_or_else(|| anyhow::anyhow!("No Vulkan-capable GPU found"))?
         .queue_family_indices()
-        . graphics_family()
+        .graphics_family()
         .ok_or_else(|| anyhow::anyhow!("No graphics queue family"))?;
-    
+
     let device_queue = instance
         .device()
         .physical_device(physical_device)
         .queue_family_index(queue_family)
         .queue(vk::QueueFlags::GRAPHICS);
-    
+
     let device = device_queue.device();
     let queue = device_queue.queue();
-    
+
     // Create swapchain matching window dimensions
     let caps = surface.capabilities();
-    let surface_format = surface.supported_formats().next().unwrap_or(vk::Format::B8G8R8AUNORM);
-    let present_mode = surface.present_modes().next().unwrap_or(vk::PresentModeKHR::FIFO);
-    
+    let surface_format = surface
+        .supported_formats()
+        .next()
+        .unwrap_or(vk::Format::B8G8R8AUNORM);
+    let present_mode = surface
+        .present_modes()
+        .next()
+        .unwrap_or(vk::PresentModeKHR::FIFO);
+
     let swapchain = Swapchain::new(
         device.clone(),
         surface.clone(),
@@ -96,7 +102,7 @@ pub fn create_vulkan_hook(window: &winit::window::Window) -> anyhow::Result<Vulk
             .clipped(true)
             .old_swapchain(vk::SwapchainKHR::null()),
     )?;
-    
+
     Ok(VulkanHook {
         instance,
         device,
@@ -109,7 +115,7 @@ pub fn create_vulkan_hook(window: &winit::window::Window) -> anyhow::Result<Vulk
 
 /// Submits a present operation and captures the resulting swapchain image
 /// into the frame buffer for later recording.
-/// 
+///
 /// # Safety
 /// - The swapchain must be valid and have images available
 /// - The queue must be a graphics queue
@@ -126,43 +132,45 @@ pub unsafe fn present_and_capture(
         .command_buffers(&[])
         .signal_semaphores(&[])
         .build();
-    
+
     // Present the image
-    let result = hook.queue.present_khr(&vk::PresentInfoKHR::builder()
-        .swapchains(&[hook.swapchain.handle()])
-        .image_indices(&[hook.image_index])
-        .p_wait_semaphores(&[])
-        .p_signal_semaphores(&[])
-        .p_results(&[])
-        .build());
-    
+    let result = hook.queue.present_khr(
+        &vk::PresentInfoKHR::builder()
+            .swapchains(&[hook.swapchain.handle()])
+            .image_indices(&[hook.image_index])
+            .p_wait_semaphores(&[])
+            .p_signal_semaphores(&[])
+            .p_results(&[])
+            .build(),
+    );
+
     match result {
-        vk::Result::SUCCESS => {},
+        vk::Result::SUCCESS => {}
         _ => return Err(anyhow::anyhow!("Present failed")),
     }
-    
+
     // Read swapchain image data (RGBA) into frame buffer
     let image = hook.swapchain.images()[hook.image_index as usize].clone();
     let mapped = image.map_memory()?;
     let data = mapped.read_as::<[u8]>()?.to_vec();
-    
+
     let mut buffer = hook.frame_buffer.lock().unwrap();
     buffer.resize(hook.swchain.image_count() as usize, Vec::new());
     buffer[hook.image_index as usize] = data;
-    
+
     Ok(())
 }
 
 /// Returns the latest captured frame as RGBA byte slice.
-/// 
+///
 /// The frame dimensions match the swapchain extent.
 pub fn get_captured_frame(hook: &VulkanHook) -> Option<(u32, u32, &[u8])> {
     let buffer = hook.frame_buffer.lock().unwrap();
     let last_idx = (hook.image_index + 1) % hook.swapchain.image_count();
-    
+
     let data = &buffer[last_idx as usize];
     let extent = hook.swapchain.extent();
-    
+
     // Verify data size matches expected (width * height * 4 for RGBA)
     let expected_size = extent.width * extent.height * 4;
     if data.len() >= expected_size {
