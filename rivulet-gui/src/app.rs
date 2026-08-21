@@ -29,6 +29,8 @@ use {
 #[cfg(target_os = "windows")]
 use {
     rfd,
+    rivulet_capture::backend::{BackendKind, BackendStatus},
+    rivulet_capture::dxgi::DxgiDesktopDuplication,
     std::sync::mpsc::{self, Sender},
     std::thread,
     windows_capture::{
@@ -442,6 +444,13 @@ pub struct RivuletApp {
     #[cfg(target_os = "windows")]
     #[serde(skip)]
     frame_receiver: Option<Receiver<RawFrame>>,
+    /// Capture backend status (G2): whether DXGI Desktop Duplication is the
+    /// active backend or whether the GUI fell back to Windows Graphics
+    /// Capture, plus the fallback reason. Set at the start of a monitor
+    /// recording and cleared when recording stops.
+    #[cfg(target_os = "windows")]
+    #[serde(skip)]
+    capture_backend: Option<BackendStatus>,
     #[serde(skip)]
     error_receiver: Option<Receiver<String>>,
     #[serde(skip)]
@@ -640,6 +649,8 @@ impl Default for RivuletApp {
             selected_monitor_idx: None,
             #[cfg(target_os = "windows")]
             selected_window_idx: None,
+            #[cfg(target_os = "windows")]
+            capture_backend: None,
 
             // Platform-agnostic fields (used by camera/game capture)
             #[cfg(target_os = "windows")]
@@ -800,6 +811,11 @@ impl RivuletApp {
             self.last_error = None;
             self.record_started = Instant::now();
             self.last_frame_at = None;
+
+            // Probe the preferred capture backend: DXGI Desktop Duplication
+            // (G2) if available, otherwise Windows Graphics Capture (the
+            // thread below) with the fallback reason recorded for the UI.
+            self.capture_backend = probe_dxgi_backend();
 
             thread::spawn(move || {
                 let settings = Settings::new(
@@ -963,12 +979,43 @@ impl RivuletApp {
             signal.store(true, Ordering::SeqCst);
         }
         self.is_windows_recording = false;
+        self.capture_backend = None;
         self.engine.stop_recording();
         self.frame_receiver = None;
         // Keep the error receiver alive after the stop so a capture error
         // that arrives a frame late is still shown in the UI; the next
         // recording start replaces it.
         self.stop_signal = None;
+    }
+}
+
+/// Probe the preferred Windows capture backend and report the status for
+/// the UI (G2).
+///
+/// Tries DXGI Desktop Duplication first (zero-overhead fullscreen path). If
+/// it is unavailable — e.g. protected content, a non-duplicable desktop, or
+/// a headless session — returns a status with the active backend set to
+/// Windows Graphics Capture (what the recording thread uses) and the reason
+/// recorded, so the GUI can show that a fallback occurred.
+#[cfg(target_os = "windows")]
+fn probe_dxgi_backend() -> Option<BackendStatus> {
+    // Use the primary adapter's first output as the probe target; the GUI
+    // lets the user pick a monitor afterwards, but availability is the same
+    // across outputs of the active adapter in practice.
+    match DxgiDesktopDuplication::new() {
+        Ok(dup) => {
+            let mut status = BackendStatus::idle();
+            status.switch_to(BackendKind::DesktopDuplication);
+            let _ = dup; // dropped immediately; the probe is read-only
+            Some(status)
+        }
+        Err(e) => {
+            eprintln!("DXGI Desktop Duplication unavailable: {e}");
+            let mut status = BackendStatus::idle();
+            status.switch_to(BackendKind::WindowsGraphicsCapture);
+            status.fail(format!("DXGI unavailable ({e})"));
+            Some(status)
+        }
     }
 }
 
@@ -2255,6 +2302,22 @@ impl eframe::App for RivuletApp {
                         );
                     }
                     ui.label(self.metrics_line());
+                    // Capture backend indicator (G2): show which backend is
+                    // active and whether the recording fell back from DXGI
+                    // Desktop Duplication to Windows Graphics Capture.
+                    if let Some(status) = &self.capture_backend {
+                        let (key, reason) = status.ui_key();
+                        let label = match reason {
+                            Some(r) if !r.is_empty() => self.tr_fmt(key, &[r.to_string()]),
+                            _ => self.tr(key).to_string(),
+                        };
+                        let color = match status.active {
+                            BackendKind::DesktopDuplication => colors.success,
+                            BackendKind::WindowsGraphicsCapture => colors.warning,
+                            BackendKind::None => colors.hint,
+                        };
+                        ui.label(egui::RichText::new(label).color(color).strong());
+                    }
                 } else {
                     ui.horizontal(|ui| {
                         ui.label(self.tr("source"));

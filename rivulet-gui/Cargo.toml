@@ -58,8 +58,12 @@ rivulet-audio = { path = "../rivulet-audio" }
 
 
 
-[target.'cfg(target_os = "windows")'.dependencies.windows-capture]
-version = "2.0.0"
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-capture = { version = "2.0.0" }
+# Capture backend status (G2): reports whether DXGI Desktop Duplication is
+# the active backend or whether the GUI fell back to Windows Graphics
+# Capture, plus the fallback reason.
+rivulet-capture = { path = "../rivulet-capture" }
 
 # Build dependencies
 [build-dependencies]

@@ -69,6 +69,23 @@ impl BackendStatus {
     pub fn is_healthy(&self) -> bool {
         self.active != BackendKind::None && self.last_error.is_none()
     }
+
+    /// The i18n key (and optional fallback reason) the GUI should render for
+    /// this status. The key is resolved through the app's locale table;
+    /// keeping the mapping here makes it unit-testable on every platform
+    /// without a GUI.
+    pub fn ui_key(&self) -> (&'static str, Option<&str>) {
+        match self.active {
+            BackendKind::DesktopDuplication => ("backend_desktop_duplication", None),
+            // Only use the parameterised fallback key when there is a reason
+            // to show; otherwise the plain WGC key avoids a literal `{0}`.
+            BackendKind::WindowsGraphicsCapture => match self.last_error.as_deref() {
+                Some(r) if !r.is_empty() => ("backend_wgc_fallback", Some(r)),
+                _ => ("backend_wgc", None),
+            },
+            BackendKind::None => ("backend_none", None),
+        }
+    }
 }
 
 /// Classified DXGI failure codes (Windows-only at runtime; the numeric
@@ -217,5 +234,22 @@ mod tests {
         assert!(DxgiFailure::AccessLost.is_fatal());
         assert!(DxgiFailure::AccessDenied.is_fatal());
         assert!(DxgiFailure::Unsupported.is_fatal());
+    }
+
+    #[test]
+    fn ui_key_maps_backend_to_i18n_key() {
+        let mut s = BackendStatus::idle();
+        s.switch_to(BackendKind::DesktopDuplication);
+        assert_eq!(s.ui_key(), ("backend_desktop_duplication", None));
+
+        let mut s2 = BackendStatus::idle();
+        s2.switch_to(BackendKind::WindowsGraphicsCapture);
+        // No reason → plain fallback key, no literal `{0}`.
+        assert_eq!(s2.ui_key(), ("backend_wgc", None));
+
+        s2.fail("access denied");
+        assert_eq!(s2.ui_key(), ("backend_wgc_fallback", Some("access denied")));
+
+        assert_eq!(BackendStatus::idle().ui_key(), ("backend_none", None));
     }
 }

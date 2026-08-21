@@ -137,6 +137,20 @@ impl Locale {
                     "recording_no_frames",
                     "No frames received for {0} seconds — recording stopped.",
                 ),
+                // Capture backend (G2)
+                (
+                    "backend_desktop_duplication",
+                    "Capture backend: DXGI Desktop Duplication (zero-copy GPU)",
+                ),
+                (
+                    "backend_wgc",
+                    "Capture backend: Windows Graphics Capture (fallback)",
+                ),
+                (
+                    "backend_wgc_fallback",
+                    "Capture backend: Windows Graphics Capture (fallback — {0})",
+                ),
+                ("backend_none", "Capture backend: not active"),
                 // Replay buffer
                 ("replay_buffer", "Replay buffer"),
                 ("replay_off", "Off"),
@@ -274,6 +288,17 @@ impl Locale {
                     "recording_no_frames",
                     "{0} Sekunden lang keine Frames empfangen — Aufnahme gestoppt.",
                 ),
+                // Capture backend (G2)
+                (
+                    "backend_desktop_duplication",
+                    "Capture-Backend: DXGI Desktop Duplication (Zero-Copy-GPU)",
+                ),
+                ("backend_wgc", "Capture-Backend: Windows Graphics Capture (Fallback)"),
+                (
+                    "backend_wgc_fallback",
+                    "Capture-Backend: Windows Graphics Capture (Fallback — {0})",
+                ),
+                ("backend_none", "Capture-Backend: nicht aktiv"),
                 // Replay buffer
                 ("replay_buffer", "Replay-Puffer"),
                 ("replay_off", "Aus"),
@@ -489,6 +514,39 @@ mod tests {
         assert_eq!(Locale::De.tr("theme_dark"), "Dunkel");
         assert_eq!(Locale::En.tr("theme_light"), "Light");
         assert_eq!(Locale::De.tr("theme_light"), "Hell");
+    }
+
+    #[test]
+    fn capture_backend_keys_translate_in_both_locales() {
+        assert_eq!(
+            Locale::En.tr("backend_desktop_duplication"),
+            "Capture backend: DXGI Desktop Duplication (zero-copy GPU)"
+        );
+        assert_eq!(
+            Locale::De.tr("backend_desktop_duplication"),
+            "Capture-Backend: DXGI Desktop Duplication (Zero-Copy-GPU)"
+        );
+        assert_eq!(
+            Locale::En.tr("backend_wgc"),
+            "Capture backend: Windows Graphics Capture (fallback)"
+        );
+        assert_eq!(
+            Locale::De.tr("backend_wgc"),
+            "Capture-Backend: Windows Graphics Capture (Fallback)"
+        );
+        assert_eq!(
+            Locale::En.tr_fmt("backend_wgc_fallback", &["access denied".to_string()]),
+            "Capture backend: Windows Graphics Capture (fallback — access denied)"
+        );
+        assert_eq!(
+            Locale::De.tr_fmt("backend_wgc_fallback", &["Zugriff verweigert".to_string()]),
+            "Capture-Backend: Windows Graphics Capture (Fallback — Zugriff verweigert)"
+        );
+        assert_eq!(Locale::En.tr("backend_none"), "Capture backend: not active");
+        assert_eq!(
+            Locale::De.tr("backend_none"),
+            "Capture-Backend: nicht aktiv"
+        );
     }
 
     #[test]
