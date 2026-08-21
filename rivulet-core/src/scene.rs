@@ -325,8 +325,12 @@ mod tests {
             .map(|id| mgr.get(*id).map(|s| s.name.as_str()).unwrap_or(""))
             .collect();
         assert_eq!(names, vec!["Folder", "Child 1", "Child 2", "Top"]);
-
-        // `other` was added before `child2`, so its position is stable.
-        let _ = other;
+        // Every added scene is present exactly once, and child ids are grouped
+        // under their parent regardless of insertion order.
+        assert_eq!(ids.len(), 4);
+        assert!(ids.contains(&parent));
+        assert!(ids.contains(&child1));
+        assert!(ids.contains(&child2));
+        assert!(ids.contains(&other));
     }
 }
