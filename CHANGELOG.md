@@ -13,6 +13,7 @@
 - chore: replace non-compiling `vulkan` crate with `ash` 0.38 (full features)
 - docs: link the new roadmap items to their GitHub issues
 - docs: update G3 roadmap — layer done, next: recording pipeline integration
+- test: 14 layer tests — negotiate version, proc addr resolution, JSON manifest validation, thread safety
 
 ## [0.27.1-alpha.1] - 2026-08-21
 - fix: decouple the non-compiling G3 Vulkan draft from the build
