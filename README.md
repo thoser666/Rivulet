@@ -113,7 +113,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 | --- | --- | --- | --- | --- |
 | M0 – Recording Foundation | Capture, Encoding, Audio, GUI | ✅ Done | — | [![M0](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F3&query=open_issues&label=M0&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/3) |
 | M1 – Solid Recording | Audio tracks, Hardware encoding, QoL, Overlay | ✅ Done (milestone closed) | — | [![M1](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F4&query=open_issues&label=M1&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/4) |
-| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 In progress (scene management + G2 DXGI backend done; G3–G6 hooks, S1–S5b sources open) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
+| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 In progress (scene management + G2 DXGI backend done; G3 hook infra, G4–G6 hooks, S1–S8 sources open) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
 | M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | 🚧 In progress | — | [![M3](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F5&query=open_issues&label=M3&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/5) |
 | M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 🚧 Replay Buffer done | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 🚧 In progress (installers, signing, i18n done) | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
@@ -200,31 +200,39 @@ The core concept of OBS: scenes, sources, and transitions.
 *Game capture (D3D/Vulkan/OpenGL hook, zero-overhead) — #1 priority: without this, Rivulet cannot replace OBS for gaming. Split into work packages G1–G6:*
 - [x] **G1 – Capture strategy spike** — evaluate the capture approach per graphics API (DXGI Desktop Duplication, Vulkan layer, wgl hook; OBS backends as reference) and define the overhead budget (<1% frame time) and abort criteria. *DoD: decision document in docs/ with per-API recommendation and feasibility assessment — [docs/game-capture-strategy.md](docs/game-capture-strategy.md).*
 - [x] **G2 – Windows DXGI backend** — Desktop Duplication for fullscreen/exclusive fullscreen with Graphics Capture fallback; GPU-texture path instead of CPU copy; usable as a scene source. *Backend done: `rivulet-capture` gains a DXGI Desktop Duplication source (`DxgiDesktopDuplication`) with a zero-copy GPU-texture path (shared-handle hand-off, no CPU readback in the hot path), BGRA→RGBA readback for the compatibility path, output enumeration, and the strategy's abort/fallback rules (access-lost → re-create, protected content → explicit "not capturable", timeout → retry). Unit tests run on every platform; a live-DXGI smoke test runs locally (`cargo test -p rivulet-capture -- --ignored`). The Windows GUI probes the backend at recording start and shows the active backend (Desktop Duplication vs. Graphics Capture fallback, with reason) during the recording. Scene-source wiring follows with S1 (Source abstraction). DoD: DX9/11/12 fullscreen captured via zero-copy path, tests + docs.*
-- [ ] **G3 – Vulkan hook** — VK_LAYER-based capture (OBS vulkan-capture approach) for fullscreen Vulkan games. *DoD: Vulkan fullscreen captured within the overhead budget, tests + docs.*
+- [ ] **G3 – Vulkan hook** — VK_LAYER-based capture (OBS vulkan-capture approach) for fullscreen Vulkan games. *Hook infrastructure (instance/device/swapchain interception foundation in `rivulet-core/src/vulkan_hook.rs`) committed; DoD (Vulkan fullscreen captured within the overhead budget, tests + docs) still open.*
 - [ ] **G4 – OpenGL hook** — wglSwapBuffers interception for OpenGL games. *DoD: OpenGL fullscreen captured within the overhead budget, tests + docs.*
 - [ ] **G5 – Performance verification** — FPS/frame-time comparison with vs. without capture, benchmarked against OBS, with a CI regression guard. *DoD: benchmark script in scripts/, overhead budget verified for all three backends.*
 - [ ] **G6 – Linux fullscreen path** (optional) — PipeWire/portal capture on Wayland with X11 fallback. *DoD: fullscreen capture on Wayland and X11, tests + docs.*
 - [x] Game capture (window-based) — Windows Graphics Capture (Windows) / xcap (Linux), with checkbox toggle and window picker in the GUI
 
-*Sources (image, text, webcam, browser/embedded Chromium). Split into work packages S1–S5b:*
+*Sources (image, text, webcam, browser/embedded Chromium, media, color, per-app audio). Split into work packages S1–S8:*
 - [ ] **S1 – Source abstraction** — complete the Source trait, properties UI, and per-source transforms. *DoD: any source type renders in a scene with a configurable transform, tests.*
 - [ ] **S2 – Image source** — PNG/JPEG/GIF, folder loop/slideshow. *DoD: static and slideshow image sources usable in scenes, tests + docs.*
 - [ ] **S3 – Text source** — rich text, scrolling, outline/background. *DoD: styled text source usable in scenes, tests + docs.*
 - [ ] **S4 – Webcam as scene source** — expose the existing camera capture as a scene source with a properties panel. *DoD: webcam selectable per scene with resolution/framerate settings, tests + docs.*
 - [ ] **S5a – Browser spike** — evaluate platform webviews (WebView2 / WebKitGTK / WKWebView) and render into a GPU texture. *DoD: spike document with per-platform recommendation and a rendered-frame proof.*
 - [ ] **S5b – Browser source** — URL, interaction, transparency, config UI. *DoD: interactive browser source in scenes on all platforms, tests + docs.*
+- [ ] **S6 – Media source** — video/audio file playback in scenes (loop, restart on scene entry, speed). *DoD: media files play in scenes with controls, tests + docs.*
+- [ ] **S7 – Color source** — solid-color background/banner. *DoD: color source usable in scenes, tests + docs.*
+- [ ] **S8 – Audio sources** — per-app audio capture (Windows WASAPI loopback) and audio input/output device capture as scene sources. *DoD: per-app and device audio selectable per scene, tests + docs.*
 - [x] Sources — camera capture (webcam via GStreamer)
 
 **Scene system:**
 - [x] **Scene management** (multiple scenes, switching, add/rename/remove, switch-back history) — `SceneManager` in `rivulet-core/src/scene.rs`, live Scenes view in the sidebar
 - [x] **Scene organisation** (folders, search/filter, color coding) — *top community request, active PRs in OBS; `Scene` model with parent UUIDs and ARGB color coding (folders via hierarchy), tested in `rivulet-core/src/scene.rs`*
 - [ ] **Undo/Redo** (Ctrl+Z / Ctrl+Y) — *requested since OBS v23, implemented in v27*
+- [ ] **Scene collections & profiles** — switchable sets of scenes/sources (collection) and settings (profile) for different setups (gaming / work / podcast); OBS's core workspace concept
+- [ ] **Duplicate scene / source** — one-click copy of a scene or source including its transform; copy/paste transform between sources
+- [ ] **Scene hotkeys & auto-switching** — a hotkey for every scene, plus window-focus-driven auto scene switching (OBS auto-scene-switcher workflow)
 - [x] Sources — window capture (monitor + individual windows, Linux & Windows)
 - [ ] **Source composition** (layers, position, scaling, cropping — each scene stores its own layout per source; switching scenes auto-moves sources to their saved positions)
 - [ ] Transitions (fade, cut, stinger)
 - [ ] Overlays (picture-in-picture, banners)
 - [ ] Chroma key / green screen
 - [ ] Studio mode (preview/program)
+- [ ] **Multi-view & projectors** — scene grid (9-view) and fullscreen preview on a second display (projector)
+- [ ] **Scene snapshot** — one-click screenshot of the current scene/preview (PNG)
 
 **Goal:** The composable workspace OBS users expect.
 
@@ -246,6 +254,9 @@ The core concept of OBS: scenes, sources, and transitions.
 - [ ] Multitrack Video (adaptive bitrate streaming with multiple quality levels, TCP pacing)
 - [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible)
 - [ ] **SRT/RIST** for professional contribution/relay
+- [ ] **Multistreaming** — simultaneous output to multiple platforms (native multi-ingest, Restream-style)
+- [ ] **NDI output** — LAN contribution/monitoring for production setups
+- [ ] **VOD track** — separate copyright-safe audio track for the VOD recording while streaming (Twitch VOD workflow)
 
 **Goal:** Live streaming to the common platforms *and* low-latency protocols as native citizens instead of RTMP legacy.
 
@@ -257,11 +268,14 @@ The core concept of OBS: scenes, sources, and transitions.
 
 - [x] **Replay buffer / instant replay** — *essential for gaming streamers (clip moments without recording the whole session); ring buffer (H.264+AAC) with instant replay save via F12 hotkey or GUI button*
 - [ ] Virtual camera output
-- [ ] Video filters & effects (color correction, LUT, blur, chroma key refinement)
-- [ ] **Audio filters** (noise suppression RNNoise/NVIDIA, compressor, limiter, expander)
+- [ ] Video filters & effects (color correction, LUT, blur, sharpen, chroma key refinement)
+- [ ] **Audio filters** (noise suppression RNNoise/NVIDIA, noise gate, compressor, limiter, expander, gain, 10-band EQ)
+- [ ] **Audio ducking** (sidechain compression — lower music/crowd while the mic speaks)
 - [ ] **VST 3.x support** — *231 votes on OBS Ideas, $3000 bounty; most modern plugins are VST3-only*
 - [ ] **Master audio mix** (output VU meter, master volume control, monitoring) — *highly requested, PR rejected in OBS due to complexity*
 - [ ] Additional recording formats (MKV, MOV, TS — crash-safe alternatives to MP4)
+- [ ] **Remux recordings** (MKV/MOV → MP4 remux after stop, automatic or manual)
+- [ ] **Recording file management** (split by time/size, filename patterns, auto-record alongside stream)
 - [ ] Advanced rate control (VBR, CQ, CQVBR, custom encoder options)
 - [ ] Multi-track audio export
 - [ ] Cloud integration (cloud recordings)
@@ -278,12 +292,14 @@ The core concept of OBS: scenes, sources, and transitions.
 - [ ] **WASM plugin runtime** (stable ABI, sandboxed: plugins can never crash the app; long-term target plugin model)
 - [ ] **OBS plugin compatibility layer** — *temporary bridge*: opt-in "Compatibility Mode" (explicitly marked as unsafe), loads native libobs plugins (encoders/filters/sources without UI); UI plugins (Qt) are out of scope; the goal is migration to the WASM plugin system
 - [ ] Mobile companion app (remote control)
+- [ ] **obs-websocket compatibility** — Streamdeck/TouchPortal ecosystem remote control (bridge to the mobile companion API)
 - [ ] **Windows/macOS feature parity** (currently Linux-first; window capture on Windows exists, macOS still open) — as a release blocker, not an afterthought
 - [x] Installers (Windows MSI, macOS DMG, Linux AppImage) — automated in CI
 - [x] Code signing (signing automation present, secrets needed)
 - [ ] Telemetry (opt-in, privacy-friendly)
 - [ ] Multi-language support (locale files fully wired)
 - [ ] **MIDI device support** (map controllers like Korg NanoKontrol to scene switches, volume faders, filter toggles) — *frequently requested for live production and music streams*
+- [ ] **Global hotkeys & remapping UI** — OBS-style hotkey settings: per-action rebinding, global hotkeys that work while the app is unfocused
 
 **Goal:** OBS core parity across all platforms, with a plugin model structurally superior to OBS (WASM instead of a C ABI), plus OBS compat as a transition bridge.
 
@@ -368,17 +384,20 @@ The core concept of OBS: scenes, sources, and transitions.
 
 | OBS category | Status |
 | --- | --- |
-| Capture sources (display, window, webcam) | Partial (display + window + region, multi-monitor) |
-| Scenes & transitions | Open |
-| Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks) |
-| Recording & encoding | Partial (H.264/H.265/VP9, HW + SW) |
-| Streaming (RTMP, platforms) | Partial (RTMPS Twitch/Kick/YouTube) |
+| Capture sources (display, window, webcam, media, color, per-app audio) | Partial (display, window, region, webcam; media/color/audio sources planned M2) |
+| Scenes & transitions | In progress (scene mgmt + G2 done; transitions/studio open, M2) |
+| Scene collections & profiles | Open (M2) |
+| Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks, filters; ducking/EQ/VST planned M4) |
+| Recording & encoding | Partial (H.264/H.265/VP9, HW + SW; remux/file mgmt planned M4) |
+| Streaming (RTMP, platforms) | Partial (RTMPS Twitch/Kick/YouTube; multistream/NDI planned M3) |
 | Virtual camera | Open |
 | Replay buffer | Done (ring buffer, F12 hotkey, save-to-MP4) |
-| Browser sources | Open |
-| Studio mode & hotkeys | Partial (hotkeys: record/pause/mute/save-replay) |
+| Browser sources | Open (M2 S5b) |
+| Studio mode & hotkeys | Partial (hotkeys: record/pause/mute/save-replay; remapping planned M5) |
+| Multi-view & projectors | Open (M2) |
 | Plugin ecosystem & OBS compatibility | Open |
-| Multi-track audio | Partial (2 tracks) |
+| obs-websocket / Streamdeck | Open (M5) |
+| Multi-track audio | Partial (2 tracks; VOD track planned M3) |
 | Platform parity (Windows/macOS) | Open |
 | AI chat assistant | Open (M9) |
 
