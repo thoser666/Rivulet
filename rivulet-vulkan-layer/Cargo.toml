@@ -1,0 +1,23 @@
+[package]
+name = "rivulet-vulkan-layer"
+version.workspace = true
+edition = "2021"
+description = "Vulkan implicit layer for zero-overhead game capture (G3)"
+
+# cdylib produces the .dll/.so that the Vulkan loader loads into the game
+# process. rlib is also produced so `cargo test` can link the unit tests.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Low-level Vulkan bindings — only the types are used by the layer itself;
+# the smoke test (tests/smoke.rs) uses the loader functions to drive a real
+# Vulkan instance and exercise the layer.
+ash = "0.38"
+# Platform-independent status reporting (same pattern as
+# rivulet-capture/src/backend.rs).
+anyhow = { workspace = true }
+
+[dev-dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

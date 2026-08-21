@@ -4,13 +4,12 @@
 - feat: G3 Vulkan capture pipeline — staging buffer readback, 12 tests pass
 
 ## [0.28.0-alpha.1] - 2026-08-21
-- feat: G3 Vulkan hook capture pipeline — staging buffer readback, image transitions, cmd_copy_image_to_buffer
-- feat: G3 VulkanHook::capture_current_frame() — swapchain image → HOST_VISIBLE staging → RGBA pixels
-- feat: G3 capture resource lifecycle — command pool, command buffer, fence, staging buffer init/destroy
-- test: 12 vulkan_hook tests passing (8 base + 4 capture pipeline error paths)
+- feat: G3 Vulkan layer (cdylib) — VK_LAYER_RIVULET_capture with vkQueuePresentKHR interception + staging buffer readback
+- feat: G3 layer negotiation — vkNegotiateLoaderLayerInterfaceVersion, instance/device/swapchain/present hooks
+- feat: G3 capture pipeline — image transition PRESENT_SRC → TRANSFER_SRC, cmd_copy_image_to_buffer, HOST_VISIBLE staging → RGBA pixels
 - chore: replace non-compiling `vulkan` crate with `ash` 0.38 (full features)
 - docs: link the new roadmap items to their GitHub issues
-- docs: update G3 roadmap — capture pipeline done, next: VK_LAYER integration
+- docs: update G3 roadmap — layer done, next: recording pipeline integration
 
 ## [0.27.1-alpha.1] - 2026-08-21
 - fix: decouple the non-compiling G3 Vulkan draft from the build
