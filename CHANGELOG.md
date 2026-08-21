@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.27.1-alpha.1] - 2026-08-21
+- fix: decouple the non-compiling G3 Vulkan draft from the build
+- chore: apply rustfmt to the G3 vulkan_hook module
+- ci: verify the OBS feature-parity checklist against a machine-readable catalog
+- docs: add OBS features without a Rivulet counterpart to the roadmap
+
 ## [0.27.0-alpha.1] - 2026-08-21
 - feat: G3 Vulkan hook infrastructure for zero-overhead game capture
 
