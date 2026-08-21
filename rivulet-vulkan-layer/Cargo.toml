@@ -18,6 +18,12 @@ ash = "0.38"
 # rivulet-capture/src/backend.rs).
 anyhow = { workspace = true }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3", features = ["memoryapi", "winbase", "winnt", "handleapi"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

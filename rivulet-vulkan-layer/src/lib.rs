@@ -5,6 +5,9 @@
     dead_code
 )]
 
+pub mod capture_channel;
+
+use capture_channel::{FrameHeader, SHM_NAME, DEFAULT_SHM_SIZE, next_sequence};
 use ash::vk;
 use std::collections::HashMap;
 use std::ffi::CStr;
@@ -300,6 +303,124 @@ impl DeviceState {
             );
             Some(frame)
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared memory frame writer
+// ---------------------------------------------------------------------------
+
+/// Shared memory handle — created on first write, reused thereafter.
+struct ShmHandle {
+    ptr: *mut u8,
+    size: usize,
+}
+
+unsafe impl Send for ShmHandle {}
+unsafe impl Sync for ShmHandle {}
+
+static SHM: Mutex<Option<ShmHandle>> = Mutex::new(None);
+
+/// Write a captured frame to the shared memory region so Rivulet can read it.
+///
+/// Creates the shared memory region on first call. Subsequent calls overwrite
+/// the previous frame (latest-frame-wins semantics).
+fn write_frame_to_shm(frame: &[u8], width: u32, height: u32) {
+    let seq = next_sequence();
+    let header = FrameHeader::new(width, height, seq);
+    let header_bytes = header.to_bytes();
+
+    let mut guard = SHM.lock().unwrap();
+    let handle = guard.get_or_insert_with(|| {
+        create_shm().expect("[Rivulet Layer] Failed to create shared memory")
+    });
+
+    let total = FrameHeader::SIZE + frame.len();
+    if total > handle.size {
+        eprintln!(
+            "[Rivulet Layer] Frame {} bytes > SHM {} bytes, truncating",
+            total, handle.size
+        );
+    }
+
+    unsafe {
+        let dst = handle.ptr;
+        let copy_len = total.min(handle.size);
+        std::ptr::copy_nonoverlapping(header_bytes.as_ptr(), dst, FrameHeader::SIZE);
+        let data_len = (copy_len - FrameHeader::SIZE).min(frame.len());
+        std::ptr::copy_nonoverlapping(frame.as_ptr(), dst.add(FrameHeader::SIZE), data_len);
+    }
+}
+
+/// Platform-specific shared memory creation.
+#[cfg(target_os = "windows")]
+fn create_shm() -> Option<ShmHandle> {
+    use std::ffi::CString;
+    use winapi::um::handleapi::*;
+    use winapi::um::memoryapi::*;
+    use winapi::um::winbase::*;
+    use winapi::um::winnt::*;
+
+    let name = CString::new(SHM_NAME).ok()?;
+    let size = DEFAULT_SHM_SIZE as u64;
+
+    unsafe {
+        let handle = CreateFileMappingA(
+            INVALID_HANDLE_VALUE,
+            std::ptr::null_mut(),
+            PAGE_READWRITE,
+            (size >> 32) as u32,
+            size as u32,
+            name.as_ptr(),
+        );
+        if handle.is_null() {
+            return None;
+        }
+
+        let ptr = MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+        if ptr.is_null() {
+            CloseHandle(handle);
+            return None;
+        }
+
+        Some(ShmHandle {
+            ptr: ptr as *mut u8,
+            size: DEFAULT_SHM_SIZE,
+        })
+    }
+}
+
+/// Platform-specific shared memory creation.
+#[cfg(target_os = "linux")]
+fn create_shm() -> Option<ShmHandle> {
+    use std::ffi::CString;
+
+    let name = CString::new(format!("/{}", SHM_NAME)).ok()?;
+    let size = DEFAULT_SHM_SIZE;
+
+    unsafe {
+        let fd = libc::shm_open(name.as_ptr(), libc::O_CREAT | libc::O_RDWR, 0o666);
+        if fd < 0 {
+            return None;
+        }
+        libc::ftruncate(fd, size as libc::off_t);
+        let ptr = libc::mmap(
+            std::ptr::null_mut(),
+            size,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_SHARED,
+            fd,
+            0,
+        );
+        libc::close(fd);
+        if ptr == libc::MAP_FAILED {
+            return None;
+        }
+
+        Some(ShmHandle {
+            ptr: ptr as *mut u8,
+            size,
+        })
     }
 }
 
@@ -799,7 +920,13 @@ unsafe extern "system" fn layer_vk_queue_present_khr(
                             count,
                         );
                         for &idx in indices {
-                            dev.capture(idx);
+                            if let Some(frame) = dev.capture(idx) {
+                                write_frame_to_shm(
+                                    &frame,
+                                    dev.extent.width,
+                                    dev.extent.height,
+                                );
+                            }
                         }
                     }
                 }
