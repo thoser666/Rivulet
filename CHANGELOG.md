@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.30.0-alpha.1] - 2026-08-21
+- feat: G3 Vulkan capture layer — ash 0.38, vkQueuePresentKHR interception, staging buffer readback
+
 ## [0.29.0-alpha.1] - 2026-08-21
 - feat: G3 Vulkan capture pipeline — staging buffer readback, 12 tests pass
 
