@@ -48,6 +48,137 @@ impl Scene {
     }
 }
 
+/// Manages the scene collection: adding/removing/renaming scenes and
+/// switching the active scene (the one whose sources are shown on output).
+/// Scene switches are tracked in a history stack so `switch_back` behaves
+/// like an undo (A → B → C, back → B, back → A).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SceneManager {
+    scenes: Vec<Scene>,
+    active: Option<Uuid>,
+    history: Vec<Uuid>,
+}
+
+impl Default for SceneManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SceneManager {
+    pub fn new() -> Self {
+        Self {
+            scenes: Vec::new(),
+            active: None,
+            history: Vec::new(),
+        }
+    }
+
+    /// Adds a scene and activates it when it is the first scene.
+    pub fn add(&mut self, scene: Scene) -> Uuid {
+        let id = scene.id;
+        self.scenes.push(scene);
+        if self.active.is_none() {
+            self.active = Some(id);
+        }
+        id
+    }
+
+    pub fn remove(&mut self, id: Uuid) -> bool {
+        let Some(index) = self.scenes.iter().position(|s| s.id == id) else {
+            return false;
+        };
+        self.scenes.remove(index);
+        self.history.retain(|h| *h != id);
+        if self.active == Some(id) {
+            // Restore the most recent still-existing scene from history,
+            // otherwise fall back to the last remaining scene (or none).
+            self.active = self
+                .history
+                .pop()
+                .filter(|h| self.scenes.iter().any(|s| s.id == *h))
+                .or_else(|| self.scenes.last().map(|s| s.id));
+        }
+        true
+    }
+
+    /// Renames a scene; returns the old name or `None` if the scene is unknown.
+    pub fn rename(&mut self, id: Uuid, name: String) -> Option<String> {
+        let scene = self.scenes.iter_mut().find(|s| s.id == id)?;
+        let old = std::mem::replace(&mut scene.name, name);
+        Some(old)
+    }
+
+    /// Switches the active scene. Unknown IDs are ignored (returns false).
+    /// The previously active scene is pushed onto the history stack.
+    pub fn switch_to(&mut self, id: Uuid) -> bool {
+        if !self.scenes.iter().any(|s| s.id == id) {
+            return false;
+        }
+        if self.active != Some(id) {
+            if let Some(previous) = self.active {
+                self.history.push(previous);
+            }
+        }
+        self.active = Some(id);
+        true
+    }
+
+    /// Undo: reverts to the most recently active scene that still exists.
+    pub fn switch_back(&mut self) -> bool {
+        while let Some(previous) = self.history.pop() {
+            if self.scenes.iter().any(|s| s.id == previous) {
+                self.active = Some(previous);
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn scenes(&self) -> &[Scene] {
+        &self.scenes
+    }
+
+    pub fn get(&self, id: Uuid) -> Option<&Scene> {
+        self.scenes.iter().find(|s| s.id == id)
+    }
+
+    pub fn active(&self) -> Option<Uuid> {
+        self.active
+    }
+
+    pub fn active_scene(&self) -> Option<&Scene> {
+        self.active.and_then(|id| self.get(id))
+    }
+
+    /// The scene active before the current one (top of the history stack).
+    pub fn last_active(&self) -> Option<Uuid> {
+        self.history.last().copied()
+    }
+
+    /// All scene IDs ordered so that children directly follow their parent
+    /// (depth-first, folders first) — a stable presentation order for the UI.
+    pub fn ordered_scenes(&self) -> Vec<Uuid> {
+        let mut ordered: Vec<Uuid> = Vec::with_capacity(self.scenes.len());
+        for scene in &self.scenes {
+            if scene.parent.is_none() {
+                ordered.push(scene.id);
+                self.push_children(scene.id, &mut ordered);
+            }
+        }
+        ordered
+    }
+
+    fn push_children(&self, parent: Uuid, out: &mut Vec<Uuid>) {
+        for scene in &self.scenes {
+            if scene.parent == Some(parent) {
+                out.push(scene.id);
+                self.push_children(scene.id, out);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,5 +213,120 @@ mod tests {
         let child = Scene::with_parent_and_color("Child".to_string(), parent, 0xFF36A2EB);
         assert_eq!(child.parent, Some(parent));
         assert_eq!(child.color, 0xFF36A2EB);
+    }
+
+    #[test]
+    fn manager_first_scene_becomes_active() {
+        let mut mgr = SceneManager::new();
+        assert_eq!(mgr.active(), None);
+        let id = mgr.add(Scene::new("Game".to_string()));
+        assert_eq!(mgr.active(), Some(id));
+        assert_eq!(mgr.active_scene().map(|s| s.name.as_str()), Some("Game"));
+    }
+
+    #[test]
+    fn manager_switch_changes_active_and_tracks_last_active() {
+        let mut mgr = SceneManager::new();
+        let a = mgr.add(Scene::new("A".to_string()));
+        let b = mgr.add(Scene::new("B".to_string()));
+        assert_eq!(mgr.active(), Some(a));
+
+        assert!(mgr.switch_to(b));
+        assert_eq!(mgr.active(), Some(b));
+        assert_eq!(mgr.last_active(), Some(a));
+
+        // Switching to the same scene is a no-op for last_active.
+        assert!(mgr.switch_to(b));
+        assert_eq!(mgr.last_active(), Some(a));
+
+        // Unknown IDs are rejected.
+        assert!(!mgr.switch_to(Uuid::new_v4()));
+        assert_eq!(mgr.active(), Some(b));
+    }
+
+    #[test]
+    fn manager_switch_back_returns_to_previous_scene() {
+        let mut mgr = SceneManager::new();
+        let a = mgr.add(Scene::new("A".to_string()));
+        let b = mgr.add(Scene::new("B".to_string()));
+        let c = mgr.add(Scene::new("C".to_string()));
+        mgr.switch_to(b);
+        mgr.switch_to(c);
+        assert_eq!(mgr.active(), Some(c));
+
+        assert!(mgr.switch_back());
+        assert_eq!(mgr.active(), Some(b));
+        assert_eq!(mgr.last_active(), Some(a));
+
+        assert!(mgr.switch_back());
+        assert_eq!(mgr.active(), Some(a));
+        assert_eq!(mgr.last_active(), None);
+
+        // History exhausted → false, active unchanged.
+        assert!(!mgr.switch_back());
+        assert_eq!(mgr.active(), Some(a));
+
+        // A fresh manager without switching history returns false.
+        let mut fresh = SceneManager::new();
+        fresh.add(Scene::new("Only".to_string()));
+        assert!(!fresh.switch_back());
+        assert!(fresh.active().is_some());
+    }
+
+    #[test]
+    fn manager_remove_unknown_returns_false() {
+        let mut mgr = SceneManager::new();
+        mgr.add(Scene::new("A".to_string()));
+        assert!(!mgr.remove(Uuid::new_v4()));
+        assert_eq!(mgr.scenes().len(), 1);
+    }
+
+    #[test]
+    fn manager_remove_active_falls_back_to_last_scene() {
+        let mut mgr = SceneManager::new();
+        let a = mgr.add(Scene::new("A".to_string()));
+        let b = mgr.add(Scene::new("B".to_string()));
+        mgr.switch_to(b);
+        assert!(mgr.remove(b));
+        assert_eq!(mgr.scenes().len(), 1);
+        assert_eq!(mgr.active(), Some(a));
+    }
+
+    #[test]
+    fn manager_remove_last_scene_clears_active() {
+        let mut mgr = SceneManager::new();
+        let a = mgr.add(Scene::new("A".to_string()));
+        assert!(mgr.remove(a));
+        assert_eq!(mgr.scenes().len(), 0);
+        assert_eq!(mgr.active(), None);
+    }
+
+    #[test]
+    fn manager_rename_updates_name_and_reports_old() {
+        let mut mgr = SceneManager::new();
+        let a = mgr.add(Scene::new("Old".to_string()));
+        assert_eq!(mgr.rename(a, "New".to_string()), Some("Old".to_string()));
+        assert_eq!(mgr.get(a).map(|s| s.name.as_str()), Some("New"));
+
+        assert_eq!(mgr.rename(Uuid::new_v4(), "X".to_string()), None);
+    }
+
+    #[test]
+    fn manager_ordered_scenes_groups_children_under_parents() {
+        let mut mgr = SceneManager::new();
+        let parent = mgr.add(Scene::new("Folder".to_string()));
+        let child1 = mgr.add(Scene::with_parent("Child 1".to_string(), parent));
+        let other = mgr.add(Scene::new("Top".to_string()));
+        let child2 = mgr.add(Scene::with_parent("Child 2".to_string(), parent));
+
+        let ids = mgr.ordered_scenes();
+        let names: Vec<&str> = ids
+            .iter()
+            .map(|id| mgr.get(*id).map(|s| s.name.as_str()).unwrap_or(""))
+            .collect();
+        assert_eq!(names, vec!["Folder", "Child 1", "Child 2", "Top"]);
+
+        // `other` was added before `child2`, so its position is stable.
+        let _ = other;
     }
 }

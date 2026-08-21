@@ -47,6 +47,9 @@ pub use preset::RecordingPreset;
 pub mod region;
 pub use region::CaptureRegion;
 
+pub mod scene;
+pub use scene::{Scene, SceneManager};
+
 // GStreamer initialization
 static GSTREAMER_INIT: Lazy<()> = Lazy::new(|| {
     gst::init().expect("GStreamer initialization failed.");

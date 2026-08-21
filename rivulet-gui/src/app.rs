@@ -150,7 +150,6 @@ impl AppView {
     /// Milestone of still-planned views (`None` once implemented).
     fn planned_milestone(self) -> Option<&'static str> {
         match self {
-            AppView::Scenes => Some("M2"),
             AppView::Stream => Some("M3"),
             AppView::Assistant => Some("M9"),
             _ => None,
@@ -478,6 +477,14 @@ pub struct RivuletApp {
     #[serde(skip)]
     view: AppView,
 
+    // Scenes (multiple scenes & switching)
+    #[serde(skip)]
+    scenes: rivulet_core::SceneManager,
+    #[serde(skip)]
+    scene_name_input: String,
+    #[serde(skip)]
+    scene_status: Option<String>,
+
     // Auto-update
     #[serde(skip)]
     update_ui: std::sync::Arc<std::sync::Mutex<UpdateUi>>,
@@ -653,6 +660,10 @@ impl Default for RivuletApp {
             region_preview_error: None,
 
             view: AppView::Record,
+
+            scenes: rivulet_core::SceneManager::new(),
+            scene_name_input: String::new(),
+            scene_status: None,
 
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
@@ -1356,6 +1367,142 @@ impl RivuletApp {
     /// Translate a UI string and substitute positional placeholders.
     fn tr_fmt(&self, key: &str, args: &[String]) -> String {
         self.locale.tr_fmt(key, args)
+    }
+
+    /// Scenes view: list scenes (folders first), switch the active scene,
+    /// and add/rename/remove scenes. Pure state logic is testable via the
+    /// `SceneManager` in rivulet-core; this method only renders and calls it.
+    fn draw_scenes_view(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
+        let active = self.scenes.active();
+        let active_name = self
+            .scenes
+            .active_scene()
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| self.tr("scenes_no_scenes").to_string());
+        ui.label(
+            egui::RichText::new(self.tr_fmt("scenes_active_label", &[active_name]))
+                .strong()
+                .color(colors.success),
+        );
+
+        let name_hint = self.tr("scenes_name_placeholder");
+        let add_label = self.tr("scenes_add");
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.scene_name_input).hint_text(name_hint));
+            if ui.button(add_label).clicked() {
+                let name = self.scene_name_input.trim().to_string();
+                if !name.is_empty() {
+                    self.scenes.add(rivulet_core::Scene::new(name.clone()));
+                    self.scene_status = Some(self.tr_fmt("scenes_added", &[name]));
+                    self.scene_name_input.clear();
+                }
+            }
+            let switched_back = ui
+                .add_enabled(
+                    active.is_some(),
+                    egui::Button::new(self.tr("scenes_switch_back")),
+                )
+                .on_hover_text(self.tr("scenes_switch_back"))
+                .clicked();
+            if switched_back && self.scenes.switch_back() {
+                self.scene_status = None;
+            }
+        });
+
+        ui.separator();
+
+        let ordered = self.scenes.ordered_scenes();
+        if ordered.is_empty() {
+            ui.label(self.tr("scenes_no_scenes"));
+        } else {
+            let mut rename_target: Option<(uuid::Uuid, String)> = None;
+            let mut remove_target: Option<uuid::Uuid> = None;
+            let mut switch_target: Option<uuid::Uuid> = None;
+
+            egui::ScrollArea::vertical()
+                .max_height(ui.available_height() - 80.0)
+                .show(ui, |ui| {
+                    for id in ordered {
+                        let Some(scene) = self.scenes.get(id).cloned() else {
+                            continue;
+                        };
+                        let is_active = Some(id) == active;
+                        ui.horizontal(|ui| {
+                            if ui.selectable_label(is_active, &scene.name).clicked() {
+                                switch_target = Some(id);
+                            }
+                            if is_active {
+                                ui.label(
+                                    egui::RichText::new(self.tr("scenes_active"))
+                                        .small()
+                                        .color(colors.success),
+                                );
+                            }
+                            if ui.small_button(self.tr("scenes_rename")).clicked() {
+                                rename_target = Some((id, scene.name.clone()));
+                            }
+                            if ui.small_button(self.tr("scenes_remove")).clicked() {
+                                remove_target = Some(id);
+                            }
+                        });
+                    }
+                });
+
+            if let Some((id, old_name)) = rename_target {
+                if let Some(new_name) = self.scene_rename_prompt(ui, id, old_name) {
+                    self.scene_status = Some(self.tr_fmt("scenes_renamed", &[new_name]));
+                }
+            }
+            if let Some(id) = remove_target {
+                let name = self
+                    .scenes
+                    .get(id)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default();
+                if self.scenes.remove(id) {
+                    self.scene_status = Some(self.tr_fmt("scenes_removed", &[name]));
+                }
+            }
+            if let Some(id) = switch_target {
+                let name = self
+                    .scenes
+                    .get(id)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default();
+                if self.scenes.switch_to(id) {
+                    self.scene_status = Some(self.tr_fmt("scenes_switched", &[name]));
+                }
+            }
+        }
+
+        if let Some(status) = &self.scene_status {
+            ui.colored_label(colors.info, status);
+        }
+    }
+
+    /// Minimal inline rename flow: swaps the row into a text field, applies
+    /// the change via the SceneManager, returns the new name when applied.
+    fn scene_rename_prompt(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: uuid::Uuid,
+        old_name: String,
+    ) -> Option<String> {
+        let mut new_name = old_name.clone();
+        let mut applied = None;
+        ui.horizontal(|ui| {
+            let edit =
+                ui.add(egui::TextEdit::singleline(&mut new_name).hint_text(old_name.as_str()));
+            if ui.button(self.tr("scenes_rename")).clicked() {
+                let trimmed = new_name.trim().to_string();
+                if !trimmed.is_empty() {
+                    self.scenes.rename(id, trimmed.clone());
+                    applied = Some(trimmed);
+                }
+            }
+            edit.request_focus();
+        });
+        applied
     }
 
     /// Live performance metrics line for the recording UI
@@ -2766,6 +2913,11 @@ impl eframe::App for RivuletApp {
                 ui.label(self.tr("mixer_unavailable"));
             }
 
+            // Scenes: list, switching, add/rename/remove
+            if self.view == AppView::Scenes {
+                self.draw_scenes_view(ui, &colors);
+            }
+
             #[cfg(not(any(target_os = "linux", target_os = "windows")))]
             if self.view == AppView::Record {
                 ui.add_space(20.0);
@@ -3071,10 +3223,10 @@ mod tests {
 
     #[test]
     fn placeholder_views_expose_their_milestone() {
-        assert_eq!(AppView::Scenes.planned_milestone(), Some("M2"));
         assert_eq!(AppView::Stream.planned_milestone(), Some("M3"));
         assert_eq!(AppView::Assistant.planned_milestone(), Some("M9"));
-        // Implemented views have no milestone banner.
+        // Implemented views have no milestone banner (Scenes is now live).
+        assert_eq!(AppView::Scenes.planned_milestone(), None);
         assert_eq!(AppView::Record.planned_milestone(), None);
         assert_eq!(AppView::Mixer.planned_milestone(), None);
         assert_eq!(AppView::Settings.planned_milestone(), None);

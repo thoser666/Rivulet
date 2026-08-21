@@ -225,6 +225,18 @@ impl Locale {
                 ("nav_stream", "Stream"),
                 ("nav_assistant", "Assistant"),
                 ("nav_settings", "Settings"),
+                ("scenes_add", "Add scene"),
+                ("scenes_name_placeholder", "Scene name…"),
+                ("scenes_active", "Active"),
+                ("scenes_no_scenes", "No scenes yet. Add one to start composing."),
+                ("scenes_switch_back", "Switch back"),
+                ("scenes_rename", "Rename"),
+                ("scenes_remove", "Remove"),
+                ("scenes_renamed", "Renamed to \"{0}\"."),
+                ("scenes_added", "Scene \"{0}\" added."),
+                ("scenes_removed", "Scene \"{0}\" removed."),
+                ("scenes_switched", "Switched to \"{0}\"."),
+                ("scenes_active_label", "Active scene: {0}"),
                 ("section_planned", "This section is planned for milestone {0}."),
                 ("mixer_unavailable", "The audio mixer is currently only available on Linux."),
                 // Theme
@@ -350,6 +362,18 @@ impl Locale {
                 ("nav_stream", "Stream"),
                 ("nav_assistant", "Assistant"),
                 ("nav_settings", "Einstellungen"),
+                ("scenes_add", "Szene hinzufügen"),
+                ("scenes_name_placeholder", "Szenenname…"),
+                ("scenes_active", "Aktiv"),
+                ("scenes_no_scenes", "Noch keine Szenen. Füge eine hinzu, um mit dem Komponieren zu beginnen."),
+                ("scenes_switch_back", "Zurückwechseln"),
+                ("scenes_rename", "Umbenennen"),
+                ("scenes_remove", "Entfernen"),
+                ("scenes_renamed", "Umbenannt in \"{0}\"."),
+                ("scenes_added", "Szene \"{0}\" hinzugefügt."),
+                ("scenes_removed", "Szene \"{0}\" entfernt."),
+                ("scenes_switched", "Gewechselt zu \"{0}\"."),
+                ("scenes_active_label", "Aktive Szene: {0}"),
                 ("section_planned", "Dieser Bereich ist für Meilenstein {0} geplant."),
                 ("mixer_unavailable", "Der Audio-Mixer ist derzeit nur unter Linux verfügbar."),
                 // Theme
@@ -493,6 +517,24 @@ mod tests {
         assert_eq!(en_fail, "Could not save replay: boom");
         let de_fail = Locale::De.tr_fmt("replay_save_failed", &["boom".to_string()]);
         assert_eq!(de_fail, "Replay konnte nicht gespeichert werden: boom");
+    }
+
+    #[test]
+    fn scenes_keys_translate_in_both_locales() {
+        assert_eq!(Locale::En.tr("scenes_add"), "Add scene");
+        assert_eq!(Locale::De.tr("scenes_add"), "Szene hinzufügen");
+        assert_eq!(Locale::En.tr("scenes_active"), "Active");
+        assert_eq!(Locale::De.tr("scenes_active"), "Aktiv");
+        assert_eq!(Locale::En.tr("scenes_switch_back"), "Switch back");
+        assert_eq!(Locale::De.tr("scenes_switch_back"), "Zurückwechseln");
+        let en = Locale::En.tr_fmt("scenes_switched", &["Game".to_string()]);
+        assert_eq!(en, "Switched to \"Game\".");
+        let de = Locale::De.tr_fmt("scenes_switched", &["Game".to_string()]);
+        assert_eq!(de, "Gewechselt zu \"Game\".");
+        let en_removed = Locale::En.tr_fmt("scenes_removed", &["Old".to_string()]);
+        assert_eq!(en_removed, "Scene \"Old\" removed.");
+        let de_removed = Locale::De.tr_fmt("scenes_removed", &["Old".to_string()]);
+        assert_eq!(de_removed, "Szene \"Old\" entfernt.");
     }
 
     #[test]
