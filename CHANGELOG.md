@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.25.0-alpha.1] - 2026-08-21
+- fix(release): stop changelog size doubling and repair CHANGELOG.md
+- docs: mark G2 DXGI backend done in M2 roadmap
+- feat: G2 DXGI Desktop Duplication capture backend
+- test: use child ids in scene ordering assertions
+- fix: use as_chunks in record_screen example for clippy 1.98
+- docs: mark scene management done in M2 roadmap
+- feat: scene management - multiple scenes, switching, add/rename/remove
+- docs: mark M1 milestone as closed in roadmap table
+- docs: fix remaining roadmap status inconsistencies (M4/M5 + features)
+- docs: correct M2 status and scene organisation checkbox
+- docs: add M1 target date to milestone overview table
+- docs: live milestone progress badges in roadmap overview
+- chore: ignore .freebuff/ tool artifacts
+- docs: replay buffer roadmap status + game capture strategy (G1)
+- feat: replay buffer engine module (instant replay)
+- feat: game capture implementation & scene organisation
+- feat: game capture priority & replay buffer i18n updates
+
 ## [0.24.0-alpha.1] - 2026-08-20
 - feat: scene organisation - folders, color coding, search/filter
 - ci: avoid stale Cargo build artifacts
