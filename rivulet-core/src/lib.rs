@@ -48,6 +48,7 @@ pub mod region;
 pub use region::CaptureRegion;
 
 pub mod scene;
+pub mod vulkan_hook;
 pub use scene::{Scene, SceneManager};
 
 // GStreamer initialization
