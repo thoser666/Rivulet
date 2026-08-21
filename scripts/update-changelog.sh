@@ -28,11 +28,26 @@ ENTRY="$SECTION
 $BODY"
 
 if [[ -f "$CHANGELOG" ]]; then
-  # Keep the existing content without the header and prepend the new section.
-  REST="$(sed '1{/^# Changelog/d;}' "$CHANGELOG" | sed '/./,$!d' | sed 's/^/\n/')"
-  printf '%s\n\n%s\n%s\n' "$HEADER" "$ENTRY" "$REST" > "$CHANGELOG"
+  # Keep the existing content without the header and leading blank lines,
+  # then prepend the new section separated by a blank line.
+  #
+  # NOTE: never run `sed 's/^/\n/'` on the rest — it prepends a newline to
+  # *every* line, doubling the file on each release (fixed in v0.25.0).
+  REST="$(sed '1{/^# Changelog/d;}' "$CHANGELOG" | sed '/./,$!d')"
+  printf '%s\n\n%s\n\n%s\n' "$HEADER" "$ENTRY" "$REST" > "$CHANGELOG"
 else
   printf '%s\n\n%s\n' "$HEADER" "$ENTRY" > "$CHANGELOG"
 fi
 
-echo "CHANGELOG.md updated (version $VERSION)."
+# Defensive guard: the generated file must stay small. This catches
+# regressions like the pre-v0.25.0 doubling bug before a >100 MB file
+# breaks the push to GitHub (hard limit 100 MB).
+SIZE_BYTES="$(wc -c < "$CHANGELOG")"
+MAX_BYTES=5242880 # 5 MB
+if (( SIZE_BYTES > MAX_BYTES )); then
+  echo "ERROR: $CHANGELOG is $SIZE_BYTES bytes (>${MAX_BYTES}) — aborting." >&2
+  echo "The changelog generation has a bug; fix it instead of pushing a huge file." >&2
+  exit 1
+fi
+
+echo "CHANGELOG.md updated (version $VERSION, $SIZE_BYTES bytes)."
