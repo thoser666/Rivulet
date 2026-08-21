@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.27.0-alpha.1] - 2026-08-21
+- feat: G3 Vulkan hook infrastructure for zero-overhead game capture
+
 ## [0.26.0-alpha.1] - 2026-08-21
 - docs: note Windows GUI backend indicator in G2 roadmap entry
 - feat(gui): show active capture backend during Windows recordings (G2)
