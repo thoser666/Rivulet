@@ -184,9 +184,19 @@ jobs:
             -name RivuletGameCaptureTest \
             "Rivulet game capture CI test window" &
           test_window_pid=$!
-          sleep 1
 
-          xdotool search --name RivuletGameCaptureTest
+          # The window manager maps the xmessage window asynchronously;
+          # poll with xdotool until it appears instead of guessing a sleep.
+          found_window=""
+          for _ in $(seq 1 30); do
+            if found_window="$(xdotool search --name RivuletGameCaptureTest 2>/dev/null || true)"; then
+              if [ -n "$found_window" ]; then break; fi
+            fi
+            sleep 0.5
+          done
+          echo "Found CI window id(s): $found_window"
+          [ -n "$found_window" ] || { echo "CI window never appeared on $DISPLAY" >&2; exit 1; }
+
           cargo test -p rivulet-core list_game_windows_finds_the_ci_window -- --nocapture
 
       # --- Install Windows dependencies ---
