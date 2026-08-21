@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.32.0-alpha.1] - 2026-08-21
+- feat: G3 layer activation — VulkanLayerConfig for VK_LAYER_PATH env setup
+
 ## [0.31.0-alpha.1] - 2026-08-21
 - feat: G3 layer tests — 14 tests pass, clippy clean
 
