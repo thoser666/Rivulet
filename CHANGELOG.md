@@ -1,6 +1,10 @@
 # Changelog
 
 ## [0.28.0-alpha.1] - 2026-08-21
+- feat: G3 Vulkan hook compiles with 8 tests, replace vulkan crate with ash 0.38
+- docs: link the new roadmap items to their GitHub issues
+
+## [0.28.0-alpha.1] - 2026-08-21
 - feat: G3 Vulkan hook compiles, 8 unit tests pass (Entry/Instance/Device/Queue, GPU selection, swapchain lifecycle)
 - chore: replace non-compiling `vulkan` crate with `ash` 0.38 (full features) for raw Vulkan API access
 - docs: update G3 roadmap status from WIP draft to infrastructure done
