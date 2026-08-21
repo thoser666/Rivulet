@@ -10,6 +10,7 @@
 - feat: G3 layer activation — VulkanLayerConfig for VK_LAYER_PATH env setup
 - feat: G3 layer wiring — VulkanHook::with_backend() enables layer in InstanceCreateInfo
 - feat: G3 capture channel — shared memory IPC (FrameHeader protocol, CreateFileMapping/shm_open), 18 layer tests
+- feat: G3 capture channel reader — `ShmReader` in rivulet-core for reading frames from layer, 5 tests
 
 ## [0.31.0-alpha.1] - 2026-08-21
 - feat: G3 layer tests — 14 tests pass, clippy clean
