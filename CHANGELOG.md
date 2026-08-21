@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.36.0-alpha.1] - 2026-08-21
+- feat: G3 start_vulkan_layer_capture() — channel-based frame reading from layer
+
 ## [0.35.0-alpha.1] - 2026-08-21
 - feat: G3 capture channel reader — ShmReader for reading layer frames
 
