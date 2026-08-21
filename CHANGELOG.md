@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.34.0-alpha.1] - 2026-08-21
+- feat: G3 capture channel — shared memory IPC for frame transfer
+
 ## [0.33.0-alpha.1] - 2026-08-21
 - feat: G3 layer wiring — VulkanHook::with_backend() + multi-path layer discovery
 
