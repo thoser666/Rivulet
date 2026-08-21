@@ -202,6 +202,50 @@ impl Drop for GameCaptureHandle {
     }
 }
 
+/// Start reading captured frames from the Vulkan layer's shared memory.
+///
+/// The layer writes frames to a named shared memory region; this function
+/// spawns a thread that polls for new frames and sends them through the
+/// returned channel.
+///
+/// Returns `None` if the shared memory region is not available (layer not
+/// active, or no game has started writing yet).
+pub fn start_vulkan_layer_capture(
+    fps: u32,
+) -> Option<(mpsc::Receiver<GameCaptureFrame>, GameCaptureHandle)> {
+    let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(Mutex::new(false));
+    let stop_clone = stop.clone();
+
+    let reader = crate::capture_channel::ShmReader::open()?;
+    let frame_duration = Duration::from_millis(1000 / fps.max(1) as u64);
+
+    let handle = GameCaptureHandle { stop };
+
+    thread::spawn(move || {
+        let mut last_seq = 0u64;
+        loop {
+            if *stop_clone.lock().unwrap() {
+                break;
+            }
+            if let Some(frame) = reader.read_frame() {
+                if frame.sequence != last_seq {
+                    last_seq = frame.sequence;
+                    let _ = tx.send(GameCaptureFrame {
+                        data: frame.pixels,
+                        width: frame.width,
+                        height: frame.height,
+                    });
+                }
+            }
+            thread::sleep(frame_duration);
+        }
+        println!("Vulkan layer capture thread stopped.");
+    });
+
+    Some((rx, handle))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
