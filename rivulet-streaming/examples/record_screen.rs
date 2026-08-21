@@ -80,7 +80,7 @@ fn main() -> anyhow::Result<()> {
 
         // Konvertiere RGBA -> BGRA (FFmpeg erwartet BGRA)
         let mut bgra_data = Vec::with_capacity(rgba_data.len());
-        for pixel in rgba_data.chunks_exact(4) {
+        for pixel in rgba_data.as_chunks::<4>().0 {
             bgra_data.push(pixel[2]); // B
             bgra_data.push(pixel[1]); // G
             bgra_data.push(pixel[0]); // R
