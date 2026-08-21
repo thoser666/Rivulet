@@ -1,7 +1,14 @@
 use anyhow::Result;
 
+/// Platform-independent backend status / DXGI error classification (G2).
+pub mod backend;
+/// DXGI Desktop Duplication backend (G2) — Windows only.
+#[cfg(target_os = "windows")]
+pub mod dxgi;
 pub mod screen;
 
+#[cfg(target_os = "windows")]
+pub use dxgi::DxgiDesktopDuplication;
 pub use screen::XCapScreenCapture;
 
 pub trait CaptureSource {

@@ -14,3 +14,15 @@ image = "0.25"
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
+
+# DXGI Desktop Duplication (G2) — Windows-only; same version already in the
+# tree via windows-capture, so no version conflict in the lockfile.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "=0.62.2", features = [
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Foundation",
+] }
