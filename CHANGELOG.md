@@ -19,7 +19,8 @@
 - chore: replace non-compiling `vulkan` crate with `ash` 0.38 (full features)
 - docs: link the new roadmap items to their GitHub issues
 - docs: update G3 roadmap — layer done, next: recording pipeline integration
-- feat: G3 layer activation — `VulkanLayerConfig` for `VK_LAYER_PATH` + `VK_INSTANCE_LAYERS` env var setup, 5 tests
+- feat: G3 layer activation — `VulkanLayerConfig` for `VK_LAYER_PATH` + `VK_INSTANCE_LAYERS` env var setup, 7 tests
+- feat: G3 `VulkanHook::with_backend()` — enables layer in InstanceCreateInfo when backend is Layer
 
 ## [0.27.1-alpha.1] - 2026-08-21
 - fix: decouple the non-compiling G3 Vulkan draft from the build

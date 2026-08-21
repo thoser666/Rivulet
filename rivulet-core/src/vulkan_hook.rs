@@ -71,6 +71,10 @@ impl std::fmt::Debug for VulkanHook {
 
 impl VulkanHook {
     pub fn new() -> anyhow::Result<Self> {
+        Self::with_backend(VulkanHookBackend::Layer)
+    }
+
+    pub fn with_backend(backend: VulkanHookBackend) -> anyhow::Result<Self> {
         let entry = unsafe { Entry::load()? };
 
         let app_name = CString::new("Rivulet")?;
@@ -88,9 +92,17 @@ impl VulkanHook {
         #[cfg(target_os = "linux")]
         ext_names.push(vk::KHR_XLIB_SURFACE_NAME.as_ptr());
 
-        let instance_ci = vk::InstanceCreateInfo::default()
+        let mut instance_ci = vk::InstanceCreateInfo::default()
             .application_info(&app_info)
             .enabled_extension_names(&ext_names);
+
+        // When using the Layer backend, enable VK_LAYER_RIVULET_capture
+        // so the Vulkan loader inserts our interception layer.
+        let layer_name_c = CString::new(crate::vulkan_layer::LAYER_NAME)?;
+        let layer_name_ptr = layer_name_c.as_ptr();
+        if backend == VulkanHookBackend::Layer {
+            instance_ci = instance_ci.enabled_layer_names(std::slice::from_ref(&layer_name_ptr));
+        }
 
         let instance = unsafe { entry.create_instance(&instance_ci, None)? };
 
@@ -174,7 +186,7 @@ impl VulkanHook {
             swapchain_format: vk::Format::UNDEFINED,
             swapchain_extent: vk::Extent2D { width: 0, height: 0 },
             captured_frame: None,
-            backend: VulkanHookBackend::Layer,
+            backend,
             memory_properties,
             command_pool,
             command_buffer,

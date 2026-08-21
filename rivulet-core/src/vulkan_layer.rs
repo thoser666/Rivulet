@@ -60,11 +60,8 @@ impl VulkanLayerConfig {
     /// This sets `VK_LAYER_PATH` and `VK_INSTANCE_LAYERS` so the child
     /// process loads the Rivulet capture layer on Vulkan init.
     pub fn apply_to_command(&self, cmd: &mut std::process::Command) {
-        // VK_LAYER_PATH: where the loader finds our JSON manifest
         cmd.env("VK_LAYER_PATH", &self.layer_dir);
 
-        // VK_INSTANCE_LAYERS: enable the layer (comma-separated list)
-        // Append to existing value if present
         let existing = std::env::var("VK_INSTANCE_LAYERS").unwrap_or_default();
         let layers = if existing.is_empty() {
             LAYER_NAME.to_string()
@@ -103,11 +100,50 @@ impl VulkanLayerConfig {
     }
 }
 
-/// Try to locate the layer files relative to the current executable.
+/// Try to locate the layer files by searching multiple standard locations.
+///
+/// Search order:
+/// 1. Directory of the current executable
+/// 2. `target/debug/` relative to `CARGO_MANIFEST_DIR` (dev builds)
+/// 3. `target/release/` relative to `CARGO_MANIFEST_DIR` (release builds)
 pub fn find_layer_config() -> Option<VulkanLayerConfig> {
-    let exe_dir = std::env::current_exe().ok()?;
-    let base_dir = exe_dir.parent()?;
-    VulkanLayerConfig::find(base_dir)
+    // 1. Next to the current executable
+    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())) {
+        if let Some(config) = VulkanLayerConfig::find(&exe_dir) {
+            return Some(config);
+        }
+    }
+
+    // 2. target/debug/ relative to workspace root
+    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        let workspace = PathBuf::from(&manifest_dir)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from(&manifest_dir));
+
+        for profile in &["debug", "release"] {
+            let target_dir = workspace.join("target").join(profile);
+            if let Some(config) = VulkanLayerConfig::find(&target_dir) {
+                return Some(config);
+            }
+        }
+
+        // Also check inside rivulet-vulkan-layer/target/{debug,release}
+        let layer_crate = workspace.join("rivulet-vulkan-layer");
+        for profile in &["debug", "release"] {
+            let target_dir = layer_crate.join("target").join(profile);
+            if let Some(config) = VulkanLayerConfig::find(&target_dir) {
+                return Some(config);
+            }
+        }
+    }
+
+    None
+}
+
+/// Check if the Vulkan capture layer is available on this system.
+pub fn is_layer_available() -> bool {
+    find_layer_config().is_some()
 }
 
 #[cfg(test)]
@@ -123,10 +159,7 @@ mod tests {
     #[test]
     fn find_requires_both_files() {
         let dir = std::env::temp_dir();
-        // Without both files present, should return None
         let result = VulkanLayerConfig::find(&dir);
-        // This may or may not find files depending on test env,
-        // just verify it doesn't panic
         let _ = result;
     }
 
@@ -136,8 +169,6 @@ mod tests {
         let config = VulkanLayerConfig::new(dir.clone());
         let mut cmd = std::process::Command::new("echo");
         config.apply_to_command(&mut cmd);
-        // Verify the command has the env vars set
-        // (We can't easily inspect Command internals, but verify no panic)
     }
 
     #[test]
@@ -153,5 +184,15 @@ mod tests {
         let dir = PathBuf::from("/some/path");
         let config = VulkanLayerConfig::new(dir.clone());
         assert_eq!(config.vk_layer_path(), dir.as_path());
+    }
+
+    #[test]
+    fn find_layer_config_does_not_panic() {
+        let _ = find_layer_config();
+    }
+
+    #[test]
+    fn is_layer_available_does_not_panic() {
+        let _ = is_layer_available();
     }
 }
