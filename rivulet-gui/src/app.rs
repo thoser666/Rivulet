@@ -1712,14 +1712,19 @@ impl RivuletApp {
             let result = rivulet_updater::install_asset(&path);
             let quit_after = result.as_ref().map(|quit| *quit).unwrap_or(false);
             let state = match result {
-                Ok(_) => UpdateUi::Installed(version),
+                Ok(_) => {
+                    // Clean up the downloaded installer — no longer needed.
+                    if let Err(e) = std::fs::remove_file(&path) {
+                        eprintln!("[Updater] Failed to remove installer {}: {}", path.display(), e);
+                    }
+                    UpdateUi::Installed(version)
+                }
                 Err(e) => UpdateUi::Error(e.to_string()),
             };
             *shared.lock().unwrap_or_else(|e| e.into_inner()) = state;
             ctx.request_repaint();
+
             if quit_after {
-                // Show the "installed" message for a moment, then close so the
-                // installer can replace the running files (MSI / new AppImage).
                 std::thread::sleep(std::time::Duration::from_millis(1500));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
