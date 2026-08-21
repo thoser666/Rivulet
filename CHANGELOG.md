@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.26.0-alpha.1] - 2026-08-21
+- docs: note Windows GUI backend indicator in G2 roadmap entry
+- feat(gui): show active capture backend during Windows recordings (G2)
+- ci: make Linux game-window verification robust against window-map timing
+
 ## [0.25.0-alpha.1] - 2026-08-21
 - fix(release): stop changelog size doubling and repair CHANGELOG.md
 - docs: mark G2 DXGI backend done in M2 roadmap
