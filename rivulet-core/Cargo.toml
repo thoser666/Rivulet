@@ -26,9 +26,6 @@ gstreamer-video = "0.25"
 # Provides the `parse_launch` function in newer gstreamer-rs versions.
 gstreamer-pbutils = "0.25"
 
-# Vulkan bindings (for G3: Vulkan hook / interposition)
-vulkan = "0.0.0-dev"
-
 # This crate is often needed as a helper library.
 glib = "0.22"
 

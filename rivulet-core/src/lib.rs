@@ -48,7 +48,9 @@ pub mod region;
 pub use region::CaptureRegion;
 
 pub mod scene;
-pub mod vulkan_hook;
+// NOTE: G3 (Vulkan hook) is a non-compiling WIP draft kept in
+// `src/vulkan_hook.rs` for reference only — deliberately NOT declared as a
+// module so the crate builds. See issue #56 for the rewrite.
 pub use scene::{Scene, SceneManager};
 
 // GStreamer initialization
