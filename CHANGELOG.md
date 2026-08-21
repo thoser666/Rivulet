@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.33.0-alpha.1] - 2026-08-21
+- feat: G3 layer wiring — VulkanHook::with_backend() + multi-path layer discovery
+
 ## [0.32.0-alpha.1] - 2026-08-21
 - feat: G3 layer activation — VulkanLayerConfig for VK_LAYER_PATH env setup
 
