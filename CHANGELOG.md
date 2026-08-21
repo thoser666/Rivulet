@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.28.0-alpha.1] - 2026-08-21
+- feat: G3 Vulkan hook compiles, 8 unit tests pass (Entry/Instance/Device/Queue, GPU selection, swapchain lifecycle)
+- chore: replace non-compiling `vulkan` crate with `ash` 0.38 (full features) for raw Vulkan API access
+- docs: update G3 roadmap status from WIP draft to infrastructure done
+
 ## [0.27.1-alpha.1] - 2026-08-21
 - fix: decouple the non-compiling G3 Vulkan draft from the build
 - chore: apply rustfmt to the G3 vulkan_hook module
