@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.29.0-alpha.1] - 2026-08-21
+- feat: G3 Vulkan capture pipeline — staging buffer readback, 12 tests pass
+
 ## [0.28.0-alpha.1] - 2026-08-21
 - feat: G3 Vulkan hook capture pipeline — staging buffer readback, image transitions, cmd_copy_image_to_buffer
 - feat: G3 VulkanHook::capture_current_frame() — swapchain image → HOST_VISIBLE staging → RGBA pixels
