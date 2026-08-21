@@ -384,22 +384,45 @@ The core concept of OBS: scenes, sources, and transitions.
 
 | OBS category | Status |
 | --- | --- |
-| Capture sources (display, window, webcam, media, color, per-app audio) | Partial (display, window, region, webcam; media/color/audio sources planned M2) |
+| Capture sources (display, window, webcam) | Partial (display + window + region, multi-monitor) |
+| Game capture (D3D/Vulkan/OpenGL hooks) | In progress (G2 DXGI + G3 infra done; G4–G6 open) |
+| Media & color sources | Open (M2 S6/S7) |
+| Image & text sources | Open (M2 S2/S3) |
+| Browser sources | Open (M2 S5b) |
+| Audio sources (microphone, per-app, devices) | Open (M2 S8) |
 | Scenes & transitions | In progress (scene mgmt + G2 done; transitions/studio open, M2) |
 | Scene collections & profiles | Open (M2) |
-| Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks, filters; ducking/EQ/VST planned M4) |
-| Recording & encoding | Partial (H.264/H.265/VP9, HW + SW; remux/file mgmt planned M4) |
-| Streaming (RTMP, platforms) | Partial (RTMPS Twitch/Kick/YouTube; multistream/NDI planned M3) |
-| Virtual camera | Open |
+| Studio mode & multi-view | Open (M2) |
+| Source transforms & composition | Open (M2 S1) |
+| Hotkeys (incl. remapping, global) | Partial (record/pause/mute/save-replay; remapping planned M5) |
+| Undo/Redo | Open (M2) |
+| Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks, filters) |
+| Video filters (color correction, LUT, blur, sharpen, chroma key) | Open (M4) |
+| Audio filters (noise gate, compressor, limiter, expander, gain, EQ) | Partial (M1 basics; gate/EQ/ducking planned M4) |
+| Audio ducking (sidechain) | Open (M4) |
+| VST 3.x support | Open (M4) |
+| Recording & encoding | Partial (H.264/H.265/VP9, HW + SW) |
 | Replay buffer | Done (ring buffer, F12 hotkey, save-to-MP4) |
-| Browser sources | Open (M2 S5b) |
-| Studio mode & hotkeys | Partial (hotkeys: record/pause/mute/save-replay; remapping planned M5) |
-| Multi-view & projectors | Open (M2) |
+| Remux & file management | Open (M4) |
+| Virtual camera | Open (M4) |
+| Streaming (RTMP/RTMPS, platforms) | Partial (RTMPS Twitch/Kick/YouTube) |
+| Multistreaming | Open (M3) |
+| Adaptive bitrate | Open (M3) |
+| WebRTC/WHIP, SRT/RIST, NDI | Open (M3) |
+| VOD track | Open (M3) |
+| Multi-track audio | Partial (2 tracks; VOD track planned M3) |
 | Plugin ecosystem & OBS compatibility | Open |
 | obs-websocket / Streamdeck | Open (M5) |
-| Multi-track audio | Partial (2 tracks; VOD track planned M3) |
+| Mobile remote & MIDI | Open (M5) |
+| Cloud & telemetry | Open (M4/M5) |
+| Multi-language support | Partial (DE/EN wired) |
 | Platform parity (Windows/macOS) | Open |
 | AI chat assistant | Open (M9) |
+
+> The checklist is verified against the machine-readable OBS catalog
+> [`scripts/obs-features.json`](scripts/obs-features.json) by
+> [`scripts/check-parity-checklist.py`](scripts/check-parity-checklist.py) in CI —
+> a new OBS capability without a matching checklist row fails the check.
 
 ---
 

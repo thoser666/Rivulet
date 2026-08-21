@@ -76,6 +76,11 @@ jobs:
       - name: Check status color contrast (WCAG AA)
         run: python3 scripts/check-theme-contrast.py
 
+      - name: Check OBS feature-parity checklist
+        run: |
+          python3 scripts/check-parity-checklist.py
+          python3 scripts/check-parity-checklist.py --self-test
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
