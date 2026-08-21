@@ -5,6 +5,7 @@
 
 ## [0.35.0-alpha.1] - 2026-08-21
 - feat: G3 capture channel reader — ShmReader for reading layer frames
+- feat: G3 build integration — build.rs copies VkLayer_rivulet_capture.json to target dir, layer DLL + manifest colocated
 
 ## [0.34.0-alpha.1] - 2026-08-21
 - feat: G3 capture channel — shared memory IPC for frame transfer
@@ -12,7 +13,8 @@
 ## [0.33.0-alpha.1] - 2026-08-21
 - feat: G3 layer wiring — VulkanHook::with_backend() + multi-path layer discovery
 
-## [0.32.0-alpha.1] - 2026-08-21
+## [0.35.0-alpha.1] - 2026-08-21
+- feat: G3 build integration — build.rs copies VkLayer_rivulet_capture.json to target dir, layer DLL + manifest colocated
 - feat: G3 layer activation — VulkanLayerConfig for VK_LAYER_PATH env setup
 - feat: G3 layer wiring — VulkanHook::with_backend() enables layer in InstanceCreateInfo
 - feat: G3 capture channel — shared memory IPC (FrameHeader protocol, CreateFileMapping/shm_open), 18 layer tests
