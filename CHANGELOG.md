@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.37.0-alpha.1] - 2026-08-21
+- feat: G3 build integration — build.rs copies layer manifest to target dir
+
 ## [0.36.0-alpha.1] - 2026-08-21
 - feat: G3 start_vulkan_layer_capture() — channel-based frame reading from layer
 
