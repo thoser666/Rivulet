@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.38.1-alpha.1] - 2026-08-22
+- fix(vulkan-layer): fix loader ABI, add live smoke test, close Issue #55
+- docs: mark G3 done with the G5 budget caveat, close Issue #56
+- chore: fix full-workspace macOS build and clippy warnings
+
 ## [0.38.0-alpha.1] - 2026-08-22
 - feat: wire Vulkan layer into Windows GUI as preferred game capture backend
 
