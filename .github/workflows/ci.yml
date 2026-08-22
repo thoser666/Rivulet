@@ -204,6 +204,14 @@ jobs:
 
           cargo test -p rivulet-core list_game_windows_finds_the_ci_window -- --nocapture
 
+      # --- Cache GStreamer MSIs (Windows) ---
+      - name: Cache GStreamer MSIs
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: C:/gstreamer-cache
+          key: gstreamer-msvc-1.24.13
+
       # --- Install Windows dependencies ---
       - name: Install Windows dependencies (if applicable)
         if: runner.os == 'Windows'
@@ -220,12 +228,20 @@ jobs:
           # 3. Install GStreamer (MSVC, 64-bit, runtime and dev) directly from
           # freedesktop.org as MSI. The Chocolatey package "gstreamer-devel"
           # does not contain every release version (1.24.13 is missing there).
+          # MSIs are cached via actions/cache to avoid 503 errors on repeated downloads.
           $version = "1.24.13"
-          $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$version/msvc"
-          $runtimeMsi = Join-Path $env:TEMP "gstreamer-runtime-$version.msi"
-          $develMsi = Join-Path $env:TEMP "gstreamer-devel-$version.msi"
-          Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi
-          Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi
+          $gstCacheDir = "C:/gstreamer-cache"
+          if (-not (Test-Path $gstCacheDir)) { New-Item -ItemType Directory -Path $gstCacheDir -Force | Out-Null }
+          $runtimeMsi = Join-Path $gstCacheDir "gstreamer-1.0-msvc-x86_64-$version.msi"
+          $develMsi = Join-Path $gstCacheDir "gstreamer-1.0-devel-msvc-x86_64-$version.msi"
+          if (-not (Test-Path $runtimeMsi) -or -not (Test-Path $develMsi)) {
+            $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$version/msvc"
+            Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi
+            Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi
+            Write-Host "Downloaded GStreamer MSIs to cache"
+          } else {
+            Write-Host "GStreamer MSIs found in cache, skipping download"
+          }
           Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
           Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
 
