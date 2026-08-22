@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.39.3-alpha.1] - 2026-08-22
+- fix: gate FrameHeader/DEFAULT_SHM_SIZE imports behind cfg(windows)
+
 ## [0.39.2-alpha.1] - 2026-08-22
 - fix: gate OpenGL hook DLL behind #[cfg(target_os = "windows")]
 
