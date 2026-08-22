@@ -1,4 +1,4 @@
-﻿// G3 – Vulkan hook for zero-overhead game capture.
+// G3 – Vulkan hook for zero-overhead game capture.
 //
 // Uses `ash` for raw Vulkan API access.
 // Pipeline: Entry → Instance → Device → Queue → Swapchain → Capture.
@@ -13,7 +13,7 @@
 
 use std::ffi::CString;
 
-use ash::{vk, Entry, Device};
+use ash::{vk, Device, Entry};
 
 pub struct VulkanHook {
     pub entry: Entry,
@@ -62,7 +62,13 @@ impl std::fmt::Debug for VulkanHook {
             .field("physical_device", &self.physical_device)
             .field("queue_family_index", &self.queue_family_index)
             .field("swapchain_format", &format_to_raw(self.swapchain_format))
-            .field("swapchain_extent", &format!("{}x{}", self.swapchain_extent.width, self.swapchain_extent.height))
+            .field(
+                "swapchain_extent",
+                &format!(
+                    "{}x{}",
+                    self.swapchain_extent.width, self.swapchain_extent.height
+                ),
+            )
             .field("swapchain_images", &self.swapchain_images.len())
             .field("backend", &self.backend)
             .finish()
@@ -167,8 +173,7 @@ impl VulkanHook {
         };
 
         let fence = unsafe {
-            let fence_ci = vk::FenceCreateInfo::default()
-                .flags(vk::FenceCreateFlags::SIGNALED);
+            let fence_ci = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
             device.create_fence(&fence_ci, None)?
         };
 
@@ -184,7 +189,10 @@ impl VulkanHook {
             swapchain: vk::SwapchainKHR::null(),
             swapchain_images: Vec::new(),
             swapchain_format: vk::Format::UNDEFINED,
-            swapchain_extent: vk::Extent2D { width: 0, height: 0 },
+            swapchain_extent: vk::Extent2D {
+                width: 0,
+                height: 0,
+            },
             captured_frame: None,
             backend,
             memory_properties,
@@ -203,8 +211,12 @@ impl VulkanHook {
 
     pub fn device_name(&self) -> String {
         unsafe {
-            let props = self.instance.get_physical_device_properties(self.physical_device);
-            let name_bytes: Vec<u8> = props.device_name.iter()
+            let props = self
+                .instance
+                .get_physical_device_properties(self.physical_device);
+            let name_bytes: Vec<u8> = props
+                .device_name
+                .iter()
                 .take_while(|&&c| c != 0)
                 .map(|&c| c as u8)
                 .collect();
@@ -214,7 +226,9 @@ impl VulkanHook {
 
     pub fn api_version(&self) -> (u32, u32, u32) {
         unsafe {
-            let props = self.instance.get_physical_device_properties(self.physical_device);
+            let props = self
+                .instance
+                .get_physical_device_properties(self.physical_device);
             (
                 vk::api_version_major(props.api_version),
                 vk::api_version_minor(props.api_version),
@@ -225,9 +239,12 @@ impl VulkanHook {
 
     pub fn queue_family_supports_transfer(&self) -> bool {
         unsafe {
-            let queue_families = self.instance
+            let queue_families = self
+                .instance
                 .get_physical_device_queue_family_properties(self.physical_device);
-            queue_families.iter().any(|qf| qf.queue_flags.contains(vk::QueueFlags::TRANSFER))
+            queue_families
+                .iter()
+                .any(|qf| qf.queue_flags.contains(vk::QueueFlags::TRANSFER))
         }
     }
 
@@ -255,29 +272,37 @@ impl VulkanHook {
         surface: vk::SurfaceKHR,
         extent: vk::Extent2D,
     ) -> anyhow::Result<()> {
-        let surface_caps = self.surface_loader
+        let surface_caps = self
+            .surface_loader
             .get_physical_device_surface_capabilities(self.physical_device, surface)
             .map_err(|e| anyhow::anyhow!("Surface capabilities query failed: {:?}", e))?;
 
-        let formats = self.surface_loader
+        let formats = self
+            .surface_loader
             .get_physical_device_surface_formats(self.physical_device, surface)
             .map_err(|e| anyhow::anyhow!("Surface formats query failed: {:?}", e))?;
 
-        let format = formats.iter()
+        let format = formats
+            .iter()
             .find(|f| f.format == vk::Format::B8G8R8A8_UNORM)
             .or(formats.first())
             .ok_or_else(|| anyhow::anyhow!("No surface formats available"))?;
 
-        let present_modes = self.surface_loader
+        let present_modes = self
+            .surface_loader
             .get_physical_device_surface_present_modes(self.physical_device, surface)
             .map_err(|e| anyhow::anyhow!("Surface present modes query failed: {:?}", e))?;
 
-        let present_mode = present_modes.iter()
+        let present_mode = present_modes
+            .iter()
             .find(|&&m| m == vk::PresentModeKHR::MAILBOX)
             .unwrap_or(&vk::PresentModeKHR::FIFO);
 
-        let image_count = (surface_caps.min_image_count + 1)
-            .min(surface_caps.max_image_count.max(surface_caps.min_image_count));
+        let image_count = (surface_caps.min_image_count + 1).min(
+            surface_caps
+                .max_image_count
+                .max(surface_caps.min_image_count),
+        );
 
         let create_info = vk::SwapchainCreateInfoKHR::default()
             .surface(surface)
@@ -293,11 +318,13 @@ impl VulkanHook {
             .present_mode(*present_mode)
             .clipped(true);
 
-        let swapchain = self.swapchain_loader
+        let swapchain = self
+            .swapchain_loader
             .create_swapchain(&create_info, None)
             .map_err(|e| anyhow::anyhow!("Swapchain creation failed: {:?}", e))?;
 
-        let images = self.swapchain_loader
+        let images = self
+            .swapchain_loader
             .get_swapchain_images(swapchain)
             .map_err(|e| anyhow::anyhow!("Get swapchain images failed: {:?}", e))?;
 
@@ -314,9 +341,7 @@ impl VulkanHook {
     unsafe fn init_staging_buffer(&mut self, extent: vk::Extent2D) -> anyhow::Result<()> {
         self.destroy_staging_buffer();
 
-        let buffer_size = (extent.width as vk::DeviceSize)
-            * (extent.height as vk::DeviceSize)
-            * 4;
+        let buffer_size = (extent.width as vk::DeviceSize) * (extent.height as vk::DeviceSize) * 4;
 
         let buffer_ci = vk::BufferCreateInfo::default()
             .size(buffer_size)
@@ -336,7 +361,8 @@ impl VulkanHook {
             .memory_type_index(memory_type_index);
 
         let staging_memory = self.device.allocate_memory(&alloc_ci, None)?;
-        self.device.bind_buffer_memory(staging_buffer, staging_memory, 0)?;
+        self.device
+            .bind_buffer_memory(staging_buffer, staging_memory, 0)?;
 
         self.staging_buffer = staging_buffer;
         self.staging_memory = staging_memory;
@@ -358,17 +384,17 @@ impl VulkanHook {
                 }
             }
         }
-        Err(anyhow::anyhow!("No suitable memory type for {:?}", property_flags))
+        Err(anyhow::anyhow!(
+            "No suitable memory type for {:?}",
+            property_flags
+        ))
     }
 
     /// Captures the current frame from swapchain image at `image_index`.
     ///
     /// # Safety
     /// `image_index` must be a valid index into `self.swapchain_images`.
-    pub unsafe fn capture_current_frame(
-        &mut self,
-        image_index: u32,
-    ) -> anyhow::Result<()> {
+    pub unsafe fn capture_current_frame(&mut self, image_index: u32) -> anyhow::Result<()> {
         if self.staging_buffer == vk::Buffer::null() {
             return Err(anyhow::anyhow!("Staging buffer not initialized"));
         }
@@ -380,13 +406,17 @@ impl VulkanHook {
             ));
         }
 
-        self.device.wait_for_fences(std::slice::from_ref(&self.fence), true, u64::MAX)?;
-        self.device.reset_fences(std::slice::from_ref(&self.fence))?;
+        self.device
+            .wait_for_fences(std::slice::from_ref(&self.fence), true, u64::MAX)?;
+        self.device
+            .reset_fences(std::slice::from_ref(&self.fence))?;
 
-        self.device.reset_command_buffer(self.command_buffer, vk::CommandBufferResetFlags::empty())?;
+        self.device
+            .reset_command_buffer(self.command_buffer, vk::CommandBufferResetFlags::empty())?;
         let begin_ci = vk::CommandBufferBeginInfo::default()
             .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        self.device.begin_command_buffer(self.command_buffer, &begin_ci)?;
+        self.device
+            .begin_command_buffer(self.command_buffer, &begin_ci)?;
 
         let image = self.swapchain_images[image_index as usize];
         let extent = self.swapchain_extent;
@@ -473,16 +503,14 @@ impl VulkanHook {
 
         self.device.end_command_buffer(self.command_buffer)?;
 
-        let submit_ci = vk::SubmitInfo::default()
-            .command_buffers(std::slice::from_ref(&self.command_buffer));
+        let submit_ci =
+            vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&self.command_buffer));
 
-        self.device.queue_submit(
-            self.queue,
-            std::slice::from_ref(&submit_ci),
-            self.fence,
-        )?;
+        self.device
+            .queue_submit(self.queue, std::slice::from_ref(&submit_ci), self.fence)?;
 
-        self.device.wait_for_fences(std::slice::from_ref(&self.fence), true, u64::MAX)?;
+        self.device
+            .wait_for_fences(std::slice::from_ref(&self.fence), true, u64::MAX)?;
 
         let mapped = self.device.map_memory(
             self.staging_memory,
@@ -491,10 +519,8 @@ impl VulkanHook {
             vk::MemoryMapFlags::empty(),
         )?;
 
-        let pixel_data = std::slice::from_raw_parts(
-            mapped as *const u8,
-            self.staging_size as usize,
-        );
+        let pixel_data =
+            std::slice::from_raw_parts(mapped as *const u8, self.staging_size as usize);
 
         self.captured_frame = Some(CapturedFrame {
             width: extent.width,
@@ -527,11 +553,15 @@ impl VulkanHook {
     pub unsafe fn destroy_swapchain(&mut self) {
         if self.swapchain != vk::SwapchainKHR::null() {
             self.device.device_wait_idle().ok();
-            self.swapchain_loader.destroy_swapchain(self.swapchain, None);
+            self.swapchain_loader
+                .destroy_swapchain(self.swapchain, None);
             self.swapchain = vk::SwapchainKHR::null();
             self.swapchain_images.clear();
             self.swapchain_format = vk::Format::UNDEFINED;
-            self.swapchain_extent = vk::Extent2D { width: 0, height: 0 };
+            self.swapchain_extent = vk::Extent2D {
+                width: 0,
+                height: 0,
+            };
             self.destroy_staging_buffer();
         }
     }
@@ -658,7 +688,10 @@ mod tests {
             hook.staging_buffer = ash::vk::Handle::from_raw(1);
             let result = unsafe { hook.capture_current_frame(99) };
             assert!(result.is_err());
-            assert!(result.unwrap_err().to_string().contains("Invalid image_index"));
+            assert!(result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid image_index"));
         }
     }
 }

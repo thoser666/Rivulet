@@ -83,11 +83,7 @@ impl ShmReader {
                 return None;
             }
 
-            let pixels = std::slice::from_raw_parts(
-                self.ptr.add(data_offset),
-                data_len,
-            )
-            .to_vec();
+            let pixels = std::slice::from_raw_parts(self.ptr.add(data_offset), data_len).to_vec();
 
             Some(CapturedFrame {
                 width: header.width,
@@ -160,6 +156,13 @@ fn open_shm() -> Option<(*const u8, usize)> {
     }
 }
 
+/// The Vulkan layer is not shipped on other platforms (macOS etc.), so the
+/// shared-memory channel is simply unavailable there.
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn open_shm() -> Option<(*const u8, usize)> {
+    None
+}
+
 /// Platform-specific shared memory cleanup.
 #[cfg(target_os = "windows")]
 fn close_shm(_ptr: *mut u8, _size: usize) {
@@ -174,6 +177,9 @@ fn close_shm(ptr: *mut u8, size: usize) {
         libc::munmap(ptr as *mut libc::c_void, size);
     }
 }
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn close_shm(_ptr: *mut u8, _size: usize) {}
 
 #[cfg(test)]
 mod tests {

@@ -12,6 +12,9 @@
 pub enum BackendKind {
     /// DXGI Desktop Duplication (G2) — primary zero-overhead fullscreen path.
     DesktopDuplication,
+    /// Vulkan layer interception (G3) — preferred zero-overhead fullscreen
+    /// game capture backend.
+    VulkanLayer,
     /// Windows Graphics Capture (existing windowed path, fallback).
     WindowsGraphicsCapture,
     /// No backend is active (not started, or everything failed).
@@ -23,6 +26,7 @@ impl BackendKind {
     pub fn as_str(self) -> &'static str {
         match self {
             BackendKind::DesktopDuplication => "desktop-duplication",
+            BackendKind::VulkanLayer => "vulkan-layer",
             BackendKind::WindowsGraphicsCapture => "windows-graphics-capture",
             BackendKind::None => "none",
         }
@@ -77,6 +81,7 @@ impl BackendStatus {
     pub fn ui_key(&self) -> (&'static str, Option<&str>) {
         match self.active {
             BackendKind::DesktopDuplication => ("backend_desktop_duplication", None),
+            BackendKind::VulkanLayer => ("backend_vulkan_layer", None),
             // Only use the parameterised fallback key when there is a reason
             // to show; otherwise the plain WGC key avoids a literal `{0}`.
             BackendKind::WindowsGraphicsCapture => match self.last_error.as_deref() {
@@ -158,6 +163,7 @@ mod tests {
             BackendKind::DesktopDuplication.as_str(),
             "desktop-duplication"
         );
+        assert_eq!(BackendKind::VulkanLayer.as_str(), "vulkan-layer");
         assert_eq!(
             BackendKind::WindowsGraphicsCapture.as_str(),
             "windows-graphics-capture"
@@ -241,6 +247,11 @@ mod tests {
         let mut s = BackendStatus::idle();
         s.switch_to(BackendKind::DesktopDuplication);
         assert_eq!(s.ui_key(), ("backend_desktop_duplication", None));
+
+        let mut vulkan = BackendStatus::idle();
+        vulkan.switch_to(BackendKind::VulkanLayer);
+        assert_eq!(vulkan.ui_key(), ("backend_vulkan_layer", None));
+        assert!(vulkan.is_healthy());
 
         let mut s2 = BackendStatus::idle();
         s2.switch_to(BackendKind::WindowsGraphicsCapture);

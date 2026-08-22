@@ -29,7 +29,10 @@ fn copy_layer_manifest() {
         .join(manifest_name);
 
     if !src.exists() {
-        eprintln!("cargo:warning=Vulkan layer manifest not found at {}", src.display());
+        eprintln!(
+            "cargo:warning=Vulkan layer manifest not found at {}",
+            src.display()
+        );
         return;
     }
 
@@ -47,7 +50,11 @@ fn copy_layer_manifest() {
 
     match std::fs::copy(&src, &dst) {
         Ok(_) => {
-            println!("cargo:warning=Copied {} to {}", manifest_name, dst.display());
+            println!(
+                "cargo:warning=Copied {} to {}",
+                manifest_name,
+                dst.display()
+            );
         }
         Err(e) => {
             eprintln!("cargo:warning=Failed to copy {}: {}", manifest_name, e);

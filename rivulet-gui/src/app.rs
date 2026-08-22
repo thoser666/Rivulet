@@ -892,7 +892,9 @@ impl RivuletApp {
                 println!("Capture thread stopped.");
             });
         } else if self.use_game_capture {
-            // Game capture mode
+            // Game capture mode (G3): prefer the zero-overhead Vulkan layer;
+            // fall back to Windows Graphics Capture on the game window when
+            // the layer's shared-memory channel is not available yet.
             let Some(idx) = self.selected_game_window_idx else {
                 self.last_error = Some(self.tr("no_source_selected").to_string());
                 return;
@@ -908,43 +910,76 @@ impl RivuletApp {
             self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
 
-            let (sender, receiver) = mpsc::channel();
-            self.frame_receiver = Some(receiver);
-
-            let (error_sender, error_receiver) = mpsc::channel::<String>();
-            self.error_receiver = Some(error_receiver);
-
-            let stop_signal = Arc::new(AtomicBool::new(false));
-            self.stop_signal = Some(stop_signal.clone());
-
             self.is_aux_recording = true;
             self.last_error = None;
             self.record_started = Instant::now();
             self.last_frame_at = None;
 
-            thread::spawn(move || {
-                let settings = Settings::new(
-                    Window::from_raw_hwnd(game_window.id as *mut _),
-                    CursorCaptureSettings::Default,
-                    DrawBorderSettings::Default,
-                    SecondaryWindowSettings::Default,
-                    MinimumUpdateIntervalSettings::Default,
-                    DirtyRegionSettings::Default,
-                    ColorFormat::Rgba8,
-                    (sender, stop_signal),
-                );
-                println!("Starting game capture thread...");
-                if let Err(e) = CaptureHandler::start(settings) {
-                    if !e.to_string().contains("user stopped")
-                        && !e.to_string().contains("GUI channel closed")
-                    {
-                        let message = format!("Game capture error: {}", e);
-                        eprintln!("{}", message);
-                        let _ = error_sender.send(message);
+            let fps = self.selected_preset.effective_fps(30);
+
+            if let Some((rx, handle)) = rivulet_core::game_capture::start_vulkan_layer_capture(fps)
+            {
+                // Preferred backend: frames arrive through the layer's shared
+                // memory and are drained into the engine via `game_capture_rx`
+                // in the aux-recording drain below.
+                self.capture_backend = Some(vulkan_layer_backend_status(true));
+                self.game_capture_rx = Some(rx);
+                self.game_capture_handle = Some(handle);
+                println!("Vulkan layer capture started (preferred fullscreen backend).");
+            } else {
+                // Fallback: capture the game window with Windows Graphics
+                // Capture. WGC raw frames are forwarded into `game_capture_rx`
+                // so the shared aux-recording drain handles them.
+                self.capture_backend = Some(vulkan_layer_backend_status(false));
+                let (raw_tx, raw_rx) = mpsc::channel::<RawFrame>();
+                let (frame_tx, frame_rx) = mpsc::channel::<rivulet_core::GameCaptureFrame>();
+                self.game_capture_rx = Some(frame_rx);
+
+                let (error_sender, error_receiver) = mpsc::channel::<String>();
+                self.error_receiver = Some(error_receiver);
+
+                let stop_signal = Arc::new(AtomicBool::new(false));
+                self.stop_signal = Some(stop_signal.clone());
+
+                // Adapter thread: re-wrap the WGC RawFrame into a
+                // GameCaptureFrame for the aux-recording drain.
+                thread::spawn(move || {
+                    while let Ok(raw) = raw_rx.recv() {
+                        let frame = rivulet_core::GameCaptureFrame {
+                            data: raw.data,
+                            width: raw.width,
+                            height: raw.height,
+                        };
+                        if frame_tx.send(frame).is_err() {
+                            break;
+                        }
                     }
-                }
-                println!("Game capture thread stopped.");
-            });
+                });
+
+                thread::spawn(move || {
+                    let settings = Settings::new(
+                        Window::from_raw_hwnd(game_window.id as *mut _),
+                        CursorCaptureSettings::Default,
+                        DrawBorderSettings::Default,
+                        SecondaryWindowSettings::Default,
+                        MinimumUpdateIntervalSettings::Default,
+                        DirtyRegionSettings::Default,
+                        ColorFormat::Rgba8,
+                        (raw_tx, stop_signal),
+                    );
+                    println!("Starting game capture thread (WGC fallback)...");
+                    if let Err(e) = CaptureHandler::start(settings) {
+                        if !e.to_string().contains("user stopped")
+                            && !e.to_string().contains("GUI channel closed")
+                        {
+                            let message = format!("Game capture error: {}", e);
+                            eprintln!("{}", message);
+                            let _ = error_sender.send(message);
+                        }
+                    }
+                    println!("Game capture thread stopped.");
+                });
+            }
         } else if let Some(idx) = self.selected_camera_idx {
             // Camera capture mode
             let Some(device) = self.camera_devices.get(idx).cloned() else {
@@ -1017,6 +1052,21 @@ fn probe_dxgi_backend() -> Option<BackendStatus> {
             Some(status)
         }
     }
+}
+
+/// Build the capture-backend status for the Vulkan layer game-capture path
+/// (G3). When the layer's shared-memory channel opened successfully the
+/// Vulkan layer is the active backend; otherwise the GUI falls back to
+/// Windows Graphics Capture and the reason is recorded for the UI badge.
+#[cfg(target_os = "windows")]
+fn vulkan_layer_backend_status(layer_active: bool) -> BackendStatus {
+    let mut status = BackendStatus::idle();
+    status.switch_to(BackendKind::VulkanLayer);
+    if !layer_active {
+        status.switch_to(BackendKind::WindowsGraphicsCapture);
+        status.fail("Vulkan layer not available");
+    }
+    status
 }
 
 #[cfg(target_os = "linux")]
@@ -1402,6 +1452,10 @@ impl RivuletApp {
         self.game_capture_handle = None;
         self.stop_signal = None;
         self.is_aux_recording = false;
+        #[cfg(target_os = "windows")]
+        {
+            self.capture_backend = None;
+        }
     }
 }
 
@@ -1715,7 +1769,11 @@ impl RivuletApp {
                 Ok(_) => {
                     // Clean up the downloaded installer — no longer needed.
                     if let Err(e) = std::fs::remove_file(&path) {
-                        eprintln!("[Updater] Failed to remove installer {}: {}", path.display(), e);
+                        eprintln!(
+                            "[Updater] Failed to remove installer {}: {}",
+                            path.display(),
+                            e
+                        );
                     }
                     UpdateUi::Installed(version)
                 }
@@ -2318,6 +2376,7 @@ impl eframe::App for RivuletApp {
                         };
                         let color = match status.active {
                             BackendKind::DesktopDuplication => colors.success,
+                            BackendKind::VulkanLayer => colors.success,
                             BackendKind::WindowsGraphicsCapture => colors.warning,
                             BackendKind::None => colors.hint,
                         };
@@ -3298,6 +3357,27 @@ mod tests {
         assert_eq!(AppView::Record.planned_milestone(), None);
         assert_eq!(AppView::Mixer.planned_milestone(), None);
         assert_eq!(AppView::Settings.planned_milestone(), None);
+    }
+
+    // ── Vulkan layer backend status (G3) ──────────────────────────
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn vulkan_layer_status_reports_active_or_fallback() {
+        let active = vulkan_layer_backend_status(true);
+        assert_eq!(active.active, BackendKind::VulkanLayer);
+        assert_eq!(active.ui_key(), ("backend_vulkan_layer", None));
+        assert!(active.is_healthy());
+        assert!(!active.fallback_occurred);
+
+        let fallback = vulkan_layer_backend_status(false);
+        assert_eq!(fallback.active, BackendKind::WindowsGraphicsCapture);
+        assert!(fallback.fallback_occurred);
+        assert_eq!(
+            fallback.ui_key(),
+            ("backend_wgc_fallback", Some("Vulkan layer not available"))
+        );
+        assert!(!fallback.is_healthy());
     }
 
     // ── format_bytes ──────────────────────────────────────────────

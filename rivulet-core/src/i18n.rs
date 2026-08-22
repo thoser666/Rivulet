@@ -150,6 +150,10 @@ impl Locale {
                     "backend_wgc_fallback",
                     "Capture backend: Windows Graphics Capture (fallback — {0})",
                 ),
+                (
+                    "backend_vulkan_layer",
+                    "Capture backend: Vulkan layer (zero-copy fullscreen)",
+                ),
                 ("backend_none", "Capture backend: not active"),
                 // Replay buffer
                 ("replay_buffer", "Replay buffer"),
@@ -297,6 +301,10 @@ impl Locale {
                 (
                     "backend_wgc_fallback",
                     "Capture-Backend: Windows Graphics Capture (Fallback — {0})",
+                ),
+                (
+                    "backend_vulkan_layer",
+                    "Capture-Backend: Vulkan-Layer (Zero-Copy-Fullscreen)",
                 ),
                 ("backend_none", "Capture-Backend: nicht aktiv"),
                 // Replay buffer
@@ -541,6 +549,14 @@ mod tests {
         assert_eq!(
             Locale::De.tr_fmt("backend_wgc_fallback", &["Zugriff verweigert".to_string()]),
             "Capture-Backend: Windows Graphics Capture (Fallback — Zugriff verweigert)"
+        );
+        assert_eq!(
+            Locale::En.tr("backend_vulkan_layer"),
+            "Capture backend: Vulkan layer (zero-copy fullscreen)"
+        );
+        assert_eq!(
+            Locale::De.tr("backend_vulkan_layer"),
+            "Capture-Backend: Vulkan-Layer (Zero-Copy-Fullscreen)"
         );
         assert_eq!(Locale::En.tr("backend_none"), "Capture backend: not active");
         assert_eq!(

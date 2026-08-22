@@ -7,8 +7,8 @@
 
 pub mod capture_channel;
 
-use capture_channel::{FrameHeader, SHM_NAME, DEFAULT_SHM_SIZE, next_sequence};
 use ash::vk;
+use capture_channel::{next_sequence, FrameHeader, DEFAULT_SHM_SIZE, SHM_NAME};
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -26,10 +26,8 @@ type FnCreateDevice = unsafe extern "system" fn(
     *const vk::AllocationCallbacks,
     *mut vk::Device,
 ) -> vk::Result;
-type FnDestroyDevice =
-    unsafe extern "system" fn(vk::Device, *const vk::AllocationCallbacks);
-type FnGetDeviceQueue =
-    unsafe extern "system" fn(vk::Device, u32, u32, *mut vk::Queue);
+type FnDestroyDevice = unsafe extern "system" fn(vk::Device, *const vk::AllocationCallbacks);
+type FnGetDeviceQueue = unsafe extern "system" fn(vk::Device, u32, u32, *mut vk::Queue);
 type FnCreateSwapchainKHR = unsafe extern "system" fn(
     vk::Device,
     *const vk::SwapchainCreateInfoKHR,
@@ -119,33 +117,24 @@ impl DeviceState {
         let pool_ci = vk::CommandPoolCreateInfo::default()
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
             .queue_family_index(self.graphics_queue_family);
-        self.cmd_pool = unsafe {
-            self.device.create_command_pool(&pool_ci, None).unwrap()
-        };
+        self.cmd_pool = unsafe { self.device.create_command_pool(&pool_ci, None).unwrap() };
 
         let buf_ai = vk::CommandBufferAllocateInfo::default()
             .command_pool(self.cmd_pool)
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(1);
-        self.cmd_buf = unsafe {
-            self.device.allocate_command_buffers(&buf_ai).unwrap()[0]
-        };
+        self.cmd_buf = unsafe { self.device.allocate_command_buffers(&buf_ai).unwrap()[0] };
 
         let bytes = ext.width as vk::DeviceSize * ext.height as vk::DeviceSize * 4;
         let buf_ci = vk::BufferCreateInfo::default()
             .size(bytes)
             .usage(vk::BufferUsageFlags::TRANSFER_DST)
             .sharing_mode(vk::SharingMode::EXCLUSIVE);
-        self.staging_buf = unsafe {
-            self.device.create_buffer(&buf_ci, None).unwrap()
-        };
+        self.staging_buf = unsafe { self.device.create_buffer(&buf_ci, None).unwrap() };
 
-        let mem_reqs = unsafe {
-            self.device.get_buffer_memory_requirements(self.staging_buf)
-        };
-        let mem_props = unsafe {
-            instance.get_physical_device_memory_properties(self.physical_device)
-        };
+        let mem_reqs = unsafe { self.device.get_buffer_memory_requirements(self.staging_buf) };
+        let mem_props =
+            unsafe { instance.get_physical_device_memory_properties(self.physical_device) };
         let type_idx = {
             let mut found = None;
             for (i, mt) in mem_props.memory_types.iter().enumerate() {
@@ -165,9 +154,7 @@ impl DeviceState {
         let alloc_ci = vk::MemoryAllocateInfo::default()
             .allocation_size(mem_reqs.size)
             .memory_type_index(type_idx);
-        self.staging_mem = unsafe {
-            self.device.allocate_memory(&alloc_ci, None).unwrap()
-        };
+        self.staging_mem = unsafe { self.device.allocate_memory(&alloc_ci, None).unwrap() };
         unsafe {
             self.device
                 .bind_buffer_memory(self.staging_buf, self.staging_mem, 0)
@@ -178,8 +165,7 @@ impl DeviceState {
         self.fence = unsafe {
             self.device
                 .create_fence(
-                    &vk::FenceCreateInfo::default()
-                        .flags(vk::FenceCreateFlags::SIGNALED),
+                    &vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED),
                     None,
                 )
                 .unwrap()
@@ -290,17 +276,11 @@ impl DeviceState {
                     vk::MemoryMapFlags::empty(),
                 )
                 .ok()?;
-            let frame = std::slice::from_raw_parts(
-                ptr as *const u8,
-                self.staging_size as usize,
-            )
-            .to_vec();
+            let frame =
+                std::slice::from_raw_parts(ptr as *const u8, self.staging_size as usize).to_vec();
             self.device.unmap_memory(self.staging_mem);
 
-            eprintln!(
-                "[Rivulet Layer] Captured frame: {} bytes",
-                frame.len()
-            );
+            eprintln!("[Rivulet Layer] Captured frame: {} bytes", frame.len());
             Some(frame)
         }
     }
@@ -431,10 +411,8 @@ fn create_shm() -> Option<ShmHandle> {
 struct InstanceState {
     entry: Box<ash::Entry>,
     instance: ash::Instance,
-    fn_get_instance_proc_addr: unsafe extern "system" fn(
-        vk::Instance,
-        *const c_char,
-    ) -> vk::PFN_vkVoidFunction,
+    fn_get_instance_proc_addr:
+        unsafe extern "system" fn(vk::Instance, *const c_char) -> vk::PFN_vkVoidFunction,
     fn_get_dpa: FnGetDeviceProcAddr,
     fn_create_device: FnCreateDevice,
     devices: HashMap<vk::Device, DeviceState>,
@@ -514,12 +492,8 @@ unsafe fn resolve_instance_proc(
     }
     let s = CStr::from_ptr(name).to_string_lossy();
     match s.as_ref() {
-        "vkGetInstanceProcAddr" => {
-            Some(layer_fn!(VK_LAYER_RIVULET_capture_vkGetInstanceProcAddr))
-        }
-        "vkGetDeviceProcAddr" => {
-            Some(layer_fn!(VK_LAYER_RIVULET_capture_vkGetDeviceProcAddr))
-        }
+        "vkGetInstanceProcAddr" => Some(layer_fn!(VK_LAYER_RIVULET_capture_vkGetInstanceProcAddr)),
+        "vkGetDeviceProcAddr" => Some(layer_fn!(VK_LAYER_RIVULET_capture_vkGetDeviceProcAddr)),
         "vkCreateInstance" => Some(layer_fn!(layer_vk_create_instance)),
         "vkDestroyInstance" => Some(layer_fn!(layer_vk_destroy_instance)),
         "vkCreateDevice" => Some(layer_fn!(layer_vk_create_device)),
@@ -528,25 +502,20 @@ unsafe fn resolve_instance_proc(
         "vkDestroySwapchainKHR" => Some(layer_fn!(layer_vk_destroy_swapchain_khr)),
         "vkQueuePresentKHR" => Some(layer_fn!(layer_vk_queue_present_khr)),
         _ => with_global(|g| {
-            g.instances.get(&instance).and_then(|i| {
-                (i.fn_get_instance_proc_addr)(instance, name)
-            })
+            g.instances
+                .get(&instance)
+                .and_then(|i| (i.fn_get_instance_proc_addr)(instance, name))
         }),
     }
 }
 
-unsafe fn resolve_device_proc(
-    device: vk::Device,
-    name: *const c_char,
-) -> vk::PFN_vkVoidFunction {
+unsafe fn resolve_device_proc(device: vk::Device, name: *const c_char) -> vk::PFN_vkVoidFunction {
     if name.is_null() {
         return None;
     }
     let s = CStr::from_ptr(name).to_string_lossy();
     match s.as_ref() {
-        "vkGetDeviceProcAddr" => {
-            Some(layer_fn!(VK_LAYER_RIVULET_capture_vkGetDeviceProcAddr))
-        }
+        "vkGetDeviceProcAddr" => Some(layer_fn!(VK_LAYER_RIVULET_capture_vkGetDeviceProcAddr)),
         "vkCreateDevice" => Some(layer_fn!(layer_vk_create_device)),
         "vkDestroyDevice" => Some(layer_fn!(layer_vk_destroy_device)),
         "vkCreateSwapchainKHR" => Some(layer_fn!(layer_vk_create_swapchain_khr)),
@@ -681,11 +650,7 @@ unsafe extern "system" fn layer_vk_create_device(
 
     let (inst_handle, fn_create_device, fn_get_dpa) = with_global(|g| {
         if let Some((&inst, state)) = g.instances.iter().next() {
-            return Some((
-                inst,
-                state.fn_create_device,
-                state.fn_get_dpa,
-            ));
+            return Some((inst, state.fn_create_device, state.fn_get_dpa));
         }
         None
     })
@@ -700,15 +665,11 @@ unsafe extern "system" fn layer_vk_create_device(
     with_global(|g| {
         if let Some(inst) = g.instances.get_mut(&inst_handle) {
             // Create ash::Device using the next layer's get_device_proc_addr
-            let ash_device = ash::Device::load(
-                inst.instance.fp_v1_0(),
-                device,
-            );
+            let ash_device = ash::Device::load(inst.instance.fp_v1_0(), device);
 
             // Load extension functions via get_device_proc_addr
             let load_ext = |name: &str| -> *const std::ffi::c_void {
-                let cname =
-                    std::ffi::CString::new(name).unwrap();
+                let cname = std::ffi::CString::new(name).unwrap();
                 let r = (fn_get_dpa)(device, cname.as_ptr());
                 match r {
                     Some(f) => f as *const std::ffi::c_void,
@@ -731,24 +692,17 @@ unsafe extern "system" fn layer_vk_create_device(
             // Find graphics queue family
             let queue_props = inst
                 .instance
-                .get_physical_device_queue_family_properties(
-                    physical_device,
-                );
+                .get_physical_device_queue_family_properties(physical_device);
             let graphics_qf = queue_props
                 .iter()
-                .position(|q| {
-                    q.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-                })
+                .position(|q| q.queue_flags.contains(vk::QueueFlags::GRAPHICS))
                 .unwrap_or(0) as u32;
 
             // Get the graphics queue
             let mut graphics_queue = vk::Queue::null();
             fn_get_device_queue(device, graphics_qf, 0, &mut graphics_queue);
 
-            let swapchain_loader = ash::khr::swapchain::Device::new(
-                &inst.instance,
-                &ash_device,
-            );
+            let swapchain_loader = ash::khr::swapchain::Device::new(&inst.instance, &ash_device);
 
             let device_name = {
                 let props = inst
@@ -782,9 +736,7 @@ unsafe extern "system" fn layer_vk_create_device(
                 ready: false,
             };
 
-            eprintln!(
-                "[Rivulet Layer] vkCreateDevice → {device_name}"
-            );
+            eprintln!("[Rivulet Layer] vkCreateDevice → {device_name}");
             inst.devices.insert(device, dev);
         }
     });
@@ -859,12 +811,7 @@ unsafe extern "system" fn layer_vk_create_swapchain_khr(
                     .swapchain_loader
                     .get_swapchain_images(swapchain)
                     .unwrap_or_default();
-                dev.init_capture(
-                    &inst.instance,
-                    &images,
-                    ci.image_format,
-                    ci.image_extent,
-                );
+                dev.init_capture(&inst.instance, &images, ci.image_format, ci.image_extent);
             }
         }
     });
@@ -915,17 +862,10 @@ unsafe extern "system" fn layer_vk_queue_present_khr(
                 for dev in inst.devices.values_mut() {
                     if dev.graphics_queue == queue && dev.ready {
                         let count = pi.swapchain_count as usize;
-                        let indices = std::slice::from_raw_parts(
-                            pi.p_image_indices,
-                            count,
-                        );
+                        let indices = std::slice::from_raw_parts(pi.p_image_indices, count);
                         for &idx in indices {
                             if let Some(frame) = dev.capture(idx) {
-                                write_frame_to_shm(
-                                    &frame,
-                                    dev.extent.width,
-                                    dev.extent.height,
-                                );
+                                write_frame_to_shm(&frame, dev.extent.width, dev.extent.height);
                             }
                         }
                     }
@@ -961,18 +901,14 @@ mod tests {
 
     #[test]
     fn negotiate_version_rejects_null_pointer() {
-        let result = unsafe {
-            vkNegotiateLoaderLayerInterfaceVersion(std::ptr::null_mut())
-        };
+        let result = unsafe { vkNegotiateLoaderLayerInterfaceVersion(std::ptr::null_mut()) };
         assert_eq!(result, vk::Result::ERROR_INITIALIZATION_FAILED);
     }
 
     #[test]
     fn negotiate_version_rejects_old_version() {
         let mut version: u32 = 1; // old
-        let result = unsafe {
-            vkNegotiateLoaderLayerInterfaceVersion(&mut version)
-        };
+        let result = unsafe { vkNegotiateLoaderLayerInterfaceVersion(&mut version) };
         assert_eq!(result, vk::Result::ERROR_INITIALIZATION_FAILED);
         assert_eq!(version, 1); // unchanged
     }
@@ -980,9 +916,7 @@ mod tests {
     #[test]
     fn negotiate_version_accepts_current_version() {
         let mut version: u32 = VK_LAYER_INTERFACE_VERSION;
-        let result = unsafe {
-            vkNegotiateLoaderLayerInterfaceVersion(&mut version)
-        };
+        let result = unsafe { vkNegotiateLoaderLayerInterfaceVersion(&mut version) };
         assert_eq!(result, vk::Result::SUCCESS);
         assert_eq!(version, VK_LAYER_INTERFACE_VERSION);
     }
@@ -990,18 +924,14 @@ mod tests {
     #[test]
     fn negotiate_version_accepts_newer_version() {
         let mut version: u32 = 99;
-        let result = unsafe {
-            vkNegotiateLoaderLayerInterfaceVersion(&mut version)
-        };
+        let result = unsafe { vkNegotiateLoaderLayerInterfaceVersion(&mut version) };
         assert_eq!(result, vk::Result::SUCCESS);
         assert_eq!(version, VK_LAYER_INTERFACE_VERSION);
     }
 
     #[test]
     fn resolve_instance_proc_null_name_returns_none() {
-        let result = unsafe {
-            resolve_instance_proc(vk::Instance::null(), std::ptr::null())
-        };
+        let result = unsafe { resolve_instance_proc(vk::Instance::null(), std::ptr::null()) };
         assert!(result.is_none());
     }
 
@@ -1019,23 +949,15 @@ mod tests {
             "vkQueuePresentKHR\0",
         ];
         for name in &names {
-            let cstr =
-                CStr::from_bytes_with_nul(name.as_bytes()).unwrap();
-            let result = unsafe {
-                resolve_instance_proc(vk::Instance::null(), cstr.as_ptr())
-            };
-            assert!(
-                result.is_some(),
-                "Expected Some for {name:?}, got None"
-            );
+            let cstr = CStr::from_bytes_with_nul(name.as_bytes()).unwrap();
+            let result = unsafe { resolve_instance_proc(vk::Instance::null(), cstr.as_ptr()) };
+            assert!(result.is_some(), "Expected Some for {name:?}, got None");
         }
     }
 
     #[test]
     fn resolve_device_proc_null_name_returns_none() {
-        let result = unsafe {
-            resolve_device_proc(vk::Device::null(), std::ptr::null())
-        };
+        let result = unsafe { resolve_device_proc(vk::Device::null(), std::ptr::null()) };
         assert!(result.is_none());
     }
 
@@ -1050,40 +972,29 @@ mod tests {
             "vkQueuePresentKHR\0",
         ];
         for name in &names {
-            let cstr =
-                CStr::from_bytes_with_nul(name.as_bytes()).unwrap();
-            let result = unsafe {
-                resolve_device_proc(vk::Device::null(), cstr.as_ptr())
-            };
-            assert!(
-                result.is_some(),
-                "Expected Some for {name:?}, got None"
-            );
+            let cstr = CStr::from_bytes_with_nul(name.as_bytes()).unwrap();
+            let result = unsafe { resolve_device_proc(vk::Device::null(), cstr.as_ptr()) };
+            assert!(result.is_some(), "Expected Some for {name:?}, got None");
         }
     }
 
     #[test]
     fn resolve_device_proc_unknown_name_without_device_returns_none() {
         let cstr = CStr::from_bytes_with_nul(b"vkFooBar\0").unwrap();
-        let result = unsafe {
-            resolve_device_proc(vk::Device::null(), cstr.as_ptr())
-        };
+        let result = unsafe { resolve_device_proc(vk::Device::null(), cstr.as_ptr()) };
         assert!(result.is_none());
     }
 
     #[test]
     fn resolve_instance_proc_unknown_name_without_instance_returns_none() {
         let cstr = CStr::from_bytes_with_nul(b"vkFooBar\0").unwrap();
-        let result = unsafe {
-            resolve_instance_proc(vk::Instance::null(), cstr.as_ptr())
-        };
+        let result = unsafe { resolve_instance_proc(vk::Instance::null(), cstr.as_ptr()) };
         assert!(result.is_none());
     }
 
     #[test]
     fn layer_fn_macro_produces_fn_pointer() {
-        let f: unsafe extern "system" fn() =
-            layer_fn!(layer_vk_create_instance);
+        let f: unsafe extern "system" fn() = layer_fn!(layer_vk_create_instance);
         let _ = f as usize;
     }
 
@@ -1117,16 +1028,12 @@ mod tests {
     #[test]
     fn json_manifest_exists_and_is_valid() {
         let manifest = include_str!("../VkLayer_rivulet_capture.json");
-        let json: serde_json::Value = serde_json::from_str(manifest)
-            .expect("manifest is valid JSON");
+        let json: serde_json::Value =
+            serde_json::from_str(manifest).expect("manifest is valid JSON");
         let layer = &json["layer"];
-        assert_eq!(
-            layer["name"].as_str().unwrap(),
-            "VK_LAYER_RIVULET_capture"
-        );
+        assert_eq!(layer["name"].as_str().unwrap(), "VK_LAYER_RIVULET_capture");
         assert_eq!(layer["type"].as_str().unwrap(), "GLOBAL");
         assert!(layer["api_version"].as_str().is_some());
         assert!(layer["description"].as_str().is_some());
     }
 }
-

@@ -19,6 +19,12 @@ pub const LAYER_DLL_FILENAME: &str = "rivulet-vulkan-layer.dll";
 #[cfg(target_os = "linux")]
 pub const LAYER_DLL_FILENAME: &str = "librivulet_vulkan_layer.so";
 
+/// Layer shared library filename (macOS). The layer is not shipped on macOS,
+/// but the constant keeps `VulkanLayerConfig::find` compiling everywhere; it
+/// simply never finds the files and reports the layer as unavailable.
+#[cfg(target_os = "macos")]
+pub const LAYER_DLL_FILENAME: &str = "librivulet_vulkan_layer.dylib";
+
 /// Configuration for activating the Vulkan capture layer.
 pub struct VulkanLayerConfig {
     /// Directory containing the layer DLL and JSON manifest.
@@ -108,7 +114,10 @@ impl VulkanLayerConfig {
 /// 3. `target/release/` relative to `CARGO_MANIFEST_DIR` (release builds)
 pub fn find_layer_config() -> Option<VulkanLayerConfig> {
     // 1. Next to the current executable
-    if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())) {
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+    {
         if let Some(config) = VulkanLayerConfig::find(&exe_dir) {
             return Some(config);
         }
