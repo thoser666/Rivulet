@@ -97,7 +97,7 @@ struct VkLayerDeviceCreateInfo {
 }
 
 #[repr(C)]
-struct VkNegotiateLayerInterface {
+pub struct VkNegotiateLayerInterface {
     s_type: i32,
     p_next: *mut c_void,
     loader_layer_interface_version: u32,
@@ -660,6 +660,10 @@ unsafe fn resolve_device_proc(device: vk::Device, name: *const c_char) -> vk::PF
 /// names (`vkGetInstanceProcAddr`, `vkGetDeviceProcAddr`) for interface
 /// version 1 layers; the `VK_LAYER_RIVULET_capture_*` aliases are exported for
 /// diagnostics and tooling.
+///
+/// # Safety
+/// Called by the Vulkan loader; `p_name` must be a valid null-terminated
+/// Vulkan command name or null.
 #[no_mangle]
 pub unsafe extern "system" fn vkGetInstanceProcAddr(
     instance: vk::Instance,
@@ -668,6 +672,9 @@ pub unsafe extern "system" fn vkGetInstanceProcAddr(
     resolve_instance_proc(instance, p_name)
 }
 
+/// # Safety
+/// Called by the Vulkan loader; `p_name` must be a valid null-terminated
+/// Vulkan command name or null.
 #[no_mangle]
 pub unsafe extern "system" fn vkGetDeviceProcAddr(
     device: vk::Device,
@@ -676,6 +683,9 @@ pub unsafe extern "system" fn vkGetDeviceProcAddr(
     resolve_device_proc(device, p_name)
 }
 
+/// # Safety
+/// Called by the Vulkan loader; `p_name` must be a valid null-terminated
+/// Vulkan command name or null.
 #[no_mangle]
 pub unsafe extern "system" fn VK_LAYER_RIVULET_capture_vkGetInstanceProcAddr(
     instance: vk::Instance,
@@ -684,6 +694,9 @@ pub unsafe extern "system" fn VK_LAYER_RIVULET_capture_vkGetInstanceProcAddr(
     resolve_instance_proc(instance, p_name)
 }
 
+/// # Safety
+/// Called by the Vulkan loader; `p_name` must be a valid null-terminated
+/// Vulkan command name or null.
 #[no_mangle]
 pub unsafe extern "system" fn VK_LAYER_RIVULET_capture_vkGetDeviceProcAddr(
     device: vk::Device,
@@ -717,7 +730,7 @@ unsafe extern "system" fn layer_vk_create_instance(
     let create_name = CString::new("vkCreateInstance").unwrap();
     let next_create_instance: FnCreateInstance =
         match next_gipa(vk::Instance::null(), create_name.as_ptr()) {
-            Some(f) => std::mem::transmute(f),
+            Some(f) => std::mem::transmute::<*const c_void, FnCreateInstance>(f as *const c_void),
             None => return vk::Result::ERROR_INITIALIZATION_FAILED,
         };
 
@@ -816,7 +829,7 @@ unsafe extern "system" fn layer_vk_create_device(
     let create_name = CString::new("vkCreateDevice").unwrap();
     let next_create_device: FnCreateDevice =
         match next_gipa(vk::Instance::null(), create_name.as_ptr()) {
-            Some(f) => std::mem::transmute(f),
+            Some(f) => std::mem::transmute::<*const c_void, FnCreateDevice>(f as *const c_void),
             None => return vk::Result::ERROR_INITIALIZATION_FAILED,
         };
 
@@ -850,11 +863,16 @@ unsafe extern "system" fn layer_vk_create_device(
             None => std::ptr::null(),
         }
     };
-    let fn_create_swapchain: FnCreateSwapchainKHR =
-        std::mem::transmute(load_ext("vkCreateSwapchainKHR"));
-    let fn_destroy_swapchain: FnDestroySwapchainKHR =
-        std::mem::transmute(load_ext("vkDestroySwapchainKHR"));
-    let fn_queue_present: FnQueuePresentKHR = std::mem::transmute(load_ext("vkQueuePresentKHR"));
+    let fn_create_swapchain: FnCreateSwapchainKHR = std::mem::transmute::<
+        *const c_void,
+        FnCreateSwapchainKHR,
+    >(load_ext("vkCreateSwapchainKHR"));
+    let fn_destroy_swapchain: FnDestroySwapchainKHR = std::mem::transmute::<
+        *const c_void,
+        FnDestroySwapchainKHR,
+    >(load_ext("vkDestroySwapchainKHR"));
+    let fn_queue_present: FnQueuePresentKHR =
+        std::mem::transmute::<*const c_void, FnQueuePresentKHR>(load_ext("vkQueuePresentKHR"));
 
     // Find the graphics queue family and queue.
     let queue_props = ash_instance.get_physical_device_queue_family_properties(physical_device);
@@ -1068,37 +1086,15 @@ mod tests {
         let result = unsafe { vkNegotiateLoaderLayerInterfaceVersion(std::ptr::null_mut()) };
         assert_eq!(result, vk::Result::ERROR_INITIALIZATION_FAILED);
     }
-
     #[test]
     fn negotiate_version_negotiates_down_to_legacy() {
         let mut s = VkNegotiateLayerInterface {
             s_type: LAYER_NEGOTIATE_INTERFACE_STRUCT,
             p_next: std::ptr::null_mut(),
             loader_layer_interface_version: 2,
-            pfn_get_instance_proc_addr: unsafe {
-                std::mem::transmute::<
-                    unsafe extern "system" fn(
-                        vk::Instance,
-                        *const c_char,
-                    ) -> vk::PFN_vkVoidFunction,
-                    FnGetInstanceProcAddr,
-                >(vkGetInstanceProcAddr)
-            },
-            pfn_get_device_proc_addr: unsafe {
-                std::mem::transmute::<
-                    unsafe extern "system" fn(vk::Device, *const c_char) -> vk::PFN_vkVoidFunction,
-                    FnGetDeviceProcAddr,
-                >(vkGetDeviceProcAddr)
-            },
-            pfn_get_physical_device_proc_addr: unsafe {
-                std::mem::transmute::<
-                    unsafe extern "system" fn(
-                        vk::Instance,
-                        *const c_char,
-                    ) -> vk::PFN_vkVoidFunction,
-                    FnGetPhysicalDeviceProcAddr,
-                >(vkGetInstanceProcAddr)
-            },
+            pfn_get_instance_proc_addr: vkGetInstanceProcAddr,
+            pfn_get_device_proc_addr: vkGetDeviceProcAddr,
+            pfn_get_physical_device_proc_addr: vkGetInstanceProcAddr,
         };
         let result = unsafe { vkNegotiateLoaderLayerInterfaceVersion(&mut s) };
         assert_eq!(result, vk::Result::SUCCESS);
@@ -1114,30 +1110,9 @@ mod tests {
             s_type: LAYER_NEGOTIATE_INTERFACE_STRUCT,
             p_next: std::ptr::null_mut(),
             loader_layer_interface_version: 1,
-            pfn_get_instance_proc_addr: unsafe {
-                std::mem::transmute::<
-                    unsafe extern "system" fn(
-                        vk::Instance,
-                        *const c_char,
-                    ) -> vk::PFN_vkVoidFunction,
-                    FnGetInstanceProcAddr,
-                >(vkGetInstanceProcAddr)
-            },
-            pfn_get_device_proc_addr: unsafe {
-                std::mem::transmute::<
-                    unsafe extern "system" fn(vk::Device, *const c_char) -> vk::PFN_vkVoidFunction,
-                    FnGetDeviceProcAddr,
-                >(vkGetDeviceProcAddr)
-            },
-            pfn_get_physical_device_proc_addr: unsafe {
-                std::mem::transmute::<
-                    unsafe extern "system" fn(
-                        vk::Instance,
-                        *const c_char,
-                    ) -> vk::PFN_vkVoidFunction,
-                    FnGetPhysicalDeviceProcAddr,
-                >(vkGetInstanceProcAddr)
-            },
+            pfn_get_instance_proc_addr: vkGetInstanceProcAddr,
+            pfn_get_device_proc_addr: vkGetDeviceProcAddr,
+            pfn_get_physical_device_proc_addr: vkGetInstanceProcAddr,
         };
         let result = unsafe { vkNegotiateLoaderLayerInterfaceVersion(&mut s) };
         assert_eq!(result, vk::Result::SUCCESS);
@@ -1146,27 +1121,14 @@ mod tests {
 
     #[test]
     fn advance_instance_chain_skips_non_link_info_and_advances() {
-        // Use the layer's own vkGetInstanceProcAddr as a valid function pointer.
-        let next_gipa: FnGetInstanceProcAddr = unsafe {
-            std::mem::transmute::<
-                unsafe extern "system" fn(vk::Instance, *const c_char) -> vk::PFN_vkVoidFunction,
-                FnGetInstanceProcAddr,
-            >(vkGetInstanceProcAddr)
-        };
+        let next_gipa = vkGetInstanceProcAddr as FnGetInstanceProcAddr;
         let mut link = VkLayerInstanceLink {
             p_next: std::ptr::null_mut(),
             pfn_next_get_instance_proc_addr: next_gipa,
-            pfn_next_get_physical_device_proc_addr: unsafe {
-                std::mem::transmute::<
-                    unsafe extern "system" fn(
-                        vk::Instance,
-                        *const c_char,
-                    ) -> vk::PFN_vkVoidFunction,
-                    FnGetPhysicalDeviceProcAddr,
-                >(vkGetInstanceProcAddr)
-            },
+            pfn_next_get_physical_device_proc_addr: vkGetInstanceProcAddr
+                as FnGetPhysicalDeviceProcAddr,
         };
-        let mut link_info = VkLayerInstanceCreateInfo {
+        let link_info = VkLayerInstanceCreateInfo {
             s_type: VK_STRUCTURE_TYPE_LOADER_INSTANCE_CREATE_INFO,
             p_next: std::ptr::null(),
             function: VK_LAYER_LINK_INFO,
@@ -1187,24 +1149,14 @@ mod tests {
 
     #[test]
     fn advance_device_chain_returns_both_next_ptrs() {
-        let gipa: FnGetInstanceProcAddr = unsafe {
-            std::mem::transmute::<
-                unsafe extern "system" fn(vk::Instance, *const c_char) -> vk::PFN_vkVoidFunction,
-                FnGetInstanceProcAddr,
-            >(vkGetInstanceProcAddr)
-        };
-        let gdpa: FnGetDeviceProcAddr = unsafe {
-            std::mem::transmute::<
-                unsafe extern "system" fn(vk::Device, *const c_char) -> vk::PFN_vkVoidFunction,
-                FnGetDeviceProcAddr,
-            >(vkGetDeviceProcAddr)
-        };
+        let gipa = vkGetInstanceProcAddr as FnGetInstanceProcAddr;
+        let gdpa = vkGetDeviceProcAddr as FnGetDeviceProcAddr;
         let mut link = VkLayerDeviceLink {
             p_next: std::ptr::null_mut(),
             pfn_next_get_instance_proc_addr: gipa,
             pfn_next_get_device_proc_addr: gdpa,
         };
-        let mut link_info = VkLayerDeviceCreateInfo {
+        let link_info = VkLayerDeviceCreateInfo {
             s_type: VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO,
             p_next: std::ptr::null(),
             function: VK_LAYER_LINK_INFO,

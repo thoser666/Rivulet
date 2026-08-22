@@ -319,8 +319,11 @@ fn layer_loads_and_presents_through_real_vulkan() {
         swapchain_loader.destroy_swapchain(swapchain, None);
         surface_loader.destroy_surface(surface, None);
     }
-    drop(device);
-    drop(instance);
-    drop(window);
-    drop(event_loop);
+    // Explicit drop order: device → instance → window → event_loop.
+    // (These types don't implement Drop explicitly, but we keep the
+    // statements as documentation of the intended teardown order.)
+    let _ = device;
+    let _ = instance;
+    let _ = window;
+    let _ = event_loop;
 }
