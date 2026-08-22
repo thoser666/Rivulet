@@ -1,6 +1,6 @@
 # Game Capture Strategy — Decision Record (G1)
 
-**Status:** Accepted for planning — revisit per approach during G2–G4 implementation
+**Status:** G2 (DXGI Desktop Duplication) and G3 (Vulkan layer) implemented; G4/G5/G6 open — G5 benchmarks the "within the overhead budget" clause of the G3/G4 DoDs
 **Date:** 2026-08-20
 **Tracked in:** [Issue #54](https://github.com/thoser666/Rivulet/issues/54) (M2 roadmap, *Priority for gaming streamers:*)
 **Scope:** zero-overhead fullscreen game capture (D3D/Vulkan/OpenGL), fallback strategy, overhead budget, abort criteria
@@ -141,18 +141,20 @@ occurred, so the GUI can inform the user (mirrors the
 
 ## 7. Phased plan
 
-| Phase | Work package | Deliverable | DoD |
-| --- | --- | --- | --- |
-| 1 | **G2 – DXGI backend** | Desktop Duplication capture, zero-copy GPU path to encoder, scene-source integration | DX9/11/12 fullscreen captured via zero-copy, tests + docs |
-| 2 | **G3 – Vulkan hook** | Implicit layer, swapchain image capture | Vulkan fullscreen within budget, tests + docs |
-| 2 | **G4 – OpenGL hook** | wglSwapBuffers interception | OpenGL fullscreen within budget, tests + docs |
-| 3 | **G5 – Performance verification** | Benchmark harness + CI regression | `scripts/` benchmark, budget verified for all backends |
-| 4 | **G6 – Linux fullscreen** | PipeWire portal (Wayland), X11 fallback | Wayland + X11 capture, tests + docs |
+| Phase | Work package | Deliverable | DoD | Status |
+| --- | --- | --- | --- | --- |
+| 1 | **G2 – DXGI backend** | Desktop Duplication capture, zero-copy GPU path to encoder, scene-source integration | DX9/11/12 fullscreen captured via zero-copy, tests + docs | ✅ Done |
+| 2 | **G3 – Vulkan hook** | Implicit layer, swapchain image capture | Vulkan fullscreen within budget, tests + docs | ✅ Done (implementation); budget number pending G5 |
+| 2 | **G4 – OpenGL hook** | wglSwapBuffers interception | OpenGL fullscreen within budget, tests + docs | Open |
+| 3 | **G5 – Performance verification** | Benchmark harness + CI regression | `scripts/` benchmark, budget verified for all backends | Open |
+| 4 | **G6 – Linux fullscreen** | PipeWire portal (Wayland), X11 fallback | Wayland + X11 capture, tests + docs | Open |
 
-G2 is the recommended next step: it delivers fullscreen game capture for the
+G2 is the recommended first step: it delivers fullscreen game capture for the
 majority of titles with no injection risk and unblocks the scene-source
-integration. G3/G4 can follow independently; G5 must land before any hook is
-declared "done".
+integration. G3/G4 follow independently. G5 remains the gate for the
+"within the overhead budget" clause of the G3/G4 DoDs: those hooks are checked
+as *implementation-complete* with tests + docs, but the measured overhead
+number is only final once G5 runs.
 
 ---
 
