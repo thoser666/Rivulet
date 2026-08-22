@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.38.2-alpha.1] - 2026-08-22
+- fix(vulkan-layer): fix CI clippy errors for Clippy 1.98
+
 ## [0.38.1-alpha.1] - 2026-08-22
 - fix(vulkan-layer): fix loader ABI, add live smoke test, close Issue #55
 - docs: mark G3 done with the G5 budget caveat, close Issue #56
