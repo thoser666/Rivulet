@@ -12,7 +12,9 @@
 use std::ffi::CString;
 use std::path::PathBuf;
 
-use crate::capture_channel::{CapturedFrame, FrameHeader, DEFAULT_SHM_SIZE};
+use crate::capture_channel::CapturedFrame;
+#[cfg(target_os = "windows")]
+use crate::capture_channel::{FrameHeader, DEFAULT_SHM_SIZE};
 
 /// Errors specific to the OpenGL hook backend.
 #[derive(Debug, Clone)]
