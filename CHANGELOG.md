@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.39.0-alpha.1] - 2026-08-22
+- feat: G4 – OpenGL wglSwapBuffers hook for fullscreen game capture
+
 ## [0.38.2-alpha.1] - 2026-08-22
 - fix(vulkan-layer): fix CI clippy errors for Clippy 1.98
 
