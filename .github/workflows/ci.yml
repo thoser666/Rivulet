@@ -236,9 +236,19 @@ jobs:
           $develMsi = Join-Path $gstCacheDir "gstreamer-1.0-devel-msvc-x86_64-$version.msi"
           if (-not (Test-Path $runtimeMsi) -or -not (Test-Path $develMsi)) {
             $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$version/msvc"
-            Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi
-            Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi
-            Write-Host "Downloaded GStreamer MSIs to cache"
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              try {
+                Write-Host "Downloading GStreamer MSIs (attempt $attempt/3)..."
+                Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi -TimeoutSec 120
+                Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi -TimeoutSec 120
+                Write-Host "Downloaded GStreamer MSIs to cache"
+                break
+              } catch {
+                Write-Host "Download failed: $_"
+                if ($attempt -eq 3) { throw }
+                Start-Sleep -Seconds (10 * $attempt)
+              }
+            }
           } else {
             Write-Host "GStreamer MSIs found in cache, skipping download"
           }
