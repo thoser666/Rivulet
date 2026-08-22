@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.39.2-alpha.1] - 2026-08-22
+- fix: gate OpenGL hook DLL behind #[cfg(target_os = "windows")]
+
 ## [0.39.1-alpha.1] - 2026-08-22
 - fix: remove cfg gate from PathBuf import in opengl_hook.rs
 
