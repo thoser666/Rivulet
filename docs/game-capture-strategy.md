@@ -1,6 +1,6 @@
 # Game Capture Strategy — Decision Record (G1)
 
-**Status:** G2 (DXGI Desktop Duplication) and G3 (Vulkan layer) implemented; G4/G5/G6 open — G5 benchmarks the "within the overhead budget" clause of the G3/G4 DoDs
+**Status:** G2 (DXGI Desktop Duplication), G3 (Vulkan layer), and G4 (OpenGL hook) implemented; G5/G6 open — G5 benchmarks the "within the overhead budget" clause of the G3/G4 DoDs
 **Date:** 2026-08-20
 **Tracked in:** [Issue #54](https://github.com/thoser666/Rivulet/issues/54) (M2 roadmap, *Priority for gaming streamers:*)
 **Scope:** zero-overhead fullscreen game capture (D3D/Vulkan/OpenGL), fallback strategy, overhead budget, abort criteria
@@ -145,7 +145,7 @@ occurred, so the GUI can inform the user (mirrors the
 | --- | --- | --- | --- | --- |
 | 1 | **G2 – DXGI backend** | Desktop Duplication capture, zero-copy GPU path to encoder, scene-source integration | DX9/11/12 fullscreen captured via zero-copy, tests + docs | ✅ Done |
 | 2 | **G3 – Vulkan hook** | Implicit layer, swapchain image capture | Vulkan fullscreen within budget, tests + docs | ✅ Done (implementation); budget number pending G5 |
-| 2 | **G4 – OpenGL hook** | wglSwapBuffers interception | OpenGL fullscreen within budget, tests + docs | Open |
+| 2 | **G4 – OpenGL hook** | wglSwapBuffers interception (IAT patch + GDI readback + SHM) | OpenGL fullscreen within budget, tests + docs | ✅ Implementation complete |
 | 3 | **G5 – Performance verification** | Benchmark harness + CI regression | `scripts/` benchmark, budget verified for all backends | Open |
 | 4 | **G6 – Linux fullscreen** | PipeWire portal (Wayland), X11 fallback | Wayland + X11 capture, tests + docs | Open |
 

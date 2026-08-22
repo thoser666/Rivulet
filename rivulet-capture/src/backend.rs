@@ -15,6 +15,8 @@ pub enum BackendKind {
     /// Vulkan layer interception (G3) — preferred zero-overhead fullscreen
     /// game capture backend.
     VulkanLayer,
+    /// OpenGL wglSwapBuffers hook (G4) — fullscreen OpenGL game capture.
+    OpenGLHook,
     /// Windows Graphics Capture (existing windowed path, fallback).
     WindowsGraphicsCapture,
     /// No backend is active (not started, or everything failed).
@@ -27,6 +29,7 @@ impl BackendKind {
         match self {
             BackendKind::DesktopDuplication => "desktop-duplication",
             BackendKind::VulkanLayer => "vulkan-layer",
+            BackendKind::OpenGLHook => "opengl-hook",
             BackendKind::WindowsGraphicsCapture => "windows-graphics-capture",
             BackendKind::None => "none",
         }
@@ -82,6 +85,10 @@ impl BackendStatus {
         match self.active {
             BackendKind::DesktopDuplication => ("backend_desktop_duplication", None),
             BackendKind::VulkanLayer => ("backend_vulkan_layer", None),
+            BackendKind::OpenGLHook => match self.last_error.as_deref() {
+                Some(r) if !r.is_empty() => ("backend_opengl_hook_fallback", Some(r)),
+                _ => ("backend_opengl_hook", None),
+            },
             // Only use the parameterised fallback key when there is a reason
             // to show; otherwise the plain WGC key avoids a literal `{0}`.
             BackendKind::WindowsGraphicsCapture => match self.last_error.as_deref() {
@@ -252,6 +259,19 @@ mod tests {
         vulkan.switch_to(BackendKind::VulkanLayer);
         assert_eq!(vulkan.ui_key(), ("backend_vulkan_layer", None));
         assert!(vulkan.is_healthy());
+
+        let mut gl = BackendStatus::idle();
+        gl.switch_to(BackendKind::OpenGLHook);
+        assert_eq!(gl.ui_key(), ("backend_opengl_hook", None));
+        assert!(gl.is_healthy());
+
+        let mut gl_fail = BackendStatus::idle();
+        gl_fail.switch_to(BackendKind::OpenGLHook);
+        gl_fail.fail("injection blocked");
+        assert_eq!(
+            gl_fail.ui_key(),
+            ("backend_opengl_hook_fallback", Some("injection blocked"))
+        );
 
         let mut s2 = BackendStatus::idle();
         s2.switch_to(BackendKind::WindowsGraphicsCapture);

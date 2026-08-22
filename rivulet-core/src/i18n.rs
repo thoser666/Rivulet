@@ -154,6 +154,14 @@ impl Locale {
                     "backend_vulkan_layer",
                     "Capture backend: Vulkan layer (zero-copy fullscreen)",
                 ),
+                (
+                    "backend_opengl_hook",
+                    "Capture backend: OpenGL hook (wglSwapBuffers)",
+                ),
+                (
+                    "backend_opengl_hook_fallback",
+                    "Capture backend: OpenGL hook (wglSwapBuffers — {0})",
+                ),
                 ("backend_none", "Capture backend: not active"),
                 // Replay buffer
                 ("replay_buffer", "Replay buffer"),
@@ -305,6 +313,14 @@ impl Locale {
                 (
                     "backend_vulkan_layer",
                     "Capture-Backend: Vulkan-Layer (Zero-Copy-Fullscreen)",
+                ),
+                (
+                    "backend_opengl_hook",
+                    "Capture-Backend: OpenGL-Hook (wglSwapBuffers)",
+                ),
+                (
+                    "backend_opengl_hook_fallback",
+                    "Capture-Backend: OpenGL-Hook (wglSwapBuffers — {0})",
                 ),
                 ("backend_none", "Capture-Backend: nicht aktiv"),
                 // Replay buffer
@@ -557,6 +573,22 @@ mod tests {
         assert_eq!(
             Locale::De.tr("backend_vulkan_layer"),
             "Capture-Backend: Vulkan-Layer (Zero-Copy-Fullscreen)"
+        );
+        assert_eq!(
+            Locale::En.tr("backend_opengl_hook"),
+            "Capture backend: OpenGL hook (wglSwapBuffers)"
+        );
+        assert_eq!(
+            Locale::De.tr("backend_opengl_hook"),
+            "Capture-Backend: OpenGL-Hook (wglSwapBuffers)"
+        );
+        assert_eq!(
+            Locale::En.tr_fmt("backend_opengl_hook_fallback", &["injected".to_string()]),
+            "Capture backend: OpenGL hook (wglSwapBuffers — injected)"
+        );
+        assert_eq!(
+            Locale::De.tr_fmt("backend_opengl_hook_fallback", &["injiziert".to_string()]),
+            "Capture-Backend: OpenGL-Hook (wglSwapBuffers — injiziert)"
         );
         assert_eq!(Locale::En.tr("backend_none"), "Capture backend: not active");
         assert_eq!(

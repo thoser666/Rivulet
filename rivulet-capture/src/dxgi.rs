@@ -479,8 +479,8 @@ impl CaptureSource for DxgiDesktopDuplication {
 
         // Convert BGRA → RGBA for the rest of the pipeline.
         let mut rgba = bgra;
-        for px in rgba.chunks_exact_mut(4) {
-            px.swap(0, 2);
+        for [b, _g, r, _a] in rgba.as_chunks_mut::<4>().0 {
+            std::mem::swap(b, r);
         }
 
         Ok(Some(CapturedFrame::new(

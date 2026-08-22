@@ -1,0 +1,20 @@
+[package]
+name = "rivulet-opengl-hook-dll"
+version.workspace = true
+edition = "2021"
+description = "Injected DLL for OpenGL wglSwapBuffers interception (G4)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+winapi = { version = "0.3", features = [
+    "memoryapi",
+    "winbase",
+    "winnt",
+    "handleapi",
+    "processthreadsapi",
+    "libloaderapi",
+    "wingdi",
+    "fileapi",
+] }

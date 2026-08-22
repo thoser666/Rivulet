@@ -2375,6 +2375,7 @@ impl eframe::App for RivuletApp {
                         let color = match status.active {
                             BackendKind::DesktopDuplication => colors.success,
                             BackendKind::VulkanLayer => colors.success,
+                            BackendKind::OpenGLHook => colors.success,
                             BackendKind::WindowsGraphicsCapture => colors.warning,
                             BackendKind::None => colors.hint,
                         };

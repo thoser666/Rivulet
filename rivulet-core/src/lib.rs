@@ -51,6 +51,7 @@ pub mod scene;
 pub use scene::{Scene, SceneManager};
 
 pub mod capture_channel;
+pub mod opengl_hook;
 pub mod vulkan_hook;
 pub mod vulkan_layer;
 
