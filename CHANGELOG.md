@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.39.1-alpha.1] - 2026-08-22
+- fix: remove cfg gate from PathBuf import in opengl_hook.rs
+
 ## [0.39.0-alpha.1] - 2026-08-22
 - feat: G4 – OpenGL wglSwapBuffers hook for fullscreen game capture
 
