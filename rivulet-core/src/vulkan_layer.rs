@@ -13,7 +13,7 @@ pub const MANIFEST_FILENAME: &str = "VkLayer_rivulet_capture.json";
 
 /// Layer DLL filename (Windows).
 #[cfg(target_os = "windows")]
-pub const LAYER_DLL_FILENAME: &str = "rivulet-vulkan-layer.dll";
+pub const LAYER_DLL_FILENAME: &str = "rivulet_vulkan_layer.dll";
 
 /// Layer shared library filename (Linux).
 #[cfg(target_os = "linux")]
