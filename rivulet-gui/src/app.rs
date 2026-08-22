@@ -28,7 +28,6 @@ use {
 // --- Windows imports (for windows-capture v1.5.0) ---
 #[cfg(target_os = "windows")]
 use {
-    rfd,
     rivulet_capture::backend::{BackendKind, BackendStatus},
     rivulet_capture::dxgi::DxgiDesktopDuplication,
     std::sync::mpsc::{self, Sender},
@@ -771,7 +770,7 @@ impl RivuletApp {
         let ext = self.selected_codec.file_extension();
         let file_path = rfd::FileDialog::new()
             .add_filter("Video", &[ext, "mov"])
-            .set_file_name(&format!(
+            .set_file_name(format!(
                 "rivulet-recording-{}.{}",
                 chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S"),
                 ext
@@ -1003,7 +1002,6 @@ impl RivuletApp {
             self.last_frame_at = None;
         } else {
             self.last_error = Some(self.tr("no_source_selected").to_string());
-            return;
         }
     }
 

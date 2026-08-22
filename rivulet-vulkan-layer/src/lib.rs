@@ -404,6 +404,13 @@ fn create_shm() -> Option<ShmHandle> {
     }
 }
 
+/// The layer is not shipped on other platforms (macOS etc.), so the shared
+/// memory region is never created there.
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn create_shm() -> Option<ShmHandle> {
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Instance state
 // ---------------------------------------------------------------------------
@@ -980,14 +987,14 @@ mod tests {
 
     #[test]
     fn resolve_device_proc_unknown_name_without_device_returns_none() {
-        let cstr = CStr::from_bytes_with_nul(b"vkFooBar\0").unwrap();
+        let cstr = c"vkFooBar";
         let result = unsafe { resolve_device_proc(vk::Device::null(), cstr.as_ptr()) };
         assert!(result.is_none());
     }
 
     #[test]
     fn resolve_instance_proc_unknown_name_without_instance_returns_none() {
-        let cstr = CStr::from_bytes_with_nul(b"vkFooBar\0").unwrap();
+        let cstr = c"vkFooBar";
         let result = unsafe { resolve_instance_proc(vk::Instance::null(), cstr.as_ptr()) };
         assert!(result.is_none());
     }
