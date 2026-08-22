@@ -10,7 +10,6 @@
 
 #[cfg(target_os = "windows")]
 use std::ffi::CString;
-#[cfg(target_os = "windows")]
 use std::path::PathBuf;
 
 use crate::capture_channel::{CapturedFrame, FrameHeader, DEFAULT_SHM_SIZE};
