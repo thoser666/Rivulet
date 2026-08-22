@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.38.0-alpha.1] - 2026-08-22
+- feat: wire Vulkan layer into Windows GUI as preferred game capture backend
+
 ## [0.37.1-alpha.1] - 2026-08-21
 - fix: cleanup downloaded installer after successful update
 
