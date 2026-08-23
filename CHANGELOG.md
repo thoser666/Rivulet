@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.40.0-alpha.1] - 2026-08-23
+- feat: G5 – Performance verification benchmark framework + CI gate
+- ci: add retry logic for GStreamer MSI download
+- ci: cache GStreamer MSIs to avoid transient 503 download failures
+- ci: cache GStreamer MSIs to avoid transient 503 download failures
+
 ## [0.39.3-alpha.1] - 2026-08-22
 - fix: gate FrameHeader/DEFAULT_SHM_SIZE imports behind cfg(windows)
 
