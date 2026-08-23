@@ -385,8 +385,10 @@ mod tests {
 
     #[test]
     fn transform_clamp_opacity() {
-        let mut t = Transform::default();
-        t.opacity = -0.5;
+        let mut t = Transform {
+            opacity: -0.5,
+            ..Default::default()
+        };
         t.clamp_opacity();
         assert_eq!(t.opacity, 0.0);
 
@@ -401,8 +403,10 @@ mod tests {
 
     #[test]
     fn transform_normalize_rotation() {
-        let mut t = Transform::default();
-        t.rotation = 370.0;
+        let mut t = Transform {
+            rotation: 370.0,
+            ..Default::default()
+        };
         t.normalize_rotation();
         assert!((t.rotation - 10.0).abs() < f32::EPSILON);
 
