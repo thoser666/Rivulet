@@ -179,16 +179,22 @@ pub fn download_asset_with_progress(
 pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
     #[cfg(target_os = "windows")]
     {
-        let path = path.to_string_lossy();
-        std::process::Command::new("msiexec")
+        let path_str = path.to_string_lossy().to_string();
+        let mut child = std::process::Command::new("msiexec")
             .args([
                 "/i",
-                path.as_ref(),
+                &path_str,
                 "/passive",
                 "/norestart",
                 "REBOOT=ReallySuppress",
             ])
             .spawn()?;
+        // Wait for the installer to finish so the file is not deleted
+        // while msiexec is still reading it.
+        let status = child.wait()?;
+        if !status.success() {
+            anyhow::bail!("msiexec exited with {status} — is the MSI file valid and accessible?");
+        }
         Ok(true)
     }
 
@@ -196,7 +202,13 @@ pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
-        std::process::Command::new(path).spawn()?;
+        let mut child = std::process::Command::new(path).spawn()?;
+        // Wait for the AppImage to finish extracting/running so the file
+        // is safe to clean up.
+        let status = child.wait()?;
+        if !status.success() {
+            anyhow::bail!("installer exited with {status}");
+        }
         Ok(true)
     }
 
@@ -411,21 +423,34 @@ mod tests {
     }
 
     #[test]
-    fn install_asset_returns_correct_quit_flag() {
+    fn install_asset_returns_error_for_nonexistent_file() {
         let fake = std::env::temp_dir().join("rivulet_test_nonexistent.msi");
         let result = install_asset(&fake);
-        // The function will fail to spawn on a nonexistent file, but we
-        // can at least verify the platform-specific return type compiles
-        // and the error is an I/O error (file not found / spawn failure).
-        #[cfg(target_os = "windows")]
-        {
-            // msiexec spawn may succeed even with nonexistent file (it's async),
-            // so we just check it doesn't panic.
-            let _ = result;
-        }
+        assert!(
+            result.is_err(),
+            "install_asset must fail for nonexistent file"
+        );
+    }
+
+    #[test]
+    fn install_asset_waits_for_process() {
+        // Create a small script/batch that sleeps briefly, then verify
+        // install_asset blocks until it exits.
         #[cfg(target_os = "linux")]
         {
-            assert!(result.is_err());
+            let script = std::env::temp_dir().join("rivulet_test_install_wait.sh");
+            std::fs::write(&script, "#!/bin/sh\nsleep 0.1").unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let start = std::time::Instant::now();
+            let result = install_asset(&script);
+            let elapsed = start.elapsed();
+            assert!(result.is_ok(), "install_asset should succeed: {result:?}");
+            assert!(
+                elapsed.as_millis() >= 50,
+                "install_asset should have waited for the child (elapsed: {elapsed:?})"
+            );
+            let _ = std::fs::remove_file(&script);
         }
     }
 
