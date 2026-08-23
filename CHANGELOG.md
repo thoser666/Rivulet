@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.43.1-alpha.1] - 2026-08-23
+- fix: gate source_label() for Linux/Windows only (macOS compilation)
+
 ## [0.43.0-alpha.1] - 2026-08-23
 - feat: S2 — Image source with single-file and folder slideshow modes
 
