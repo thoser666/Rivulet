@@ -26,3 +26,10 @@ windows = { version = "=0.62.2", features = [
     "Win32_Graphics_Gdi",
     "Win32_Foundation",
 ] }
+
+# PipeWire portal screen capture (G6) — Linux-only.
+# ashpd provides xdg-desktop-portal D-Bus bindings; pipewire captures frames.
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.13.10", features = ["tokio", "screencast"] }
+pipewire = { version = "0.10.0", features = ["v0_3_33"] }
+futures-util = "0.3"

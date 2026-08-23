@@ -351,6 +351,9 @@ pub struct RivuletApp {
     pipewire_fd: Option<Fd>,
     #[cfg(target_os = "linux")]
     #[serde(skip)]
+    pipewire_capture: Option<rivulet_capture::PipeWireCaptureHandle>,
+    #[cfg(target_os = "linux")]
+    #[serde(skip)]
     sender: std_mpsc::Sender<BackendMessage>,
     #[cfg(target_os = "linux")]
     #[serde(skip)]
@@ -583,6 +586,8 @@ impl Default for RivuletApp {
             stream: None,
             #[cfg(target_os = "linux")]
             pipewire_fd: None,
+            #[cfg(target_os = "linux")]
+            pipewire_capture: None,
             #[cfg(target_os = "linux")]
             sender,
             #[cfg(target_os = "linux")]
@@ -1223,12 +1228,120 @@ impl RivuletApp {
         self.region_editor_open = true;
     }
 
+    /// Attempt to start recording via the PipeWire portal (G6).
+    /// Returns `true` if the portal was available and recording started.
+    /// Returns `false` if the portal is unavailable (fallback to xcap).
+    #[cfg(target_os = "linux")]
+    fn try_start_pipewire_recording(&mut self) -> bool {
+        // Create a blocking tokio runtime to run the async portal request.
+        let rt = match Runtime::new() {
+            Ok(rt) => rt,
+            Err(e) => {
+                eprintln!("PipeWire: failed to create tokio runtime: {e}");
+                return false;
+            }
+        };
+
+        let prefer_monitor = self.selected_monitor_idx.is_some();
+        let portal_result = rt.block_on(rivulet_capture::pipewire_portal::request_portal_session(
+            prefer_monitor,
+        ));
+
+        let (fd, info) = match portal_result {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("PipeWire portal unavailable: {e}");
+                return false;
+            }
+        };
+
+        // File dialog
+        let ext = self.selected_codec.file_extension();
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Video", &[ext])
+            .set_file_name(format!(
+                "rivulet-recording-{}.{}",
+                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S"),
+                ext
+            ))
+            .save_file()
+        else {
+            println!("File selection cancelled.");
+            return false;
+        };
+
+        if (self.capture_system || self.capture_mic) && !self.audio_preview {
+            self.start_audio_capture();
+        }
+        self.engine.set_video_codec(self.selected_codec);
+        self.engine.set_preset(self.selected_preset);
+        self.engine.set_overlay_enabled(self.show_overlay);
+        self.apply_replay_setting();
+        self.engine.set_audio_enabled(self.audio_preview);
+        self.engine
+            .set_separate_audio_tracks(self.separate_tracks && self.audio_preview);
+        if self.engine.separate_audio_tracks() {
+            self.engine
+                .set_audio_track_enabled(rivulet_core::AudioTrack::System, self.capture_system);
+            self.engine
+                .set_audio_track_enabled(rivulet_core::AudioTrack::Microphone, self.capture_mic);
+        }
+        self.engine.start_local_recording(path);
+
+        let (frame_rx, handle) =
+            rivulet_capture::pipewire_portal::start_pipewire_capture(fd, info.node_id);
+        self.pipewire_capture = Some(handle);
+
+        // Convert PipeWire frames to RawFrame and send to engine
+        let (raw_tx, raw_rx) = std_mpsc::channel::<RawFrame>();
+        let stop = Arc::new(AtomicBool::new(false));
+        self.raw_rx = Some(raw_rx);
+        self.stop_signal = Some(stop.clone());
+
+        thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                match frame_rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                    Ok(pw_frame) => {
+                        let frame = RawFrame {
+                            data: pw_frame.data,
+                            width: pw_frame.width,
+                            height: pw_frame.height,
+                        };
+                        if raw_tx.send(frame).is_err() {
+                            break;
+                        }
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            }
+        });
+
+        self.is_recording = true;
+        self.record_started = Instant::now();
+        self.last_frame_at = None;
+        self.record_status = None;
+        println!(
+            "Linux recording started via PipeWire portal: node={}",
+            info.node_id
+        );
+        true
+    }
+
     #[cfg(target_os = "linux")]
     fn start_linux_recording(&mut self) {
         if self.is_recording {
             return;
         }
 
+        // Fallback: xcap screen/window capture.
+        // If the portal is available and the user selects a source, use PipeWire.
+        // Otherwise fall back to xcap (X11 composite capture).
+        if self.try_start_pipewire_recording() {
+            return;
+        }
+
+        // Fallback: xcap screen/window capture.
         // Capture source: window takes precedence over monitor.
         enum Source {
             Monitor(xcap::Monitor),
@@ -1358,6 +1471,8 @@ impl RivuletApp {
         if let Some(signal) = &self.stop_signal {
             signal.store(true, Ordering::SeqCst);
         }
+        // Stop PipeWire portal capture if active (G6)
+        self.pipewire_capture = None;
         self.engine.stop_recording();
         self.raw_rx = None;
         self.stop_signal = None;
@@ -2376,6 +2491,7 @@ impl eframe::App for RivuletApp {
                             BackendKind::DesktopDuplication => colors.success,
                             BackendKind::VulkanLayer => colors.success,
                             BackendKind::OpenGLHook => colors.success,
+                            BackendKind::PipeWirePortal => colors.success,
                             BackendKind::WindowsGraphicsCapture => colors.warning,
                             BackendKind::None => colors.hint,
                         };

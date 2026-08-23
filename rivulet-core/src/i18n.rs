@@ -162,6 +162,14 @@ impl Locale {
                     "backend_opengl_hook_fallback",
                     "Capture backend: OpenGL hook (wglSwapBuffers — {0})",
                 ),
+                (
+                    "backend_pipewire_portal",
+                    "Capture backend: PipeWayland portal (fullscreen)",
+                ),
+                (
+                    "backend_pipewire_portal_fallback",
+                    "Capture backend: PipeWire portal ({0})",
+                ),
                 ("backend_none", "Capture backend: not active"),
                 // Replay buffer
                 ("replay_buffer", "Replay buffer"),
@@ -321,6 +329,14 @@ impl Locale {
                 (
                     "backend_opengl_hook_fallback",
                     "Capture-Backend: OpenGL-Hook (wglSwapBuffers — {0})",
+                ),
+                (
+                    "backend_pipewire_portal",
+                    "Capture-Backend: PipeWire-Portal (Fullscreen)",
+                ),
+                (
+                    "backend_pipewire_portal_fallback",
+                    "Capture-Backend: PipeWire-Portal ({0})",
                 ),
                 ("backend_none", "Capture-Backend: nicht aktiv"),
                 // Replay buffer
@@ -589,6 +605,25 @@ mod tests {
         assert_eq!(
             Locale::De.tr_fmt("backend_opengl_hook_fallback", &["injiziert".to_string()]),
             "Capture-Backend: OpenGL-Hook (wglSwapBuffers — injiziert)"
+        );
+        assert_eq!(
+            Locale::En.tr("backend_pipewire_portal"),
+            "Capture backend: PipeWayland portal (fullscreen)"
+        );
+        assert_eq!(
+            Locale::De.tr("backend_pipewire_portal"),
+            "Capture-Backend: PipeWire-Portal (Fullscreen)"
+        );
+        assert_eq!(
+            Locale::En.tr_fmt("backend_pipewire_portal_fallback", &["denied".to_string()]),
+            "Capture backend: PipeWire portal (denied)"
+        );
+        assert_eq!(
+            Locale::De.tr_fmt(
+                "backend_pipewire_portal_fallback",
+                &["verweigert".to_string()]
+            ),
+            "Capture-Backend: PipeWire-Portal (verweigert)"
         );
         assert_eq!(Locale::En.tr("backend_none"), "Capture backend: not active");
         assert_eq!(

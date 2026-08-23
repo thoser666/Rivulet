@@ -17,6 +17,8 @@ pub enum BackendKind {
     VulkanLayer,
     /// OpenGL wglSwapBuffers hook (G4) — fullscreen OpenGL game capture.
     OpenGLHook,
+    /// PipeWire portal screencast (G6) — Linux fullscreen capture.
+    PipeWirePortal,
     /// Windows Graphics Capture (existing windowed path, fallback).
     WindowsGraphicsCapture,
     /// No backend is active (not started, or everything failed).
@@ -30,6 +32,7 @@ impl BackendKind {
             BackendKind::DesktopDuplication => "desktop-duplication",
             BackendKind::VulkanLayer => "vulkan-layer",
             BackendKind::OpenGLHook => "opengl-hook",
+            BackendKind::PipeWirePortal => "pipewire-portal",
             BackendKind::WindowsGraphicsCapture => "windows-graphics-capture",
             BackendKind::None => "none",
         }
@@ -88,6 +91,10 @@ impl BackendStatus {
             BackendKind::OpenGLHook => match self.last_error.as_deref() {
                 Some(r) if !r.is_empty() => ("backend_opengl_hook_fallback", Some(r)),
                 _ => ("backend_opengl_hook", None),
+            },
+            BackendKind::PipeWirePortal => match self.last_error.as_deref() {
+                Some(r) if !r.is_empty() => ("backend_pipewire_portal_fallback", Some(r)),
+                _ => ("backend_pipewire_portal", None),
             },
             // Only use the parameterised fallback key when there is a reason
             // to show; otherwise the plain WGC key avoids a literal `{0}`.
@@ -280,6 +287,20 @@ mod tests {
 
         s2.fail("access denied");
         assert_eq!(s2.ui_key(), ("backend_wgc_fallback", Some("access denied")));
+
+        // G6 PipeWire portal
+        let mut pw = BackendStatus::idle();
+        pw.switch_to(BackendKind::PipeWirePortal);
+        assert_eq!(pw.ui_key(), ("backend_pipewire_portal", None));
+        assert!(pw.is_healthy());
+
+        let mut pw_fail = BackendStatus::idle();
+        pw_fail.switch_to(BackendKind::PipeWirePortal);
+        pw_fail.fail("portal denied");
+        assert_eq!(
+            pw_fail.ui_key(),
+            ("backend_pipewire_portal_fallback", Some("portal denied"))
+        );
 
         assert_eq!(BackendStatus::idle().ui_key(), ("backend_none", None));
     }

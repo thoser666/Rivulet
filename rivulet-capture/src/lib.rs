@@ -5,10 +5,15 @@ pub mod backend;
 /// DXGI Desktop Duplication backend (G2) — Windows only.
 #[cfg(target_os = "windows")]
 pub mod dxgi;
+/// PipeWire portal screen capture (G6) — Linux only.
+#[cfg(target_os = "linux")]
+pub mod pipewire_portal;
 pub mod screen;
 
 #[cfg(target_os = "windows")]
 pub use dxgi::DxgiDesktopDuplication;
+#[cfg(target_os = "linux")]
+pub use pipewire_portal::{PipeWireCaptureHandle, PortalFrame, PortalStreamInfo};
 pub use screen::XCapScreenCapture;
 
 pub trait CaptureSource {
