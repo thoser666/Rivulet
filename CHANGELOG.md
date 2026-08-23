@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.42.0-alpha.1] - 2026-08-23
+- feat: S1 — Source abstraction layer with transforms
+- revert: remove unsupported continue-on-error from release workflow
+- ci: make Windows build optional in release workflow (GStreamer 503)
+
 ## [0.41.7-alpha.1] - 2026-08-23
 - fix: G6 PipeWire — use fully-qualified path for VideoInfoRaw in struct
 
