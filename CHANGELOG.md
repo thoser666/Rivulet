@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.43.3-alpha.2] - 2026-08-23
+- Initial release or no new commits.
+
 ## [0.43.3-alpha.1] - 2026-08-23
 - fix: add 3-strategy GStreamer download to build-package.yml
 
