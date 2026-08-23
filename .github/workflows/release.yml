@@ -136,6 +136,7 @@ jobs:
     name: Build Alpha Binaries (${{ matrix.artifact_name }})
     needs: [check, version]
     if: ${{ needs.check.outputs.should_release == 'true' }}
+    continue-on-error: ${{ matrix.continue-on-error || false }}
     strategy:
       fail-fast: false
       matrix:
@@ -146,6 +147,7 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: rivulet-windows-x86_64-alpha
+            continue-on-error: true  # GStreamer 503 outages should not block releases
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: rivulet-macos-aarch64-alpha
