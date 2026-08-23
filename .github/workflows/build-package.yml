@@ -60,6 +60,13 @@ jobs:
             gstreamer1.0-tools libglib2.0-dev \
             libpipewire-0.3-dev libspa-0.2-dev
 
+      - name: Cache GStreamer MSIs
+        if: runner.os == 'Windows'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: C:/gstreamer-cache
+          key: gstreamer-msvc-1.24.13
+
       - name: Install Windows release dependencies
         if: runner.os == 'Windows'
         shell: pwsh
@@ -68,11 +75,50 @@ jobs:
           C:/msys64/usr/bin/bash -lc "pacman -S --noconfirm mingw-w64-x86_64-pkg-config"
           echo "C:/msys64/mingw64/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           $version = "1.24.13"
-          $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$version/msvc"
-          $runtimeMsi = Join-Path $env:TEMP "gstreamer-runtime-$version.msi"
-          $develMsi = Join-Path $env:TEMP "gstreamer-devel-$version.msi"
-          Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi
-          Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi
+          $gstCacheDir = "C:/gstreamer-cache"
+          if (-not (Test-Path $gstCacheDir)) { New-Item -ItemType Directory -Path $gstCacheDir -Force | Out-Null }
+          $runtimeMsi = Join-Path $gstCacheDir "gstreamer-1.0-msvc-x86_64-$version.msi"
+          $develMsi = Join-Path $gstCacheDir "gstreamer-1.0-devel-msvc-x86_64-$version.msi"
+          $downloaded = $false
+          if ((Test-Path $runtimeMsi) -and (Test-Path $develMsi)) {
+            Write-Host "GStreamer MSIs found in local cache"
+            $downloaded = $true
+          }
+          if (-not $downloaded) {
+            $mirrorTag = "gstreamer-msi-$version"
+            $mirrorBase = "https://github.com/thoser666/Rivulet/releases/download/$mirrorTag"
+            try {
+              Write-Host "Downloading GStreamer MSIs from mirrored release..."
+              Invoke-WebRequest -Uri "$mirrorBase/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi -TimeoutSec 120
+              Invoke-WebRequest -Uri "$mirrorBase/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi -TimeoutSec 120
+              Write-Host "Downloaded from mirrored release"
+              $downloaded = $true
+            } catch {
+              Write-Host "Mirror download failed: $_"
+            }
+          }
+          if (-not $downloaded) {
+            $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$version/msvc"
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              try {
+                Write-Host "Downloading from freedesktop.org (attempt $attempt/3)..."
+                Invoke-WebRequest -Uri "$base/gstreamer-1.0-msvc-x86_64-$version.msi" -OutFile $runtimeMsi -TimeoutSec 120
+                Invoke-WebRequest -Uri "$base/gstreamer-1.0-devel-msvc-x86_64-$version.msi" -OutFile $develMsi -TimeoutSec 120
+                Write-Host "Downloaded from freedesktop.org"
+                $downloaded = $true
+                break
+              } catch {
+                Write-Host "Download failed: $_"
+                if ($attempt -eq 3) {
+                  Write-Host "ERROR: All GStreamer download sources failed."
+                  Write-Host "Run: scripts/mirror-gstreamer-msi.sh $version"
+                  exit 1
+                } else {
+                  Start-Sleep -Seconds (10 * $attempt)
+                }
+              }
+            }
+          }
           Start-Process msiexec -ArgumentList "/i", "`"$runtimeMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
           Start-Process msiexec -ArgumentList "/i", "`"$develMsi`"", "/qn", "/norestart", "INSTALLLEVEL=100" -Wait
           $gstRoot = [System.Environment]::GetEnvironmentVariable("GSTREAMER_1_0_ROOT_MSVC_X86_64", "Machine")
