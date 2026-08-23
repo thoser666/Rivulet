@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.41.4-alpha.1] - 2026-08-23
+- fix: G6 PipeWire — wrap closures in Arc for Send safety on Linux
+
 ## [0.41.3-alpha.1] - 2026-08-23
 - fix: G6 PipeWire — fix i32/u32 cast and MainLoopWeak Send issue
 
