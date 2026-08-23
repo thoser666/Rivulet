@@ -56,7 +56,7 @@ pub async fn request_portal_session(prefer_monitor: bool) -> Result<(OwnedFd, Po
         .context("Failed to create screencast session")?;
 
     let source_type = if prefer_monitor {
-        SourceType::Monitor
+        SourceType::Monitor.into()
     } else {
         SourceType::Monitor | SourceType::Window
     };
@@ -91,10 +91,11 @@ pub async fn request_portal_session(prefer_monitor: bool) -> Result<(OwnedFd, Po
         .await
         .context("Failed to open PipeWire remote")?;
 
+    let (pw, ph) = stream.size().map(|s| (s.0, s.1)).unwrap_or((1920, 1080));
     let info = PortalStreamInfo {
         node_id: stream.pipe_wire_node_id(),
-        width: stream.size().map(|s| s.0).unwrap_or(1920),
-        height: stream.size().map(|s| s.1).unwrap_or(1080),
+        width: pw,
+        height: ph,
     };
 
     tracing::info!(
@@ -209,14 +210,12 @@ fn pipewire_capture_loop(
             }
 
             let mut fmt = user_data.lock().unwrap();
-            if let Ok(info) = spa::param::video::VideoInfoRaw::parse(param) {
-                tracing::info!(
-                    "PipeWire video format: {}x{} {:?}",
-                    info.size().width,
-                    info.size().height,
-                    info.format()
-                );
-                *fmt = Some(info);
+            let mut video_info = spa::param::video::VideoInfoRaw::default();
+            if video_info.parse(param).is_ok() {
+                let w = video_info.size().width;
+                let h = video_info.size().height;
+                tracing::info!("PipeWire video format: {}x{}", w, h);
+                *fmt = Some(video_info);
             }
         })
         .process(|stream, user_data| {
