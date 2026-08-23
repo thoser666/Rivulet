@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.41.7-alpha.1] - 2026-08-23
+- fix: G6 PipeWire — use fully-qualified path for VideoInfoRaw in struct
+
 ## [0.41.6-alpha.1] - 2026-08-23
 - fix: G6 PipeWire — apply rustfmt to match CI formatting
 
