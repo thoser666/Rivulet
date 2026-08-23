@@ -1590,6 +1590,7 @@ impl RivuletApp {
     ///
     /// This is extracted so that unit tests can verify the label
     /// logic without instantiating the full egui UI.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn source_label(&self) -> Option<String> {
         let mon_name = self
             .selected_monitor_idx
