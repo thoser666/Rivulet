@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.41.0-alpha.1] - 2026-08-23
+- feat: G6 – Linux PipeWire portal fullscreen capture
+
 ## [0.40.1-alpha.1] - 2026-08-23
 - fix: robust GStreamer download with mirrored release fallback
 
