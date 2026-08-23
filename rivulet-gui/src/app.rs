@@ -1583,6 +1583,30 @@ impl RivuletApp {
         self.locale.tr_fmt(key, args)
     }
 
+    /// Compute the source label for the recording view.
+    ///
+    /// Returns the monitor name, the window name, or `None` (which
+    /// should render as the "Select Monitor" fallback).
+    ///
+    /// This is extracted so that unit tests can verify the label
+    /// logic without instantiating the full egui UI.
+    fn source_label(&self) -> Option<String> {
+        let mon_name = self
+            .selected_monitor_idx
+            .and_then(|idx| self.monitors.get(idx))
+            .and_then(|m| m.name().ok());
+        let win_title = self
+            .selected_window_idx
+            .and_then(|idx| self.windows.get(idx))
+            .and_then(|w| w.title().ok());
+        resolve_source_label(
+            self.selected_monitor_idx,
+            mon_name.as_deref(),
+            self.selected_window_idx,
+            win_title.as_deref(),
+        )
+    }
+
     /// Scenes view: list scenes (folders first), switch the active scene,
     /// and add/rename/remove scenes. Pure state logic is testable via the
     /// `SceneManager` in rivulet-core; this method only renders and calls it.
@@ -2502,13 +2526,7 @@ impl eframe::App for RivuletApp {
                         ui.label(self.tr("source"));
                         egui::ComboBox::from_id_salt("monitor_select")
                             .selected_text(
-                                self.selected_monitor_idx
-                                    .and_then(|idx| self.monitors.get(idx))
-                                    .map(|m| {
-                                        m.name().unwrap_or_else(|_| {
-                                            self.tr("unknown_monitor").to_string()
-                                        })
-                                    })
+                                self.source_label()
                                     .unwrap_or_else(|| self.tr("select_monitor").to_string()),
                             )
                             .show_ui(ui, |ui| {
@@ -3441,6 +3459,37 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// Resolve the source label for the recording view.
+///
+/// When a monitor is selected, returns `Some(monitor_name)`.  When a
+/// window is selected (but no monitor), returns `Some(window_title)`.
+/// When nothing is selected, returns `None`.
+///
+/// Extracted as a standalone function so it can be unit-tested
+/// without instantiating the full egui UI.
+fn resolve_source_label(
+    selected_monitor_idx: Option<usize>,
+    monitor_name: Option<&str>,
+    selected_window_idx: Option<usize>,
+    window_title: Option<&str>,
+) -> Option<String> {
+    if let Some(name) = monitor_name {
+        Some(name.to_string())
+    } else if selected_monitor_idx.is_some() && monitor_name.is_none() {
+        // Monitor selected but name unavailable — fall through to
+        // caller's unknown_monitor fallback.
+        None
+    } else if let Some(title) = window_title {
+        if title.is_empty() {
+            None
+        } else {
+            Some(title.to_string())
+        }
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4026,5 +4075,60 @@ mod tests {
         let hotkeys = HotkeyConfig::default();
         assert_eq!(hotkeys.save_replay, egui::Key::F12);
         assert_eq!(hotkeys.label_for("save_replay"), "F12");
+    }
+
+    // ── source label (bugfix: source jumps back to "Select Monitor")
+
+    #[test]
+    fn source_label_returns_monitor_name_when_monitor_selected() {
+        assert_eq!(
+            resolve_source_label(Some(0), Some("Display 1"), None, None),
+            Some("Display 1".to_string())
+        );
+    }
+
+    #[test]
+    fn source_label_returns_window_title_when_window_selected_and_no_monitor() {
+        assert_eq!(
+            resolve_source_label(None, None, Some(0), Some("My Game")),
+            Some("My Game".to_string())
+        );
+    }
+
+    #[test]
+    fn source_label_returns_none_when_nothing_selected() {
+        assert_eq!(resolve_source_label(None, None, None, None), None);
+    }
+
+    #[test]
+    fn source_label_prefers_monitor_over_window() {
+        // When both indices are set (shouldn't happen in practice,
+        // but the function must be deterministic), monitor wins.
+        assert_eq!(
+            resolve_source_label(Some(0), Some("Monitor"), Some(0), Some("Window")),
+            Some("Monitor".to_string())
+        );
+    }
+
+    #[test]
+    fn source_label_returns_none_when_monitor_selected_but_name_unavailable() {
+        // Monitor index is set but name is None → returns None so
+        // caller can use its "unknown_monitor" fallback string.
+        assert_eq!(resolve_source_label(Some(0), None, None, None), None);
+    }
+
+    #[test]
+    fn source_label_window_title_used_when_monitor_name_none() {
+        // Monitor index set but name unavailable, window available →
+        // still returns None (monitor takes priority, even if nameless).
+        assert_eq!(
+            resolve_source_label(Some(0), None, Some(0), Some("Win")),
+            None
+        );
+    }
+
+    #[test]
+    fn source_label_empty_window_title_returns_none() {
+        assert_eq!(resolve_source_label(None, None, Some(0), Some("")), None);
     }
 }
