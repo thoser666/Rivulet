@@ -149,7 +149,7 @@ impl Drop for PipeWireCaptureHandle {
 /// User data shared between PipeWire callbacks and the capture loop.
 struct PipeWireUserData {
     /// Video format negotiated by param_changed.
-    format: std::sync::Mutex<Option<spa::param::video::VideoInfoRaw>>,
+    format: std::sync::Mutex<Option<pipewire::spa::param::video::VideoInfoRaw>>,
     /// Stop flag — checked in the process callback.
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Frame sender.
