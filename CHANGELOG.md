@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.41.3-alpha.1] - 2026-08-23
+- fix: G6 PipeWire — fix i32/u32 cast and MainLoopWeak Send issue
+
 ## [0.41.2-alpha.1] - 2026-08-23
 - fix: G6 PipeWire — fix Linux CI API mismatches (source_type, parse, stream.size)
 
