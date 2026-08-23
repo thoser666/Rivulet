@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.43.4-alpha.1] - 2026-08-23
+- fix(updater): wait for installer process before deleting downloaded file
+
 ## [0.43.3-alpha.2] - 2026-08-23
 - Initial release or no new commits.
 
