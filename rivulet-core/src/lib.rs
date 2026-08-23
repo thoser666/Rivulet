@@ -50,6 +50,9 @@ pub use region::CaptureRegion;
 pub mod scene;
 pub use scene::{Scene, SceneManager};
 
+pub mod source;
+pub use source::{SceneSource, Source, SourceKind, SourceManager, Transform};
+
 pub mod benchmark;
 pub mod capture_channel;
 pub mod opengl_hook;

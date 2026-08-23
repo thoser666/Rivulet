@@ -148,6 +148,7 @@ occurred, so the GUI can inform the user (mirrors the
 | 2 | **G4 – OpenGL hook** | wglSwapBuffers interception (IAT patch + GDI readback + SHM) | OpenGL fullscreen within budget, tests + docs | ✅ Implementation complete |
 | 3 | **G5 – Performance verification** | Benchmark harness + CI regression | `scripts/` benchmark, budget verified for all backends | ✅ Done (framework + CI gate; GPU measurements on real hardware) |
 | 4 | **G6 – Linux fullscreen** | PipeWire portal (Wayland), X11 fallback | Wayland + X11 capture, tests + docs | ✅ Done |
+| 5 | **S1 – Source abstraction** | SourceKind enum, Transform struct, SceneSource, SourceManager | Any source type renders in a scene with configurable transform, tests | ✅ Done |
 
 G2 is the recommended first step: it delivers fullscreen game capture for the
 majority of titles with no injection risk and unblocks the scene-source

@@ -113,7 +113,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 | --- | --- | --- | --- | --- |
 | M0 – Recording Foundation | Capture, Encoding, Audio, GUI | ✅ Done | — | [![M0](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F3&query=open_issues&label=M0&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/3) |
 | M1 – Solid Recording | Audio tracks, Hardware encoding, QoL, Overlay | ✅ Done (milestone closed) | — | [![M1](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F4&query=open_issues&label=M1&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/4) |
-| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 In progress (scene management + G2 DXGI + G3 Vulkan + G4 OpenGL + G5 perf verification + G6 Linux done; S1–S8 sources open) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
+| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 In progress (scene management + G2–G6 done + S1 done; S2–S8 sources open) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
 | M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | 🚧 In progress | — | [![M3](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F5&query=open_issues&label=M3&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/5) |
 | M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 🚧 Replay Buffer done | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 🚧 In progress (installers, signing, i18n done) | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
@@ -207,7 +207,7 @@ The core concept of OBS: scenes, sources, and transitions.
 - [x] Game capture (window-based) — Windows Graphics Capture (Windows) / xcap (Linux), with checkbox toggle and window picker in the GUI
 
 *Sources (image, text, webcam, browser/embedded Chromium, media, color, per-app audio). Split into work packages S1–S8:*
-- [ ] **S1 – Source abstraction** — complete the Source trait, properties UI, and per-source transforms. *DoD: any source type renders in a scene with a configurable transform, tests.*
+- [x] **S1 – Source abstraction** — complete the Source trait, properties UI, and per-source transforms. *Done: `rivulet-core/src/source.rs` — `SourceKind` enum (Image, Text, Webcam, Browser, Media, Color, GameCapture, ScreenCapture, Audio), `Transform` struct (x/y/width/height/rotation/opacity), `Source` struct with kind/transform/visibility/locked/z_order, `SceneSource` for per-scene transform overrides, `SourceManager` for source CRUD + scene bindings + z-order reordering. 36 unit tests + 18 i18n tests pass. DoD met: any source type can be added to a scene with a configurable transform.*
 - [ ] **S2 – Image source** — PNG/JPEG/GIF, folder loop/slideshow. *DoD: static and slideshow image sources usable in scenes, tests + docs.*
 - [ ] **S3 – Text source** — rich text, scrolling, outline/background. *DoD: styled text source usable in scenes, tests + docs.*
 - [ ] **S4 – Webcam as scene source** — expose the existing camera capture as a scene source with a properties panel. *DoD: webcam selectable per scene with resolution/framerate settings, tests + docs.*
@@ -393,7 +393,7 @@ The core concept of OBS: scenes, sources, and transitions.
 | Scenes & transitions | In progress (scene mgmt + G2 done; transitions/studio open, M2) |
 | Scene collections & profiles | Open (M2) |
 | Studio mode & multi-view | Open (M2) |
-| Source transforms & composition | Open (M2 S1) |
+| Source transforms & composition | ✅ Done (M2 S1) |
 | Hotkeys (incl. remapping, global) | Partial (record/pause/mute/save-replay; remapping planned M5) |
 | Undo/Redo | Open (M2) |
 | Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks, filters) |

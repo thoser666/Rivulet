@@ -171,6 +171,16 @@ impl Locale {
                     "Capture backend: PipeWire portal ({0})",
                 ),
                 ("backend_none", "Capture backend: not active"),
+                // Source kinds (S1)
+                ("source_image", "Image"),
+                ("source_text", "Text"),
+                ("source_webcam", "Webcam"),
+                ("source_browser", "Browser"),
+                ("source_media", "Media"),
+                ("source_color", "Color"),
+                ("source_game_capture", "Game Capture"),
+                ("source_screen_capture", "Screen Capture"),
+                ("source_audio", "Audio"),
                 // Replay buffer
                 ("replay_buffer", "Replay buffer"),
                 ("replay_off", "Off"),
@@ -339,6 +349,16 @@ impl Locale {
                     "Capture-Backend: PipeWire-Portal ({0})",
                 ),
                 ("backend_none", "Capture-Backend: nicht aktiv"),
+                // Source kinds (S1)
+                ("source_image", "Bild"),
+                ("source_text", "Text"),
+                ("source_webcam", "Webcam"),
+                ("source_browser", "Browser"),
+                ("source_media", "Medien"),
+                ("source_color", "Farbe"),
+                ("source_game_capture", "Game-Capture"),
+                ("source_screen_capture", "Bildschirm-Capture"),
+                ("source_audio", "Audio"),
                 // Replay buffer
                 ("replay_buffer", "Replay-Puffer"),
                 ("replay_off", "Aus"),
@@ -630,6 +650,25 @@ mod tests {
             Locale::De.tr("backend_none"),
             "Capture-Backend: nicht aktiv"
         );
+        // Source kinds (S1)
+        assert_eq!(Locale::En.tr("source_image"), "Image");
+        assert_eq!(Locale::De.tr("source_image"), "Bild");
+        assert_eq!(Locale::En.tr("source_text"), "Text");
+        assert_eq!(Locale::De.tr("source_text"), "Text");
+        assert_eq!(Locale::En.tr("source_webcam"), "Webcam");
+        assert_eq!(Locale::De.tr("source_webcam"), "Webcam");
+        assert_eq!(Locale::En.tr("source_browser"), "Browser");
+        assert_eq!(Locale::De.tr("source_browser"), "Browser");
+        assert_eq!(Locale::En.tr("source_media"), "Media");
+        assert_eq!(Locale::De.tr("source_media"), "Medien");
+        assert_eq!(Locale::En.tr("source_color"), "Color");
+        assert_eq!(Locale::De.tr("source_color"), "Farbe");
+        assert_eq!(Locale::En.tr("source_game_capture"), "Game Capture");
+        assert_eq!(Locale::De.tr("source_game_capture"), "Game-Capture");
+        assert_eq!(Locale::En.tr("source_screen_capture"), "Screen Capture");
+        assert_eq!(Locale::De.tr("source_screen_capture"), "Bildschirm-Capture");
+        assert_eq!(Locale::En.tr("source_audio"), "Audio");
+        assert_eq!(Locale::De.tr("source_audio"), "Audio");
     }
 
     #[test]
