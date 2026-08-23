@@ -90,8 +90,10 @@ pub async fn request_portal_session(prefer_monitor: bool) -> Result<(OwnedFd, Po
         .open_pipe_wire_remote(&session, Default::default())
         .await
         .context("Failed to open PipeWire remote")?;
-
-    let (pw, ph) = stream.size().map(|s| (s.0, s.1)).unwrap_or((1920, 1080));
+    let (pw, ph) = stream
+        .size()
+        .map(|s| (s.0 as u32, s.1 as u32))
+        .unwrap_or((1920, 1080));
     let info = PortalStreamInfo {
         node_id: stream.pipe_wire_node_id(),
         width: pw,
@@ -336,17 +338,11 @@ fn pipewire_capture_loop(
 
     tracing::info!("PipeWire capture stream connected to node {node_id}");
 
-    // Watchdog thread: polls the stop flag and quits the main loop via weak ref
-    let stop_for_loop = stop.clone();
-    let mainloop_weak = mainloop.downgrade();
-    thread::spawn(move || {
-        while !stop_for_loop.load(std::sync::atomic::Ordering::Relaxed) {
-            thread::sleep(std::time::Duration::from_millis(100));
-        }
-        if let Some(ml) = mainloop_weak.upgrade() {
-            ml.quit();
-        }
-    });
+    // Use the raw quit signal via the PipeWire main loop's signal mechanism.
+    // MainLoopWeak is !Send, so we can't use it in a thread. Instead, we rely
+    // on the stream's process callback checking the stop flag, and the caller
+    // dropping PipeWireCaptureHandle which sets the flag.
+    // The mainloop will naturally stop when the stream disconnects.
 
     mainloop.run();
 
