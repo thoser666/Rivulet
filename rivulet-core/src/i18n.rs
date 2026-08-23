@@ -173,6 +173,10 @@ impl Locale {
                 ("backend_none", "Capture backend: not active"),
                 // Source kinds (S1)
                 ("source_image", "Image"),
+                ("source_image_single", "Single image"),
+                ("source_image_folder", "Image folder (slideshow)"),
+                ("source_image_interval", "Slideshow interval"),
+                ("source_image_no_images", "No images found"),
                 ("source_text", "Text"),
                 ("source_webcam", "Webcam"),
                 ("source_browser", "Browser"),
@@ -351,6 +355,10 @@ impl Locale {
                 ("backend_none", "Capture-Backend: nicht aktiv"),
                 // Source kinds (S1)
                 ("source_image", "Bild"),
+                ("source_image_single", "Einzelbild"),
+                ("source_image_folder", "Bilderordner (Slideshow)"),
+                ("source_image_interval", "Slideshow-Intervall"),
+                ("source_image_no_images", "Keine Bilder gefunden"),
                 ("source_text", "Text"),
                 ("source_webcam", "Webcam"),
                 ("source_browser", "Browser"),
@@ -669,6 +677,27 @@ mod tests {
         assert_eq!(Locale::De.tr("source_screen_capture"), "Bildschirm-Capture");
         assert_eq!(Locale::En.tr("source_audio"), "Audio");
         assert_eq!(Locale::De.tr("source_audio"), "Audio");
+        // S2 image source keys
+        assert_eq!(Locale::En.tr("source_image_single"), "Single image");
+        assert_eq!(Locale::De.tr("source_image_single"), "Einzelbild");
+        assert_eq!(
+            Locale::En.tr("source_image_folder"),
+            "Image folder (slideshow)"
+        );
+        assert_eq!(
+            Locale::De.tr("source_image_folder"),
+            "Bilderordner (Slideshow)"
+        );
+        assert_eq!(Locale::En.tr("source_image_interval"), "Slideshow interval");
+        assert_eq!(
+            Locale::De.tr("source_image_interval"),
+            "Slideshow-Intervall"
+        );
+        assert_eq!(Locale::En.tr("source_image_no_images"), "No images found");
+        assert_eq!(
+            Locale::De.tr("source_image_no_images"),
+            "Keine Bilder gefunden"
+        );
     }
 
     #[test]

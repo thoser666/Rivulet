@@ -208,7 +208,7 @@ The core concept of OBS: scenes, sources, and transitions.
 
 *Sources (image, text, webcam, browser/embedded Chromium, media, color, per-app audio). Split into work packages S1–S8:*
 - [x] **S1 – Source abstraction** — complete the Source trait, properties UI, and per-source transforms. *Done: `rivulet-core/src/source.rs` — `SourceKind` enum (Image, Text, Webcam, Browser, Media, Color, GameCapture, ScreenCapture, Audio), `Transform` struct (x/y/width/height/rotation/opacity), `Source` struct with kind/transform/visibility/locked/z_order, `SceneSource` for per-scene transform overrides, `SourceManager` for source CRUD + scene bindings + z-order reordering. 36 unit tests + 18 i18n tests pass. DoD met: any source type can be added to a scene with a configurable transform.*
-- [ ] **S2 – Image source** — PNG/JPEG/GIF, folder loop/slideshow. *DoD: static and slideshow image sources usable in scenes, tests + docs.*
+- [x] **S2 – Image source** — PNG/JPEG/GIF, folder loop/slideshow. *DoD: static and slideshow image sources usable in scenes, tests + docs.* Done: `rivulet-core/src/image_source.rs` (10 unit tests, i18n keys EN/DE).
 - [ ] **S3 – Text source** — rich text, scrolling, outline/background. *DoD: styled text source usable in scenes, tests + docs.*
 - [ ] **S4 – Webcam as scene source** — expose the existing camera capture as a scene source with a properties panel. *DoD: webcam selectable per scene with resolution/framerate settings, tests + docs.*
 - [ ] **S5a – Browser spike** — evaluate platform webviews (WebView2 / WebKitGTK / WKWebView) and render into a GPU texture. *DoD: spike document with per-platform recommendation and a rendered-frame proof.*
