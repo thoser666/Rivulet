@@ -50,10 +50,12 @@ pub use region::CaptureRegion;
 pub mod scene;
 pub use scene::{Scene, SceneManager};
 
+pub mod benchmark;
 pub mod capture_channel;
 pub mod opengl_hook;
 pub mod vulkan_hook;
 pub mod vulkan_layer;
+pub use benchmark::{BenchmarkReport, FramePercentiles, OverheadBudget, OverheadResult, SampleSet};
 
 // GStreamer initialization
 static GSTREAMER_INIT: Lazy<()> = Lazy::new(|| {

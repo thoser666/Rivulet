@@ -81,6 +81,9 @@ jobs:
           python3 scripts/check-parity-checklist.py
           python3 scripts/check-parity-checklist.py --self-test
 
+      - name: G5 – Benchmark framework smoke test
+        run: python3 scripts/g5-benchmark.py --smoke-test
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
