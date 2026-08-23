@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.43.3-alpha.1] - 2026-08-23
+- fix: add 3-strategy GStreamer download to build-package.yml
+
 ## [0.43.2-alpha.1] - 2026-08-23
 - fix: resolve clippy::field_reassign_with_default in source.rs tests
 
