@@ -42,12 +42,8 @@ pub struct PortalFrame {
 /// PipeWire remote fd plus stream metadata.
 ///
 /// This is an async function — call it from a tokio runtime.
-pub async fn request_portal_session(
-    prefer_monitor: bool,
-) -> Result<(OwnedFd, PortalStreamInfo)> {
-    use ashpd::desktop::screencast::{
-        CursorMode, Screencast, SelectSourcesOptions, SourceType,
-    };
+pub async fn request_portal_session(prefer_monitor: bool) -> Result<(OwnedFd, PortalStreamInfo)> {
+    use ashpd::desktop::screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType};
     use ashpd::desktop::PersistMode;
 
     let proxy = Screencast::new()
@@ -146,8 +142,7 @@ pub struct PipeWireCaptureHandle {
 
 impl Drop for PipeWireCaptureHandle {
     fn drop(&mut self) {
-        self.stop
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -178,8 +173,8 @@ fn pipewire_capture_loop(
 
     pw::init();
 
-    let mainloop = pw::main_loop::MainLoopRc::new(None)
-        .context("Failed to create PipeWire main loop")?;
+    let mainloop =
+        pw::main_loop::MainLoopRc::new(None).context("Failed to create PipeWire main loop")?;
     let context = pw::context::ContextRc::new(&mainloop, None)
         .context("Failed to create PipeWire context")?;
     let core = context
@@ -216,11 +211,10 @@ fn pipewire_capture_loop(
                 return;
             }
 
-            let (media_type, media_subtype) =
-                match spa::param::format_utils::parse_format(param) {
-                    Ok(v) => v,
-                    Err(_) => return,
-                };
+            let (media_type, media_subtype) = match spa::param::format_utils::parse_format(param) {
+                Ok(v) => v,
+                Err(_) => return,
+            };
 
             if media_type != spa::param::format::MediaType::Video
                 || media_subtype != spa::param::format::MediaSubtype::Raw
@@ -340,8 +334,8 @@ fn pipewire_capture_loop(
     .0
     .into_inner();
 
-    let mut params = [spa::pod::Pod::from_bytes(&values)
-        .context("Failed to parse format negotiation pod")?];
+    let mut params =
+        [spa::pod::Pod::from_bytes(&values).context("Failed to parse format negotiation pod")?];
 
     stream
         .connect(
@@ -391,9 +385,7 @@ mod tests {
     #[test]
     fn pipe_wire_capture_handle_stops_on_drop() {
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let handle = PipeWireCaptureHandle {
-            stop: stop.clone(),
-        };
+        let handle = PipeWireCaptureHandle { stop: stop.clone() };
         assert!(!stop.load(std::sync::atomic::Ordering::Relaxed));
         drop(handle);
         assert!(stop.load(std::sync::atomic::Ordering::Relaxed));
