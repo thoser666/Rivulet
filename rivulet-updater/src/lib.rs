@@ -214,7 +214,11 @@ pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
 
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open").arg(path).spawn()?;
+        let mut child = std::process::Command::new("open").arg(path).spawn()?;
+        let status = child.wait()?;
+        if !status.success() {
+            anyhow::bail!("open exited with {status} — is the DMG file valid?");
+        }
         Ok(false)
     }
 

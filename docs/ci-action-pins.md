@@ -18,7 +18,7 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 <!-- action-pins-table:start -->
 | Action | Version | Pinned SHA | Used in |
 | --- | --- | --- | --- |
-| `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | ci.yml, nightly.yml |
+| `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | build-package.yml, ci.yml, nightly.yml |
 | `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | build-package.yml, ci.yml, nightly.yml, release.yml, signing-e2e.yml |
 | `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | ci.yml, release.yml |
 | `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | build-package.yml |
