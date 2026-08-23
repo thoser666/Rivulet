@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.41.5-alpha.1] - 2026-08-23
+- fix: G6 PipeWire — move all shared state into PipeWireUserData
+
 ## [0.41.4-alpha.1] - 2026-08-23
 - fix: G6 PipeWire — wrap closures in Arc for Send safety on Linux
 
