@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.41.2-alpha.1] - 2026-08-23
+- fix: G6 PipeWire — fix Linux CI API mismatches (source_type, parse, stream.size)
+
 ## [0.41.1-alpha.1] - 2026-08-23
 - fix: G6 PipeWire portal — use Rc types for cross-platform compat, add GUI dep
 
