@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.40.1-alpha.1] - 2026-08-23
+- fix: robust GStreamer download with mirrored release fallback
+
 ## [0.40.0-alpha.1] - 2026-08-23
 - feat: G5 – Performance verification benchmark framework + CI gate
 - ci: add retry logic for GStreamer MSI download
