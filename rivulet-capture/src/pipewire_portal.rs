@@ -184,8 +184,11 @@ fn pipewire_capture_loop(
     )
     .context("Failed to create PipeWire stream")?;
 
-    let tx_for_listener = tx.clone();
-    let stop_for_listener = stop.clone();
+    // Clone into Arc-wrapped copies that are Send + 'static for the
+    // PipeWire process callback (which may outlive the function).
+    let tx_for_listener: std::sync::Arc<mpsc::Sender<PortalFrame>> =
+        std::sync::Arc::new(tx.clone());
+    let stop_for_listener: std::sync::Arc<std::sync::atomic::AtomicBool> = stop.clone();
 
     let _listener = stream
         .add_local_listener_with_user_data(format)
