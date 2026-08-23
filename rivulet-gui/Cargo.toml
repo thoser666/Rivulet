@@ -55,6 +55,7 @@ version = "0.30"
 ashpd = { version = "0.13.10", features = ["tokio", "screencast"] }
 pipewire = { version = "0.10.0", features = ["v0_3_33"] }
 rivulet-audio = { path = "../rivulet-audio" }
+rivulet-capture = { path = "../rivulet-capture" }
 
 
 

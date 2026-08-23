@@ -13,9 +13,6 @@
 //! 2. **PipeWire loop** (blocking, runs on a dedicated thread): connects to
 //!    the PipeWire remote via the fd, creates a video stream on the given
 //!    node, and dequeues frames into an `mpsc` channel.
-//!
-//! The two halves communicate via the PipeWire fd (passed from async → thread)
-//! and the frame channel (thread → engine).
 
 use anyhow::{Context, Result};
 use std::os::fd::OwnedFd;
@@ -146,6 +143,9 @@ impl Drop for PipeWireCaptureHandle {
 }
 
 /// Blocking PipeWire main loop — runs on a dedicated thread.
+///
+/// Uses `MainLoopRc` (shared ownership) so a watchdog thread can quit the
+/// loop via a weak reference when the stop flag is set.
 fn pipewire_capture_loop(
     fd: OwnedFd,
     node_id: u32,
@@ -159,19 +159,19 @@ fn pipewire_capture_loop(
     pw::init();
 
     let mainloop =
-        pw::main_loop::MainLoopBox::new(None).context("Failed to create PipeWire main loop")?;
-    let context = pw::context::ContextBox::new(mainloop.loop_(), None)
+        pw::main_loop::MainLoopRc::new(None).context("Failed to create PipeWire main loop")?;
+    let context = pw::context::ContextRc::new(&mainloop, None)
         .context("Failed to create PipeWire context")?;
     let core = context
-        .connect_fd(fd, None)
+        .connect_fd_rc(fd, None)
         .context("Failed to connect to PipeWire remote")?;
 
     // Shared state for format negotiation
     let format: std::sync::Mutex<Option<spa::param::video::VideoInfoRaw>> =
         std::sync::Mutex::new(None);
 
-    let stream = pw::stream::StreamBox::new(
-        &core,
+    let stream = pw::stream::StreamRc::new(
+        core.clone(),
         "rivulet-capture",
         properties! {
             *pw::keys::MEDIA_TYPE => "Video",
@@ -228,26 +228,27 @@ fn pipewire_capture_loop(
                 None => {
                     tracing::warn!("PipeWire: no buffers available");
                 }
-                Some(buffer) => {
-                    let datas = buffer.datas();
+                Some(mut buffer) => {
+                    let datas = buffer.datas_mut();
                     if datas.is_empty() {
                         return;
                     }
 
-                    let data = &datas[0];
+                    let data = &mut datas[0];
                     let chunk_size = data.chunk().size() as usize;
 
                     if chunk_size == 0 {
                         return;
                     }
 
-                    // Read the frame data from the PipeWire buffer
-                    let map = data.data();
-                    if map.is_empty() {
-                        return;
-                    }
-
-                    let pixels = &map[0..chunk_size.min(map.len())];
+                    // Read frame data from the PipeWire buffer
+                    let pixels = match data.data() {
+                        Some(slice) => {
+                            let len = chunk_size.min(slice.len());
+                            slice[..len].to_vec()
+                        }
+                        None => return,
+                    };
 
                     let (width, height) = {
                         let fmt_lock = user_data.lock().unwrap();
@@ -258,7 +259,7 @@ fn pipewire_capture_loop(
                     };
 
                     let _ = tx_for_listener.send(PortalFrame {
-                        data: pixels.to_vec(),
+                        data: pixels,
                         width,
                         height,
                     });
@@ -336,15 +337,16 @@ fn pipewire_capture_loop(
 
     tracing::info!("PipeWire capture stream connected to node {node_id}");
 
-    // Run the main loop — stops when `stop` is set
-    // We poll the stop flag periodically since PipeWire mainloop.run() is blocking
+    // Watchdog thread: polls the stop flag and quits the main loop via weak ref
     let stop_for_loop = stop.clone();
-    let mainloop_clone = mainloop.clone();
+    let mainloop_weak = mainloop.downgrade();
     thread::spawn(move || {
         while !stop_for_loop.load(std::sync::atomic::Ordering::Relaxed) {
             thread::sleep(std::time::Duration::from_millis(100));
         }
-        mainloop_clone.quit();
+        if let Some(ml) = mainloop_weak.upgrade() {
+            ml.quit();
+        }
     });
 
     mainloop.run();
