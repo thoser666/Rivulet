@@ -42,8 +42,12 @@ pub struct PortalFrame {
 /// PipeWire remote fd plus stream metadata.
 ///
 /// This is an async function — call it from a tokio runtime.
-pub async fn request_portal_session(prefer_monitor: bool) -> Result<(OwnedFd, PortalStreamInfo)> {
-    use ashpd::desktop::screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType};
+pub async fn request_portal_session(
+    prefer_monitor: bool,
+) -> Result<(OwnedFd, PortalStreamInfo)> {
+    use ashpd::desktop::screencast::{
+        CursorMode, Screencast, SelectSourcesOptions, SourceType,
+    };
     use ashpd::desktop::PersistMode;
 
     let proxy = Screencast::new()
@@ -90,6 +94,7 @@ pub async fn request_portal_session(prefer_monitor: bool) -> Result<(OwnedFd, Po
         .open_pipe_wire_remote(&session, Default::default())
         .await
         .context("Failed to open PipeWire remote")?;
+
     let (pw, ph) = stream
         .size()
         .map(|s| (s.0 as u32, s.1 as u32))
@@ -141,14 +146,26 @@ pub struct PipeWireCaptureHandle {
 
 impl Drop for PipeWireCaptureHandle {
     fn drop(&mut self) {
-        self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.stop
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
+}
+
+/// User data shared between PipeWire callbacks and the capture loop.
+struct PipeWireUserData {
+    /// Video format negotiated by param_changed.
+    format: std::sync::Mutex<Option<spa::param::video::VideoInfoRaw>>,
+    /// Stop flag — checked in the process callback.
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Frame sender.
+    tx: mpsc::Sender<PortalFrame>,
 }
 
 /// Blocking PipeWire main loop — runs on a dedicated thread.
 ///
-/// Uses `MainLoopRc` (shared ownership) so a watchdog thread can quit the
-/// loop via a weak reference when the stop flag is set.
+/// Uses `MainLoopRc` (shared ownership) so the main loop reference is valid
+/// for the entire function lifetime. All PipeWire state is owned by this
+/// stack frame.
 fn pipewire_capture_loop(
     fd: OwnedFd,
     node_id: u32,
@@ -161,17 +178,19 @@ fn pipewire_capture_loop(
 
     pw::init();
 
-    let mainloop =
-        pw::main_loop::MainLoopRc::new(None).context("Failed to create PipeWire main loop")?;
+    let mainloop = pw::main_loop::MainLoopRc::new(None)
+        .context("Failed to create PipeWire main loop")?;
     let context = pw::context::ContextRc::new(&mainloop, None)
         .context("Failed to create PipeWire context")?;
     let core = context
         .connect_fd_rc(fd, None)
         .context("Failed to connect to PipeWire remote")?;
 
-    // Shared state for format negotiation
-    let format: std::sync::Mutex<Option<spa::param::video::VideoInfoRaw>> =
-        std::sync::Mutex::new(None);
+    let user_data = PipeWireUserData {
+        format: std::sync::Mutex::new(None),
+        stop,
+        tx,
+    };
 
     let stream = pw::stream::StreamRc::new(
         core.clone(),
@@ -184,14 +203,8 @@ fn pipewire_capture_loop(
     )
     .context("Failed to create PipeWire stream")?;
 
-    // Clone into Arc-wrapped copies that are Send + 'static for the
-    // PipeWire process callback (which may outlive the function).
-    let tx_for_listener: std::sync::Arc<mpsc::Sender<PortalFrame>> =
-        std::sync::Arc::new(tx.clone());
-    let stop_for_listener: std::sync::Arc<std::sync::atomic::AtomicBool> = stop.clone();
-
     let _listener = stream
-        .add_local_listener_with_user_data(format)
+        .add_local_listener_with_user_data(user_data)
         .state_changed(|_, _, old, new| {
             tracing::debug!("PipeWire stream state: {:?} -> {:?}", old, new);
         })
@@ -203,10 +216,11 @@ fn pipewire_capture_loop(
                 return;
             }
 
-            let (media_type, media_subtype) = match spa::param::format_utils::parse_format(param) {
-                Ok(v) => v,
-                Err(_) => return,
-            };
+            let (media_type, media_subtype) =
+                match spa::param::format_utils::parse_format(param) {
+                    Ok(v) => v,
+                    Err(_) => return,
+                };
 
             if media_type != spa::param::format::MediaType::Video
                 || media_subtype != spa::param::format::MediaSubtype::Raw
@@ -214,17 +228,16 @@ fn pipewire_capture_loop(
                 return;
             }
 
-            let mut fmt = user_data.lock().unwrap();
             let mut video_info = spa::param::video::VideoInfoRaw::default();
             if video_info.parse(param).is_ok() {
                 let w = video_info.size().width;
                 let h = video_info.size().height;
                 tracing::info!("PipeWire video format: {}x{}", w, h);
-                *fmt = Some(video_info);
+                *user_data.format.lock().unwrap() = Some(video_info);
             }
         })
         .process(|stream, user_data| {
-            if stop_for_listener.load(std::sync::atomic::Ordering::Relaxed) {
+            if user_data.stop.load(std::sync::atomic::Ordering::Relaxed) {
                 return;
             }
 
@@ -255,14 +268,14 @@ fn pipewire_capture_loop(
                     };
 
                     let (width, height) = {
-                        let fmt_lock = user_data.lock().unwrap();
+                        let fmt_lock = user_data.format.lock().unwrap();
                         match fmt_lock.as_ref() {
                             Some(info) => (info.size().width, info.size().height),
                             None => return, // Format not yet negotiated
                         }
                     };
 
-                    let _ = tx_for_listener.send(PortalFrame {
+                    let _ = user_data.tx.send(PortalFrame {
                         data: pixels,
                         width,
                         height,
@@ -327,8 +340,8 @@ fn pipewire_capture_loop(
     .0
     .into_inner();
 
-    let mut params =
-        [spa::pod::Pod::from_bytes(&values).context("Failed to parse format negotiation pod")?];
+    let mut params = [spa::pod::Pod::from_bytes(&values)
+        .context("Failed to parse format negotiation pod")?];
 
     stream
         .connect(
@@ -340,12 +353,6 @@ fn pipewire_capture_loop(
         .context("Failed to connect PipeWire stream")?;
 
     tracing::info!("PipeWire capture stream connected to node {node_id}");
-
-    // Use the raw quit signal via the PipeWire main loop's signal mechanism.
-    // MainLoopWeak is !Send, so we can't use it in a thread. Instead, we rely
-    // on the stream's process callback checking the stop flag, and the caller
-    // dropping PipeWireCaptureHandle which sets the flag.
-    // The mainloop will naturally stop when the stream disconnects.
 
     mainloop.run();
 
@@ -384,7 +391,9 @@ mod tests {
     #[test]
     fn pipe_wire_capture_handle_stops_on_drop() {
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let handle = PipeWireCaptureHandle { stop: stop.clone() };
+        let handle = PipeWireCaptureHandle {
+            stop: stop.clone(),
+        };
         assert!(!stop.load(std::sync::atomic::Ordering::Relaxed));
         drop(handle);
         assert!(stop.load(std::sync::atomic::Ordering::Relaxed));
