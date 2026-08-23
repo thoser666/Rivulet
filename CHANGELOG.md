@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.43.5-alpha.1] - 2026-08-23
+- fix(updater): wait for installer on all platforms + fix macOS test
+
 ## [0.43.4-alpha.1] - 2026-08-23
 - fix(updater): wait for installer process before deleting downloaded file
 
