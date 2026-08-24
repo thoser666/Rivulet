@@ -177,6 +177,23 @@ impl Locale {
                 ("source_image_folder", "Image folder (slideshow)"),
                 ("source_image_interval", "Slideshow interval"),
                 ("source_image_no_images", "No images found"),
+                // Text source (S3)
+                ("source_text_font_size", "Font size"),
+                ("source_text_font_name", "Font"),
+                ("source_text_color", "Text color"),
+                ("source_text_background", "Background"),
+                ("source_text_outline", "Outline"),
+                ("source_text_alignment", "Alignment"),
+                ("source_text_scroll", "Scroll"),
+                ("source_text_scroll_speed", "Scroll speed"),
+                // Webcam source (S4)
+                ("source_webcam_device", "Device"),
+                ("source_webcam_resolution", "Resolution"),
+                ("source_webcam_fps", "Frame rate"),
+                ("source_webcam_format", "Pixel format"),
+                ("source_webcam_mirror", "Mirror"),
+                ("source_webcam_active", "Camera active"),
+                ("source_webcam_inactive", "Camera inactive"),
                 ("source_text", "Text"),
                 ("source_webcam", "Webcam"),
                 ("source_browser", "Browser"),
@@ -359,6 +376,23 @@ impl Locale {
                 ("source_image_folder", "Bilderordner (Slideshow)"),
                 ("source_image_interval", "Slideshow-Intervall"),
                 ("source_image_no_images", "Keine Bilder gefunden"),
+                // Text source (S3)
+                ("source_text_font_size", "Schriftgröße"),
+                ("source_text_font_name", "Schriftart"),
+                ("source_text_color", "Textfarbe"),
+                ("source_text_background", "Hintergrund"),
+                ("source_text_outline", "Umriss"),
+                ("source_text_alignment", "Ausrichtung"),
+                ("source_text_scroll", "Scrollen"),
+                ("source_text_scroll_speed", "Scrollgeschwindigkeit"),
+                // Webcam source (S4)
+                ("source_webcam_device", "Gerät"),
+                ("source_webcam_resolution", "Auflösung"),
+                ("source_webcam_fps", "Bildrate"),
+                ("source_webcam_format", "Pixelformat"),
+                ("source_webcam_mirror", "Spiegeln"),
+                ("source_webcam_active", "Kamera aktiv"),
+                ("source_webcam_inactive", "Kamera inaktiv"),
                 ("source_text", "Text"),
                 ("source_webcam", "Webcam"),
                 ("source_browser", "Browser"),
@@ -698,6 +732,41 @@ mod tests {
             Locale::De.tr("source_image_no_images"),
             "Keine Bilder gefunden"
         );
+        // S3 text source keys
+        assert_eq!(Locale::En.tr("source_text_font_size"), "Font size");
+        assert_eq!(Locale::De.tr("source_text_font_size"), "Schriftgröße");
+        assert_eq!(Locale::En.tr("source_text_font_name"), "Font");
+        assert_eq!(Locale::De.tr("source_text_font_name"), "Schriftart");
+        assert_eq!(Locale::En.tr("source_text_color"), "Text color");
+        assert_eq!(Locale::De.tr("source_text_color"), "Textfarbe");
+        assert_eq!(Locale::En.tr("source_text_background"), "Background");
+        assert_eq!(Locale::De.tr("source_text_background"), "Hintergrund");
+        assert_eq!(Locale::En.tr("source_text_outline"), "Outline");
+        assert_eq!(Locale::De.tr("source_text_outline"), "Umriss");
+        assert_eq!(Locale::En.tr("source_text_alignment"), "Alignment");
+        assert_eq!(Locale::De.tr("source_text_alignment"), "Ausrichtung");
+        assert_eq!(Locale::En.tr("source_text_scroll"), "Scroll");
+        assert_eq!(Locale::De.tr("source_text_scroll"), "Scrollen");
+        assert_eq!(Locale::En.tr("source_text_scroll_speed"), "Scroll speed");
+        assert_eq!(
+            Locale::De.tr("source_text_scroll_speed"),
+            "Scrollgeschwindigkeit"
+        );
+        // S4 webcam source keys
+        assert_eq!(Locale::En.tr("source_webcam_device"), "Device");
+        assert_eq!(Locale::De.tr("source_webcam_device"), "Gerät");
+        assert_eq!(Locale::En.tr("source_webcam_resolution"), "Resolution");
+        assert_eq!(Locale::De.tr("source_webcam_resolution"), "Auflösung");
+        assert_eq!(Locale::En.tr("source_webcam_fps"), "Frame rate");
+        assert_eq!(Locale::De.tr("source_webcam_fps"), "Bildrate");
+        assert_eq!(Locale::En.tr("source_webcam_format"), "Pixel format");
+        assert_eq!(Locale::De.tr("source_webcam_format"), "Pixelformat");
+        assert_eq!(Locale::En.tr("source_webcam_mirror"), "Mirror");
+        assert_eq!(Locale::De.tr("source_webcam_mirror"), "Spiegeln");
+        assert_eq!(Locale::En.tr("source_webcam_active"), "Camera active");
+        assert_eq!(Locale::De.tr("source_webcam_active"), "Kamera aktiv");
+        assert_eq!(Locale::En.tr("source_webcam_inactive"), "Camera inactive");
+        assert_eq!(Locale::De.tr("source_webcam_inactive"), "Kamera inaktiv");
     }
 
     #[test]

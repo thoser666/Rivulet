@@ -56,6 +56,12 @@ pub use source::{SceneSource, Source, SourceKind, SourceManager, Transform};
 pub mod image_source;
 pub use image_source::{is_image_file, supported_image_extensions, ImageSource};
 
+pub mod text_source;
+pub use text_source::{FontWeight, Rgba, ScrollDirection, TextAlign, TextSource};
+
+pub mod webcam_source;
+pub use webcam_source::{PixelFormat, Resolution, WebcamSource};
+
 pub mod benchmark;
 pub mod capture_channel;
 pub mod opengl_hook;

@@ -209,8 +209,8 @@ The core concept of OBS: scenes, sources, and transitions.
 *Sources (image, text, webcam, browser/embedded Chromium, media, color, per-app audio). Split into work packages S1–S8:*
 - [x] **S1 – Source abstraction** — complete the Source trait, properties UI, and per-source transforms. *Done: `rivulet-core/src/source.rs` — `SourceKind` enum (Image, Text, Webcam, Browser, Media, Color, GameCapture, ScreenCapture, Audio), `Transform` struct (x/y/width/height/rotation/opacity), `Source` struct with kind/transform/visibility/locked/z_order, `SceneSource` for per-scene transform overrides, `SourceManager` for source CRUD + scene bindings + z-order reordering. 36 unit tests + 18 i18n tests pass. DoD met: any source type can be added to a scene with a configurable transform.*
 - [x] **S2 – Image source** — PNG/JPEG/GIF, folder loop/slideshow. *DoD: static and slideshow image sources usable in scenes, tests + docs.* Done: `rivulet-core/src/image_source.rs` (10 unit tests, i18n keys EN/DE).
-- [ ] **S3 – Text source** — rich text, scrolling, outline/background. *DoD: styled text source usable in scenes, tests + docs.*
-- [ ] **S4 – Webcam as scene source** — expose the existing camera capture as a scene source with a properties panel. *DoD: webcam selectable per scene with resolution/framerate settings, tests + docs.*
+- [x] **S3 – Text source** — rich text, scrolling, outline/background. *DoD: styled text source usable in scenes, tests + docs.* Done: `rivulet-core/src/text_source.rs` (Rgba, FontWeight, TextAlign, ScrollDirection, TextSource with scrolling animation, 30 unit tests + i18n keys EN/DE).
+- [x] **S4 – Webcam as scene source** — expose the existing camera capture as a scene source with a properties panel. *DoD: webcam selectable per scene with resolution/framerate settings, tests + docs.* Done: `rivulet-core/src/webcam_source.rs` (PixelFormat, Resolution, WebcamSource with resolution/framerate/mirror/timeout, 19 unit tests + i18n keys EN/DE).
 - [ ] **S5a – Browser spike** — evaluate platform webviews (WebView2 / WebKitGTK / WKWebView) and render into a GPU texture. *DoD: spike document with per-platform recommendation and a rendered-frame proof.*
 - [ ] **S5b – Browser source** — URL, interaction, transparency, config UI. *DoD: interactive browser source in scenes on all platforms, tests + docs.*
 - [ ] **S6 – Media source** — video/audio file playback in scenes (loop, restart on scene entry, speed). *DoD: media files play in scenes with controls, tests + docs. Tracked in [#66](https://github.com/thoser666/Rivulet/issues/66).*
@@ -387,7 +387,7 @@ The core concept of OBS: scenes, sources, and transitions.
 | Capture sources (display, window, webcam) | Partial (display + window + region, multi-monitor) |
 | Game capture (D3D/Vulkan/OpenGL hooks) | In progress (G2 DXGI done; G3 Vulkan layer + capture pipeline; G4 OpenGL hook; G5 perf verification done; G6 Linux PipeWire portal done) |
 | Media & color sources | Open (M2 S6/S7) |
-| Image & text sources | Open (M2 S2/S3) |
+| Image & text sources | Done (S2 + S3 + S4 done) |
 | Browser sources | Open (M2 S5b) |
 | Audio sources (microphone, per-app, devices) | Open (M2 S8) |
 | Scenes & transitions | In progress (scene mgmt + G2 done; transitions/studio open, M2) |
