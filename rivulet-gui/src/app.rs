@@ -91,9 +91,9 @@ impl RegionPreview {
 /// on window change and at most every [`GAME_PREVIEW_REFRESH_INTERVAL`] while
 /// the game-capture picker is open.
 ///
-/// Only the Windows record view has a game-window picker today, so the
-/// preview is Windows-only.
-#[cfg(target_os = "windows")]
+/// The game-window picker exists on Linux and Windows; macOS has no game
+/// capture today.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 struct GamePreview {
     texture: egui::TextureHandle,
     /// Frame size in pixels.
@@ -106,7 +106,7 @@ struct GamePreview {
     last_refresh: std::time::Instant,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 impl GamePreview {
     fn new(ctx: &egui::Context, image: image::RgbaImage, window_id: u64) -> Self {
         let width = image.width();
@@ -128,7 +128,7 @@ impl GamePreview {
 /// How often the game-window preview is re-grabbed while the game-capture
 /// picker is open (matches the roadmap: "refresh on selection change or
 /// every ~500ms").
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 const GAME_PREVIEW_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Default maximum time to wait for the first captured frame before aborting
@@ -601,11 +601,11 @@ pub struct RivuletApp {
     selected_game_window_idx: Option<usize>,
     /// Live thumbnail of the selected game window (refreshed while the
     /// picker is open). Not persisted.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[serde(skip)]
     game_preview: Option<GamePreview>,
     /// Error message when the live game-window preview could not be captured.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[serde(skip)]
     game_preview_error: Option<String>,
     #[serde(skip)]
@@ -762,9 +762,9 @@ impl Default for RivuletApp {
             // Game capture
             game_windows: Vec::new(),
             selected_game_window_idx: None,
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             game_preview: None,
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             game_preview_error: None,
             game_capture_rx: None,
             game_capture_handle: None,
@@ -801,29 +801,37 @@ impl RivuletApp {
 
     /// Refresh the list of game-like windows for game capture mode.
     ///
-    /// The `rivulet-core` list is empty on Windows, so xcap's own window
-    /// enumeration is used with the same heuristic as the Linux core path
-    /// (visible title, larger than 640x480). This also makes the live
-    /// game-window preview targetable on Windows.
-    #[cfg(target_os = "windows")]
+    /// On Linux the list comes from `rivulet-core` (xdotool + xcap). The
+    /// core list is empty on Windows, so xcap's own window enumeration is
+    /// used there with the same heuristic (visible title, larger than
+    /// 640x480). This also makes the live game-window preview targetable
+    /// on both platforms.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn refresh_game_windows(&mut self) {
-        self.game_windows = xcap::Window::all()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|w| {
-                let title = w.title().unwrap_or_default();
-                let (width, height) = (w.width().unwrap_or(0), w.height().unwrap_or(0));
-                if title.trim().is_empty() || width <= 640 || height <= 480 {
-                    return None;
-                }
-                Some(rivulet_core::GameWindow {
-                    id: w.id().map(|id| id as u64).unwrap_or(0),
-                    title,
-                    width,
-                    height,
+        #[cfg(target_os = "linux")]
+        {
+            self.game_windows = rivulet_core::game_capture::list_game_windows();
+        }
+        #[cfg(target_os = "windows")]
+        {
+            self.game_windows = xcap::Window::all()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|w| {
+                    let title = w.title().unwrap_or_default();
+                    let (width, height) = (w.width().unwrap_or(0), w.height().unwrap_or(0));
+                    if title.trim().is_empty() || width <= 640 || height <= 480 {
+                        return None;
+                    }
+                    Some(rivulet_core::GameWindow {
+                        id: w.id().map(|id| id as u64).unwrap_or(0),
+                        title,
+                        width,
+                        height,
+                    })
                 })
-            })
-            .collect();
+                .collect();
+        }
         self.selected_game_window_idx = None;
         self.game_preview = None;
         self.game_preview_error = None;
@@ -831,7 +839,7 @@ impl RivuletApp {
 
     /// Grab a single frame from the given window (via xcap) for the live
     /// game-window preview.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn grab_game_window_preview(&mut self, ctx: &egui::Context, window_id: u64) {
         match game_window_preview_image(window_id) {
             Some(image) => {
@@ -851,7 +859,7 @@ impl RivuletApp {
     /// Keep the game-window preview fresh while the game-capture picker is
     /// open: grab a new frame when the selection changed or when at least
     /// [`GAME_PREVIEW_REFRESH_INTERVAL`] elapsed since the last grab.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn update_game_preview(&mut self, ctx: &egui::Context) {
         let Some(idx) = self.selected_game_window_idx else {
             self.game_preview = None;
@@ -1471,13 +1479,36 @@ impl RivuletApp {
         }
 
         // Fallback: xcap screen/window capture.
-        // Capture source: window takes precedence over monitor.
+        // Capture source: game window (when game capture is enabled) takes
+        // precedence over the plain window/monitor pickers.
         enum Source {
             Monitor(xcap::Monitor),
             Window(xcap::Window),
         }
 
-        let source = if let Some(idx) = self.selected_window_idx {
+        let source = if self.use_game_capture {
+            // Resolve the selected game window (xdotool id) to its xcap
+            // window so the existing capture loop below handles it.
+            let Some(idx) = self.selected_game_window_idx else {
+                self.record_status = Some(self.tr("no_source_selected").to_string());
+                return;
+            };
+            let Some(game_window) = self.game_windows.get(idx) else {
+                self.record_status = Some(self.tr("invalid_window").to_string());
+                return;
+            };
+            match xcap::Window::all().ok().and_then(|windows| {
+                windows
+                    .into_iter()
+                    .find(|w| w.id().map(|id| id as u64).unwrap_or(0) == game_window.id)
+            }) {
+                Some(w) => Source::Window(w),
+                None => {
+                    self.record_status = Some(self.tr("invalid_window").to_string());
+                    return;
+                }
+            }
+        } else if let Some(idx) = self.selected_window_idx {
             match self.windows.get(idx).cloned() {
                 Some(w) => Source::Window(w),
                 None => {
@@ -3073,8 +3104,76 @@ impl eframe::App for RivuletApp {
                                 .clicked()
                             {
                                 self.refresh_linux_sources();
+                                self.refresh_game_windows();
                             }
                         });
+                        // Game capture toggle + window selection + live preview
+                        self.update_game_preview(ui.ctx());
+                        ui.horizontal(|ui| {
+                            let gc_label = self.tr("game_capture");
+                            ui.checkbox(&mut self.use_game_capture, gc_label);
+                            if self.use_game_capture {
+                                egui::ComboBox::from_id_salt("linux_game_window_select")
+                                    .selected_text(
+                                        self.selected_game_window_idx
+                                            .and_then(|idx| self.game_windows.get(idx))
+                                            .map(|w| w.title.clone())
+                                            .unwrap_or_else(|| {
+                                                self.tr("select_game_window").to_string()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for (i, window) in self.game_windows.iter().enumerate() {
+                                            if ui
+                                                .selectable_label(
+                                                    self.selected_game_window_idx == Some(i),
+                                                    &window.title,
+                                                )
+                                                .clicked()
+                                            {
+                                                self.selected_game_window_idx = Some(i);
+                                                self.selected_monitor_idx = None;
+                                                self.selected_window_idx = None;
+                                                self.selected_camera_idx = None;
+                                            }
+                                        }
+                                    });
+                            }
+                        });
+                        // Live thumbnail of the selected game window, so the
+                        // user can verify the correct window is targeted
+                        // before recording starts (refreshes every ~500ms).
+                        if self.use_game_capture {
+                            if let Some(preview) = &self.game_preview {
+                                let scale = (ui.available_width().min(360.0)
+                                    / preview.width.max(1) as f32)
+                                    .min(0.5);
+                                let size = egui::vec2(
+                                    preview.width as f32 * scale,
+                                    preview.height as f32 * scale,
+                                );
+                                let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                                let uv = egui::Rect::from_min_max(
+                                    egui::pos2(0.0, 0.0),
+                                    egui::pos2(1.0, 1.0),
+                                );
+                                ui.painter().image(
+                                    preview.texture.id(),
+                                    rect,
+                                    uv,
+                                    egui::Color32::WHITE,
+                                );
+                                ui.label(
+                                    egui::RichText::new(self.tr("game_preview_title"))
+                                        .small()
+                                        .color(colors.hint),
+                                );
+                            } else if let Some(err) = &self.game_preview_error {
+                                ui.colored_label(colors.warning, err);
+                            } else if self.selected_game_window_idx.is_some() {
+                                ui.colored_label(colors.hint, self.tr("game_preview_loading"));
+                            }
+                        }
                         // Region capture controls (monitor capture only)
                         ui.horizontal(|ui| {
                             let monitor_selected = self.selected_monitor_idx.is_some();
@@ -3542,7 +3641,7 @@ fn monitor_preview_image(
 /// Uses xcap's window enumeration and capture. Returns `None` when the
 /// window cannot be found or captured (closed, minimized, or a transient
 /// grab error).
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn game_window_preview_image(window_id: u64) -> Option<image::RgbaImage> {
     let window = xcap::Window::all()
         .ok()?
@@ -3557,7 +3656,7 @@ fn game_window_preview_image(window_id: u64) -> Option<image::RgbaImage> {
 /// a new frame is grabbed when there is no preview yet, when the selected
 /// window changed, or when [`GAME_PREVIEW_REFRESH_INTERVAL`] has elapsed
 /// since the last grab.
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn should_refresh_game_preview(
     preview_window_id: Option<u64>,
     target_window_id: u64,
@@ -4313,14 +4412,14 @@ mod tests {
 
     // ── Game-window live preview refresh ─────────────────────────
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn game_preview_refreshes_when_no_preview_yet() {
         let now = std::time::Instant::now();
         assert!(should_refresh_game_preview(None, 42, None, now));
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn game_preview_refreshes_when_window_changed() {
         let now = std::time::Instant::now();
@@ -4328,7 +4427,7 @@ mod tests {
         assert!(should_refresh_game_preview(Some(1), 2, Some(now), now));
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn game_preview_does_not_refresh_before_interval_elapses() {
         let now = std::time::Instant::now();
@@ -4337,7 +4436,7 @@ mod tests {
         assert!(!should_refresh_game_preview(Some(7), 7, Some(recent), now));
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     fn game_preview_refreshes_after_interval_elapses() {
         let now = std::time::Instant::now();

@@ -149,6 +149,7 @@ occurred, so the GUI can inform the user (mirrors the
 | 3 | **G5 – Performance verification** | Benchmark harness + CI regression | `scripts/` benchmark, budget verified for all backends | ✅ Done (framework + CI gate; GPU measurements on real hardware) |
 | 4 | **G6 – Linux fullscreen** | PipeWire portal (Wayland), X11 fallback | Wayland + X11 capture, tests + docs | ✅ Done |
 | 5 | **S1 – Source abstraction** | SourceKind enum, Transform struct, SceneSource, SourceManager | Any source type renders in a scene with configurable transform, tests | ✅ Done |
+| 6 | **Game capture live preview** | `GamePreview` thumbnail below the game-window picker, xcap frame grab, ~500ms refresh | User can verify the targeted window before recording (Linux + Windows), tests + docs | ✅ Done |
 
 G2 is the recommended first step: it delivers fullscreen game capture for the
 majority of titles with no injection risk and unblocks the scene-source
