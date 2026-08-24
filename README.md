@@ -219,6 +219,11 @@ The core concept of OBS: scenes, sources, and transitions.
 - [x] **S8 – Audio sources** — per-app audio capture (Windows WASAPI loopback) and audio input/output device capture as scene sources. *DoD: per-app and device audio selectable per scene, tests + docs. Tracked in [#68](https://github.com/thoser666/Rivulet/issues/68).* Done: `rivulet-core/src/audio_source.rs` (AudioSourceKind: Application/Input/Output/Mixed, AudioSource with volume/mute, 16 unit tests + i18n EN/DE).
 - [x] Sources — camera capture (webcam via GStreamer)
 
+**GUI polish:**
+- [x] **Glassmorphism panels** — semi-transparent top menu bar and left sidebar (`theme::glass_frame()`) with rounded corners, desktop shows through with frosted-glass effect
+- [x] **Hover & active accent strokes** — `theme::hover_stroke()` (1.5px, accent 60% alpha) and `theme::active_stroke()` (2px, full accent) for interactive element styling
+- [x] **Preview fade-in animation** — `theme::preview_fade_alpha()` wrapping `ctx.animate_bool` for smooth game-preview tint fade-in
+
 **Scene system:**
 - [x] **Scene management** (multiple scenes, switching, add/rename/remove, switch-back history) — `SceneManager` in `rivulet-core/src/scene.rs`, live Scenes view in the sidebar
 - [x] **Scene organisation** (folders, search/filter, color coding) — *top community request, active PRs in OBS; `Scene` model with parent UUIDs and ARGB color coding (folders via hierarchy), tested in `rivulet-core/src/scene.rs`*

@@ -16,7 +16,15 @@ fn repo_file(rel: &str) -> PathBuf {
 }
 
 fn read(rel: &str) -> String {
-    fs::read_to_string(repo_file(rel)).unwrap_or_else(|e| panic!("failed to read {rel}: {e}"))
+    fs::read_to_string(repo_file(rel)).unwrap_or_else(|e| {
+        panic!(
+            "failed to read {rel}: {e}\n\
+             HINT: if the file exists in git but is missing on disk, \
+             check for a skip-worktree flag: `git ls-files -v {rel}`. \
+             Fix with: `git update-index --no-skip-worktree {rel} && \
+             git checkout -- {rel}`"
+        )
+    })
 }
 
 /// 0-based line index of the first line containing `needle`.
