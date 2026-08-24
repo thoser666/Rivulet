@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.45.0-alpha.1] - 2026-08-24
+- feat: S5a + S6 + S7 + S8 — Browser spike, Media, Color, Audio sources
+
 ## [0.44.0-alpha.1] - 2026-08-24
 - feat: S3 Text source + S4 Webcam source with i18n and tests
 
