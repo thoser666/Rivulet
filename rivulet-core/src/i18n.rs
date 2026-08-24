@@ -124,6 +124,7 @@ impl Locale {
                 ("select_camera", "Select camera"),
                 ("game_capture", "Game Capture"),
                 ("select_game_window", "Select game window"),
+                ("refresh_game_windows", "Refresh window list"),
                 ("game_preview_title", "Window preview (live)"),
                 ("game_preview_loading", "Loading window preview…"),
                 (
@@ -350,6 +351,7 @@ impl Locale {
                 ("select_camera", "Kamera auswählen"),
                 ("game_capture", "Game-Capture"),
                 ("select_game_window", "Spiel-Fenster auswählen"),
+                ("refresh_game_windows", "Fensterliste aktualisieren"),
                 ("game_preview_title", "Fenster-Vorschau (live)"),
                 ("game_preview_loading", "Fenster-Vorschau wird geladen…"),
                 (

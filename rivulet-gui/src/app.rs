@@ -131,6 +131,12 @@ impl GamePreview {
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 const GAME_PREVIEW_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// Minimum time between live re-enumerations of the game-window list while the
+/// game-capture picker is open (the window list refreshes live, but not on
+/// every frame).
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+const GAME_WINDOWS_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Default maximum time to wait for the first captured frame before aborting
 /// a Windows recording with an error. The pipeline is only initialized once
 /// the first frame arrives, so a capture that never delivers a frame would
@@ -608,6 +614,10 @@ pub struct RivuletApp {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[serde(skip)]
     game_preview_error: Option<String>,
+    /// Timestamp of the last live re-enumeration of the game-window list.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[serde(skip)]
+    game_windows_last_refresh: Option<std::time::Instant>,
     #[serde(skip)]
     game_capture_rx: Option<std::sync::mpsc::Receiver<rivulet_core::GameCaptureFrame>>,
     #[serde(skip)]
@@ -766,6 +776,8 @@ impl Default for RivuletApp {
             game_preview: None,
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             game_preview_error: None,
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            game_windows_last_refresh: None,
             game_capture_rx: None,
             game_capture_handle: None,
             use_game_capture: false,
@@ -785,31 +797,27 @@ impl RivuletApp {
     /// 640x480). This also makes the live game-window preview targetable
     /// on both platforms.
     fn refresh_game_windows(&mut self) {
-        #[cfg(target_os = "linux")]
-        {
-            self.game_windows = rivulet_core::game_capture::list_game_windows();
-        }
-        #[cfg(target_os = "windows")]
-        {
-            self.game_windows = xcap::Window::all()
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|w| {
-                    let title = w.title().unwrap_or_default();
-                    let (width, height) = (w.width().unwrap_or(0), w.height().unwrap_or(0));
-                    if title.trim().is_empty() || width <= 640 || height <= 480 {
-                        return None;
-                    }
-                    Some(rivulet_core::GameWindow {
-                        id: w.id().map(|id| id as u64).unwrap_or(0),
-                        title,
-                        width,
-                        height,
-                    })
-                })
-                .collect();
-        }
+        self.game_windows = crate::app::enumerate_game_windows();
+        self.game_windows_last_refresh = Some(std::time::Instant::now());
         self.selected_game_window_idx = None;
+        self.game_preview = None;
+        self.game_preview_error = None;
+    }
+
+    /// Live-refresh the game-window list while the picker is open, re-using the
+    /// current selection (by window id) whenever the window still exists and
+    /// re-targeting the preview to it. Unlike [`refresh_game_windows`] it does
+    /// not clear the selection, so an auto-refresh never silently deselects the
+    /// window the user is about to record.
+    fn refresh_game_windows_live(&mut self) {
+        let keep_id = self
+            .selected_game_window_idx
+            .and_then(|idx| self.game_windows.get(idx))
+            .map(|w| w.id);
+        self.game_windows = crate::app::enumerate_game_windows();
+        self.game_windows_last_refresh = Some(std::time::Instant::now());
+        self.selected_game_window_idx =
+            keep_id.and_then(|id| self.game_windows.iter().position(|w| w.id == id));
         self.game_preview = None;
         self.game_preview_error = None;
     }
@@ -834,8 +842,23 @@ impl RivuletApp {
 
     /// Keep the game-window preview fresh while the game-capture picker is
     /// open: grab a new frame when the selection changed or when at least
-    /// [`GAME_PREVIEW_REFRESH_INTERVAL`] elapsed since the last grab.
+    /// [`GAME_PREVIEW_REFRESH_INTERVAL`] elapsed since the last grab. Also
+    /// re-enumerates the window list live (bounded by
+    /// [`GAME_WINDOWS_REFRESH_INTERVAL`]) so new/closed windows appear without
+    /// the user manually refreshing.
     fn update_game_preview(&mut self, ctx: &egui::Context) {
+        let now = std::time::Instant::now();
+        // Live window-list refresh: only when at least the refresh interval has
+        // elapsed since the last enumeration, and only while a game window is
+        // actually selected (the picker is in use).
+        let list_stale = self
+            .game_windows_last_refresh
+            .map(|last| now.duration_since(last) >= GAME_WINDOWS_REFRESH_INTERVAL)
+            .unwrap_or(true);
+        if self.selected_game_window_idx.is_some() && list_stale {
+            self.refresh_game_windows_live();
+        }
+
         let Some(idx) = self.selected_game_window_idx else {
             self.game_preview = None;
             self.game_preview_error = None;
@@ -849,7 +872,7 @@ impl RivuletApp {
             self.game_preview.as_ref().map(|p| p.window_id),
             game_window.id,
             self.game_preview.as_ref().map(|p| p.last_refresh),
-            std::time::Instant::now(),
+            now,
         );
         if should_refresh {
             self.grab_game_window_preview(ctx, game_window.id);
@@ -2798,6 +2821,16 @@ impl eframe::App for RivuletApp {
                                         }
                                     }
                                 });
+                            ui.separator();
+                            // Manual refresh of the window list (also refreshed
+                            // live while the picker is open).
+                            if ui
+                                .button("🔄")
+                                .on_hover_text(self.tr("refresh_game_windows"))
+                                .clicked()
+                            {
+                                self.refresh_game_windows();
+                            }
                         }
                     });
                     // Live thumbnail of the selected game window, so the
@@ -3139,6 +3172,16 @@ impl eframe::App for RivuletApp {
                                             }
                                         }
                                     });
+                                ui.separator();
+                                // Manual refresh of the window list (also
+                                // refreshed live while the picker is open).
+                                if ui
+                                    .button("🔄")
+                                    .on_hover_text(self.tr("refresh_game_windows"))
+                                    .clicked()
+                                {
+                                    self.refresh_game_windows();
+                                }
                             }
                         });
                         // Live thumbnail of the selected game window, so the
@@ -3634,6 +3677,61 @@ fn monitor_preview_image(
         .find(|m| m.name().unwrap_or_default() == preferred_name)
         .or_else(|| xcap_monitors.first())?;
     monitor.capture_image().ok()
+}
+
+/// Enumerate the game-like windows (visible title, larger than 640x480) for
+/// the game-capture picker.
+///
+/// On Linux the list comes from `rivulet-core` (xdotool + xcap) so the window
+/// ids match the xdotool resolution used when recording starts; on Windows it
+/// uses xcap's own window enumeration (the core list is empty there).
+/// Extracted as a free function so the same list powers the initial fill, the
+/// manual refresh, and the periodic live refresh.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn enumerate_game_windows() -> Vec<rivulet_core::GameWindow> {
+    #[cfg(target_os = "linux")]
+    {
+        rivulet_core::game_capture::list_game_windows()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        xcap::Window::all()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|w| {
+                let title = w.title().unwrap_or_default();
+                let (width, height) = (w.width().unwrap_or(0), w.height().unwrap_or(0));
+                if title.trim().is_empty() || width <= 640 || height <= 480 {
+                    return None;
+                }
+                Some(rivulet_core::GameWindow {
+                    id: w.id().map(|id| id as u64).unwrap_or(0),
+                    title,
+                    width,
+                    height,
+                })
+            })
+            .collect()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        Vec::new()
+    }
+}
+
+/// Re-resolve a selected game-window index after the window list has been
+/// re-enumerated, preserving the selection by window id. Returns `None` when
+/// the previously selected window no longer exists in `new_windows`.
+///
+/// Extracted as a pure function so the selection-preserving live refresh is
+/// unit-testable.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn preserve_selected_game_window(
+    new_windows: &[rivulet_core::GameWindow],
+    previously_selected_id: Option<u64>,
+) -> Option<usize> {
+    let id = previously_selected_id?;
+    new_windows.iter().position(|w| w.id == id)
 }
 
 /// Capture a still image of the window with the given id for the live
@@ -4444,6 +4542,51 @@ mod tests {
         // Same window, grabbed longer than the interval ago → refresh.
         let stale = now - (GAME_PREVIEW_REFRESH_INTERVAL + std::time::Duration::from_millis(1));
         assert!(should_refresh_game_preview(Some(7), 7, Some(stale), now));
+    }
+
+    // ── Game-window list live refresh ───────────────────────────
+
+    fn gw(id: u64) -> rivulet_core::GameWindow {
+        rivulet_core::GameWindow {
+            id,
+            title: format!("window {id}"),
+            width: 1280,
+            height: 720,
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn live_refresh_preserves_selection_when_window_still_exists() {
+        let windows = vec![gw(1), gw(2), gw(3)];
+        // Selecting window 2 at index 1; after a re-enumeration it stays at
+        // index 1 because the window still exists.
+        assert_eq!(preserve_selected_game_window(&windows, Some(2)), Some(1));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn live_refresh_keeps_selection_across_a_reordered_list() {
+        // The list is re-enumerated in a different order; selection must be
+        // re-resolved by id, not by old index.
+        let windows = vec![gw(5), gw(2), gw(9), gw(3)];
+        assert_eq!(preserve_selected_game_window(&windows, Some(9)), Some(2));
+        assert_eq!(preserve_selected_game_window(&windows, Some(3)), Some(3));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn live_refresh_deselects_when_window_closed() {
+        let windows = vec![gw(1), gw(3)];
+        // Window 2 closed → selection cleared, not kept dangling.
+        assert_eq!(preserve_selected_game_window(&windows, Some(2)), None);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    fn live_refresh_with_no_prior_selection_stays_none() {
+        let windows = vec![gw(1)];
+        assert_eq!(preserve_selected_game_window(&windows, None), None);
     }
 
     // ── Theme persistence (serde round-trip) ────────────────────

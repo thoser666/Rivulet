@@ -61,6 +61,14 @@ into the central panel *below* the recording controls, separated by
   `ui.painter().image(texture.id(), rect, uv, ...)`. Keep the refresh
   decision (`should_refresh`) as pure logic so it is unit-testable, and show
   a localized error when the frame cannot be captured.
+- **Live lists** (e.g. the game-window picker): while the picker is open its
+  underlying list is re-enumerated periodically (`GAME_WINDOWS_REFRESH_INTERVAL`)
+  so new/closed windows appear without manual action. Re-resolve the current
+  selection **by id** (`preserve_selected_game_window`) instead of by index so
+  an auto-refresh never silently deselects the window the user chose; keep that
+  re-mapping pure and unit-tested. Also expose a manual refresh button (🔄,
+  localized `refresh_game_windows` hover) for an immediate, full re-scan that
+  clears the selection.
 - **Footers**: pin to the bottom of the panel with
   `ui.with_layout(egui::Layout::bottom_up(...), ...)`.
 - **Status colors** (use the egui palette, no custom hex unless necessary):
