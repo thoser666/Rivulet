@@ -2568,7 +2568,9 @@ impl eframe::App for RivuletApp {
             }
         }
 
-        egui::Panel::top("top_panel").show(ui, |ui| {
+        egui::Panel::top("top_panel")
+            .frame(theme::glass_frame(ui))
+            .show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
                     if ui.button("Quit").clicked() {
@@ -2590,6 +2592,7 @@ impl eframe::App for RivuletApp {
 
         egui::Panel::left("nav_panel")
             .resizable(false)
+            .frame(theme::glass_frame(ui))
             .show(ui, |ui| {
                 ui.add_space(10.0);
                 ui.label(egui::RichText::new("Rivulet").strong().size(18.0));

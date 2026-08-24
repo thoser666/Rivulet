@@ -227,6 +227,23 @@ pub fn init(ctx: &egui::Context, pref: ThemePreference) {
     }
 }
 
+/// Semi-transparent panel frame for the glassmorphism effect.
+///
+/// Used for sidebars and the top bar so the desktop wallpaper or
+/// background shows through with a frosted-glass look.
+pub fn glass_frame(ui: &egui::Ui) -> egui::Frame {
+    let dark = ui.visuals().dark_mode;
+    let fill = if dark {
+        egui::Color32::from_rgba_unmultiplied(27, 27, 27, 200)
+    } else {
+        egui::Color32::from_rgba_unmultiplied(245, 245, 245, 200)
+    };
+    egui::Frame::default()
+        .fill(fill)
+        .inner_margin(egui::Margin::symmetric(8, 4))
+        .corner_radius(egui::CornerRadius::same(4))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
