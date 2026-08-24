@@ -14,7 +14,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.46.0-alpha.1"
+version = "0.47.0-alpha.1"
 authors = ["thoser666"]
 edition = "2021"
 repository = "https://github.com/thoser666/rivulet"

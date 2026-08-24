@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.47.0-alpha.1] - 2026-08-24
+- feat: game capture live preview + window picker on Linux
+
 ## [0.46.0-alpha.1] - 2026-08-24
 - feat: game capture live preview + fix window title leaking into Source dropdown
 - docs: add game capture live preview to M2 roadmap
