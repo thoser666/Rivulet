@@ -62,6 +62,15 @@ pub use text_source::{FontWeight, Rgba, ScrollDirection, TextAlign, TextSource};
 pub mod webcam_source;
 pub use webcam_source::{PixelFormat, Resolution, WebcamSource};
 
+pub mod color_source;
+pub use color_source::ColorSource;
+
+pub mod media_source;
+pub use media_source::{MediaSource, MediaType, PlaybackMode};
+
+pub mod audio_source;
+pub use audio_source::{AudioSource, AudioSourceKind};
+
 pub mod benchmark;
 pub mod capture_channel;
 pub mod opengl_hook;

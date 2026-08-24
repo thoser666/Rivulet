@@ -113,7 +113,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 | --- | --- | --- | --- | --- |
 | M0 – Recording Foundation | Capture, Encoding, Audio, GUI | ✅ Done | — | [![M0](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F3&query=open_issues&label=M0&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/3) |
 | M1 – Solid Recording | Audio tracks, Hardware encoding, QoL, Overlay | ✅ Done (milestone closed) | — | [![M1](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F4&query=open_issues&label=M1&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/4) |
-| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 In progress (scene management + G2–G6 done + S1 done; S2–S8 sources open) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
+| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 In progress (G1–G6 + S1–S4 + S6–S8 done; S5b browser source open) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
 | M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | 🚧 In progress | — | [![M3](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F5&query=open_issues&label=M3&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/5) |
 | M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 🚧 Replay Buffer done | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 🚧 In progress (installers, signing, i18n done) | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
@@ -211,11 +211,11 @@ The core concept of OBS: scenes, sources, and transitions.
 - [x] **S2 – Image source** — PNG/JPEG/GIF, folder loop/slideshow. *DoD: static and slideshow image sources usable in scenes, tests + docs.* Done: `rivulet-core/src/image_source.rs` (10 unit tests, i18n keys EN/DE).
 - [x] **S3 – Text source** — rich text, scrolling, outline/background. *DoD: styled text source usable in scenes, tests + docs.* Done: `rivulet-core/src/text_source.rs` (Rgba, FontWeight, TextAlign, ScrollDirection, TextSource with scrolling animation, 30 unit tests + i18n keys EN/DE).
 - [x] **S4 – Webcam as scene source** — expose the existing camera capture as a scene source with a properties panel. *DoD: webcam selectable per scene with resolution/framerate settings, tests + docs.* Done: `rivulet-core/src/webcam_source.rs` (PixelFormat, Resolution, WebcamSource with resolution/framerate/mirror/timeout, 19 unit tests + i18n keys EN/DE).
-- [ ] **S5a – Browser spike** — evaluate platform webviews (WebView2 / WebKitGTK / WKWebView) and render into a GPU texture. *DoD: spike document with per-platform recommendation and a rendered-frame proof.*
+- [x] **S5a – Browser spike** — evaluate platform webviews (WebView2 / WebKitGTK / WKWebView) and render into a GPU texture. *DoD: spike document with per-platform recommendation and a rendered-frame proof.* Done: `docs/browser-source-spike.md` (wry recommendation, GPU texture integration, risk analysis).
 - [ ] **S5b – Browser source** — URL, interaction, transparency, config UI. *DoD: interactive browser source in scenes on all platforms, tests + docs.*
-- [ ] **S6 – Media source** — video/audio file playback in scenes (loop, restart on scene entry, speed). *DoD: media files play in scenes with controls, tests + docs. Tracked in [#66](https://github.com/thoser666/Rivulet/issues/66).*
-- [ ] **S7 – Color source** — solid-color background/banner. *DoD: color source usable in scenes, tests + docs. Tracked in [#67](https://github.com/thoser666/Rivulet/issues/67).*
-- [ ] **S8 – Audio sources** — per-app audio capture (Windows WASAPI loopback) and audio input/output device capture as scene sources. *DoD: per-app and device audio selectable per scene, tests + docs. Tracked in [#68](https://github.com/thoser666/Rivulet/issues/68).*
+- [x] **S6 – Media source** — video/audio file playback in scenes (loop, restart on scene entry, speed). *DoD: media files play in scenes with controls, tests + docs. Tracked in [#66](https://github.com/thoser666/Rivulet/issues/66).* Done: `rivulet-core/src/media_source.rs` (MediaType, PlaybackMode, MediaSource with speed/volume/loop/restart, 26 unit tests + i18n EN/DE).
+- [x] **S7 – Color source** — solid-color background/banner. *DoD: color source usable in scenes, tests + docs. Tracked in [#67](https://github.com/thoser666/Rivulet/issues/67).* Done: `rivulet-core/src/color_source.rs` (ColorSource with hex parsing, opacity, scene-fill, 15 unit tests + i18n EN/DE).
+- [x] **S8 – Audio sources** — per-app audio capture (Windows WASAPI loopback) and audio input/output device capture as scene sources. *DoD: per-app and device audio selectable per scene, tests + docs. Tracked in [#68](https://github.com/thoser666/Rivulet/issues/68).* Done: `rivulet-core/src/audio_source.rs` (AudioSourceKind: Application/Input/Output/Mixed, AudioSource with volume/mute, 16 unit tests + i18n EN/DE).
 - [x] Sources — camera capture (webcam via GStreamer)
 
 **Scene system:**
@@ -386,10 +386,10 @@ The core concept of OBS: scenes, sources, and transitions.
 | --- | --- |
 | Capture sources (display, window, webcam) | Partial (display + window + region, multi-monitor) |
 | Game capture (D3D/Vulkan/OpenGL hooks) | In progress (G2 DXGI done; G3 Vulkan layer + capture pipeline; G4 OpenGL hook; G5 perf verification done; G6 Linux PipeWire portal done) |
-| Media & color sources | Open (M2 S6/S7) |
+| Media & color sources | Done (S6 + S7 done; S5b browser source open) |
 | Image & text sources | Done (S2 + S3 + S4 done) |
-| Browser sources | Open (M2 S5b) |
-| Audio sources (microphone, per-app, devices) | Open (M2 S8) |
+| Browser sources | Spike done (S5a); S5b open |
+| Audio sources (microphone, per-app, devices) | Done (S8 done) |
 | Scenes & transitions | In progress (scene mgmt + G2 done; transitions/studio open, M2) |
 | Scene collections & profiles | Open (M2) |
 | Studio mode & multi-view | Open (M2) |

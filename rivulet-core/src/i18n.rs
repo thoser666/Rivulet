@@ -194,6 +194,27 @@ impl Locale {
                 ("source_webcam_mirror", "Mirror"),
                 ("source_webcam_active", "Camera active"),
                 ("source_webcam_inactive", "Camera inactive"),
+                // Color source (S7)
+                ("source_color_name", "Color source"),
+                ("source_color_fill", "Fill scene"),
+                ("source_color_custom_size", "Custom size"),
+                // Media source (S6)
+                ("source_media_file", "File"),
+                ("source_media_playback", "Playback"),
+                ("source_media_speed", "Speed"),
+                ("source_media_volume", "Volume"),
+                ("source_media_loop", "Loop"),
+                ("source_media_once", "Once"),
+                ("source_media_freeze", "Freeze on last frame"),
+                ("source_media_restart", "Restart on scene entry"),
+                ("source_media_muted", "Muted"),
+                // Audio source (S8)
+                ("source_audio_application", "Application"),
+                ("source_audio_input", "Input Device"),
+                ("source_audio_output", "Output Device"),
+                ("source_audio_mixed", "Mixed"),
+                ("source_audio_active", "Audio active"),
+                ("source_audio_inactive", "Audio inactive"),
                 ("source_text", "Text"),
                 ("source_webcam", "Webcam"),
                 ("source_browser", "Browser"),
@@ -393,6 +414,27 @@ impl Locale {
                 ("source_webcam_mirror", "Spiegeln"),
                 ("source_webcam_active", "Kamera aktiv"),
                 ("source_webcam_inactive", "Kamera inaktiv"),
+                // Color source (S7)
+                ("source_color_name", "Farbquelle"),
+                ("source_color_fill", "Szene füllen"),
+                ("source_color_custom_size", "Benutzergröße"),
+                // Media source (S6)
+                ("source_media_file", "Datei"),
+                ("source_media_playback", "Wiedergabe"),
+                ("source_media_speed", "Geschwindigkeit"),
+                ("source_media_volume", "Lautstärke"),
+                ("source_media_loop", "Schleife"),
+                ("source_media_once", "Einmal"),
+                ("source_media_freeze", "Auf letztem Frame frieren"),
+                ("source_media_restart", "Bei Szenenstart neu starten"),
+                ("source_media_muted", "Stumm"),
+                // Audio source (S8)
+                ("source_audio_application", "Anwendung"),
+                ("source_audio_input", "Eingabegerät"),
+                ("source_audio_output", "Ausgabegerät"),
+                ("source_audio_mixed", "Gemischt"),
+                ("source_audio_active", "Audio aktiv"),
+                ("source_audio_inactive", "Audio inaktiv"),
                 ("source_text", "Text"),
                 ("source_webcam", "Webcam"),
                 ("source_browser", "Browser"),
@@ -767,6 +809,54 @@ mod tests {
         assert_eq!(Locale::De.tr("source_webcam_active"), "Kamera aktiv");
         assert_eq!(Locale::En.tr("source_webcam_inactive"), "Camera inactive");
         assert_eq!(Locale::De.tr("source_webcam_inactive"), "Kamera inaktiv");
+        // S7 color source keys
+        assert_eq!(Locale::En.tr("source_color_name"), "Color source");
+        assert_eq!(Locale::De.tr("source_color_name"), "Farbquelle");
+        assert_eq!(Locale::En.tr("source_color_fill"), "Fill scene");
+        assert_eq!(Locale::De.tr("source_color_fill"), "Szene füllen");
+        assert_eq!(Locale::En.tr("source_color_custom_size"), "Custom size");
+        assert_eq!(Locale::De.tr("source_color_custom_size"), "Benutzergröße");
+        // S6 media source keys
+        assert_eq!(Locale::En.tr("source_media_file"), "File");
+        assert_eq!(Locale::De.tr("source_media_file"), "Datei");
+        assert_eq!(Locale::En.tr("source_media_playback"), "Playback");
+        assert_eq!(Locale::De.tr("source_media_playback"), "Wiedergabe");
+        assert_eq!(Locale::En.tr("source_media_speed"), "Speed");
+        assert_eq!(Locale::De.tr("source_media_speed"), "Geschwindigkeit");
+        assert_eq!(Locale::En.tr("source_media_volume"), "Volume");
+        assert_eq!(Locale::De.tr("source_media_volume"), "Lautstärke");
+        assert_eq!(Locale::En.tr("source_media_loop"), "Loop");
+        assert_eq!(Locale::De.tr("source_media_loop"), "Schleife");
+        assert_eq!(Locale::En.tr("source_media_once"), "Once");
+        assert_eq!(Locale::De.tr("source_media_once"), "Einmal");
+        assert_eq!(Locale::En.tr("source_media_freeze"), "Freeze on last frame");
+        assert_eq!(
+            Locale::De.tr("source_media_freeze"),
+            "Auf letztem Frame frieren"
+        );
+        assert_eq!(
+            Locale::En.tr("source_media_restart"),
+            "Restart on scene entry"
+        );
+        assert_eq!(
+            Locale::De.tr("source_media_restart"),
+            "Bei Szenenstart neu starten"
+        );
+        assert_eq!(Locale::En.tr("source_media_muted"), "Muted");
+        assert_eq!(Locale::De.tr("source_media_muted"), "Stumm");
+        // S8 audio source keys
+        assert_eq!(Locale::En.tr("source_audio_application"), "Application");
+        assert_eq!(Locale::De.tr("source_audio_application"), "Anwendung");
+        assert_eq!(Locale::En.tr("source_audio_input"), "Input Device");
+        assert_eq!(Locale::De.tr("source_audio_input"), "Eingabegerät");
+        assert_eq!(Locale::En.tr("source_audio_output"), "Output Device");
+        assert_eq!(Locale::De.tr("source_audio_output"), "Ausgabegerät");
+        assert_eq!(Locale::En.tr("source_audio_mixed"), "Mixed");
+        assert_eq!(Locale::De.tr("source_audio_mixed"), "Gemischt");
+        assert_eq!(Locale::En.tr("source_audio_active"), "Audio active");
+        assert_eq!(Locale::De.tr("source_audio_active"), "Audio aktiv");
+        assert_eq!(Locale::En.tr("source_audio_inactive"), "Audio inactive");
+        assert_eq!(Locale::De.tr("source_audio_inactive"), "Audio inaktiv");
     }
 
     #[test]
