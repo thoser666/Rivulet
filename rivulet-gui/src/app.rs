@@ -774,31 +774,9 @@ impl Default for RivuletApp {
     }
 }
 
-// --- Windows logic implementation ---
-#[cfg(target_os = "windows")]
+// --- Game-window live preview (shared by Linux + Windows) ---
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 impl RivuletApp {
-    fn refresh_capture_sources(&mut self) {
-        self.monitors = Monitor::enumerate().unwrap_or_default();
-
-        self.windows = Window::enumerate()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|w| {
-                // FIX: filter by title (is_capturable removed)
-                !w.title().unwrap_or_default().is_empty()
-            })
-            .collect();
-
-        self.selected_monitor_idx = None;
-        self.selected_window_idx = None;
-    }
-
-    /// Refresh the list of available camera devices.
-    fn refresh_camera_devices(&mut self) {
-        self.camera_devices = rivulet_core::camera::list_cameras();
-        self.selected_camera_idx = None;
-    }
-
     /// Refresh the list of game-like windows for game capture mode.
     ///
     /// On Linux the list comes from `rivulet-core` (xdotool + xcap). The
@@ -806,7 +784,6 @@ impl RivuletApp {
     /// used there with the same heuristic (visible title, larger than
     /// 640x480). This also makes the live game-window preview targetable
     /// on both platforms.
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn refresh_game_windows(&mut self) {
         #[cfg(target_os = "linux")]
         {
@@ -839,7 +816,6 @@ impl RivuletApp {
 
     /// Grab a single frame from the given window (via xcap) for the live
     /// game-window preview.
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn grab_game_window_preview(&mut self, ctx: &egui::Context, window_id: u64) {
         match game_window_preview_image(window_id) {
             Some(image) => {
@@ -859,7 +835,6 @@ impl RivuletApp {
     /// Keep the game-window preview fresh while the game-capture picker is
     /// open: grab a new frame when the selection changed or when at least
     /// [`GAME_PREVIEW_REFRESH_INTERVAL`] elapsed since the last grab.
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn update_game_preview(&mut self, ctx: &egui::Context) {
         let Some(idx) = self.selected_game_window_idx else {
             self.game_preview = None;
@@ -879,6 +854,32 @@ impl RivuletApp {
         if should_refresh {
             self.grab_game_window_preview(ctx, game_window.id);
         }
+    }
+}
+
+// --- Windows logic implementation ---
+#[cfg(target_os = "windows")]
+impl RivuletApp {
+    fn refresh_capture_sources(&mut self) {
+        self.monitors = Monitor::enumerate().unwrap_or_default();
+
+        self.windows = Window::enumerate()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|w| {
+                // FIX: filter by title (is_capturable removed)
+                !w.title().unwrap_or_default().is_empty()
+            })
+            .collect();
+
+        self.selected_monitor_idx = None;
+        self.selected_window_idx = None;
+    }
+
+    /// Refresh the list of available camera devices.
+    fn refresh_camera_devices(&mut self) {
+        self.camera_devices = rivulet_core::camera::list_cameras();
+        self.selected_camera_idx = None;
     }
 
     /// Open the region editor for the currently selected monitor, capturing
