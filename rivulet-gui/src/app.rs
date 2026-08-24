@@ -83,6 +83,54 @@ impl RegionPreview {
     }
 }
 
+/// Live preview of the selected game window, shown in the record view so the
+/// user can verify the correct window is targeted before recording starts.
+///
+/// Mirrors the `RegionPreview` pattern: a single frame is grabbed from the
+/// window (via `xcap`) and displayed as an egui texture. The frame refreshes
+/// on window change and at most every [`GAME_PREVIEW_REFRESH_INTERVAL`] while
+/// the game-capture picker is open.
+///
+/// Only the Windows record view has a game-window picker today, so the
+/// preview is Windows-only.
+#[cfg(target_os = "windows")]
+struct GamePreview {
+    texture: egui::TextureHandle,
+    /// Frame size in pixels.
+    width: u32,
+    height: u32,
+    /// Window this preview belongs to (so a stale preview is dropped when
+    /// the selection changes).
+    window_id: u64,
+    /// Last time a frame was grabbed (throttles the refresh loop).
+    last_refresh: std::time::Instant,
+}
+
+#[cfg(target_os = "windows")]
+impl GamePreview {
+    fn new(ctx: &egui::Context, image: image::RgbaImage, window_id: u64) -> Self {
+        let width = image.width();
+        let height = image.height();
+        let color_image = egui::ColorImage::from_rgba_unmultiplied(
+            [width as usize, height as usize],
+            image.as_raw(),
+        );
+        Self {
+            texture: ctx.load_texture("game_preview", color_image, egui::TextureOptions::LINEAR),
+            width,
+            height,
+            window_id,
+            last_refresh: std::time::Instant::now(),
+        }
+    }
+}
+
+/// How often the game-window preview is re-grabbed while the game-capture
+/// picker is open (matches the roadmap: "refresh on selection change or
+/// every ~500ms").
+#[cfg(target_os = "windows")]
+const GAME_PREVIEW_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Default maximum time to wait for the first captured frame before aborting
 /// a Windows recording with an error. The pipeline is only initialized once
 /// the first frame arrives, so a capture that never delivers a frame would
@@ -551,6 +599,15 @@ pub struct RivuletApp {
     game_windows: Vec<rivulet_core::GameWindow>,
     #[serde(skip)]
     selected_game_window_idx: Option<usize>,
+    /// Live thumbnail of the selected game window (refreshed while the
+    /// picker is open). Not persisted.
+    #[cfg(target_os = "windows")]
+    #[serde(skip)]
+    game_preview: Option<GamePreview>,
+    /// Error message when the live game-window preview could not be captured.
+    #[cfg(target_os = "windows")]
+    #[serde(skip)]
+    game_preview_error: Option<String>,
     #[serde(skip)]
     game_capture_rx: Option<std::sync::mpsc::Receiver<rivulet_core::GameCaptureFrame>>,
     #[serde(skip)]
@@ -705,6 +762,10 @@ impl Default for RivuletApp {
             // Game capture
             game_windows: Vec::new(),
             selected_game_window_idx: None,
+            #[cfg(target_os = "windows")]
+            game_preview: None,
+            #[cfg(target_os = "windows")]
+            game_preview_error: None,
             game_capture_rx: None,
             game_capture_handle: None,
             use_game_capture: false,
@@ -739,9 +800,77 @@ impl RivuletApp {
     }
 
     /// Refresh the list of game-like windows for game capture mode.
+    ///
+    /// The `rivulet-core` list is empty on Windows, so xcap's own window
+    /// enumeration is used with the same heuristic as the Linux core path
+    /// (visible title, larger than 640x480). This also makes the live
+    /// game-window preview targetable on Windows.
+    #[cfg(target_os = "windows")]
     fn refresh_game_windows(&mut self) {
-        self.game_windows = rivulet_core::game_capture::list_game_windows();
+        self.game_windows = xcap::Window::all()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|w| {
+                let title = w.title().unwrap_or_default();
+                let (width, height) = (w.width().unwrap_or(0), w.height().unwrap_or(0));
+                if title.trim().is_empty() || width <= 640 || height <= 480 {
+                    return None;
+                }
+                Some(rivulet_core::GameWindow {
+                    id: w.id().map(|id| id as u64).unwrap_or(0),
+                    title,
+                    width,
+                    height,
+                })
+            })
+            .collect();
         self.selected_game_window_idx = None;
+        self.game_preview = None;
+        self.game_preview_error = None;
+    }
+
+    /// Grab a single frame from the given window (via xcap) for the live
+    /// game-window preview.
+    #[cfg(target_os = "windows")]
+    fn grab_game_window_preview(&mut self, ctx: &egui::Context, window_id: u64) {
+        match game_window_preview_image(window_id) {
+            Some(image) => {
+                self.game_preview = Some(GamePreview::new(ctx, image, window_id));
+                self.game_preview_error = None;
+            }
+            None => {
+                // Keep any previous preview (a transient grab failure should
+                // not blank the thumbnail); only surface the error once.
+                if self.game_preview.is_none() {
+                    self.game_preview_error = Some(self.tr("game_preview_unavailable").to_string());
+                }
+            }
+        }
+    }
+
+    /// Keep the game-window preview fresh while the game-capture picker is
+    /// open: grab a new frame when the selection changed or when at least
+    /// [`GAME_PREVIEW_REFRESH_INTERVAL`] elapsed since the last grab.
+    #[cfg(target_os = "windows")]
+    fn update_game_preview(&mut self, ctx: &egui::Context) {
+        let Some(idx) = self.selected_game_window_idx else {
+            self.game_preview = None;
+            self.game_preview_error = None;
+            return;
+        };
+        let Some(game_window) = self.game_windows.get(idx) else {
+            return;
+        };
+
+        let should_refresh = should_refresh_game_preview(
+            self.game_preview.as_ref().map(|p| p.window_id),
+            game_window.id,
+            self.game_preview.as_ref().map(|p| p.last_refresh),
+            std::time::Instant::now(),
+        );
+        if should_refresh {
+            self.grab_game_window_preview(ctx, game_window.id);
+        }
     }
 
     /// Open the region editor for the currently selected monitor, capturing
@@ -1583,28 +1712,20 @@ impl RivuletApp {
         self.locale.tr_fmt(key, args)
     }
 
-    /// Compute the source label for the recording view.
+    /// Resolve the label for the recording view's Source (monitor) dropdown.
     ///
-    /// Returns the monitor name, the window name, or `None` (which
-    /// should render as the "Select Monitor" fallback).
-    ///
-    /// This is extracted so that unit tests can verify the label
-    /// logic without instantiating the full egui UI.
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
-    fn source_label(&self) -> Option<String> {
-        let mon_name = self
-            .selected_monitor_idx
-            .and_then(|idx| self.monitors.get(idx))
-            .and_then(|m| m.name().ok());
-        let win_title = self
-            .selected_window_idx
-            .and_then(|idx| self.windows.get(idx))
-            .and_then(|w| w.title().ok());
-        resolve_source_label(
+    /// Returns the monitor name when a monitor is selected, otherwise `None`
+    /// (the caller falls back to "Select Monitor"). The selected window is
+    /// deliberately **not** considered: the Window dropdown shows the window,
+    /// and a window pick must never leak its title into the Source dropdown.
+    #[cfg(target_os = "windows")]
+    fn monitor_label(&self) -> Option<String> {
+        resolve_monitor_label(
             self.selected_monitor_idx,
-            mon_name.as_deref(),
-            self.selected_window_idx,
-            win_title.as_deref(),
+            self.selected_monitor_idx
+                .and_then(|idx| self.monitors.get(idx))
+                .and_then(|m| m.name().ok())
+                .as_deref(),
         )
     }
 
@@ -2527,9 +2648,7 @@ impl eframe::App for RivuletApp {
                         ui.label(self.tr("source"));
                         egui::ComboBox::from_id_salt("monitor_select")
                             .selected_text(
-                                self.selected_monitor_idx
-                                    .and_then(|idx| self.monitors.get(idx))
-                                    .and_then(|m| m.name().ok())
+                                self.monitor_label()
                                     .unwrap_or_else(|| self.tr("select_monitor").to_string()),
                             )
                             .show_ui(ui, |ui| {
@@ -2616,7 +2735,8 @@ impl eframe::App for RivuletApp {
                                 }
                             });
                     });
-                    // Game capture toggle + window selection
+                    // Game capture toggle + window selection + live preview
+                    self.update_game_preview(ui.ctx());
                     ui.horizontal(|ui| {
                         let gc_label = self.tr("game_capture");
                         ui.checkbox(&mut self.use_game_capture, gc_label);
@@ -2648,6 +2768,40 @@ impl eframe::App for RivuletApp {
                                 });
                         }
                     });
+                    // Live thumbnail of the selected game window, so the
+                    // user can verify the correct window is targeted before
+                    // recording starts (refreshes every ~500ms).
+                    if self.use_game_capture {
+                        if let Some(preview) = &self.game_preview {
+                            let scale = (ui.available_width().min(360.0)
+                                / preview.width.max(1) as f32)
+                                .min(0.5);
+                            let size = egui::vec2(
+                                preview.width as f32 * scale,
+                                preview.height as f32 * scale,
+                            );
+                            let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                            let uv = egui::Rect::from_min_max(
+                                egui::pos2(0.0, 0.0),
+                                egui::pos2(1.0, 1.0),
+                            );
+                            ui.painter().image(
+                                preview.texture.id(),
+                                rect,
+                                uv,
+                                egui::Color32::WHITE,
+                            );
+                            ui.label(
+                                egui::RichText::new(self.tr("game_preview_title"))
+                                    .small()
+                                    .color(colors.hint),
+                            );
+                        } else if let Some(err) = &self.game_preview_error {
+                            ui.colored_label(colors.warning, err);
+                        } else if self.selected_game_window_idx.is_some() {
+                            ui.colored_label(colors.hint, self.tr("game_preview_loading"));
+                        }
+                    }
                     // Region capture controls (monitor capture only)
                     ui.horizontal(|ui| {
                         let monitor_selected = self.selected_monitor_idx.is_some();
@@ -3382,6 +3536,44 @@ fn monitor_preview_image(
     monitor.capture_image().ok()
 }
 
+/// Capture a still image of the window with the given id for the live
+/// game-window preview.
+///
+/// Uses xcap's window enumeration and capture. Returns `None` when the
+/// window cannot be found or captured (closed, minimized, or a transient
+/// grab error).
+#[cfg(target_os = "windows")]
+fn game_window_preview_image(window_id: u64) -> Option<image::RgbaImage> {
+    let window = xcap::Window::all()
+        .ok()?
+        .into_iter()
+        .find(|w| w.id().map(|id| id as u64).unwrap_or(0) == window_id)?;
+    window.capture_image().ok()
+}
+
+/// Decide whether the live game-window preview needs a fresh frame.
+///
+/// Extracted as a pure function so the refresh cadence is unit-testable:
+/// a new frame is grabbed when there is no preview yet, when the selected
+/// window changed, or when [`GAME_PREVIEW_REFRESH_INTERVAL`] has elapsed
+/// since the last grab.
+#[cfg(target_os = "windows")]
+fn should_refresh_game_preview(
+    preview_window_id: Option<u64>,
+    target_window_id: u64,
+    last_refresh: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> bool {
+    match preview_window_id {
+        None => true,
+        Some(preview_id) if preview_id != target_window_id => true,
+        Some(_) => match last_refresh {
+            None => true,
+            Some(last) => now.duration_since(last) >= GAME_PREVIEW_REFRESH_INTERVAL,
+        },
+    }
+}
+
 /// Parse the `--no-frame-timeout <seconds>` CLI flag from the given command
 /// line arguments (without the program name).
 ///
@@ -3470,24 +3662,22 @@ fn format_bytes(bytes: u64) -> String {
 ///
 /// Extracted as a standalone function so it can be unit-tested
 /// without instantiating the full egui UI.
-fn resolve_source_label(
+/// Resolve the label for the recording view's Source (monitor) dropdown.
+///
+/// Returns `Some(monitor_name)` when a monitor is selected and its name is
+/// available; otherwise `None` so the caller can show its "Select Monitor"
+/// fallback. The window selection is intentionally not part of this function:
+/// the Window dropdown owns the window title, and selecting a window must
+/// never make its title appear in the Source dropdown as well.
+///
+/// Extracted as a standalone function so it can be unit-tested without
+/// instantiating the full egui UI.
+fn resolve_monitor_label(
     selected_monitor_idx: Option<usize>,
     monitor_name: Option<&str>,
-    selected_window_idx: Option<usize>,
-    window_title: Option<&str>,
 ) -> Option<String> {
-    if let Some(name) = monitor_name {
-        Some(name.to_string())
-    } else if selected_monitor_idx.is_some() && monitor_name.is_none() {
-        // Monitor selected but name unavailable — fall through to
-        // caller's unknown_monitor fallback.
-        None
-    } else if let Some(title) = window_title {
-        if title.is_empty() {
-            None
-        } else {
-            Some(title.to_string())
-        }
+    if selected_monitor_idx.is_some() {
+        monitor_name.map(|n| n.to_string())
     } else {
         None
     }
@@ -4080,59 +4270,80 @@ mod tests {
         assert_eq!(hotkeys.label_for("save_replay"), "F12");
     }
 
-    // ── source label (bugfix: source jumps back to "Select Monitor")
+    // ── Source (monitor) dropdown label ───────────────────────────
+    // The Source dropdown shows monitors only. The Window dropdown owns
+    // the window title; a window pick must never leak into the Source
+    // dropdown (regression: window title appeared under Source).
 
     #[test]
-    fn source_label_returns_monitor_name_when_monitor_selected() {
+    fn monitor_label_returns_monitor_name_when_monitor_selected() {
         assert_eq!(
-            resolve_source_label(Some(0), Some("Display 1"), None, None),
+            resolve_monitor_label(Some(0), Some("Display 1")),
             Some("Display 1".to_string())
         );
     }
 
     #[test]
-    fn source_label_returns_window_title_when_window_selected_and_no_monitor() {
+    fn monitor_label_is_none_when_nothing_selected() {
+        assert_eq!(resolve_monitor_label(None, None), None);
+    }
+
+    #[test]
+    fn monitor_label_is_none_when_monitor_selected_but_name_unavailable() {
+        // Monitor index set but name unavailable → None so the caller
+        // can show its "unknown_monitor" fallback string.
+        assert_eq!(resolve_monitor_label(Some(0), None), None);
+    }
+
+    #[test]
+    fn monitor_label_is_none_when_only_window_selected() {
+        // Regression: selecting a window clears the monitor, and the
+        // window title must NOT appear in the Source dropdown.
+        assert_eq!(resolve_monitor_label(None, None), None);
+        assert_eq!(resolve_monitor_label(None, Some("ghost")), None);
+    }
+
+    #[test]
+    fn monitor_label_is_none_when_empty_name() {
         assert_eq!(
-            resolve_source_label(None, None, Some(0), Some("My Game")),
-            Some("My Game".to_string())
+            resolve_monitor_label(Some(0), Some("")),
+            Some(String::new())
         );
     }
 
+    // ── Game-window live preview refresh ─────────────────────────
+
+    #[cfg(target_os = "windows")]
     #[test]
-    fn source_label_returns_none_when_nothing_selected() {
-        assert_eq!(resolve_source_label(None, None, None, None), None);
+    fn game_preview_refreshes_when_no_preview_yet() {
+        let now = std::time::Instant::now();
+        assert!(should_refresh_game_preview(None, 42, None, now));
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
-    fn source_label_prefers_monitor_over_window() {
-        // When both indices are set (shouldn't happen in practice,
-        // but the function must be deterministic), monitor wins.
-        assert_eq!(
-            resolve_source_label(Some(0), Some("Monitor"), Some(0), Some("Window")),
-            Some("Monitor".to_string())
-        );
+    fn game_preview_refreshes_when_window_changed() {
+        let now = std::time::Instant::now();
+        // Fresh preview of window 1, now targeting window 2 → refresh.
+        assert!(should_refresh_game_preview(Some(1), 2, Some(now), now));
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
-    fn source_label_returns_none_when_monitor_selected_but_name_unavailable() {
-        // Monitor index is set but name is None → returns None so
-        // caller can use its "unknown_monitor" fallback string.
-        assert_eq!(resolve_source_label(Some(0), None, None, None), None);
+    fn game_preview_does_not_refresh_before_interval_elapses() {
+        let now = std::time::Instant::now();
+        // Same window, grabbed a moment ago → no refresh yet.
+        let recent = now - std::time::Duration::from_millis(100);
+        assert!(!should_refresh_game_preview(Some(7), 7, Some(recent), now));
     }
 
+    #[cfg(target_os = "windows")]
     #[test]
-    fn source_label_window_title_used_when_monitor_name_none() {
-        // Monitor index set but name unavailable, window available →
-        // still returns None (monitor takes priority, even if nameless).
-        assert_eq!(
-            resolve_source_label(Some(0), None, Some(0), Some("Win")),
-            None
-        );
-    }
-
-    #[test]
-    fn source_label_empty_window_title_returns_none() {
-        assert_eq!(resolve_source_label(None, None, Some(0), Some("")), None);
+    fn game_preview_refreshes_after_interval_elapses() {
+        let now = std::time::Instant::now();
+        // Same window, grabbed longer than the interval ago → refresh.
+        let stale = now - (GAME_PREVIEW_REFRESH_INTERVAL + std::time::Duration::from_millis(1));
+        assert!(should_refresh_game_preview(Some(7), 7, Some(stale), now));
     }
 
     // ── Theme persistence (serde round-trip) ────────────────────

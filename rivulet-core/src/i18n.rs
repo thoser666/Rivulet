@@ -124,6 +124,12 @@ impl Locale {
                 ("select_camera", "Select camera"),
                 ("game_capture", "Game Capture"),
                 ("select_game_window", "Select game window"),
+                ("game_preview_title", "Window preview (live)"),
+                ("game_preview_loading", "Loading window preview…"),
+                (
+                    "game_preview_unavailable",
+                    "Window preview unavailable (window closed or minimized)."
+                ),
                 ("start_recording", "Start recording"),
                 ("stop_recording", "Stop recording"),
                 ("recording_in_progress", "Recording in progress ({0}s)"),
@@ -344,6 +350,12 @@ impl Locale {
                 ("select_camera", "Kamera auswählen"),
                 ("game_capture", "Game-Capture"),
                 ("select_game_window", "Spiel-Fenster auswählen"),
+                ("game_preview_title", "Fenster-Vorschau (live)"),
+                ("game_preview_loading", "Fenster-Vorschau wird geladen…"),
+                (
+                    "game_preview_unavailable",
+                    "Fenster-Vorschau nicht verfügbar (Fenster geschlossen oder minimiert)."
+                ),
                 ("start_recording", "Aufnahme starten"),
                 ("stop_recording", "Aufnahme stoppen"),
                 ("recording_in_progress", "Aufnahme läuft ({0}s)"),
@@ -749,6 +761,20 @@ mod tests {
         assert_eq!(Locale::De.tr("source_color"), "Farbe");
         assert_eq!(Locale::En.tr("source_game_capture"), "Game Capture");
         assert_eq!(Locale::De.tr("source_game_capture"), "Game-Capture");
+        // Game capture live preview keys
+        assert_eq!(Locale::En.tr("game_preview_title"), "Window preview (live)");
+        assert_eq!(
+            Locale::De.tr("game_preview_title"),
+            "Fenster-Vorschau (live)"
+        );
+        assert_eq!(
+            Locale::En.tr("game_preview_unavailable"),
+            "Window preview unavailable (window closed or minimized)."
+        );
+        assert_eq!(
+            Locale::De.tr("game_preview_unavailable"),
+            "Fenster-Vorschau nicht verfügbar (Fenster geschlossen oder minimiert)."
+        );
         assert_eq!(Locale::En.tr("source_screen_capture"), "Screen Capture");
         assert_eq!(Locale::De.tr("source_screen_capture"), "Bildschirm-Capture");
         assert_eq!(Locale::En.tr("source_audio"), "Audio");

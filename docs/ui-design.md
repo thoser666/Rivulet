@@ -53,6 +53,14 @@ into the central panel *below* the recording controls, separated by
   `egui::Window::new(...)` rendered *after* the panels so it draws on top.
   Modal windows must be drawn via a dedicated `draw_<name>_editor` method and
   gated by a `bool`/`Option` field on `RivuletApp`.
+- **Live previews** (e.g. `RegionPreview`, `GamePreview`): a struct holding
+  an `egui::TextureHandle` plus the frame size and the identity of what was
+  captured (monitor name / window id). The frame is grabbed off the UI thread
+  (via xcap) and refreshed on selection change or on a fixed interval
+  (`GAME_PREVIEW_REFRESH_INTERVAL`), then drawn with
+  `ui.painter().image(texture.id(), rect, uv, ...)`. Keep the refresh
+  decision (`should_refresh`) as pure logic so it is unit-testable, and show
+  a localized error when the frame cannot be captured.
 - **Footers**: pin to the bottom of the panel with
   `ui.with_layout(egui::Layout::bottom_up(...), ...)`.
 - **Status colors** (use the egui palette, no custom hex unless necessary):
