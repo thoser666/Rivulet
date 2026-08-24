@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.47.1-alpha.1] - 2026-08-24
+- fix: move game-window preview methods to a shared linux+windows impl
+
 ## [0.47.0-alpha.1] - 2026-08-24
 - feat: game capture live preview + window picker on Linux
 
