@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.44.0-alpha.1] - 2026-08-24
+- feat: S3 Text source + S4 Webcam source with i18n and tests
+
 ## [0.43.5-alpha.1] - 2026-08-23
 - fix(updater): wait for installer on all platforms + fix macOS test
 
