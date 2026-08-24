@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.51.0-alpha.1] - 2026-08-24
+- feat(gui): add hover/active accent strokes and preview fade-in animation
+
 ## [0.50.0-alpha.1] - 2026-08-24
 - feat: glassmorphism effect — semi-transparent panels
 
