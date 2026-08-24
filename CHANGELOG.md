@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.48.0-alpha.1] - 2026-08-24
+- feat: add manual refresh + live window-list update to game-capture preview
+
 ## [0.47.1-alpha.1] - 2026-08-24
 - fix: move game-window preview methods to a shared linux+windows impl
 
