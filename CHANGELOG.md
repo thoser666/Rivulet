@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.50.0-alpha.1] - 2026-08-24
+- feat: glassmorphism effect — semi-transparent panels
+
 ## [0.49.0-alpha.1] - 2026-08-24
 - feat: wire theme::init into the GUI and drive colors from the palette
 
