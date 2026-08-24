@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.46.0-alpha.1] - 2026-08-24
+- feat: game capture live preview + fix window title leaking into Source dropdown
+- docs: add game capture live preview to M2 roadmap
+- test: add theme persistence verification tests
+
 ## [0.45.0-alpha.1] - 2026-08-24
 - feat: S5a + S6 + S7 + S8 — Browser spike, Media, Color, Audio sources
 
