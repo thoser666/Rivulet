@@ -13,6 +13,9 @@ Cargo.lock
 **/*.rs.bk
 *.pdb
 
+# Font source archives (extracted fonts are committed, zips are not)
+rivulet-gui/assets/fonts/*.zip
+
 # Freebuff tool artifacts
 .freebuff/
 

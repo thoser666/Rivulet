@@ -2224,7 +2224,7 @@ impl RivuletApp {
                             ui.painter().rect_filled(
                                 rect,
                                 0.0,
-                                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 110),
+                                theme::ThemePalette::for_ui(ui).scrim,
                             );
                             ui.painter().with_clip_rect(drag_rect).image(
                                 p.texture.id(),
@@ -2378,9 +2378,9 @@ impl RivuletApp {
             no_frame_timeout,
             ..Default::default()
         };
-        // Apply the persisted color scheme immediately, so the first frame
-        // already renders with the right theme.
-        app.theme.apply(&cc.egui_ctx);
+        // Apply the persisted color scheme (fonts + palette + preference)
+        // immediately, so the first frame already renders with the right theme.
+        theme::init(&cc.egui_ctx, app.theme);
         app.theme_applied = Some(app.theme);
         #[cfg(target_os = "windows")]
         {
@@ -2403,10 +2403,10 @@ impl eframe::App for RivuletApp {
         // ── Hotkey handling ────────────────────────────────────────
         let ctx = ui.ctx();
 
-        // Apply the color scheme on startup and whenever the user changes
-        // it in Settings.
+        // Apply the color scheme (fonts + palette + preference) on startup
+        // and whenever the user changes it in Settings.
         if self.theme_applied != Some(self.theme) {
-            self.theme.apply(ctx);
+            theme::init(ctx, self.theme);
             self.theme_applied = Some(self.theme);
         }
 

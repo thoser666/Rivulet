@@ -71,12 +71,25 @@ into the central panel *below* the recording controls, separated by
   clears the selection.
 - **Footers**: pin to the bottom of the panel with
   `ui.with_layout(egui::Layout::bottom_up(...), ...)`.
-- **Status colors** (use the egui palette, no custom hex unless necessary):
-  - green `LIGHT_GREEN` — success / up-to-date
-  - yellow `YELLOW` — warning / paused
-  - red `RED`, `LIGHT_RED` — error
-  - blue `LIGHT_BLUE` — informational state (e.g. muted, listening)
-  - `GRAY` — secondary/hint text
+- **Theme entry point**: the app calls `theme::init(&ctx, pref)` once at
+  startup (`RivuletApp::new`) and again whenever the preference changes in
+  Settings. It applies the preference, loads the bundled Inter font
+  (`assets/fonts/Inter-Regular.ttf` via `inter_font_definitions()`), and
+  writes the palette visuals for **both** schemes (`set_visuals_of`), so a
+  runtime switch keeps the branded look.
+- **Status colors** (`theme::StatusColors::for_ui(ui)`, no custom hex unless
+  necessary):
+  - green — success / up-to-date
+  - yellow — warning / paused
+  - red — error
+  - blue — informational state (e.g. muted, listening)
+  - gray — secondary/hint text
+  Each resolves per scheme (dark/light) and is WCAG-AA verified in
+  `theme.rs` tests.
+- **Structural palette** (`theme::ThemePalette::for_ui(ui)`):
+  `accent`, `panel_fill`, `background`, `text`, `scrim`. Use the scrim for
+  overlays that dim a captured preview (e.g. the region editor) instead of a
+  hard-coded alpha color.
 
 ## Naming conventions
 
@@ -155,7 +168,7 @@ platforms.
 - [ ] New section content is wrapped in its `AppView` variant (or, until the
       sidebar lands, placed below the recording controls with a separator).
 - [ ] All strings added to `i18n.rs` in both locales, same relative order.
-- [ ] No hard-coded text, colors from the palette above.
+- [ ] No hard-coded text; colors from `StatusColors` / `ThemePalette`.
 - [ ] `draw_*` for rendering, `spawn_*` for background work, `handle_*` for
       one-shot actions — no inline `thread::spawn` in the panel code.
 - [ ] Long-running work updates a shared state enum and calls

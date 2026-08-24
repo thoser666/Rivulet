@@ -114,6 +114,118 @@ impl StatusColors {
         }
     }
 }
+// ---------------------------------------------------------------------------
+// Extended theme handling: custom palette, font loading, and theme application
+// ---------------------------------------------------------------------------
+
+/// A full UI palette for the application, resolved per color scheme so the
+/// same structural colors (accent, panel/background fill, text, scrim) are
+/// always legible. The semantic status colors live in [`StatusColors`]; the
+/// palette carries the structural colors used by the egui visuals and by the
+/// views that paint their own overlays (e.g. the region-editor scrim).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThemePalette {
+    /// Primary accent color (teal) for active widgets and highlights.
+    pub accent: egui::Color32,
+    /// Background fill for panels/windows.
+    pub panel_fill: egui::Color32,
+    /// Base background color for the outermost area / non-interactive widgets.
+    pub background: egui::Color32,
+    /// Text color for standard body text.
+    pub text: egui::Color32,
+    /// Translucent overlay used to dim captured previews (region editor)
+    /// while dragging a selection.
+    pub scrim: egui::Color32,
+}
+
+impl ThemePalette {
+    /// The palette for the current egui scheme (`ui.visuals().dark_mode`).
+    pub fn for_ui(ui: &egui::Ui) -> Self {
+        Self::for_scheme(ui.visuals().dark_mode)
+    }
+
+    /// The palette for a scheme, `dark = true` selects the dark palette.
+    pub fn for_scheme(dark: bool) -> Self {
+        if dark {
+            Self {
+                accent: egui::Color32::from_rgb(0, 150, 136), // teal A400
+                panel_fill: egui::Color32::from_gray(27),
+                background: egui::Color32::from_gray(20),
+                text: egui::Color32::LIGHT_GRAY,
+                scrim: egui::Color32::from_rgba_unmultiplied(0, 0, 0, 110),
+            }
+        } else {
+            Self {
+                accent: egui::Color32::from_rgb(0, 128, 128), // teal
+                panel_fill: egui::Color32::from_gray(248),
+                background: egui::Color32::from_gray(255),
+                text: egui::Color32::from_gray(30),
+                scrim: egui::Color32::from_rgba_unmultiplied(0, 0, 0, 110),
+            }
+        }
+    }
+}
+
+/// Build the font definitions that register the bundled Inter font
+/// (`assets/fonts/Inter-Regular.ttf`) as the primary proportional and
+/// monospace family. Kept as a pure function so it is unit-testable without
+/// a live egui context.
+pub fn inter_font_definitions() -> egui::FontDefinitions {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "Inter".to_owned(),
+        egui::FontData::from_static(include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/fonts/Inter-Regular.ttf"
+        )))
+        .into(),
+    );
+    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+        fonts
+            .families
+            .entry(family)
+            .or_default()
+            .insert(0, "Inter".to_owned());
+    }
+    fonts
+}
+
+/// Load the Inter font into the egui context as the primary proportional +
+/// monospace family.
+pub fn load_inter_font(ctx: &egui::Context) {
+    ctx.set_fonts(inter_font_definitions());
+}
+
+/// Apply the full theme (preference, fonts, palette visuals) to the egui
+/// context. This is the single entry point the app calls at startup (and
+/// again whenever the user changes the preference in Settings).
+pub fn init(ctx: &egui::Context, pref: ThemePreference) {
+    // Apply light/dark preference first so `System` follows the OS theme.
+    pref.apply(ctx);
+
+    // Load custom fonts.
+    load_inter_font(ctx);
+
+    // Apply the palette to BOTH schemes so a runtime switch (or the "System"
+    // preference following the OS) keeps the branded visuals. `set_visuals_of`
+    // stores the palette per theme; `set_visuals` alone would only touch the
+    // currently active one.
+    for (theme, dark) in [(egui::Theme::Dark, true), (egui::Theme::Light, false)] {
+        let palette = ThemePalette::for_scheme(dark);
+        let mut visuals = if dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
+        visuals.widgets.active.bg_fill = palette.accent;
+        visuals.widgets.hovered.bg_fill = palette.accent.linear_multiply(1.15);
+        visuals.widgets.inactive.bg_fill = palette.panel_fill;
+        visuals.widgets.noninteractive.bg_fill = palette.background;
+        visuals.window_fill = palette.panel_fill;
+        visuals.override_text_color = Some(palette.text);
+        ctx.set_visuals_of(theme, visuals);
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -198,5 +310,61 @@ mod tests {
         assert_eq!(StatusColors::for_scheme(false), StatusColors::light());
         // The palettes differ, so a scheme switch visibly changes the UI.
         assert_ne!(StatusColors::dark(), StatusColors::light());
+    }
+
+    #[test]
+    fn theme_palette_selects_the_scheme_variant() {
+        let dark = ThemePalette::for_scheme(true);
+        let light = ThemePalette::for_scheme(false);
+        // Both schemes carry all five palette colors.
+        for palette in [dark, light] {
+            assert_ne!(palette.accent, egui::Color32::TRANSPARENT);
+            assert_ne!(palette.panel_fill, egui::Color32::TRANSPARENT);
+            assert_ne!(palette.background, egui::Color32::TRANSPARENT);
+            assert_ne!(palette.text, egui::Color32::TRANSPARENT);
+            assert_ne!(palette.scrim, egui::Color32::TRANSPARENT);
+        }
+        // The palettes differ, so a scheme switch visibly changes the UI.
+        assert_ne!(dark, light);
+    }
+
+    #[test]
+    fn theme_init_applies_palette_to_both_schemes() {
+        let ctx = egui::Context::default();
+        init(&ctx, ThemePreference::Dark);
+
+        let dark_visuals = ctx.style_of(egui::Theme::Dark).visuals.clone();
+        let light_visuals = ctx.style_of(egui::Theme::Light).visuals.clone();
+        assert_eq!(
+            dark_visuals.window_fill,
+            ThemePalette::for_scheme(true).panel_fill
+        );
+        assert_eq!(
+            light_visuals.window_fill,
+            ThemePalette::for_scheme(false).panel_fill
+        );
+        assert_eq!(
+            dark_visuals.widgets.active.bg_fill,
+            ThemePalette::for_scheme(true).accent
+        );
+        // The Inter font is registered as the primary proportional family.
+        let definitions = inter_font_definitions();
+        assert!(
+            definitions.font_data.contains_key("Inter")
+                && definitions
+                    .families
+                    .get(&egui::FontFamily::Proportional)
+                    .is_some_and(|names| names.first().is_some_and(|n| n == "Inter")),
+            "Inter font must be registered as the primary proportional font"
+        );
+    }
+
+    #[test]
+    fn theme_init_respects_the_preference() {
+        let ctx = egui::Context::default();
+        init(&ctx, ThemePreference::Light);
+        assert_eq!(ctx.theme(), egui::Theme::Light);
+        init(&ctx, ThemePreference::Dark);
+        assert_eq!(ctx.theme(), egui::Theme::Dark);
     }
 }
