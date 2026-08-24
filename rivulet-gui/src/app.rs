@@ -2849,6 +2849,12 @@ impl eframe::App for RivuletApp {
                                 preview.height as f32 * scale,
                             );
                             let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                            let alpha = theme::preview_fade_alpha(
+                                ui.ctx(),
+                                egui::Id::new("game_preview_fade"),
+                                true,
+                            );
+                            let tint = egui::Color32::from_white_alpha((alpha * 255.0) as u8);
                             let uv = egui::Rect::from_min_max(
                                 egui::pos2(0.0, 0.0),
                                 egui::pos2(1.0, 1.0),
@@ -2857,7 +2863,7 @@ impl eframe::App for RivuletApp {
                                 preview.texture.id(),
                                 rect,
                                 uv,
-                                egui::Color32::WHITE,
+                                tint,
                             );
                             ui.label(
                                 egui::RichText::new(self.tr("game_preview_title"))
@@ -3200,6 +3206,12 @@ impl eframe::App for RivuletApp {
                                     preview.height as f32 * scale,
                                 );
                                 let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                                let alpha = theme::preview_fade_alpha(
+                                    ui.ctx(),
+                                    egui::Id::new("game_preview_fade_linux"),
+                                    true,
+                                );
+                                let tint = egui::Color32::from_white_alpha((alpha * 255.0) as u8);
                                 let uv = egui::Rect::from_min_max(
                                     egui::pos2(0.0, 0.0),
                                     egui::pos2(1.0, 1.0),
@@ -3208,7 +3220,7 @@ impl eframe::App for RivuletApp {
                                     preview.texture.id(),
                                     rect,
                                     uv,
-                                    egui::Color32::WHITE,
+                                    tint,
                                 );
                                 ui.label(
                                     egui::RichText::new(self.tr("game_preview_title"))

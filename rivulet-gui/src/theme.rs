@@ -244,6 +244,32 @@ pub fn glass_frame(ui: &egui::Ui) -> egui::Frame {
         .corner_radius(egui::CornerRadius::same(4))
 }
 
+/// Accent-colored hover stroke for buttons and interactive elements.
+///
+/// Returns a 1.5px stroke using the palette accent color at 60% opacity.
+#[expect(dead_code, reason = "public API for nav/button hover styling")]
+pub fn hover_stroke(ui: &egui::Ui) -> egui::Stroke {
+    let accent = ThemePalette::for_ui(ui).accent;
+    egui::Stroke::new(1.5, accent.linear_multiply(0.6))
+}
+
+/// Accent-colored active press stroke.
+///
+/// Returns a 2px stroke using the full palette accent color.
+#[expect(dead_code, reason = "public API for nav/button active styling")]
+pub fn active_stroke(ui: &egui::Ui) -> egui::Stroke {
+    let accent = ThemePalette::for_ui(ui).accent;
+    egui::Stroke::new(2.0, accent)
+}
+
+/// Fade-in alpha for preview images.
+///
+/// Wraps `ui.ctx().animate_bool` to return an `f32` in `[0.0, 1.0]`
+/// suitable for `Color32::linear_multiply` or the painter's `tint`.
+pub fn preview_fade_alpha(ctx: &egui::Context, id: egui::Id, visible: bool) -> f32 {
+    ctx.animate_bool(id, visible)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,5 +409,98 @@ mod tests {
         assert_eq!(ctx.theme(), egui::Theme::Light);
         init(&ctx, ThemePreference::Dark);
         assert_eq!(ctx.theme(), egui::Theme::Dark);
+    }
+
+    /// Helper: create a temporary egui Ui from a Context for testing.
+    fn test_ui(ctx: &egui::Context, f: impl FnOnce(&mut egui::Ui)) {
+        let mut ui = egui::Ui::new(
+            ctx.clone(),
+            egui::Id::new("test_ui"),
+            egui::UiBuilder::new(),
+        );
+        f(&mut ui);
+    }
+
+    #[test]
+    fn glass_frame_is_semi_transparent_dark() {
+        let ctx = egui::Context::default();
+        ThemePreference::Dark.apply(&ctx);
+        test_ui(&ctx, |ui| {
+            let frame = super::glass_frame(ui);
+            assert!(frame.fill.a() < 255, "glass frame must be semi-transparent");
+            assert!(frame.fill.a() > 100, "glass frame must not be too transparent");
+        });
+    }
+
+    #[test]
+    fn glass_frame_is_semi_transparent_light() {
+        let ctx = egui::Context::default();
+        ThemePreference::Light.apply(&ctx);
+        test_ui(&ctx, |ui| {
+            let frame = super::glass_frame(ui);
+            assert!(frame.fill.a() < 255, "glass frame must be semi-transparent");
+            assert!(frame.fill.a() > 100, "glass frame must not be too transparent");
+        });
+    }
+
+    #[test]
+    fn glass_frame_has_corner_radius() {
+        let ctx = egui::Context::default();
+        test_ui(&ctx, |ui| {
+            let frame = super::glass_frame(ui);
+            assert!(frame.corner_radius.nw > 0, "glass frame must have rounding");
+        });
+    }
+
+    #[test]
+    fn hover_stroke_uses_accent_color() {
+        let ctx = egui::Context::default();
+        ThemePreference::Dark.apply(&ctx);
+        test_ui(&ctx, |ui| {
+            let stroke = super::hover_stroke(ui);
+            assert!(stroke.width > 0.0, "hover stroke must have width");
+            assert!(stroke.color.a() > 0, "hover stroke must have alpha");
+            assert!(stroke.color.a() < 255, "hover stroke must be semi-transparent");
+        });
+    }
+
+    #[test]
+    fn active_stroke_uses_accent_color() {
+        let ctx = egui::Context::default();
+        ThemePreference::Dark.apply(&ctx);
+        test_ui(&ctx, |ui| {
+            let stroke = super::active_stroke(ui);
+            assert!(stroke.width > 0.0, "active stroke must have width");
+            assert_eq!(stroke.color.a(), 255, "active stroke must be fully opaque");
+        });
+    }
+
+    #[test]
+    fn preview_fade_alpha_returns_zero_when_hidden() {
+        let ctx = egui::Context::default();
+        let alpha = super::preview_fade_alpha(&ctx, egui::Id::new("test_fade"), false);
+        assert_eq!(alpha, 0.0, "hidden preview should have alpha 0");
+    }
+
+    #[test]
+    fn preview_fade_alpha_returns_one_when_visible() {
+        let ctx = egui::Context::default();
+        let _ = super::preview_fade_alpha(&ctx, egui::Id::new("test_fade_visible"), true);
+        for _ in 0..10 {
+            ctx.request_repaint();
+        }
+        let alpha = super::preview_fade_alpha(&ctx, egui::Id::new("test_fade_visible"), true);
+        assert!(alpha > 0.0, "visible preview should animate toward 1.0, got {alpha}");
+    }
+
+    #[test]
+    fn hover_stroke_differs_from_active_stroke() {
+        let ctx = egui::Context::default();
+        ThemePreference::Dark.apply(&ctx);
+        test_ui(&ctx, |ui| {
+            let hover = super::hover_stroke(ui);
+            let active = super::active_stroke(ui);
+            assert_ne!(hover.width, active.width, "hover and active strokes must differ in width");
+        });
     }
 }
