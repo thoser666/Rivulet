@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.63.0-alpha.1] - 2026-08-25
+- feat(security): enable CodeQL and dependency review
+
 ## [0.62.0-alpha.1] - 2026-08-25
 - feat(gui): add milestone quality gates and studio mode
 
