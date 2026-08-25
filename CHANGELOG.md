@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.60.0-alpha.1] - 2026-08-25
+- feat(logging): add rotating diagnostic logs
+
 ## [0.59.1-alpha.1] - 2026-08-25
 - fix(gui): keep transition updates non-blocking
 
