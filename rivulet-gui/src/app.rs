@@ -1817,13 +1817,14 @@ impl RivuletApp {
                     self.scene_name_input.clear();
                 }
             }
-            let switched_back = ui
+            let switch_back_response = ui
                 .add_enabled(
                     active.is_some(),
                     egui::Button::new(self.tr("scenes_switch_back")),
                 )
-                .on_hover_text(self.tr("scenes_switch_back"))
-                .clicked();
+                .on_hover_text(self.tr("scenes_switch_back"));
+            theme::paint_interaction_stroke(ui, &switch_back_response);
+            let switched_back = switch_back_response.clicked();
             if switched_back && self.scenes.switch_back() {
                 self.scene_status = None;
             }
@@ -1860,10 +1861,14 @@ impl RivuletApp {
                                         .color(colors.success),
                                 );
                             }
-                            if ui.small_button(self.tr("scenes_rename")).clicked() {
+                            let rename_response = ui.small_button(self.tr("scenes_rename"));
+                            theme::paint_interaction_stroke(ui, &rename_response);
+                            if rename_response.clicked() {
                                 rename_target = Some((id, scene.name.clone()));
                             }
-                            if ui.small_button(self.tr("scenes_remove")).clicked() {
+                            let remove_response = ui.small_button(self.tr("scenes_remove"));
+                            theme::paint_interaction_stroke(ui, &remove_response);
+                            if remove_response.clicked() {
                                 remove_target = Some(id);
                             }
                         });
@@ -2731,7 +2736,8 @@ impl eframe::App for RivuletApp {
                 ui.label(egui::RichText::new(self.tr("windows_screen_recording")).strong());
                 if self.is_windows_recording || self.is_aux_recording {
                     ui.horizontal(|ui| {
-                        if ui.button("⏹ Stop Recording").clicked() {
+                        let stop_response = theme::accent_button(ui, "⏹ Stop Recording");
+                        if stop_response.clicked() {
                             if self.is_aux_recording {
                                 self.stop_aux_recording();
                             } else {
@@ -2745,7 +2751,8 @@ impl eframe::App for RivuletApp {
                         } else {
                             "⏸ Pause"
                         };
-                        if ui.button(pause_label).clicked() {
+                        let pause_response = theme::accent_button(ui, pause_label);
+                        if pause_response.clicked() {
                             self.is_paused = !self.is_paused;
                         }
                         let mute_label = if self.is_muted {
@@ -2753,7 +2760,8 @@ impl eframe::App for RivuletApp {
                         } else {
                             "🔇 Mute"
                         };
-                        if ui.button(mute_label).clicked() {
+                        let mute_response = theme::accent_button(ui, mute_label);
+                        if mute_response.clicked() {
                             self.is_muted = !self.is_muted;
                         }
                     });
@@ -3416,14 +3424,18 @@ impl eframe::App for RivuletApp {
 
                     ui.horizontal(|ui| {
                         if self.audio_preview {
-                            if ui.button(format!("⏹ {}", self.tr("stop_audio"))).clicked() {
+                            if theme::accent_button(ui, format!("⏹ {}", self.tr("stop_audio")))
+                                .clicked()
+                            {
                                 self.stop_audio_capture();
                             }
                             ui.label(
                                 egui::RichText::new(format!("● {}", self.tr("running")))
                                     .color(colors.success),
                             );
-                        } else if ui.button(format!("▶ {}", self.tr("start_audio"))).clicked() {
+                        } else if theme::accent_button(ui, format!("▶ {}", self.tr("start_audio")))
+                            .clicked()
+                        {
                             self.start_audio_capture();
                         }
                     });

@@ -49,6 +49,8 @@ The top bar and navigation use the shared translucent `theme::glass_frame()`.
   `ui.separator()`.
 - **Modal editors** (e.g. the region selector): floating
   `egui::Window::new(...)` rendered *after* the panels so it draws on top.
+  Their content uses `ui.max_rect()`/available bounds and preserves aspect ratio
+  instead of assuming a fixed desktop viewport.
   Modal windows must be drawn via a dedicated `draw_<name>_editor` method and
   gated by a `bool`/`Option` field on `RivuletApp`.
 - **Live previews** (e.g. `RegionPreview`, `GamePreview`): a struct holding
