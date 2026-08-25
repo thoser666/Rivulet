@@ -21,6 +21,7 @@ const WORKFLOWS: &[&str] = &[
     "build-package.yml",
     "dependabot-auto-merge.yml",
     "security.yml",
+    "scorecard.yml",
 ];
 
 /// The reviewed pins. `(action@sha, human-readable version)` — the version
@@ -65,8 +66,16 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v3.37.8",
     ),
     (
+        "github/codeql-action/upload-sarif@42947a340483f03ba47bb1a039b2c519aab3df85",
+        "v3.37.8",
+    ),
+    (
         "actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48",
         "v4.9.0",
+    ),
+    (
+        "ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc",
+        "v2.4.4",
     ),
 ];
 
@@ -332,6 +341,31 @@ fn security_workflow_enables_codeql_and_dependency_review() {
     assert!(
         workflow.contains("pull_request:") && workflow.contains("branches: [develop]"),
         "security checks must run for pull requests and develop pushes"
+    );
+}
+
+#[test]
+fn scorecard_workflow_is_wired_for_sarif_and_provenance() {
+    let workflow = read(".github/workflows/scorecard.yml");
+    assert!(
+        workflow.contains("ossf/scorecard-action@")
+            && workflow.contains("results_format: sarif")
+            && workflow.contains("publish_results: true"),
+        "scorecard.yml must run OpenSSF Scorecard and publish SARIF results"
+    );
+    assert!(
+        workflow.contains("github/codeql-action/upload-sarif@")
+            && workflow.contains("category: openssf-scorecard"),
+        "scorecard.yml must upload a distinct Code Scanning SARIF category"
+    );
+    assert!(
+        workflow.contains("id-token: write") && workflow.contains("persist-credentials: false"),
+        "Scorecard must use OIDC publication and avoid persisted checkout credentials"
+    );
+    assert!(
+        workflow.contains("actions/upload-artifact@")
+            && workflow.contains("if-no-files-found: error"),
+        "scorecard.yml must retain the SARIF artifact and fail if it is missing"
     );
 }
 

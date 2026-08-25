@@ -574,6 +574,9 @@ The repository security baseline is enabled and enforced in two layers:
   Code Scanning.
 - **Dependency Review:** the same workflow reviews pull-request dependency
   changes and fails on high-severity advisories; it posts a summary to the PR.
+- **OpenSSF Scorecard:** `.github/workflows/scorecard.yml` evaluates supply-chain
+  practices weekly and on repository changes, publishes the signed result, and
+  uploads a separate SARIF category to Code Scanning.
 
 The workflow actions are pinned to commit SHAs and covered by
 `rivulet-core/tests/ci_pinning.rs`. Verify the repository-level settings with:

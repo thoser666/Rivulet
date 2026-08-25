@@ -44,10 +44,20 @@ these settings.
   Scanning.
 - **Dependency Review** on pull requests. The check fails for high-severity or
   critical dependency advisories and posts a summary to the pull request.
+- **OpenSSF Scorecard** on pushes to `develop`, pull requests, weekly scheduled
+  scans, and manual dispatch. The workflow publishes the result to the OpenSSF
+  API, stores the SARIF artifact for 14 days, and uploads a separate
+  `openssf-scorecard` category to GitHub Code Scanning.
 
-Every third-party action in the workflow is pinned to a full commit SHA. The
-pins are listed in [`ci-action-pins.md`](ci-action-pins.md) and enforced by
-`rivulet-core/tests/ci_pinning.rs`.
+Every third-party action in the security workflows is pinned to a full commit
+SHA. The pins are listed in [`ci-action-pins.md`](ci-action-pins.md) and enforced
+by `rivulet-core/tests/ci_pinning.rs`.
+
+Scorecard requires `id-token: write` for signed, repository-bound publication.
+The workflow sets `persist-credentials: false` during checkout and does not
+request write access to repository contents. Review the first score regularly;
+Scorecard findings are improvement signals, not a substitute for threat
+modeling or maintainer review.
 
 ## Required Repository Settings
 
