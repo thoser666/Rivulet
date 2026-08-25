@@ -235,7 +235,7 @@ studio mode, and multi-view/projectors.
 - [x] **Duplicate scene / source** — one-click scene duplication with fresh identity and source duplication with copied properties and no accidental bindings; transform copy/paste remains a follow-up
 - [ ] **Scene hotkeys & auto-switching** — a hotkey for every scene, plus window-focus-driven auto scene switching (OBS auto-scene-switcher workflow)
 - [x] Sources — window capture (monitor + individual windows, Linux & Windows)
-- [ ] **Source composition** (layers, position, scaling, cropping — each scene stores its own layout per source; switching scenes auto-moves sources to their saved positions) — source transforms and z-order primitives exist; the full composition editor remains open
+- [x] **Source composition** (layers, position, scaling, cropping — each scene stores its own layout per source; switching scenes auto-moves sources to their saved positions) — the Scenes view now provides a source/layer editor for per-scene transform, crop, visibility, lock, z-order, and duplication; native media rendering and transform copy/paste remain follow-up work
 - [ ] Transitions (fade, cut, stinger)
 - [ ] Overlays (picture-in-picture, banners)
 - [ ] Chroma key / green screen

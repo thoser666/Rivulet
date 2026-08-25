@@ -359,6 +359,24 @@ impl Locale {
                 ("scenes_profile", "Profile"),
                 ("scenes_duplicate", "Duplicate"),
                 ("scenes_duplicate_name", "Copy of {0}"),
+                ("composition", "Source composition"),
+                ("composition_no_scene", "Select or create a scene first."),
+                ("composition_add_source", "Add source"),
+                ("composition_add", "Add"),
+                ("composition_empty", "No sources in this scene yet."),
+                ("composition_layers", "Layers"),
+                ("composition_properties", "Source properties"),
+                ("composition_visible", "Visible"),
+                ("composition_locked", "Locked"),
+                ("composition_position", "Position"),
+                ("composition_size", "Size"),
+                ("composition_opacity", "Opacity"),
+                ("composition_crop", "Crop"),
+                ("composition_lower", "Lower"),
+                ("composition_raise", "Raise"),
+                ("composition_duplicate_source", "Duplicate source"),
+                ("composition_hidden", "hidden"),
+                ("composition_locked_state", "locked"),
                 ("section_planned", "This section is planned for milestone {0}."),
                 ("mixer_unavailable", "The audio mixer is currently only available on Linux."),
                 // Theme
@@ -615,6 +633,24 @@ impl Locale {
                 ("scenes_profile", "Profil"),
                 ("scenes_duplicate", "Duplizieren"),
                 ("scenes_duplicate_name", "Kopie von {0}"),
+                ("composition", "Quellenkomposition"),
+                ("composition_no_scene", "Bitte zuerst eine Szene auswählen oder erstellen."),
+                ("composition_add_source", "Quelle hinzufügen"),
+                ("composition_add", "Hinzufügen"),
+                ("composition_empty", "Diese Szene enthält noch keine Quellen."),
+                ("composition_layers", "Ebenen"),
+                ("composition_properties", "Quelleneigenschaften"),
+                ("composition_visible", "Sichtbar"),
+                ("composition_locked", "Gesperrt"),
+                ("composition_position", "Position"),
+                ("composition_size", "Größe"),
+                ("composition_opacity", "Deckkraft"),
+                ("composition_crop", "Beschnitt"),
+                ("composition_lower", "Nach unten"),
+                ("composition_raise", "Nach oben"),
+                ("composition_duplicate_source", "Quelle duplizieren"),
+                ("composition_hidden", "ausgeblendet"),
+                ("composition_locked_state", "gesperrt"),
                 ("section_planned", "Dieser Bereich ist für Meilenstein {0} geplant."),
                 ("mixer_unavailable", "Der Audio-Mixer ist derzeit nur unter Linux verfügbar."),
                 // Theme
@@ -718,6 +754,16 @@ mod tests {
         assert_eq!(Locale::De.tr("nav_assistant"), "Assistant");
         assert_eq!(Locale::En.tr("nav_settings"), "Settings");
         assert_eq!(Locale::De.tr("nav_settings"), "Einstellungen");
+    }
+
+    #[test]
+    fn source_composition_keys_translate_in_both_locales() {
+        assert_eq!(Locale::En.tr("composition"), "Source composition");
+        assert_eq!(Locale::De.tr("composition"), "Quellenkomposition");
+        assert_eq!(Locale::En.tr("composition_visible"), "Visible");
+        assert_eq!(Locale::De.tr("composition_visible"), "Sichtbar");
+        assert_eq!(Locale::En.tr("composition_crop"), "Crop");
+        assert_eq!(Locale::De.tr("composition_crop"), "Beschnitt");
     }
 
     #[test]

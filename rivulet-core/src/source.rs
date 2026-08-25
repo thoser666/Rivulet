@@ -147,9 +147,30 @@ pub struct SceneSource {
     pub source_id: Uuid,
     pub scene_id: Uuid,
     pub transform_override: Option<Transform>,
+    pub crop: Crop,
     pub visible: bool,
     pub locked: bool,
     pub z_order: i32,
+}
+
+/// Per-scene crop rectangle in source pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Crop {
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
+impl Crop {
+    pub fn new(left: u32, top: u32, right: u32, bottom: u32) -> Self {
+        Self {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
 }
 
 impl SceneSource {
@@ -158,6 +179,7 @@ impl SceneSource {
             source_id,
             scene_id,
             transform_override: None,
+            crop: Crop::default(),
             visible: true,
             locked: false,
             z_order: 0,
@@ -292,6 +314,45 @@ impl SourceManager {
 
     /// Updates the transform override for a specific scene-source
     /// binding.  Returns false if the binding doesn't exist.
+    pub fn set_crop(&mut self, source_id: Uuid, scene_id: Uuid, crop: Crop) -> bool {
+        if let Some(binding) = self
+            .bindings
+            .iter_mut()
+            .find(|b| b.source_id == source_id && b.scene_id == scene_id)
+        {
+            binding.crop = crop;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn set_visibility(&mut self, source_id: Uuid, scene_id: Uuid, visible: bool) -> bool {
+        if let Some(binding) = self
+            .bindings
+            .iter_mut()
+            .find(|b| b.source_id == source_id && b.scene_id == scene_id)
+        {
+            binding.visible = visible;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn set_locked(&mut self, source_id: Uuid, scene_id: Uuid, locked: bool) -> bool {
+        if let Some(binding) = self
+            .bindings
+            .iter_mut()
+            .find(|b| b.source_id == source_id && b.scene_id == scene_id)
+        {
+            binding.locked = locked;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn set_transform(&mut self, source_id: Uuid, scene_id: Uuid, transform: Transform) -> bool {
         if let Some(binding) = self
             .bindings
@@ -481,6 +542,7 @@ mod tests {
         assert_eq!(ss.source_id, src);
         assert_eq!(ss.scene_id, scene);
         assert!(ss.transform_override.is_none());
+        assert_eq!(ss.crop, Crop::default());
         assert!(ss.visible);
         assert!(!ss.locked);
         assert_eq!(ss.z_order, 0);
@@ -633,6 +695,21 @@ mod tests {
 
         let list = mgr.scene_sources(scene);
         assert_eq!(list[0].transform_override, Some(new_t));
+    }
+
+    #[test]
+    fn manager_composition_updates_crop_visibility_and_lock() {
+        let mut mgr = SourceManager::new();
+        let scene = Uuid::new_v4();
+        let source = mgr.add_source(Source::new("Game".to_string(), SourceKind::GameCapture));
+        mgr.bind_source(source, scene, None);
+        assert!(mgr.set_crop(source, scene, Crop::new(2, 4, 8, 16)));
+        assert!(mgr.set_visibility(source, scene, false));
+        assert!(mgr.set_locked(source, scene, true));
+        let binding = mgr.scene_sources(scene)[0];
+        assert_eq!(binding.crop, Crop::new(2, 4, 8, 16));
+        assert!(!binding.visible);
+        assert!(binding.locked);
     }
 
     #[test]

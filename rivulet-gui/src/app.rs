@@ -557,6 +557,14 @@ pub struct RivuletApp {
     scene_collection_input: String,
     #[serde(skip)]
     scene_profile_input: String,
+    #[serde(skip)]
+    source_manager: rivulet_core::SourceManager,
+    #[serde(skip)]
+    source_name_input: String,
+    #[serde(skip)]
+    source_kind_index: usize,
+    #[serde(skip)]
+    selected_composition_source: Option<uuid::Uuid>,
 
     // Auto-update
     #[serde(skip)]
@@ -757,6 +765,10 @@ impl Default for RivuletApp {
             scene_status: None,
             scene_collection_input: String::new(),
             scene_profile_input: String::new(),
+            source_manager: rivulet_core::SourceManager::new(),
+            source_name_input: String::new(),
+            source_kind_index: 0,
+            selected_composition_source: None,
 
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
@@ -1967,6 +1979,234 @@ impl RivuletApp {
         if let Some(status) = &self.scene_status {
             ui.colored_label(colors.info, status);
         }
+    }
+
+    /// Edit the active scene's source bindings without mutating source defaults.
+    /// Transform, crop, visibility, locking, and z-order are scene-local.
+    fn draw_source_composition(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
+        ui.separator();
+        ui.label(egui::RichText::new(self.tr("composition")).strong());
+        let Some(scene_id) = self.scenes.active() else {
+            ui.colored_label(colors.hint, self.tr("composition_no_scene"));
+            return;
+        };
+
+        let kinds = [
+            rivulet_core::SourceKind::Image,
+            rivulet_core::SourceKind::Text,
+            rivulet_core::SourceKind::Webcam,
+            rivulet_core::SourceKind::Browser,
+            rivulet_core::SourceKind::Media,
+            rivulet_core::SourceKind::Color,
+            rivulet_core::SourceKind::GameCapture,
+            rivulet_core::SourceKind::ScreenCapture,
+            rivulet_core::SourceKind::Audio,
+        ];
+        self.source_kind_index = self.source_kind_index.min(kinds.len() - 1);
+        ui.horizontal(|ui| {
+            ui.label(self.tr("composition_add_source"));
+            ui.text_edit_singleline(&mut self.source_name_input);
+            egui::ComboBox::from_id_salt("composition_source_kind")
+                .selected_text(kinds[self.source_kind_index].label())
+                .show_ui(ui, |ui| {
+                    for (index, kind) in kinds.iter().enumerate() {
+                        if ui
+                            .selectable_label(self.source_kind_index == index, kind.label())
+                            .clicked()
+                        {
+                            self.source_kind_index = index;
+                        }
+                    }
+                });
+            if theme::accent_button(ui, self.tr("composition_add")).clicked() {
+                let name = if self.source_name_input.trim().is_empty() {
+                    format!(
+                        "{} {}",
+                        kinds[self.source_kind_index].label(),
+                        self.source_manager.sources().len() + 1
+                    )
+                } else {
+                    self.source_name_input.trim().to_string()
+                };
+                let id = self.source_manager.add_source(rivulet_core::Source::new(
+                    name,
+                    kinds[self.source_kind_index].clone(),
+                ));
+                self.source_manager.bind_source(id, scene_id, None);
+                self.selected_composition_source = Some(id);
+                self.source_name_input.clear();
+            }
+        });
+
+        let entries: Vec<(
+            uuid::Uuid,
+            String,
+            rivulet_core::SourceKind,
+            bool,
+            bool,
+            i32,
+        )> = self
+            .source_manager
+            .scene_sources(scene_id)
+            .into_iter()
+            .filter_map(|binding| {
+                self.source_manager
+                    .get_source(binding.source_id)
+                    .map(|source| {
+                        (
+                            binding.source_id,
+                            source.name.clone(),
+                            source.kind.clone(),
+                            binding.visible,
+                            binding.locked,
+                            binding.z_order,
+                        )
+                    })
+            })
+            .collect();
+        if entries.is_empty() {
+            ui.colored_label(colors.hint, self.tr("composition_empty"));
+            return;
+        }
+
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(self.tr("composition_layers"));
+                for (id, name, kind, visible, locked, z_order) in &entries {
+                    let selected = self.selected_composition_source == Some(*id);
+                    let response = ui.selectable_label(
+                        selected,
+                        format!("{} · {} · z{}", name, kind.label(), z_order),
+                    );
+                    theme::paint_interaction_stroke(ui, &response);
+                    if response.clicked() {
+                        self.selected_composition_source = Some(*id);
+                    }
+                    let state = match (*visible, *locked) {
+                        (true, true) => String::new(),
+                        (false, true) => format!(" · {}", self.tr("composition_hidden")),
+                        (true, false) => format!(" · {}", self.tr("composition_locked_state")),
+                        (false, false) => format!(
+                            " · {} · {}",
+                            self.tr("composition_hidden"),
+                            self.tr("composition_locked_state")
+                        ),
+                    };
+                    ui.small(state);
+                }
+            });
+            ui.separator();
+            ui.vertical(|ui| {
+                let selected = self
+                    .selected_composition_source
+                    .filter(|id| entries.iter().any(|entry| entry.0 == *id));
+                self.selected_composition_source =
+                    selected.or_else(|| entries.first().map(|entry| entry.0));
+                if let Some(source_id) = self.selected_composition_source {
+                    let Some(binding) = self
+                        .source_manager
+                        .scene_sources(scene_id)
+                        .into_iter()
+                        .find(|b| b.source_id == source_id)
+                        .map(|b| (*b).clone())
+                    else {
+                        return;
+                    };
+                    let mut visible = binding.visible;
+                    let mut locked = binding.locked;
+                    let mut transform = binding
+                        .transform_override
+                        .clone()
+                        .or_else(|| {
+                            self.source_manager
+                                .get_source(source_id)
+                                .map(|s| s.transform.clone())
+                        })
+                        .unwrap_or_default();
+                    let mut crop = binding.crop;
+                    ui.label(self.tr("composition_properties"));
+                    if ui
+                        .checkbox(&mut visible, self.tr("composition_visible"))
+                        .changed()
+                    {
+                        self.source_manager
+                            .set_visibility(source_id, scene_id, visible);
+                    }
+                    if ui
+                        .checkbox(&mut locked, self.tr("composition_locked"))
+                        .changed()
+                    {
+                        self.source_manager.set_locked(source_id, scene_id, locked);
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("composition_position"));
+                        ui.add(egui::DragValue::new(&mut transform.x).prefix("X "));
+                        ui.add(egui::DragValue::new(&mut transform.y).prefix("Y "));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("composition_size"));
+                        ui.add(
+                            egui::DragValue::new(&mut transform.width)
+                                .prefix("W ")
+                                .range(1.0..=16384.0),
+                        );
+                        ui.add(
+                            egui::DragValue::new(&mut transform.height)
+                                .prefix("H ")
+                                .range(1.0..=16384.0),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.add(egui::DragValue::new(&mut transform.rotation).prefix("° "));
+                        ui.add(
+                            egui::Slider::new(&mut transform.opacity, 0.0..=1.0)
+                                .text(self.tr("composition_opacity")),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("composition_crop"));
+                        ui.add(egui::DragValue::new(&mut crop.left).prefix("L "));
+                        ui.add(egui::DragValue::new(&mut crop.top).prefix("T "));
+                        ui.add(egui::DragValue::new(&mut crop.right).prefix("R "));
+                        ui.add(egui::DragValue::new(&mut crop.bottom).prefix("B "));
+                    });
+                    if !locked {
+                        self.source_manager
+                            .set_transform(source_id, scene_id, transform);
+                        self.source_manager.set_crop(source_id, scene_id, crop);
+                    }
+                    ui.horizontal(|ui| {
+                        if theme::accent_button(ui, self.tr("composition_lower")).clicked() {
+                            self.source_manager.reorder_source(source_id, scene_id, -1);
+                        }
+                        if theme::accent_button(ui, self.tr("composition_raise")).clicked() {
+                            self.source_manager.reorder_source(source_id, scene_id, 1);
+                        }
+                        if theme::accent_button(ui, self.tr("composition_duplicate_source"))
+                            .clicked()
+                        {
+                            if let Some(new_id) = self.source_manager.duplicate_source(
+                                source_id,
+                                format!(
+                                    "{} copy",
+                                    self.source_manager
+                                        .get_source(source_id)
+                                        .map(|s| s.name.as_str())
+                                        .unwrap_or("Source")
+                                ),
+                            ) {
+                                self.source_manager.bind_source(
+                                    new_id,
+                                    scene_id,
+                                    binding.transform_override.clone(),
+                                );
+                                self.selected_composition_source = Some(new_id);
+                            }
+                        }
+                    });
+                }
+            });
+        });
     }
 
     /// Configure the S5b browser source from the Scenes view. Rendering is
@@ -3658,6 +3898,7 @@ impl eframe::App for RivuletApp {
                 self.draw_scenes_view(ui, &colors);
             }
             if self.view == AppView::Scenes {
+                self.draw_source_composition(ui, &colors);
                 self.draw_browser_source_panel(ui, &colors);
             }
 

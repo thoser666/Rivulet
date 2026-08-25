@@ -51,7 +51,7 @@ pub mod scene;
 pub use scene::{Scene, SceneManager};
 
 pub mod source;
-pub use source::{SceneSource, Source, SourceKind, SourceManager, Transform};
+pub use source::{Crop, SceneSource, Source, SourceKind, SourceManager, Transform};
 
 pub mod image_source;
 pub use image_source::{is_image_file, supported_image_extensions, ImageSource};
