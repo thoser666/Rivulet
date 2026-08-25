@@ -50,6 +50,9 @@ pub use region::CaptureRegion;
 pub mod scene;
 pub use scene::{Scene, SceneManager};
 
+pub mod transition;
+pub use transition::{SceneTransition, TransitionKind};
+
 pub mod source;
 pub use source::{Crop, SceneSource, Source, SourceKind, SourceManager, Transform};
 

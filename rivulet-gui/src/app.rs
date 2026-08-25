@@ -554,6 +554,12 @@ pub struct RivuletApp {
     #[serde(skip)]
     scene_status: Option<String>,
     #[serde(skip)]
+    transition_kind: rivulet_core::TransitionKind,
+    #[serde(skip)]
+    transition_duration_ms: u64,
+    #[serde(skip)]
+    scene_transition: rivulet_core::SceneTransition,
+    #[serde(skip)]
     scene_collection_input: String,
     #[serde(skip)]
     scene_profile_input: String,
@@ -763,6 +769,9 @@ impl Default for RivuletApp {
             browser_source: rivulet_core::BrowserSource::default(),
             scene_name_input: String::new(),
             scene_status: None,
+            transition_kind: rivulet_core::TransitionKind::Cut,
+            transition_duration_ms: 300,
+            scene_transition: rivulet_core::SceneTransition::default(),
             scene_collection_input: String::new(),
             scene_profile_input: String::new(),
             source_manager: rivulet_core::SourceManager::new(),
@@ -1849,6 +1858,29 @@ impl RivuletApp {
         });
 
         ui.horizontal(|ui| {
+            ui.label(self.tr("transition"));
+            egui::ComboBox::from_id_salt("scene_transition_kind")
+                .selected_text(self.transition_kind.label())
+                .show_ui(ui, |ui| {
+                    for kind in rivulet_core::TransitionKind::ALL {
+                        if ui
+                            .selectable_label(self.transition_kind == kind, kind.label())
+                            .clicked()
+                        {
+                            self.transition_kind = kind;
+                        }
+                    }
+                });
+            if self.transition_kind == rivulet_core::TransitionKind::Fade {
+                let duration_label = self.tr("transition_duration").to_owned();
+                ui.add(
+                    egui::Slider::new(&mut self.transition_duration_ms, 50..=5000)
+                        .text(duration_label),
+                );
+            }
+        });
+
+        ui.horizontal(|ui| {
             let undo_response = ui
                 .add_enabled(
                     self.scenes.can_undo(),
@@ -1971,6 +2003,12 @@ impl RivuletApp {
                     .map(|s| s.name.clone())
                     .unwrap_or_default();
                 if self.scenes.switch_to(id) {
+                    let now = Instant::now();
+                    self.scene_transition = rivulet_core::SceneTransition::new(
+                        self.transition_kind,
+                        std::time::Duration::from_millis(self.transition_duration_ms),
+                    );
+                    self.scene_transition.start(active, Some(id), now);
                     self.scene_status = Some(self.tr_fmt("scenes_switched", &[name]));
                 }
             }
