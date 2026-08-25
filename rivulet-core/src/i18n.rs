@@ -225,6 +225,18 @@ impl Locale {
                 ("source_text", "Text"),
                 ("source_webcam", "Webcam"),
                 ("source_browser", "Browser"),
+                ("browser_source", "Browser source"),
+                ("browser_url", "URL"),
+                ("browser_apply_url", "Apply URL"),
+                ("browser_url_applied", "Browser URL updated."),
+                ("browser_viewport", "Viewport"),
+                ("browser_apply_viewport", "Apply size"),
+                ("browser_interaction", "Allow interaction"),
+                ("browser_transparent", "Transparent background"),
+                ("browser_zoom", "Zoom"),
+                ("browser_css", "Custom CSS"),
+                ("browser_frame_ready", "Browser frame ready: {0}×{1} (#{2})"),
+                ("browser_preview_pending", "Waiting for the webview renderer…"),
                 ("source_media", "Media"),
                 ("source_color", "Color"),
                 ("source_game_capture", "Game Capture"),
@@ -452,6 +464,18 @@ impl Locale {
                 ("source_text", "Text"),
                 ("source_webcam", "Webcam"),
                 ("source_browser", "Browser"),
+                ("browser_source", "Browserquelle"),
+                ("browser_url", "URL"),
+                ("browser_apply_url", "URL übernehmen"),
+                ("browser_url_applied", "Browser-URL aktualisiert."),
+                ("browser_viewport", "Ansichtsgröße"),
+                ("browser_apply_viewport", "Größe übernehmen"),
+                ("browser_interaction", "Interaktion erlauben"),
+                ("browser_transparent", "Transparenter Hintergrund"),
+                ("browser_zoom", "Zoom"),
+                ("browser_css", "Benutzerdefiniertes CSS"),
+                ("browser_frame_ready", "Browser-Frame bereit: {0}×{1} (#{2})"),
+                ("browser_preview_pending", "Warte auf den Webview-Renderer…"),
                 ("source_media", "Medien"),
                 ("source_color", "Farbe"),
                 ("source_game_capture", "Game-Capture"),
@@ -757,6 +781,8 @@ mod tests {
         assert_eq!(Locale::De.tr("source_webcam"), "Webcam");
         assert_eq!(Locale::En.tr("source_browser"), "Browser");
         assert_eq!(Locale::De.tr("source_browser"), "Browser");
+        assert_eq!(Locale::En.tr("browser_source"), "Browser source");
+        assert_eq!(Locale::De.tr("browser_source"), "Browserquelle");
         assert_eq!(Locale::En.tr("source_media"), "Media");
         assert_eq!(Locale::De.tr("source_media"), "Medien");
         assert_eq!(Locale::En.tr("source_color"), "Color");

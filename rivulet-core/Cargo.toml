@@ -45,3 +45,4 @@ winapi = { version = "0.3", features = ["memoryapi", "winbase", "winnt", "handle
 
 [dev-dependencies]
 tempfile = "3"
+serde_json = "1.0"

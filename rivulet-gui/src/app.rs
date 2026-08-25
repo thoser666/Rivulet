@@ -545,6 +545,10 @@ pub struct RivuletApp {
     // Scenes (multiple scenes & switching)
     #[serde(skip)]
     scenes: rivulet_core::SceneManager,
+    /// Browser source configuration for the active scene. The native webview
+    /// adapter is intentionally not stored in the app state yet; this config
+    /// is the portable contract used by the future WebView2/WebKit backend.
+    browser_source: rivulet_core::BrowserSource,
     #[serde(skip)]
     scene_name_input: String,
     #[serde(skip)]
@@ -744,6 +748,7 @@ impl Default for RivuletApp {
             view: AppView::Record,
 
             scenes: rivulet_core::SceneManager::new(),
+            browser_source: rivulet_core::BrowserSource::default(),
             scene_name_input: String::new(),
             scene_status: None,
 
@@ -1895,6 +1900,85 @@ impl RivuletApp {
         }
     }
 
+    /// Configure the S5b browser source from the Scenes view. Rendering is
+    /// delegated to a platform adapter; this panel owns the portable URL,
+    /// viewport, interaction, transparency, zoom, and CSS settings.
+    fn draw_browser_source_panel(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
+        ui.separator();
+        ui.label(egui::RichText::new(self.tr("browser_source")).strong());
+        ui.horizontal(|ui| {
+            ui.label(self.tr("browser_url"));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.browser_source.url)
+                    .desired_width(320.0)
+                    .hint_text("https://example.com"),
+            );
+            if ui.button(self.tr("browser_apply_url")).clicked() {
+                let url = self.browser_source.url.clone();
+                if let Err(error) = self.browser_source.navigate(url) {
+                    self.scene_status = Some(error.to_string());
+                } else {
+                    self.scene_status = Some(self.tr("browser_url_applied").to_owned());
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label(self.tr("browser_viewport"));
+            let mut width = self.browser_source.width as f32;
+            let mut height = self.browser_source.height as f32;
+            ui.add(egui::DragValue::new(&mut width).range(1.0..=8192.0));
+            ui.label("×");
+            ui.add(egui::DragValue::new(&mut height).range(1.0..=8192.0));
+            if ui.button(self.tr("browser_apply_viewport")).clicked() {
+                if let Err(error) = self
+                    .browser_source
+                    .set_viewport(width as u32, height as u32)
+                {
+                    self.scene_status = Some(error.to_string());
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            let interaction_label = self.tr("browser_interaction").to_owned();
+            let transparent_label = self.tr("browser_transparent").to_owned();
+            ui.checkbox(
+                &mut self.browser_source.interaction_enabled,
+                interaction_label,
+            );
+            ui.checkbox(&mut self.browser_source.transparent, transparent_label);
+            let mut zoom = self.browser_source.zoom_level;
+            if ui
+                .add(egui::Slider::new(&mut zoom, 0.25..=5.0).text(self.tr("browser_zoom")))
+                .changed()
+            {
+                let _ = self.browser_source.set_zoom_level(zoom);
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label(self.tr("browser_css"));
+            let css = self
+                .browser_source
+                .custom_css
+                .get_or_insert_with(String::new);
+            ui.add(egui::TextEdit::singleline(css).desired_width(360.0));
+        });
+        if let Some(frame) = self.browser_source.latest_frame() {
+            ui.label(self.tr_fmt(
+                "browser_frame_ready",
+                &[
+                    frame.width.to_string(),
+                    frame.height.to_string(),
+                    frame.sequence.to_string(),
+                ],
+            ));
+        } else {
+            ui.colored_label(colors.hint, self.tr("browser_preview_pending"));
+        }
+        if let Some(status) = &self.scene_status {
+            ui.colored_label(colors.info, status);
+        }
+    }
+
     /// Minimal inline rename flow: swaps the row into a text field, applies
     /// the change via the SceneManager, returns the new name when applied.
     fn scene_rename_prompt(
@@ -2571,24 +2655,24 @@ impl eframe::App for RivuletApp {
         egui::Panel::top("top_panel")
             .frame(theme::glass_frame(ui))
             .show(ui, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Quit").clicked() {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                });
-                ui.menu_button(self.tr("language"), |ui| {
-                    for locale in Locale::all() {
-                        if ui
-                            .selectable_label(self.locale == *locale, locale.name())
-                            .clicked()
-                        {
-                            self.locale = *locale;
+                egui::MenuBar::new().ui(ui, |ui| {
+                    ui.menu_button("File", |ui| {
+                        if ui.button("Quit").clicked() {
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                         }
-                    }
+                    });
+                    ui.menu_button(self.tr("language"), |ui| {
+                        for locale in Locale::all() {
+                            if ui
+                                .selectable_label(self.locale == *locale, locale.name())
+                                .clicked()
+                            {
+                                self.locale = *locale;
+                            }
+                        }
+                    });
                 });
             });
-        });
 
         egui::Panel::left("nav_panel")
             .resizable(false)
@@ -2859,12 +2943,7 @@ impl eframe::App for RivuletApp {
                                 egui::pos2(0.0, 0.0),
                                 egui::pos2(1.0, 1.0),
                             );
-                            ui.painter().image(
-                                preview.texture.id(),
-                                rect,
-                                uv,
-                                tint,
-                            );
+                            ui.painter().image(preview.texture.id(), rect, uv, tint);
                             ui.label(
                                 egui::RichText::new(self.tr("game_preview_title"))
                                     .small()
@@ -3216,12 +3295,7 @@ impl eframe::App for RivuletApp {
                                     egui::pos2(0.0, 0.0),
                                     egui::pos2(1.0, 1.0),
                                 );
-                                ui.painter().image(
-                                    preview.texture.id(),
-                                    rect,
-                                    uv,
-                                    tint,
-                                );
+                                ui.painter().image(preview.texture.id(), rect, uv, tint);
                                 ui.label(
                                     egui::RichText::new(self.tr("game_preview_title"))
                                         .small()
@@ -3491,6 +3565,9 @@ impl eframe::App for RivuletApp {
             // Scenes: list, switching, add/rename/remove
             if self.view == AppView::Scenes {
                 self.draw_scenes_view(ui, &colors);
+            }
+            if self.view == AppView::Scenes {
+                self.draw_browser_source_panel(ui, &colors);
             }
 
             #[cfg(not(any(target_os = "linux", target_os = "windows")))]

@@ -1,6 +1,6 @@
 # S5a – Browser Source Spike
 
-**Status:** ✅ Done  
+**Status:** ✅ S5a spike done; S5b portable contract and configuration UI implemented  
 **Date:** 2026-08-23  
 **Author:** Buffy (Codebuff)
 
@@ -111,13 +111,36 @@ tao = "0.28"   # Event loop (required by wry)
 Browser source is feasible on all platforms using `wry`. The main challenge is
 GPU texture integration, which can be solved with offscreen rendering + pixel readback.
 
-**Next Steps (S5b):**
-1. Add `wry` + `tao` dependencies
-2. Implement `BrowserSource` with offscreen rendering
-3. Add IPC protocol for JavaScript → Rust communication
-4. Create Config UI (URL bar, zoom, custom CSS)
-5. Integrate into scene system
-6. Cross-platform testing
+## S5b implementation status
+
+The first S5b slice is now implemented without coupling `rivulet-core` to a
+native window/event loop:
+
+- `rivulet-core/src/browser_source.rs` owns the validated URL, viewport, FPS,
+  zoom, transparency, custom CSS, bounded interaction queue, and latest RGBA
+  frame contract.
+- `BrowserSourceBackend` is the adapter boundary for WebView2 on Windows,
+  WebKitGTK on Linux, and WKWebView on macOS. An adapter consumes queued
+  `BrowserInput` events and submits `BrowserFrame` values to the source.
+- The Scenes view exposes URL, viewport, interaction, transparency, zoom, and
+  custom-CSS configuration in both supported UI locales.
+- Unit tests cover URL policy, viewport/frame validation, serialization,
+  interaction back-pressure, navigation invalidation, and settings bounds.
+
+The native webview adapter and GPU texture upload remain the next implementation
+slice. Until that adapter is present, the UI deliberately reports that it is
+waiting for the webview renderer instead of pretending a browser frame exists.
+
+### Adapter acceptance criteria
+
+A platform adapter can complete S5b when it:
+
+1. creates an off-screen WebView and applies the serialized configuration;
+2. forwards pointer/keyboard input only when interaction is enabled;
+3. submits correctly sized RGBA frames at or below the configured FPS;
+4. preserves alpha when transparency is enabled;
+5. runs the same adapter contract tests on Windows, Linux, and macOS.
+
 
 ## References
 
