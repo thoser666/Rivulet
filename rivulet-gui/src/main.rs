@@ -44,10 +44,14 @@ fn main() -> Result<(), eframe::Error> {
             .and_then(|value| value.parse().ok())
             .unwrap_or(logging::DEFAULT_RETENTION_DAYS),
     );
-    if let Err(error) = logging::init(&log_config) {
-        eprintln!("Failed to initialize file logging: {error}");
-    }
     let crash_log = logging::log_path(&log_config.directory, chrono::Local::now().date_naive());
+    if let Err(error) = logging::init(&log_config) {
+        // Keep bootstrap diagnostics visible even when the requested log
+        // directory is unavailable, but do not let logging failure prevent the
+        // GUI from starting.
+        eprintln!("Failed to initialize file logging: {error}");
+        let _ = logging::log_crash(&crash_log, "logging", &error.to_string());
+    }
     if let Err(error) = std::panic::catch_unwind(|| {
         tracing::info!(
             retention_days = log_config.retention_days,
@@ -58,6 +62,7 @@ fn main() -> Result<(), eframe::Error> {
         std::panic::resume_unwind(error);
     }
 
+    tracing::info!("Starting Rivulet GUI");
     let _rt = Runtime::new().unwrap();
     let engine = RivuletEngine::new();
 

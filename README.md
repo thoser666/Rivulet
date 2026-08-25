@@ -492,7 +492,10 @@ The default retention is 14 days. Set `RIVULET_LOG_RETENTION_DAYS` before
 starting the app to change it; values below one are clamped to one day. Crash
 reports are delimited by `===== RIVULET CRASH =====`, making them easy to find
 and attach to bug reports. When reporting a crash, include the relevant daily
-log and the app version, but remove personal paths or stream keys first.
+log and the app version, but remove personal paths or stream keys first. If the
+app starts with an empty log, verify that you are inspecting today's file and
+run once with `RUST_LOG=info`; see [docs/logging.md](docs/logging.md) for
+startup troubleshooting and the logging fallback behavior.
 
 
 
