@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.53.0-alpha.1] - 2026-08-25
+- feat(gui): standardize palette and interaction feedback
+
 ## [0.52.0-alpha.1] - 2026-08-25
 - feat(sources): add browser source contract and configuration
 
