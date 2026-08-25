@@ -495,7 +495,9 @@ and attach to bug reports. When reporting a crash, include the relevant daily
 log and the app version, but remove personal paths or stream keys first. If the
 app starts with an empty log, verify that you are inspecting today's file and
 run once with `RUST_LOG=info`; see [docs/logging.md](docs/logging.md) for
-startup troubleshooting and the logging fallback behavior.
+startup troubleshooting and the logging fallback behavior. Windows packages
+also include a dependency-free launcher that records pre-Rust failures and can
+opt in to WER crash dumps with `RIVULET_ENABLE_CRASH_DUMPS=1`.
 
 
 

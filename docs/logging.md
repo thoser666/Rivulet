@@ -27,16 +27,48 @@ error: <sanitized error text>
 ===== END RIVULET CRASH =====
 ```
 
-This makes crash blocks searchable and allows automated tooling to extract the
-most recent failure without guessing from ordinary warnings. Do not include
-stream keys, passwords, or unredacted personal paths in the marker.
+Windows packaged builds can also contain early-startup markers:
+
+```text
+===== RIVULET PRE-RUST EVENT =====
+context: launcher-start
+message: starting rivulet-gui.exe
+===== END RIVULET PRE-RUST EVENT =====
+```
+
+`PRE-RUST EVENT` confirms that the launcher ran. `PRE-RUST DIAGNOSTIC` blocks
+indicate that the launcher could not start the GUI or that the GUI exited with
+a non-zero status. These blocks cover failures before the GUI's tracing
+subscriber is available. Do not include stream keys, passwords, or unredacted
+personal paths in any marker.
+
+## Pre-Rust crash capture on Windows
+
+Windows release bundles include a tiny `rivulet.exe` launcher. It starts
+`rivulet-gui.exe`, records launcher errors and non-zero exit codes using a
+`RIVULET PRE-RUST DIAGNOSTIC` block, and therefore covers failures that happen
+before the GUI process can initialize Rust logging. The launcher itself has no
+GStreamer or GUI dependencies.
+
+For native Windows crashes, set `RIVULET_ENABLE_CRASH_DUMPS=1` before starting
+the launcher. The launcher then opts the current user into Windows Error
+Reporting full dumps for `rivulet-gui.exe` and stores them in the user's
+`%LOCALAPPDATA%\\Rivulet\\crash-dumps` directory. This is intentionally opt-in
+because it changes the user's WER LocalDumps registry settings. Disable it by
+removing the variable; existing dumps can be deleted manually after diagnosis.
+
+This cannot catch failures before Windows can execute the launcher itself
+(e.g. a corrupt launcher binary, blocked SmartScreen policy, or system-wide
+loader failure). In those cases use Event Viewer → Windows Logs → Application
+and the Windows Error Reporting entry.
 
 ## When the application starts but the log is empty
 
-The logger creates the daily file before GStreamer and the GUI are initialized.
-A zero-byte file therefore usually means the process exited before the first
-tracing event, or that the file being inspected is not today's file. Check the
-following:
+The launcher writes a pre-Rust event before starting the GUI, and the GUI logger
+creates the daily file before GStreamer and egui are initialized. A zero-byte
+file in a packaged Windows build therefore means the launcher itself did not
+run or could not write to `%LOCALAPPDATA%\\Rivulet\\logs`; inspect Event Viewer
+and the Windows Error Reporting entry in that case. Otherwise check:
 
 1. Confirm the current local date in the filename (`rivulet-YYYY-MM-DD.log`).
 2. Start Rivulet once with `RUST_LOG=info` to include informational startup
@@ -60,7 +92,8 @@ Default locations:
 2. Reproduce the issue once, if safe.
 3. Copy the daily log covering the failure.
 4. Include the complete crash block and the preceding ~50 lines.
-5. Remove secrets, usernames, and private file paths before sharing.
+5. On Windows, include the matching `.dmp` file when crash dumps were enabled.
+6. Remove secrets, usernames, and private file paths before sharing.
 
 Production diagnostics use `tracing` rather than direct `println!`/`eprintln!`
 output, so levels, fields, and daily file routing remain consistent. The only
@@ -69,5 +102,5 @@ logging subscriber itself cannot be initialized, plus test-only dependency
 messages.
 
 The logging module has unit tests for date-based paths, retention filtering,
-and crash-marker format. Future crash-report tooling can consume the stable
-marker format without depending on console output.
+and crash-marker format. The dependency-free launcher has tests for its
+pre-Rust marker format and date handling.

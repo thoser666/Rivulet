@@ -1,0 +1,11 @@
+[package]
+name = "rivulet-launcher"
+version.workspace = true
+authors.workspace = true
+edition = "2021"
+rust-version = "1.70"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+

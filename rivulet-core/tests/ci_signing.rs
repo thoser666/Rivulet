@@ -199,6 +199,59 @@ fn signing_e2e_smoke_tests_are_wired_up() {
 }
 
 #[test]
+fn launcher_smoke_test_is_wired_into_ci() {
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("cargo test -p rivulet-launcher --test pre_rust_smoke"),
+        "CI must run the deterministic pre-Rust launcher smoke test"
+    );
+    let smoke = read("rivulet-launcher/tests/pre_rust_smoke.rs");
+    assert!(
+        smoke.contains("RIVULET_GUI_PATH") && smoke.contains("PRE-RUST DIAGNOSTIC"),
+        "launcher smoke test must override the child binary and verify the marker"
+    );
+}
+
+#[test]
+fn windows_release_packages_use_the_pre_rust_launcher() {
+    let workflow = read(".github/workflows/build-package.yml");
+    assert!(
+        workflow.contains("--package rivulet-launcher"),
+        "Windows release builds must compile the pre-Rust launcher"
+    );
+    assert!(
+        workflow.contains("target/${{ inputs.target }}/release/rivulet-launcher.exe"),
+        "Windows staging must include the launcher binary"
+    );
+
+    let portable = read("packaging/windows/build-portable.ps1");
+    assert!(
+        portable.contains("rivulet.exe") && portable.contains("rivulet-gui.exe"),
+        "portable packages must contain both launcher and GUI binaries"
+    );
+    assert!(
+        portable.contains("rivulet.exe\" %*"),
+        "portable entrypoint must start through the launcher"
+    );
+
+    let wix = read("packaging/windows/rivulet.wxs");
+    assert!(
+        wix.contains("Target=\"[INSTALLFOLDER]rivulet.exe\""),
+        "MSI shortcuts must target the launcher"
+    );
+
+    let launcher = read("rivulet-launcher/src/lib.rs");
+    assert!(
+        launcher.contains("RIVULET PRE-RUST DIAGNOSTIC"),
+        "launcher must write pre-Rust diagnostic markers"
+    );
+    assert!(
+        launcher.contains("LocalDumps"),
+        "launcher must support opt-in Windows crash dumps"
+    );
+}
+
+#[test]
 fn shellcheck_and_pester_checks_are_wired_up() {
     let ci = read(".github/workflows/ci.yml");
     assert!(

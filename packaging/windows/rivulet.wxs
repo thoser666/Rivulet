@@ -45,7 +45,7 @@
             <Shortcut Id="RivuletStartMenuShortcut"
                       Name="Rivulet"
                       Description="Rivulet - Open-source screen recorder and live streaming studio"
-                      Target="[INSTALLFOLDER]rivulet-gui.exe"
+                      Target="[INSTALLFOLDER]rivulet.exe"
                       WorkingDirectory="INSTALLFOLDER"
                       Icon="RivuletIcon" />
             <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
@@ -59,7 +59,7 @@
           <Shortcut Id="RivuletDesktopShortcut"
                     Name="Rivulet"
                     Description="Rivulet - Open-source screen recorder and live streaming studio"
-                    Target="[INSTALLFOLDER]rivulet-gui.exe"
+                    Target="[INSTALLFOLDER]rivulet.exe"
                     WorkingDirectory="INSTALLFOLDER"
                     Icon="RivuletIcon" />
           <RemoveFolder Id="RemoveDesktopFolder" On="uninstall" />

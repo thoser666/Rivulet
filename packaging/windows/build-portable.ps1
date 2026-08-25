@@ -23,8 +23,10 @@ if (-not (Test-Path $gstPlugins)) { throw "GStreamer plugins not found: $gstPlug
 $bundle = Join-Path $Staging "bundle"
 New-Item -ItemType Directory -Force -Path $bundle | Out-Null
 
-# 1. Application binary.
+# 1. Application binaries. The launcher is the user-facing entry point:
+# it records failures from the GUI process that happen before Rust logging.
 Copy-Item (Join-Path $Staging "rivulet-gui.exe") (Join-Path $bundle "rivulet-gui.exe") -Force
+Copy-Item (Join-Path $Staging "rivulet.exe") (Join-Path $bundle "rivulet.exe") -Force
 
 # 2. GStreamer runtime: all bin DLLs.
 Copy-Item (Join-Path $gstBin "*.*") $bundle -Force -ErrorAction SilentlyContinue
@@ -46,7 +48,7 @@ set GST_PLUGIN_PATH=%~dp0gstreamer-1.0
 set GST_PLUGIN_SYSTEM_PATH=%~dp0gstreamer-1.0
 set GST_PLUGIN_SCANNER=%~dp0gst-plugin-scanner.exe
 set GST_REGISTRY=%TEMP%\rivulet-gst-registry.bin
-start "" "%~dp0rivulet-gui.exe" %*
+start "" "%~dp0rivulet.exe" %*
 "@ | Set-Content -Path (Join-Path $bundle "Rivulet.bat") -Encoding ASCII
 
 # 6. Zip the bundle (portable variant).
