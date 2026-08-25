@@ -127,6 +127,8 @@ impl SceneManager {
         self.scenes = previous.scenes;
         self.active = previous.active;
         self.history = previous.history;
+        self.collection = previous.collection;
+        self.profile = previous.profile;
         true
     }
 
@@ -139,6 +141,8 @@ impl SceneManager {
         self.scenes = next.scenes;
         self.active = next.active;
         self.history = next.history;
+        self.collection = next.collection;
+        self.profile = next.profile;
         true
     }
 

@@ -193,7 +193,10 @@ release channel only describes *how* the tag is built and published.
 
 **Status: In progress**
 
-The core concept of OBS: scenes, sources, and transitions.
+The core concept of OBS: scenes, sources, and transitions. Core scene
+organisation, collections/profiles, duplication, and source transforms are now
+implemented. Remaining M2 work is focused on composition UX, transitions,
+studio mode, and multi-view/projectors.
 
 **Priority for gaming streamers:**
 
@@ -228,11 +231,11 @@ The core concept of OBS: scenes, sources, and transitions.
 - [x] **Scene management** (multiple scenes, switching, add/rename/remove, switch-back history) — `SceneManager` in `rivulet-core/src/scene.rs`, live Scenes view in the sidebar
 - [x] **Scene organisation** (folders, search/filter, color coding) — *top community request, active PRs in OBS; `Scene` model with parent UUIDs and ARGB color coding (folders via hierarchy), tested in `rivulet-core/src/scene.rs`*
 - [x] **Undo/Redo** (Ctrl+Z / Ctrl+Y) — scene add/remove/rename/switch operations are undoable; toolbar buttons are disabled when no history is available
-- [ ] **Scene collections & profiles** — switchable sets of scenes/sources (collection) and settings (profile) for different setups (gaming / work / podcast); OBS's core workspace concept. *Tracked in [#69](https://github.com/thoser666/Rivulet/issues/69).*
-- [ ] **Duplicate scene / source** — one-click copy of a scene or source including its transform; copy/paste transform between sources
+- [x] **Scene collections & profiles** — named collection/profile context is available in the Scenes view; importing/exporting complete collections and applying profile-specific settings remain follow-up work. *Tracked in [#69](https://github.com/thoser666/Rivulet/issues/69).*
+- [x] **Duplicate scene / source** — one-click scene duplication with fresh identity and source duplication with copied properties and no accidental bindings; transform copy/paste remains a follow-up
 - [ ] **Scene hotkeys & auto-switching** — a hotkey for every scene, plus window-focus-driven auto scene switching (OBS auto-scene-switcher workflow)
 - [x] Sources — window capture (monitor + individual windows, Linux & Windows)
-- [ ] **Source composition** (layers, position, scaling, cropping — each scene stores its own layout per source; switching scenes auto-moves sources to their saved positions)
+- [ ] **Source composition** (layers, position, scaling, cropping — each scene stores its own layout per source; switching scenes auto-moves sources to their saved positions) — source transforms and z-order primitives exist; the full composition editor remains open
 - [ ] Transitions (fade, cut, stinger)
 - [ ] Overlays (picture-in-picture, banners)
 - [ ] Chroma key / green screen
