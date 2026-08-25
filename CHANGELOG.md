@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.52.0-alpha.1] - 2026-08-25
+- feat(sources): add browser source contract and configuration
+
 ## [0.51.1-alpha.1] - 2026-08-24
 - fix(tests): improve ci_signing skip-worktree error hint, update docs
 
