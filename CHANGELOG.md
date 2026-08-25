@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.55.0-alpha.1] - 2026-08-25
+- feat(scenes): add undo and redo history
+
 ## [0.54.0-alpha.1] - 2026-08-25
 - feat(gui): refine responsive and accessible styling
 - refactor(gui): align styling with desktop UI guidance
