@@ -212,6 +212,34 @@ impl AppView {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SceneHistoryShortcut {
+    Undo,
+    Redo,
+}
+
+/// Resolve scene-history shortcuts without touching egui context state.
+///
+/// Keeping this decision pure makes it impossible to accidentally call a
+/// context method from inside `ctx.input`, which already owns egui's lock.
+fn scene_history_shortcut(
+    wants_keyboard_input: bool,
+    command: bool,
+    z_pressed: bool,
+    y_pressed: bool,
+) -> Option<SceneHistoryShortcut> {
+    if wants_keyboard_input || !command {
+        return None;
+    }
+    if z_pressed {
+        Some(SceneHistoryShortcut::Undo)
+    } else if y_pressed {
+        Some(SceneHistoryShortcut::Redo)
+    } else {
+        None
+    }
+}
+
 // --- Hotkey configuration ---
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct HotkeyConfig {
@@ -2852,6 +2880,11 @@ impl eframe::App for RivuletApp {
             self.theme_applied = Some(self.theme);
         }
 
+        // Read this before entering `ctx.input`. That closure holds egui's
+        // context write lock; calling `egui_wants_keyboard_input()` inside it
+        // tries to acquire a nested read lock and deadlocks in debug builds.
+        let wants_keyboard_input = ctx.egui_wants_keyboard_input();
+
         ctx.input(|i| {
             #[cfg(target_os = "linux")]
             let any_recording = self.is_recording || self.is_aux_recording;
@@ -2900,13 +2933,19 @@ impl eframe::App for RivuletApp {
 
             // Scene history shortcuts are handled globally, but only when a
             // text field is not focused so normal editing remains unaffected.
-            if !ctx.egui_wants_keyboard_input() {
-                let command = i.modifiers.command;
-                if command && i.key_pressed(egui::Key::Z) {
+            match scene_history_shortcut(
+                wants_keyboard_input,
+                i.modifiers.command,
+                i.key_pressed(egui::Key::Z),
+                i.key_pressed(egui::Key::Y),
+            ) {
+                Some(SceneHistoryShortcut::Undo) => {
                     self.scenes.undo();
-                } else if command && i.key_pressed(egui::Key::Y) {
+                }
+                Some(SceneHistoryShortcut::Redo) => {
                     self.scenes.redo();
                 }
+                None => {}
             }
         });
 
@@ -4925,6 +4964,22 @@ mod tests {
     #[test]
     fn format_duration_exact_hour() {
         assert_eq!(RivuletApp::format_duration(3600), "01:00:00");
+    }
+
+    // ── scene history hotkeys ────────────────────────────────────
+
+    #[test]
+    fn scene_history_shortcuts_ignore_text_input_without_context_reentry() {
+        assert_eq!(scene_history_shortcut(true, true, true, false), None);
+        assert_eq!(
+            scene_history_shortcut(false, true, true, false),
+            Some(SceneHistoryShortcut::Undo)
+        );
+        assert_eq!(
+            scene_history_shortcut(false, true, false, true),
+            Some(SceneHistoryShortcut::Redo)
+        );
+        assert_eq!(scene_history_shortcut(false, false, true, false), None);
     }
 
     // ── replay buffer hotkey ─────────────────────────────────────
