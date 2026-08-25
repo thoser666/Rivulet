@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.62.0-alpha.1] - 2026-08-25
+- feat(gui): add milestone quality gates and studio mode
+
 ## [0.61.1-alpha.1] - 2026-08-25
 - fix(gui): avoid nested egui context lock
 
