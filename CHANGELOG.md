@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.60.1-alpha.1] - 2026-08-25
+- fix(logging): record startup diagnostics before GUI launch
+- refactor(logging): route diagnostics through tracing
+
 ## [0.60.0-alpha.1] - 2026-08-25
 - feat(logging): add rotating diagnostic logs
 
