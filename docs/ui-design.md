@@ -89,7 +89,14 @@ into the central panel *below* the recording controls, separated by
 - **Structural palette** (`theme::ThemePalette::for_ui(ui)`):
   `accent`, `panel_fill`, `background`, `text`, `scrim`. Use the scrim for
   overlays that dim a captured preview (e.g. the region editor) instead of a
-  hard-coded alpha color.
+  hard-coded alpha color. Component fills and text colors should derive from
+  this palette or `StatusColors`; image white is only valid as a texture tint.
+- **Interaction feedback**: use `theme::accent_button` for ordinary buttons and
+  `theme::paint_interaction_stroke` for custom/selectable controls. Hover uses
+  the palette accent at 60% alpha and a 1.5 px stroke; active press uses the
+  opaque accent and a 2 px stroke. Do not replace egui's default disabled
+  visuals, focus indicators, or contrast behavior. These helpers are covered by
+  unit tests in `theme.rs`.
 
 ## Naming conventions
 
@@ -169,6 +176,8 @@ platforms.
       sidebar lands, placed below the recording controls with a separator).
 - [ ] All strings added to `i18n.rs` in both locales, same relative order.
 - [ ] No hard-coded text; colors from `StatusColors` / `ThemePalette`.
+- [ ] Buttons use `theme::accent_button` and custom interactive controls use
+      `theme::paint_interaction_stroke` for consistent hover/active feedback.
 - [ ] `draw_*` for rendering, `spawn_*` for background work, `handle_*` for
       one-shot actions — no inline `thread::spawn` in the panel code.
 - [ ] Long-running work updates a shared state enum and calls

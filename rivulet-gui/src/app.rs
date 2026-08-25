@@ -1806,10 +1806,10 @@ impl RivuletApp {
         );
 
         let name_hint = self.tr("scenes_name_placeholder");
-        let add_label = self.tr("scenes_add");
+        let add_label = self.tr("scenes_add").to_owned();
         ui.horizontal(|ui| {
             ui.add(egui::TextEdit::singleline(&mut self.scene_name_input).hint_text(name_hint));
-            if ui.button(add_label).clicked() {
+            if theme::accent_button(ui, add_label).clicked() {
                 let name = self.scene_name_input.trim().to_string();
                 if !name.is_empty() {
                     self.scenes.add(rivulet_core::Scene::new(name.clone()));
@@ -1848,7 +1848,9 @@ impl RivuletApp {
                         };
                         let is_active = Some(id) == active;
                         ui.horizontal(|ui| {
-                            if ui.selectable_label(is_active, &scene.name).clicked() {
+                            let response = ui.selectable_label(is_active, &scene.name);
+                            theme::paint_interaction_stroke(ui, &response);
+                            if response.clicked() {
                                 switch_target = Some(id);
                             }
                             if is_active {
@@ -1913,7 +1915,7 @@ impl RivuletApp {
                     .desired_width(320.0)
                     .hint_text("https://example.com"),
             );
-            if ui.button(self.tr("browser_apply_url")).clicked() {
+            if theme::accent_button(ui, self.tr("browser_apply_url")).clicked() {
                 let url = self.browser_source.url.clone();
                 if let Err(error) = self.browser_source.navigate(url) {
                     self.scene_status = Some(error.to_string());
@@ -1929,7 +1931,7 @@ impl RivuletApp {
             ui.add(egui::DragValue::new(&mut width).range(1.0..=8192.0));
             ui.label("×");
             ui.add(egui::DragValue::new(&mut height).range(1.0..=8192.0));
-            if ui.button(self.tr("browser_apply_viewport")).clicked() {
+            if theme::accent_button(ui, self.tr("browser_apply_viewport")).clicked() {
                 if let Err(error) = self
                     .browser_source
                     .set_viewport(width as u32, height as u32)
@@ -1992,7 +1994,7 @@ impl RivuletApp {
         ui.horizontal(|ui| {
             let edit =
                 ui.add(egui::TextEdit::singleline(&mut new_name).hint_text(old_name.as_str()));
-            if ui.button(self.tr("scenes_rename")).clicked() {
+            if theme::accent_button(ui, self.tr("scenes_rename")).clicked() {
                 let trimmed = new_name.trim().to_string();
                 if !trimmed.is_empty() {
                     self.scenes.rename(id, trimmed.clone());
@@ -2209,7 +2211,7 @@ impl RivuletApp {
                     ui.label(self.tr_fmt("update_asset_size", &[format_bytes(asset.size)]));
                 }
                 ui.horizontal(|ui| {
-                    if ui.button(self.tr("update_download_install")).clicked() {
+                    if theme::accent_button(ui, self.tr("update_download_install")).clicked() {
                         self.update_download_clicked = true;
                     }
                     ui.hyperlink_to(self.tr("update_release_notes"), &info.html_url);
@@ -2235,7 +2237,7 @@ impl RivuletApp {
             UpdateUi::Downloaded { version, .. } => {
                 ui.colored_label(colors.success, self.tr("update_downloaded").to_string());
                 ui.label(self.tr_fmt("updates_new_version", &[version]));
-                if ui.button(self.tr("update_install")).clicked() {
+                if theme::accent_button(ui, self.tr("update_install")).clicked() {
                     self.update_install_clicked = true;
                 }
             }
@@ -2389,13 +2391,13 @@ impl RivuletApp {
                     region.y = full_height.saturating_sub(region.height);
                 }
                 ui.horizontal(|ui| {
-                    if ui.button(self.tr("region_full_monitor")).clicked() {
+                    if theme::accent_button(ui, self.tr("region_full_monitor")).clicked() {
                         reset = true;
                     }
-                    if ui.button(self.tr("region_apply")).clicked() {
+                    if theme::accent_button(ui, self.tr("region_apply")).clicked() {
                         apply = true;
                     }
-                    if ui.button(self.tr("region_cancel")).clicked() {
+                    if theme::accent_button(ui, self.tr("region_cancel")).clicked() {
                         cancel = true;
                     }
                 });
@@ -2657,16 +2659,16 @@ impl eframe::App for RivuletApp {
             .show(ui, |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
                     ui.menu_button("File", |ui| {
-                        if ui.button("Quit").clicked() {
+                        if theme::accent_button(ui, "Quit").clicked() {
                             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     });
                     ui.menu_button(self.tr("language"), |ui| {
                         for locale in Locale::all() {
-                            if ui
-                                .selectable_label(self.locale == *locale, locale.name())
-                                .clicked()
-                            {
+                            let response =
+                                ui.selectable_label(self.locale == *locale, locale.name());
+                            theme::paint_interaction_stroke(ui, &response);
+                            if response.clicked() {
                                 self.locale = *locale;
                             }
                         }
@@ -2683,10 +2685,9 @@ impl eframe::App for RivuletApp {
                 ui.separator();
                 ui.add_space(6.0);
                 for view in AppView::all() {
-                    if ui
-                        .selectable_label(self.view == *view, self.tr(view.nav_key()))
-                        .clicked()
-                    {
+                    let response = ui.selectable_label(self.view == *view, self.tr(view.nav_key()));
+                    theme::paint_interaction_stroke(ui, &response);
+                    if response.clicked() {
                         self.view = *view;
                     }
                 }
@@ -3592,7 +3593,7 @@ impl eframe::App for RivuletApp {
                         "updates_current_version",
                         &[env!("CARGO_PKG_VERSION").to_string()],
                     ));
-                    if ui.button(self.tr("check_for_updates")).clicked() {
+                    if theme::accent_button(ui, self.tr("check_for_updates")).clicked() {
                         self.update_check_clicked = true;
                     }
                 });

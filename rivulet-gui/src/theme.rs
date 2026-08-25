@@ -229,25 +229,49 @@ pub fn init(ctx: &egui::Context, pref: ThemePreference) {
 
 /// Semi-transparent panel frame for the glassmorphism effect.
 ///
-/// Used for sidebars and the top bar so the desktop wallpaper or
-/// background shows through with a frosted-glass look.
+/// The fill is derived from the active structural palette instead of a second
+/// set of hard-coded light/dark colors. The alpha is intentionally kept here,
+/// because translucency is a component treatment rather than a palette role.
 pub fn glass_frame(ui: &egui::Ui) -> egui::Frame {
-    let dark = ui.visuals().dark_mode;
-    let fill = if dark {
-        egui::Color32::from_rgba_unmultiplied(27, 27, 27, 200)
-    } else {
-        egui::Color32::from_rgba_unmultiplied(245, 245, 245, 200)
-    };
+    let palette = ThemePalette::for_ui(ui);
+    let fill = palette.panel_fill.gamma_multiply(200.0 / 255.0);
     egui::Frame::default()
         .fill(fill)
         .inner_margin(egui::Margin::symmetric(8, 4))
         .corner_radius(egui::CornerRadius::same(4))
 }
 
+/// Apply the semantic accent stroke to a button while preserving egui's
+/// normal widget visuals for disabled and inactive states.
+pub fn accent_button(ui: &mut egui::Ui, label: impl Into<egui::WidgetText>) -> egui::Response {
+    let response = ui.button(label);
+    paint_interaction_stroke(ui, &response);
+    response
+}
+
+/// Apply accent styling to an arbitrary interactive response. This keeps
+/// hover/active feedback consistent across buttons, menu entries, and custom
+/// controls without replacing egui's accessible text/contrast defaults.
+pub fn paint_interaction_stroke(ui: &egui::Ui, response: &egui::Response) {
+    let stroke = if response.is_pointer_button_down_on() {
+        active_stroke(ui)
+    } else if response.hovered() {
+        hover_stroke(ui)
+    } else {
+        return;
+    };
+    ui.painter().rect_stroke(
+        response.rect.expand(stroke.width / 2.0),
+        egui::CornerRadius::same(4),
+        stroke,
+        egui::StrokeKind::Outside,
+    );
+}
+
 /// Accent-colored hover stroke for buttons and interactive elements.
 ///
 /// Returns a 1.5px stroke using the palette accent color at 60% opacity.
-#[expect(dead_code, reason = "public API for nav/button hover styling")]
+#[allow(dead_code)]
 pub fn hover_stroke(ui: &egui::Ui) -> egui::Stroke {
     let accent = ThemePalette::for_ui(ui).accent;
     egui::Stroke::new(1.5, accent.linear_multiply(0.6))
@@ -256,7 +280,7 @@ pub fn hover_stroke(ui: &egui::Ui) -> egui::Stroke {
 /// Accent-colored active press stroke.
 ///
 /// Returns a 2px stroke using the full palette accent color.
-#[expect(dead_code, reason = "public API for nav/button active styling")]
+#[allow(dead_code)]
 pub fn active_stroke(ui: &egui::Ui) -> egui::Stroke {
     let accent = ThemePalette::for_ui(ui).accent;
     egui::Stroke::new(2.0, accent)
@@ -428,7 +452,10 @@ mod tests {
         test_ui(&ctx, |ui| {
             let frame = super::glass_frame(ui);
             assert!(frame.fill.a() < 255, "glass frame must be semi-transparent");
-            assert!(frame.fill.a() > 100, "glass frame must not be too transparent");
+            assert!(
+                frame.fill.a() > 100,
+                "glass frame must not be too transparent"
+            );
         });
     }
 
@@ -439,7 +466,10 @@ mod tests {
         test_ui(&ctx, |ui| {
             let frame = super::glass_frame(ui);
             assert!(frame.fill.a() < 255, "glass frame must be semi-transparent");
-            assert!(frame.fill.a() > 100, "glass frame must not be too transparent");
+            assert!(
+                frame.fill.a() > 100,
+                "glass frame must not be too transparent"
+            );
         });
     }
 
@@ -460,7 +490,10 @@ mod tests {
             let stroke = super::hover_stroke(ui);
             assert!(stroke.width > 0.0, "hover stroke must have width");
             assert!(stroke.color.a() > 0, "hover stroke must have alpha");
-            assert!(stroke.color.a() < 255, "hover stroke must be semi-transparent");
+            assert!(
+                stroke.color.a() < 255,
+                "hover stroke must be semi-transparent"
+            );
         });
     }
 
@@ -472,6 +505,22 @@ mod tests {
             let stroke = super::active_stroke(ui);
             assert!(stroke.width > 0.0, "active stroke must have width");
             assert_eq!(stroke.color.a(), 255, "active stroke must be fully opaque");
+        });
+    }
+
+    #[test]
+    fn interaction_strokes_have_expected_semantic_alpha() {
+        let ctx = egui::Context::default();
+        ThemePreference::Dark.apply(&ctx);
+        test_ui(&ctx, |ui| {
+            let hover = super::hover_stroke(ui);
+            let active = super::active_stroke(ui);
+            assert_eq!(
+                hover.color,
+                ThemePalette::for_ui(ui).accent.linear_multiply(0.6)
+            );
+            assert_eq!(active.color, ThemePalette::for_ui(ui).accent);
+            assert!(hover.width < active.width);
         });
     }
 
@@ -490,7 +539,10 @@ mod tests {
             ctx.request_repaint();
         }
         let alpha = super::preview_fade_alpha(&ctx, egui::Id::new("test_fade_visible"), true);
-        assert!(alpha > 0.0, "visible preview should animate toward 1.0, got {alpha}");
+        assert!(
+            alpha > 0.0,
+            "visible preview should animate toward 1.0, got {alpha}"
+        );
     }
 
     #[test]
@@ -500,7 +552,10 @@ mod tests {
         test_ui(&ctx, |ui| {
             let hover = super::hover_stroke(ui);
             let active = super::active_stroke(ui);
-            assert_ne!(hover.width, active.width, "hover and active strokes must differ in width");
+            assert_ne!(
+                hover.width, active.width,
+                "hover and active strokes must differ in width"
+            );
         });
     }
 }
