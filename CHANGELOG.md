@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.56.0-alpha.1] - 2026-08-25
+- feat(scenes): add collections and duplication
+
 ## [0.55.0-alpha.1] - 2026-08-25
 - feat(scenes): add undo and redo history
 
