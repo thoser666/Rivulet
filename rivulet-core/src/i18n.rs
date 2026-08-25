@@ -355,6 +355,10 @@ impl Locale {
                 ("scenes_removed", "Scene \"{0}\" removed."),
                 ("scenes_switched", "Switched to \"{0}\"."),
                 ("scenes_active_label", "Active scene: {0}"),
+                ("scenes_collection", "Collection"),
+                ("scenes_profile", "Profile"),
+                ("scenes_duplicate", "Duplicate"),
+                ("scenes_duplicate_name", "Copy of {0}"),
                 ("section_planned", "This section is planned for milestone {0}."),
                 ("mixer_unavailable", "The audio mixer is currently only available on Linux."),
                 // Theme
@@ -607,6 +611,10 @@ impl Locale {
                 ("scenes_removed", "Szene \"{0}\" entfernt."),
                 ("scenes_switched", "Gewechselt zu \"{0}\"."),
                 ("scenes_active_label", "Aktive Szene: {0}"),
+                ("scenes_collection", "Sammlung"),
+                ("scenes_profile", "Profil"),
+                ("scenes_duplicate", "Duplizieren"),
+                ("scenes_duplicate_name", "Kopie von {0}"),
                 ("section_planned", "Dieser Bereich ist für Meilenstein {0} geplant."),
                 ("mixer_unavailable", "Der Audio-Mixer ist derzeit nur unter Linux verfügbar."),
                 // Theme

@@ -59,6 +59,8 @@ pub struct SceneManager {
     history: Vec<Uuid>,
     undo_stack: Vec<SceneSnapshot>,
     redo_stack: Vec<SceneSnapshot>,
+    collection: String,
+    profile: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -66,6 +68,8 @@ struct SceneSnapshot {
     scenes: Vec<Scene>,
     active: Option<Uuid>,
     history: Vec<Uuid>,
+    collection: String,
+    profile: String,
 }
 
 impl Default for SceneManager {
@@ -82,6 +86,8 @@ impl SceneManager {
             history: Vec::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            collection: "Default".to_string(),
+            profile: "Default".to_string(),
         }
     }
 
@@ -90,6 +96,8 @@ impl SceneManager {
             scenes: self.scenes.clone(),
             active: self.active,
             history: self.history.clone(),
+            collection: self.collection.clone(),
+            profile: self.profile.clone(),
         }
     }
 
@@ -203,6 +211,36 @@ impl SceneManager {
             }
         }
         false
+    }
+
+    pub fn collection(&self) -> &str {
+        &self.collection
+    }
+
+    pub fn profile(&self) -> &str {
+        &self.profile
+    }
+
+    pub fn set_collection(&mut self, name: impl Into<String>) {
+        self.collection = name.into();
+    }
+
+    pub fn set_profile(&mut self, name: impl Into<String>) {
+        self.profile = name.into();
+    }
+
+    /// Create a copy with fresh scene IDs so it can be edited independently.
+    pub fn duplicate_scene(&mut self, id: Uuid, name: impl Into<String>) -> Option<Uuid> {
+        let source = self.get(id)?.clone();
+        let before = self.snapshot();
+        let mut copy = source;
+        copy.id = Uuid::new_v4();
+        copy.name = name.into();
+        copy.parent = None;
+        let new_id = copy.id;
+        self.scenes.push(copy);
+        self.record_change(before);
+        Some(new_id)
     }
 
     pub fn scenes(&self) -> &[Scene] {
@@ -423,6 +461,28 @@ mod tests {
         assert_eq!(mgr.get(a).map(|s| s.name.as_str()), Some("New"));
 
         assert_eq!(mgr.rename(Uuid::new_v4(), "X".to_string()), None);
+    }
+
+    #[test]
+    fn manager_duplicate_scene_has_fresh_id_and_preserves_content() {
+        let mut mgr = SceneManager::new();
+        let original = mgr.add(Scene::with_color("Original".to_string(), 0xFF123456));
+        let duplicate = mgr.duplicate_scene(original, "Copy").unwrap();
+        assert_ne!(original, duplicate);
+        assert_eq!(mgr.get(duplicate).unwrap().name, "Copy");
+        assert_eq!(mgr.get(duplicate).unwrap().color, 0xFF123456);
+        assert_eq!(mgr.scenes().len(), 2);
+    }
+
+    #[test]
+    fn manager_collection_and_profile_are_switchable() {
+        let mut mgr = SceneManager::new();
+        assert_eq!(mgr.collection(), "Default");
+        assert_eq!(mgr.profile(), "Default");
+        mgr.set_collection("Gaming");
+        mgr.set_profile("Streaming");
+        assert_eq!(mgr.collection(), "Gaming");
+        assert_eq!(mgr.profile(), "Streaming");
     }
 
     #[test]

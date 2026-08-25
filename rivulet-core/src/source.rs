@@ -196,6 +196,16 @@ impl SourceManager {
         id
     }
 
+    /// Duplicate a source with a fresh identity and no scene bindings.
+    pub fn duplicate_source(&mut self, id: Uuid, name: impl Into<String>) -> Option<Uuid> {
+        let mut copy = self.get_source(id)?.clone();
+        copy.id = Uuid::new_v4();
+        copy.name = name.into();
+        let new_id = copy.id;
+        self.sources.push(copy);
+        Some(new_id)
+    }
+
     /// Removes a source and all its scene bindings.  Returns the
     /// removed source, or `None` if the ID was unknown.
     pub fn remove_source(&mut self, id: Uuid) -> Option<Source> {
@@ -502,6 +512,18 @@ mod tests {
         mgr.add_source(s);
         assert!(mgr.get_source(id).is_some());
         assert_eq!(mgr.sources().len(), 1);
+    }
+
+    #[test]
+    fn manager_duplicate_source_has_fresh_id_and_no_bindings() {
+        let mut mgr = SourceManager::new();
+        let original = mgr.add_source(Source::new("Camera".to_string(), SourceKind::Webcam));
+        let scene = Uuid::new_v4();
+        mgr.bind_source(original, scene, None);
+        let duplicate = mgr.duplicate_source(original, "Camera copy").unwrap();
+        assert_ne!(original, duplicate);
+        assert_eq!(mgr.get_source(duplicate).unwrap().name, "Camera copy");
+        assert_eq!(mgr.source_count_in_scene(scene), 1);
     }
 
     #[test]

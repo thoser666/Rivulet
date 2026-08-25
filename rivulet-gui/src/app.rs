@@ -553,6 +553,10 @@ pub struct RivuletApp {
     scene_name_input: String,
     #[serde(skip)]
     scene_status: Option<String>,
+    #[serde(skip)]
+    scene_collection_input: String,
+    #[serde(skip)]
+    scene_profile_input: String,
 
     // Auto-update
     #[serde(skip)]
@@ -751,6 +755,8 @@ impl Default for RivuletApp {
             browser_source: rivulet_core::BrowserSource::default(),
             scene_name_input: String::new(),
             scene_status: None,
+            scene_collection_input: String::new(),
+            scene_profile_input: String::new(),
 
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
@@ -1854,6 +1860,28 @@ impl RivuletApp {
         });
 
         ui.separator();
+        ui.horizontal(|ui| {
+            ui.label(self.tr("scenes_collection"));
+            ui.text_edit_singleline(&mut self.scene_collection_input);
+            if theme::accent_button(ui, self.tr("scenes_collection")).clicked()
+                && !self.scene_collection_input.trim().is_empty()
+            {
+                self.scenes
+                    .set_collection(self.scene_collection_input.trim());
+            }
+            ui.label(self.tr("scenes_profile"));
+            ui.text_edit_singleline(&mut self.scene_profile_input);
+            if theme::accent_button(ui, self.tr("scenes_profile")).clicked()
+                && !self.scene_profile_input.trim().is_empty()
+            {
+                self.scenes.set_profile(self.scene_profile_input.trim());
+            }
+        });
+        ui.label(format!(
+            "{} / {}",
+            self.scenes.collection(),
+            self.scenes.profile()
+        ));
 
         let ordered = self.scenes.ordered_scenes();
         if ordered.is_empty() {
@@ -1888,6 +1916,17 @@ impl RivuletApp {
                             theme::paint_interaction_stroke(ui, &rename_response);
                             if rename_response.clicked() {
                                 rename_target = Some((id, scene.name.clone()));
+                            }
+                            let duplicate_response = ui.small_button(self.tr("scenes_duplicate"));
+                            theme::paint_interaction_stroke(ui, &duplicate_response);
+                            if duplicate_response.clicked() {
+                                let _ = self.scenes.duplicate_scene(
+                                    id,
+                                    self.tr_fmt(
+                                        "scenes_duplicate_name",
+                                        std::slice::from_ref(&scene.name),
+                                    ),
+                                );
                             }
                             let remove_response = ui.small_button(self.tr("scenes_remove"));
                             theme::paint_interaction_stroke(ui, &remove_response);

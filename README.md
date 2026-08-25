@@ -396,12 +396,12 @@ The core concept of OBS: scenes, sources, and transitions.
 | Image & text sources | Done (S2 + S3 + S4 done) |
 | Browser sources | S5b contract/configuration done; native WebView adapter follow-up |
 | Audio sources (microphone, per-app, devices) | Done (S8 done) |
-| Scenes & transitions | In progress (scene mgmt + G2 done; transitions/studio open, M2) |
-| Scene collections & profiles | Open (M2) |
+| Scenes & transitions | In progress (scene management, collections/profiles, duplicate scene; transitions/studio open, M2) |
+| Scene collections & profiles | Partial (named collection/profile context; import/export and per-profile settings open, M2) |
 | Studio mode & multi-view | Open (M2) |
 | Source transforms & composition | ✅ Done (M2 S1) |
 | Hotkeys (incl. remapping, global) | Partial (record/pause/mute/save-replay; remapping planned M5) |
-| Undo/Redo | Open (M2) |
+| Undo/Redo | Done (M2) |
 | Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks, filters) |
 | Video filters (color correction, LUT, blur, sharpen, chroma key) | Open (M4) |
 | Audio filters (noise gate, compressor, limiter, expander, gain, EQ) | Partial (M1 basics; gate/EQ/ducking planned M4) |

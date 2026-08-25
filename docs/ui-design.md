@@ -31,7 +31,7 @@ sidebar may be added once iconography and keyboard navigation are specified.
 | --- | --- | --- | --- |
 | Record | `Record` | M0/M1 | capture source (screen/window/camera/game), region, codec, preset, timer/FPS overlay |
 | Mixer | `Mixer` | M1 | audio filters, monitoring, levels |
-| Scenes | `Scenes` | M2 | placeholder (scenes, sources, transitions) |
+| Scenes | `Scenes` | M2 | scenes, named collections/profiles, duplication, sources, transitions |
 | Stream | `Stream` | M3 | placeholder (RTMP, stream keys, dual output) |
 | Assistant | `Assistant` | M9 | placeholder (local LLM chat) |
 | Settings | `Settings` | — | hotkeys, updates, language, general |
@@ -91,6 +91,7 @@ The top bar and navigation use the shared translucent `theme::glass_frame()`.
   overlays that dim a captured preview (e.g. the region editor) instead of a
   hard-coded alpha color. Component fills and text colors should derive from
   this palette or `StatusColors`; image white is only valid as a texture tint.
+- **Scene management**: keep the active collection and profile visible near scene controls. Duplication must create a fresh identity and must not implicitly bind the copy to existing scenes; provide explicit feedback for the resulting action.
 - **Scene history**: expose undo/redo actions near scene management controls,
   disable them when unavailable, and keep `Ctrl+Z` / `Ctrl+Y` reserved for scene
   history unless a text field currently owns keyboard input.
