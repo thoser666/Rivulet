@@ -22,10 +22,10 @@ The GUI is a single egui/eframe application in `rivulet-gui/`:
 
 ## Navigation structure
 
-**Target layout (planned):** a collapsible **left sidebar**
-(`egui::SidePanel::left`) drives the main navigation. Each sidebar entry maps
-to one roadmap milestone; every section is an `AppView` variant and the
-central panel renders a `match` on it.
+**Current layout:** a fixed left navigation panel (`egui::Panel::left`) drives
+the main navigation. Each sidebar entry maps to an `AppView` variant and the
+central panel renders the corresponding section. A future compact/collapsed
+sidebar may be added once iconography and keyboard navigation are specified.
 
 | Sidebar section | AppView | Milestone | Content |
 | --- | --- | --- | --- |
@@ -36,11 +36,9 @@ central panel renders a `match` on it.
 | Assistant | `Assistant` | M9 | placeholder (local LLM chat) |
 | Settings | `Settings` | — | hotkeys, updates, language, general |
 
-**Current layout (as of 2026-08):** single `CentralPanel` with all sections
-stacked vertically, plus a thin top `MenuBar` (File → Quit, Language). The
-migration to the sidebar is planned; until it lands, new sections still go
-into the central panel *below* the recording controls, separated by
-`ui.separator()`.
+The top bar contains only app-level actions (File and Language); feature
+content stays in the central panel and is separated with `ui.separator()`.
+The top bar and navigation use the shared translucent `theme::glass_frame()`.
 
 ## Layout conventions
 
@@ -92,7 +90,8 @@ into the central panel *below* the recording controls, separated by
   hard-coded alpha color. Component fills and text colors should derive from
   this palette or `StatusColors`; image white is only valid as a texture tint.
 - **Interaction feedback**: use `theme::accent_button` for ordinary buttons and
-  `theme::paint_interaction_stroke` for custom/selectable controls. Hover uses
+  `theme::paint_interaction_stroke` for custom/selectable controls. Focus gets
+  the opaque accent stroke; hover uses
   the palette accent at 60% alpha and a 1.5 px stroke; active press uses the
   opaque accent and a 2 px stroke. Do not replace egui's default disabled
   visuals, focus indicators, or contrast behavior. These helpers are covered by

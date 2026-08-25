@@ -2297,7 +2297,12 @@ impl RivuletApp {
                     // Preview image scaled to the available width, with the
                     // current selection drawn on top. Dragging selects a new
                     // region; the outside is dimmed while dragging.
-                    let scale = ui.available_width().min(700.0) / full_width.max(1) as f32;
+                    let content_rect = ui.max_rect();
+                    let max_width = content_rect.width().clamp(1.0, 700.0);
+                    let max_height = content_rect.height().max(1.0);
+                    let scale = (max_width / full_width.max(1) as f32)
+                        .min(max_height / full_height.max(1) as f32)
+                        .max(0.01);
                     let size = egui::vec2(full_width as f32 * scale, full_height as f32 * scale);
                     let (rect, response) =
                         ui.allocate_exact_size(size, egui::Sense::click_and_drag());
@@ -2658,8 +2663,8 @@ impl eframe::App for RivuletApp {
             .frame(theme::glass_frame(ui))
             .show(ui, |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
-                    ui.menu_button("File", |ui| {
-                        if theme::accent_button(ui, "Quit").clicked() {
+                    ui.menu_button(self.tr("file_menu"), |ui| {
+                        if theme::accent_button(ui, self.tr("quit")).clicked() {
                             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     });
@@ -3471,7 +3476,7 @@ impl eframe::App for RivuletApp {
                     }
 
                     ui.separator();
-                    ui.label(egui::RichText::new("Filter").strong());
+                    ui.label(egui::RichText::new(self.tr("audio_filters")).strong());
                     let mut sys_ns = self.system_filters.noise_suppression;
                     let mut sys_cmp = self.system_filters.compressor;
                     let mut sys_lim = self.system_filters.limiter;
@@ -3507,12 +3512,12 @@ impl eframe::App for RivuletApp {
                     }
 
                     ui.separator();
-                    ui.label(egui::RichText::new("Monitoring").strong());
+                    ui.label(egui::RichText::new(self.tr("audio_monitoring")).strong());
                     let mut sys_mon = self.system_monitor;
                     let mut mic_mon = self.mic_monitor;
                     ui.horizontal(|ui| {
-                        ui.checkbox(&mut sys_mon, "System abhören");
-                        ui.checkbox(&mut mic_mon, "Mikrofon abhören");
+                        ui.checkbox(&mut sys_mon, self.tr("monitoring_system"));
+                        ui.checkbox(&mut mic_mon, self.tr("monitoring_microphone"));
                     });
                     if sys_mon != self.system_monitor || mic_mon != self.mic_monitor {
                         self.system_monitor = sys_mon;
@@ -3525,7 +3530,7 @@ impl eframe::App for RivuletApp {
                     if ui
                         .add(
                             egui::Slider::new(&mut mon_vol, 0.0..=1.0)
-                                .text("Monitoring-Lautstärke"),
+                                .text(self.tr("monitoring_volume")),
                         )
                         .changed()
                     {
@@ -3574,8 +3579,8 @@ impl eframe::App for RivuletApp {
             #[cfg(not(any(target_os = "linux", target_os = "windows")))]
             if self.view == AppView::Record {
                 ui.add_space(20.0);
-                ui.label(egui::RichText::new("ℹ️ Screen Recording Feature").strong());
-                ui.label("This feature is currently only available on Linux and Windows.");
+                ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
+                ui.label(self.tr("screen_recording_unavailable"));
             }
 
             // Placeholder views (still-planned milestones)
@@ -3618,9 +3623,9 @@ impl eframe::App for RivuletApp {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.label("powered by ");
+                    ui.label(format!("{} ", self.tr("powered_by")));
                     ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-                    ui.label(" and ");
+                    ui.label(" & ");
                     ui.hyperlink_to(
                         "eframe",
                         "https://github.com/emilk/egui/tree/master/crates/eframe",

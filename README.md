@@ -221,7 +221,7 @@ The core concept of OBS: scenes, sources, and transitions.
 
 **GUI polish:**
 - [x] **Glassmorphism panels** — semi-transparent top menu bar and left sidebar (`theme::glass_frame()`) with rounded corners, desktop shows through with frosted-glass effect
-- [x] **Hover & active accent strokes** — shared `theme::accent_button()` / `theme::paint_interaction_stroke()` helpers apply the palette accent (1.5px at 60% alpha on hover, 2px opaque on press) without overriding egui's disabled/focus visuals
+- [x] **Hover, focus & active accent strokes** — shared `theme::accent_button()` / `theme::paint_interaction_stroke()` helpers apply the palette accent (1.5px at 60% alpha on hover, 2px opaque on focus/press) without overriding egui's disabled visuals
 - [x] **Preview fade-in animation** — `theme::preview_fade_alpha()` wrapping `ctx.animate_bool` for smooth game-preview tint fade-in
 
 **Scene system:**

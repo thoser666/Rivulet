@@ -323,6 +323,15 @@ impl Locale {
                 ("update_error", "Update check failed: {0}"),
                 // Language picker
                 ("language", "Language"),
+                ("file_menu", "File"),
+                ("quit", "Quit"),
+                ("audio_filters", "Filters"),
+                ("audio_monitoring", "Monitoring"),
+                ("monitoring_system", "Monitor system audio"),
+                ("monitoring_microphone", "Monitor microphone"),
+                ("monitoring_volume", "Monitoring volume"),
+                ("powered_by", "Powered by"),
+                ("screen_recording_unavailable", "Screen recording is currently only available on Linux and Windows."),
                 // Navigation
                 ("nav_record", "Record"),
                 ("nav_mixer", "Mixer"),
@@ -562,6 +571,15 @@ impl Locale {
                 ("update_error", "Update-Check fehlgeschlagen: {0}"),
                 // Language picker
                 ("language", "Sprache"),
+                ("file_menu", "Datei"),
+                ("quit", "Beenden"),
+                ("audio_filters", "Filter"),
+                ("audio_monitoring", "Monitoring"),
+                ("monitoring_system", "Systemaudio abhören"),
+                ("monitoring_microphone", "Mikrofon abhören"),
+                ("monitoring_volume", "Monitoring-Lautstärke"),
+                ("powered_by", "Unterstützt von"),
+                ("screen_recording_unavailable", "Bildschirmaufnahme ist derzeit nur unter Linux und Windows verfügbar."),
                 // Navigation
                 ("nav_record", "Aufnehmen"),
                 ("nav_mixer", "Mixer"),

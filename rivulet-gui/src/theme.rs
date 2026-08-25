@@ -253,7 +253,9 @@ pub fn accent_button(ui: &mut egui::Ui, label: impl Into<egui::WidgetText>) -> e
 /// hover/active feedback consistent across buttons, menu entries, and custom
 /// controls without replacing egui's accessible text/contrast defaults.
 pub fn paint_interaction_stroke(ui: &egui::Ui, response: &egui::Response) {
-    let stroke = if response.is_pointer_button_down_on() {
+    let stroke = if response.has_focus() {
+        egui::Stroke::new(2.0, ThemePalette::for_ui(ui).accent)
+    } else if response.is_pointer_button_down_on() {
         active_stroke(ui)
     } else if response.hovered() {
         hover_stroke(ui)
