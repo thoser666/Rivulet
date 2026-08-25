@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.64.0-alpha.1] - 2026-08-25
+- feat(security): add OpenSSF Scorecard analysis
+
 ## [0.63.0-alpha.1] - 2026-08-25
 - feat(security): enable CodeQL and dependency review
 
