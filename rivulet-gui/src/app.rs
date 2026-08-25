@@ -1830,6 +1830,29 @@ impl RivuletApp {
             }
         });
 
+        ui.horizontal(|ui| {
+            let undo_response = ui
+                .add_enabled(
+                    self.scenes.can_undo(),
+                    egui::Button::new(self.tr("scenes_undo")),
+                )
+                .on_hover_text(self.tr("scenes_undo_hint"));
+            theme::paint_interaction_stroke(ui, &undo_response);
+            if undo_response.clicked() {
+                self.scenes.undo();
+            }
+            let redo_response = ui
+                .add_enabled(
+                    self.scenes.can_redo(),
+                    egui::Button::new(self.tr("scenes_redo")),
+                )
+                .on_hover_text(self.tr("scenes_redo_hint"));
+            theme::paint_interaction_stroke(ui, &redo_response);
+            if redo_response.clicked() {
+                self.scenes.redo();
+            }
+        });
+
         ui.separator();
 
         let ordered = self.scenes.ordered_scenes();
@@ -2550,6 +2573,17 @@ impl eframe::App for RivuletApp {
             // F12: Save the replay buffer as a clip (only while recording)
             if i.key_pressed(self.hotkeys.save_replay) && any_recording {
                 self.save_replay_now();
+            }
+
+            // Scene history shortcuts are handled globally, but only when a
+            // text field is not focused so normal editing remains unaffected.
+            if !ctx.egui_wants_keyboard_input() {
+                let command = i.modifiers.command;
+                if command && i.key_pressed(egui::Key::Z) {
+                    self.scenes.undo();
+                } else if command && i.key_pressed(egui::Key::Y) {
+                    self.scenes.redo();
+                }
             }
         });
 

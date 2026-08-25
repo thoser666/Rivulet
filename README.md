@@ -227,7 +227,7 @@ The core concept of OBS: scenes, sources, and transitions.
 **Scene system:**
 - [x] **Scene management** (multiple scenes, switching, add/rename/remove, switch-back history) — `SceneManager` in `rivulet-core/src/scene.rs`, live Scenes view in the sidebar
 - [x] **Scene organisation** (folders, search/filter, color coding) — *top community request, active PRs in OBS; `Scene` model with parent UUIDs and ARGB color coding (folders via hierarchy), tested in `rivulet-core/src/scene.rs`*
-- [ ] **Undo/Redo** (Ctrl+Z / Ctrl+Y) — *requested since OBS v23, implemented in v27*
+- [x] **Undo/Redo** (Ctrl+Z / Ctrl+Y) — scene add/remove/rename/switch operations are undoable; toolbar buttons are disabled when no history is available
 - [ ] **Scene collections & profiles** — switchable sets of scenes/sources (collection) and settings (profile) for different setups (gaming / work / podcast); OBS's core workspace concept. *Tracked in [#69](https://github.com/thoser666/Rivulet/issues/69).*
 - [ ] **Duplicate scene / source** — one-click copy of a scene or source including its transform; copy/paste transform between sources
 - [ ] **Scene hotkeys & auto-switching** — a hotkey for every scene, plus window-focus-driven auto scene switching (OBS auto-scene-switcher workflow)

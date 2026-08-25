@@ -91,6 +91,9 @@ The top bar and navigation use the shared translucent `theme::glass_frame()`.
   overlays that dim a captured preview (e.g. the region editor) instead of a
   hard-coded alpha color. Component fills and text colors should derive from
   this palette or `StatusColors`; image white is only valid as a texture tint.
+- **Scene history**: expose undo/redo actions near scene management controls,
+  disable them when unavailable, and keep `Ctrl+Z` / `Ctrl+Y` reserved for scene
+  history unless a text field currently owns keyboard input.
 - **Interaction feedback**: use `theme::accent_button` for ordinary buttons and
   `theme::paint_interaction_stroke` for custom/selectable controls. Focus gets
   the opaque accent stroke; hover uses
@@ -161,6 +164,8 @@ Rules:
 Unit tests live in `#[cfg(test)] mod tests` at the bottom of `app.rs`
 (pure-logic only — no UI automation). Existing categories to follow:
 
+- scene history transitions (`SceneManager::undo` / `redo`, including redo
+  invalidation after a new edit)
 - `format_bytes` (size formatting)
 - stalled-frames / no-frame-timeout logic (`should_abort_for_stalled_frames`,
   `--no-frame-timeout` argument parsing)

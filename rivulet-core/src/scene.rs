@@ -57,6 +57,15 @@ pub struct SceneManager {
     scenes: Vec<Scene>,
     active: Option<Uuid>,
     history: Vec<Uuid>,
+    undo_stack: Vec<SceneSnapshot>,
+    redo_stack: Vec<SceneSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct SceneSnapshot {
+    scenes: Vec<Scene>,
+    active: Option<Uuid>,
+    history: Vec<Uuid>,
 }
 
 impl Default for SceneManager {
@@ -71,20 +80,74 @@ impl SceneManager {
             scenes: Vec::new(),
             active: None,
             history: Vec::new(),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
+    }
+
+    fn snapshot(&self) -> SceneSnapshot {
+        SceneSnapshot {
+            scenes: self.scenes.clone(),
+            active: self.active,
+            history: self.history.clone(),
+        }
+    }
+
+    fn record_change(&mut self, before: SceneSnapshot) {
+        if before != self.snapshot() {
+            self.undo_stack.push(before);
+            self.redo_stack.clear();
+        }
+    }
+
+    /// Whether an undo operation is available.
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+
+    /// Whether a redo operation is available.
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
+
+    /// Undo the most recent scene mutation or selection change.
+    pub fn undo(&mut self) -> bool {
+        let Some(previous) = self.undo_stack.pop() else {
+            return false;
+        };
+        self.redo_stack.push(self.snapshot());
+        self.scenes = previous.scenes;
+        self.active = previous.active;
+        self.history = previous.history;
+        true
+    }
+
+    /// Redo the most recently undone scene operation.
+    pub fn redo(&mut self) -> bool {
+        let Some(next) = self.redo_stack.pop() else {
+            return false;
+        };
+        self.undo_stack.push(self.snapshot());
+        self.scenes = next.scenes;
+        self.active = next.active;
+        self.history = next.history;
+        true
     }
 
     /// Adds a scene and activates it when it is the first scene.
     pub fn add(&mut self, scene: Scene) -> Uuid {
+        let before = self.snapshot();
         let id = scene.id;
         self.scenes.push(scene);
         if self.active.is_none() {
             self.active = Some(id);
         }
+        self.record_change(before);
         id
     }
 
     pub fn remove(&mut self, id: Uuid) -> bool {
+        let before = self.snapshot();
         let Some(index) = self.scenes.iter().position(|s| s.id == id) else {
             return false;
         };
@@ -99,13 +162,16 @@ impl SceneManager {
                 .filter(|h| self.scenes.iter().any(|s| s.id == *h))
                 .or_else(|| self.scenes.last().map(|s| s.id));
         }
+        self.record_change(before);
         true
     }
 
     /// Renames a scene; returns the old name or `None` if the scene is unknown.
     pub fn rename(&mut self, id: Uuid, name: String) -> Option<String> {
+        let before = self.snapshot();
         let scene = self.scenes.iter_mut().find(|s| s.id == id)?;
         let old = std::mem::replace(&mut scene.name, name);
+        self.record_change(before);
         Some(old)
     }
 
@@ -115,20 +181,24 @@ impl SceneManager {
         if !self.scenes.iter().any(|s| s.id == id) {
             return false;
         }
+        let before = self.snapshot();
         if self.active != Some(id) {
             if let Some(previous) = self.active {
                 self.history.push(previous);
             }
         }
         self.active = Some(id);
+        self.record_change(before);
         true
     }
 
     /// Undo: reverts to the most recently active scene that still exists.
     pub fn switch_back(&mut self) -> bool {
+        let before = self.snapshot();
         while let Some(previous) = self.history.pop() {
             if self.scenes.iter().any(|s| s.id == previous) {
                 self.active = Some(previous);
+                self.record_change(before);
                 return true;
             }
         }
@@ -242,6 +312,50 @@ mod tests {
         // Unknown IDs are rejected.
         assert!(!mgr.switch_to(Uuid::new_v4()));
         assert_eq!(mgr.active(), Some(b));
+    }
+
+    #[test]
+    fn manager_undo_redo_restores_scene_add_and_name_changes() {
+        let mut mgr = SceneManager::new();
+        let id = mgr.add(Scene::new("Game".to_string()));
+        assert!(mgr.can_undo());
+        assert!(mgr.undo());
+        assert!(mgr.scenes().is_empty());
+        assert_eq!(mgr.active(), None);
+        assert!(mgr.can_redo());
+        assert!(mgr.redo());
+        assert_eq!(mgr.get(id).map(|s| s.name.as_str()), Some("Game"));
+
+        mgr.rename(id, "Live".to_string());
+        assert!(mgr.undo());
+        assert_eq!(mgr.get(id).map(|s| s.name.as_str()), Some("Game"));
+        assert!(mgr.redo());
+        assert_eq!(mgr.get(id).map(|s| s.name.as_str()), Some("Live"));
+    }
+
+    #[test]
+    fn manager_new_change_clears_redo_stack() {
+        let mut mgr = SceneManager::new();
+        let a = mgr.add(Scene::new("A".to_string()));
+        mgr.add(Scene::new("B".to_string()));
+        assert!(mgr.undo());
+        assert!(mgr.can_redo());
+        mgr.rename(a, "Renamed".to_string());
+        assert!(!mgr.can_redo());
+    }
+
+    #[test]
+    fn manager_switch_back_is_undoable() {
+        let mut mgr = SceneManager::new();
+        let a = mgr.add(Scene::new("A".to_string()));
+        let b = mgr.add(Scene::new("B".to_string()));
+        mgr.switch_to(b);
+        assert!(mgr.switch_back());
+        assert_eq!(mgr.active(), Some(a));
+        assert!(mgr.undo());
+        assert_eq!(mgr.active(), Some(b));
+        assert!(mgr.redo());
+        assert_eq!(mgr.active(), Some(a));
     }
 
     #[test]
