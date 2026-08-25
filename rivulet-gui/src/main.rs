@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod logging;
 mod theme;
 
 use crate::app::{parse_no_frame_timeout, RivuletApp, DEFAULT_NO_FRAME_TIMEOUT};
@@ -36,7 +37,26 @@ fn main() -> Result<(), eframe::Error> {
     #[cfg(target_os = "windows")]
     configure_bundled_gstreamer();
 
-    tracing_subscriber::fmt::init();
+    let log_config = logging::LogConfig::new(
+        logging::LogConfig::default_directory(),
+        std::env::var("RIVULET_LOG_RETENTION_DAYS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(logging::DEFAULT_RETENTION_DAYS),
+    );
+    if let Err(error) = logging::init(&log_config) {
+        eprintln!("Failed to initialize file logging: {error}");
+    }
+    let crash_log = logging::log_path(&log_config.directory, chrono::Local::now().date_naive());
+    if let Err(error) = std::panic::catch_unwind(|| {
+        tracing::info!(
+            retention_days = log_config.retention_days,
+            "Rivulet logging initialized"
+        );
+    }) {
+        let _ = logging::log_crash(&crash_log, "startup", &format!("panic: {error:?}"));
+        std::panic::resume_unwind(error);
+    }
 
     let _rt = Runtime::new().unwrap();
     let engine = RivuletEngine::new();

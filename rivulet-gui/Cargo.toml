@@ -37,7 +37,10 @@ rivulet-core = { path = "../rivulet-core" }
 rivulet-updater = { path = "../rivulet-updater" }
 
 # Logging library
-tracing-subscriber = { version = "0.3.18", features = ["fmt"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.18", features = ["fmt", "env-filter"] }
+dirs = "6.0"
+tempfile = "3.15"
 
 # Image processing library for the icon
 image = { version = "0.25.1", features = ["png"] }

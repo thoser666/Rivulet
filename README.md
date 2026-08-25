@@ -479,6 +479,23 @@ Every two seconds the example prints the live health status, e.g.
 
 ## 🛠 Development
 
+### Diagnostics and crash logs
+
+Rivulet writes structured, ANSI-free logs to the per-user data directory under
+`Rivulet/logs/`, using one file per local calendar day:
+
+- Windows: `%LOCALAPPDATA%\\Rivulet\\logs\\rivulet-YYYY-MM-DD.log`
+- Linux: `$XDG_DATA_HOME/Rivulet/logs/rivulet-YYYY-MM-DD.log` (or the platform data directory)
+- macOS: the platform data directory under `Rivulet/logs/`
+
+The default retention is 14 days. Set `RIVULET_LOG_RETENTION_DAYS` before
+starting the app to change it; values below one are clamped to one day. Crash
+reports are delimited by `===== RIVULET CRASH =====`, making them easy to find
+and attach to bug reports. When reporting a crash, include the relevant daily
+log and the app version, but remove personal paths or stream keys first.
+
+
+
 ### Tests
 
 Run the full test suite:
