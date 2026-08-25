@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.58.0-alpha.1] - 2026-08-25
+- feat(composition): add per-scene source editor
+
 ## [0.57.0-alpha.1] - 2026-08-25
 - feat(scenes): complete remaining M2 organisation work
 
