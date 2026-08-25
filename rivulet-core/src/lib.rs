@@ -171,7 +171,7 @@ impl Default for RivuletEngine {
 
 impl RivuletEngine {
     pub fn new() -> Self {
-        println!("[Engine] GStreamer ready.");
+        tracing::info!("GStreamer ready.");
         Self::default()
     }
 
@@ -182,7 +182,7 @@ impl RivuletEngine {
     /// recording controls instead of relying on console output alone.
     fn set_error(&mut self, message: impl Into<String>) {
         let message = message.into();
-        eprintln!("[Engine] {}", message);
+        tracing::error!("Engine error: {message}");
         self.last_error = Some(message);
     }
 
@@ -420,7 +420,7 @@ impl RivuletEngine {
             .as_ref()
             .expect("Stream settings must be set")
             .location();
-        println!("[Engine] Initializing streaming pipeline for: {}", location);
+        tracing::info!(location = %location, "Initializing streaming pipeline");
         let mut s = self.video_branch_str();
         s.push_str(&self.audio_branch_str(true));
         s.push_str(&format!(
@@ -445,10 +445,7 @@ impl RivuletEngine {
             .location();
         let path = self.output_path.as_ref().expect("Output path must be set");
         let location = path.to_str().expect("Invalid file path.");
-        println!(
-            "[Engine] Initializing dual-output pipeline (recording + stream to {})",
-            stream_location
-        );
+        tracing::info!(stream_location = %stream_location, "Initializing dual-output pipeline");
 
         let muxer = self.video_codec.muxer_element();
         let transform = self.preset.transform_fragment();
@@ -522,7 +519,7 @@ impl RivuletEngine {
         } else {
             let path = self.output_path.as_ref()?;
             let location = path.to_str().expect("Invalid file path.");
-            println!("[Engine] Initializing recording pipeline for: {}", location);
+            tracing::info!(location = %location, "Initializing recording pipeline");
             Some(self.build_recording_pipeline_str(location))
         }
     }
@@ -616,11 +613,11 @@ impl RivuletEngine {
         self.appsrc = Some(appsrc);
         self.install_performance_probes();
         if self.is_dual_output() {
-            println!("[Engine] Dual-output pipeline running.");
+            tracing::info!("Dual-output pipeline running.");
         } else if self.is_streaming() {
-            println!("[Engine] Streaming pipeline running.");
+            tracing::info!("Streaming pipeline running.");
         } else {
-            println!("[Engine] Recording pipeline running.");
+            tracing::info!("Recording pipeline running.");
         }
     }
 
@@ -791,10 +788,7 @@ impl RivuletEngine {
         if !self.video_encoder.is_hardware() {
             return false;
         }
-        eprintln!(
-            "[Engine] Encoder {:?} for {:?} not initializable ({}), falling back to software.",
-            self.video_encoder, self.video_codec, reason
-        );
+        tracing::warn!(encoder = ?self.video_encoder, codec = ?self.video_codec, reason, "Hardware encoder unavailable; falling back to software");
         self.video_encoder = VideoEncoder::Software;
         *pipeline_str = self
             .build_pipeline_str()
@@ -913,7 +907,7 @@ impl RivuletEngine {
             self.set_error("No stream targets configured for streaming.");
             return;
         }
-        println!("[Engine] Streaming prepared.");
+        tracing::info!("Streaming prepared.");
         self.is_recording = true;
 
         // Initialize the stream health monitor. Defaults match the
@@ -931,7 +925,7 @@ impl RivuletEngine {
         if self.is_recording {
             return;
         }
-        println!("[Engine] Recording prepared for: {:?}", path);
+        tracing::info!(path = ?path, "Recording prepared");
         self.output_path = Some(path);
         self.is_recording = true;
 
@@ -951,7 +945,7 @@ impl RivuletEngine {
         if !self.is_recording {
             return;
         }
-        println!("[Engine] Stopping recording...");
+        tracing::info!("Stopping recording");
 
         if let Some(appsrc) = self.appsrc.as_ref() {
             let _ = appsrc.end_of_stream();
@@ -997,7 +991,7 @@ impl RivuletEngine {
         if let Some(replay) = &self.replay {
             replay.lock().unwrap_or_else(|e| e.into_inner()).clear();
         }
-        println!("[Engine] Recording stopped and file saved.");
+        tracing::info!("Recording stopped and file saved");
     }
 
     pub fn process_raw_frame(&mut self, frame_data: &[u8], width: u32, height: u32) {

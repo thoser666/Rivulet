@@ -39,6 +39,12 @@ stream keys, passwords, or unredacted personal paths in the marker.
 4. Include the complete crash block and the preceding ~50 lines.
 5. Remove secrets, usernames, and private file paths before sharing.
 
+Production diagnostics use `tracing` rather than direct `println!`/`eprintln!`
+output, so levels, fields, and daily file routing remain consistent. The only
+remaining direct stderr output is the deliberate bootstrap fallback when the
+logging subscriber itself cannot be initialized, plus test-only dependency
+messages.
+
 The logging module has unit tests for date-based paths, retention filtering,
 and crash-marker format. Future crash-report tooling can consume the stable
 marker format without depending on console output.

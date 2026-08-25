@@ -65,9 +65,9 @@ fn main() -> Result<(), eframe::Error> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let no_frame_timeout = parse_no_frame_timeout(&args, DEFAULT_NO_FRAME_TIMEOUT);
     if no_frame_timeout != DEFAULT_NO_FRAME_TIMEOUT {
-        println!(
-            "No-frame timeout set to {} seconds via CLI.",
-            no_frame_timeout.as_secs()
+        tracing::info!(
+            seconds = no_frame_timeout.as_secs(),
+            "No-frame timeout configured via CLI"
         );
     }
 

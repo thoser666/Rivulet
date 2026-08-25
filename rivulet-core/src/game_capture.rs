@@ -240,7 +240,7 @@ pub fn start_vulkan_layer_capture(
             }
             thread::sleep(frame_duration);
         }
-        println!("Vulkan layer capture thread stopped.");
+        tracing::info!("Vulkan layer capture thread stopped");
     });
 
     Some((rx, handle))
@@ -283,7 +283,7 @@ pub fn start_opengl_hook_capture(
             }
             thread::sleep(frame_duration);
         }
-        println!("OpenGL hook capture thread stopped.");
+        tracing::info!("OpenGL hook capture thread stopped");
     });
 
     Some((rx, handle))

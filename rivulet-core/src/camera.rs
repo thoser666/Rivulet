@@ -104,7 +104,7 @@ pub fn start_camera_capture(
         let pipeline = match gst::parse::launch(&pipeline_str) {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("[Camera] Failed to create pipeline: {:?}", e);
+                tracing::error!(error = ?e, "Camera pipeline creation failed");
                 return;
             }
         };
@@ -120,7 +120,7 @@ pub fn start_camera_capture(
         appsink.set_property("max-buffers", 1u32);
 
         if pipeline.set_state(gst::State::Playing).is_err() {
-            eprintln!("[Camera] Failed to set pipeline to Playing state");
+            tracing::error!("Camera pipeline failed to enter Playing state");
             return;
         }
 

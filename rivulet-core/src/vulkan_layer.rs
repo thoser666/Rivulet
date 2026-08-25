@@ -76,11 +76,7 @@ impl VulkanLayerConfig {
         };
         cmd.env("VK_INSTANCE_LAYERS", &layers);
 
-        eprintln!(
-            "[Rivulet] Vulkan layer enabled: VK_LAYER_PATH={}, VK_INSTANCE_LAYERS={}",
-            self.layer_dir.display(),
-            layers,
-        );
+        tracing::info!(layer_path = %self.layer_dir.display(), instance_layers = %layers, "Vulkan layer enabled");
     }
 
     /// Apply layer environment variables to the current process.
@@ -99,10 +95,7 @@ impl VulkanLayerConfig {
         };
         std::env::set_var("VK_INSTANCE_LAYERS", &layers);
 
-        eprintln!(
-            "[Rivulet] Vulkan layer enabled for current process: VK_LAYER_PATH={}",
-            self.layer_dir.display(),
-        );
+        tracing::info!(layer_path = %self.layer_dir.display(), "Vulkan layer enabled for current process");
     }
 }
 

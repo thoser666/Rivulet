@@ -317,7 +317,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
         if self.stop_signal.load(Ordering::SeqCst) {
-            println!("Stop signal received, ending recording.");
+            tracing::info!("Stop signal received; ending recording");
             capture_control.stop();
             return Ok(());
         }
@@ -341,7 +341,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         };
 
         if self.frame_sender.send(raw_frame).is_err() {
-            println!("GUI channel closed, ending recording.");
+            tracing::info!("GUI channel closed; ending recording");
             capture_control.stop();
         }
 
@@ -349,7 +349,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
     }
 
     fn on_closed(&mut self) -> Result<(), Self::Error> {
-        println!("Recording session was ended by the system.");
+        tracing::warn!("Recording session was ended by the system");
         self.stop_signal.store(true, Ordering::SeqCst);
         Ok(())
     }
@@ -976,7 +976,7 @@ impl RivuletApp {
             .save_file();
 
         let Some(path) = file_path else {
-            println!("File selection cancelled.");
+            tracing::debug!("File selection cancelled");
             return;
         };
 
@@ -1025,17 +1025,17 @@ impl RivuletApp {
                     ColorFormat::Rgba8,
                     flags,
                 );
-                println!("Starting capture thread (Monitor)...");
+                tracing::info!("Starting capture thread (monitor)");
                 if let Err(e) = CaptureHandler::start(settings) {
                     if !e.to_string().contains("user stopped")
                         && !e.to_string().contains("GUI channel closed")
                     {
                         let message = format!("Capture error: {}", e);
-                        eprintln!("{}", message);
+                        tracing::error!("{message}");
                         let _ = error_sender.send(message);
                     }
                 }
-                println!("Capture thread stopped.");
+                tracing::info!("Capture thread stopped");
             });
         } else if let Some(idx) = self.selected_window_idx {
             let Some(window) = self.windows.get(idx).cloned() else {
@@ -1076,17 +1076,17 @@ impl RivuletApp {
                     ColorFormat::Rgba8,
                     flags,
                 );
-                println!("Starting capture thread (Window)...");
+                tracing::info!("Starting capture thread (window)");
                 if let Err(e) = CaptureHandler::start(settings) {
                     if !e.to_string().contains("user stopped")
                         && !e.to_string().contains("GUI channel closed")
                     {
                         let message = format!("Capture error: {}", e);
-                        eprintln!("{}", message);
+                        tracing::error!("{message}");
                         let _ = error_sender.send(message);
                     }
                 }
-                println!("Capture thread stopped.");
+                tracing::info!("Capture thread stopped");
             });
         } else if self.use_game_capture {
             // Game capture mode (G3): prefer the zero-overhead Vulkan layer;
@@ -1122,7 +1122,7 @@ impl RivuletApp {
                 self.capture_backend = Some(vulkan_layer_backend_status(true));
                 self.game_capture_rx = Some(rx);
                 self.game_capture_handle = Some(handle);
-                println!("Vulkan layer capture started (preferred fullscreen backend).");
+                tracing::info!("Vulkan layer capture started (preferred fullscreen backend)");
             } else {
                 // Fallback: capture the game window with Windows Graphics
                 // Capture. WGC raw frames are forwarded into `game_capture_rx`
@@ -1164,17 +1164,17 @@ impl RivuletApp {
                         ColorFormat::Rgba8,
                         (raw_tx, stop_signal),
                     );
-                    println!("Starting game capture thread (WGC fallback)...");
+                    tracing::info!("Starting game capture thread (WGC fallback)");
                     if let Err(e) = CaptureHandler::start(settings) {
                         if !e.to_string().contains("user stopped")
                             && !e.to_string().contains("GUI channel closed")
                         {
                             let message = format!("Game capture error: {}", e);
-                            eprintln!("{}", message);
+                            tracing::error!("{message}");
                             let _ = error_sender.send(message);
                         }
                     }
-                    println!("Game capture thread stopped.");
+                    tracing::info!("Game capture thread stopped");
                 });
             }
         } else if let Some(idx) = self.selected_camera_idx {
@@ -1205,7 +1205,7 @@ impl RivuletApp {
 
     #[cfg(target_os = "windows")]
     fn stop_windows_recording(&mut self) {
-        println!("Sending stop signal.");
+        tracing::info!("Sending stop signal");
         if let Some(signal) = &self.stop_signal {
             signal.store(true, Ordering::SeqCst);
         }
@@ -1241,7 +1241,7 @@ fn probe_dxgi_backend() -> Option<BackendStatus> {
             Some(status)
         }
         Err(e) => {
-            eprintln!("DXGI Desktop Duplication unavailable: {e}");
+            tracing::warn!(error = %e, "DXGI Desktop Duplication unavailable");
             let mut status = BackendStatus::idle();
             status.switch_to(BackendKind::WindowsGraphicsCapture);
             status.fail(format!("DXGI unavailable ({e})"));
@@ -1430,7 +1430,7 @@ impl RivuletApp {
         let rt = match Runtime::new() {
             Ok(rt) => rt,
             Err(e) => {
-                eprintln!("PipeWire: failed to create tokio runtime: {e}");
+                tracing::error!(error = %e, "PipeWire failed to create Tokio runtime");
                 return false;
             }
         };
@@ -1443,7 +1443,7 @@ impl RivuletApp {
         let (fd, info) = match portal_result {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("PipeWire portal unavailable: {e}");
+                tracing::warn!(error = %e, "PipeWire portal unavailable");
                 return false;
             }
         };
@@ -1459,7 +1459,7 @@ impl RivuletApp {
             ))
             .save_file()
         else {
-            println!("File selection cancelled.");
+            tracing::debug!("File selection cancelled");
             return false;
         };
 
@@ -1514,9 +1514,9 @@ impl RivuletApp {
         self.record_started = Instant::now();
         self.last_frame_at = None;
         self.record_status = None;
-        println!(
-            "Linux recording started via PipeWire portal: node={}",
-            info.node_id
+        tracing::info!(
+            node_id = info.node_id,
+            "Linux recording started via PipeWire portal"
         );
         true
     }
@@ -1595,7 +1595,7 @@ impl RivuletApp {
             ))
             .save_file()
         else {
-            println!("File selection cancelled.");
+            tracing::debug!("File selection cancelled");
             return;
         };
 
@@ -1660,7 +1660,7 @@ impl RivuletApp {
                     Err(e) => {
                         // The window was minimized/closed or is no longer
                         // drawable -> end recording gracefully instead of crashing.
-                        eprintln!("Capture error: {e}");
+                        tracing::error!(error = %e, "Capture error");
                         break;
                     }
                 }
@@ -1676,7 +1676,7 @@ impl RivuletApp {
         self.record_started = Instant::now();
         self.last_frame_at = None;
         self.record_status = None;
-        println!("Linux recording started: {source_desc}");
+        tracing::info!(source = %source_desc, "Linux recording started");
     }
 
     #[cfg(target_os = "linux")]
@@ -2524,11 +2524,7 @@ impl RivuletApp {
                 Ok(_) => {
                     // Clean up the downloaded installer — no longer needed.
                     if let Err(e) = std::fs::remove_file(&path) {
-                        eprintln!(
-                            "[Updater] Failed to remove installer {}: {}",
-                            path.display(),
-                            e
-                        );
+                        tracing::warn!(path = %path.display(), error = %e, "Failed to remove downloaded installer");
                     }
                     UpdateUi::Installed(version)
                 }
@@ -2934,7 +2930,7 @@ impl eframe::App for RivuletApp {
                         self.last_frame_at = Some(Instant::now());
                     });
                     if ended {
-                        println!("Recording ended unexpectedly.");
+                        tracing::warn!("Recording ended unexpectedly");
                         self.stop_windows_recording();
                     }
                 }
@@ -2958,9 +2954,9 @@ impl eframe::App for RivuletApp {
                 {
                     let secs = self.no_frame_timeout.as_secs();
                     self.last_error = Some(self.tr_fmt("recording_no_frames", &[secs.to_string()]));
-                    println!(
-                        "No frames received within {} seconds, stopping recording.",
-                        secs
+                    tracing::error!(
+                        timeout_seconds = secs,
+                        "No frames received; stopping recording"
                     );
                     self.stop_windows_recording();
                 }
@@ -3448,9 +3444,9 @@ impl eframe::App for RivuletApp {
                     )
                 {
                     let secs = self.no_frame_timeout.as_secs();
-                    println!(
-                        "No frames received within {} seconds, stopping recording.",
-                        secs
+                    tracing::error!(
+                        timeout_seconds = secs,
+                        "No frames received; stopping recording"
                     );
                     // stop_linux_recording sets record_status to
                     // "recording_saved"; override it with the abort reason.
