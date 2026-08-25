@@ -561,6 +561,32 @@ newer majors (`--fail-on-major` makes those fatal). `--json` gives a
 machine-readable result and `--comment` a compact Markdown notification,
 published to the nightly run's step summary.
 
+### GitHub Security
+
+The repository security baseline is enabled and enforced in two layers:
+
+- **Secret Scanning + Push Protection:** enabled in the GitHub repository settings.
+  Pushes containing detected credentials are blocked before they reach the
+  repository. Signing secrets and stream keys must still remain in GitHub
+  Actions Secrets and must never be printed to logs.
+- **CodeQL:** `.github/workflows/security.yml` scans Rust on pushes to `develop`,
+  pull requests, and the weekly scheduled run. Results are uploaded to GitHub
+  Code Scanning.
+- **Dependency Review:** the same workflow reviews pull-request dependency
+  changes and fails on high-severity advisories; it posts a summary to the PR.
+
+The workflow actions are pinned to commit SHAs and covered by
+`rivulet-core/tests/ci_pinning.rs`. Verify the repository-level settings with:
+
+```bash
+gh api repos/thoser666/rivulet --jq '.security_and_analysis'
+```
+
+The expected state is `secret_scanning.status=enabled` and
+`secret_scanning_push_protection.status=enabled`. These settings are managed by
+GitHub and cannot be represented fully in a repository file. See
+[`docs/security.md`](docs/security.md) for incident handling and plan limitations.
+
 Beta-readiness is evaluated on every push by `scripts/check-beta-gate.py`
 (CI job `Beta-Gate readiness`): it parses the roadmap checkboxes for M1/M3
 and the 3-OS CI build matrix, and checks the signing secrets, the latest CI

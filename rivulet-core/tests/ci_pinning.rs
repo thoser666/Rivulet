@@ -20,6 +20,7 @@ const WORKFLOWS: &[&str] = &[
     "signing-e2e.yml",
     "build-package.yml",
     "dependabot-auto-merge.yml",
+    "security.yml",
 ];
 
 /// The reviewed pins. `(action@sha, human-readable version)` — the version
@@ -50,6 +51,22 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
     (
         "softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228",
         "v3.0.2",
+    ),
+    (
+        "github/codeql-action/init@42947a340483f03ba47bb1a039b2c519aab3df85",
+        "v3.37.8",
+    ),
+    (
+        "github/codeql-action/autobuild@42947a340483f03ba47bb1a039b2c519aab3df85",
+        "v3.37.8",
+    ),
+    (
+        "github/codeql-action/analyze@42947a340483f03ba47bb1a039b2c519aab3df85",
+        "v3.37.8",
+    ),
+    (
+        "actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48",
+        "v4.9.0",
     ),
 ];
 
@@ -286,6 +303,35 @@ fn dependabot_auto_merge_workflow_is_wired_up() {
     assert!(
         wf.contains("secrets.GITHUB_TOKEN"),
         "auto-merge must authenticate with the workflow token"
+    );
+}
+
+#[test]
+fn security_workflow_enables_codeql_and_dependency_review() {
+    let workflow = read(".github/workflows/security.yml");
+    assert!(
+        workflow.contains("github/codeql-action/init@")
+            && workflow.contains("github/codeql-action/autobuild@")
+            && workflow.contains("github/codeql-action/analyze@"),
+        "security.yml must initialize, build, and analyze with CodeQL"
+    );
+    assert!(
+        workflow.contains("actions/dependency-review-action@")
+            && workflow.contains("fail-on-severity: high"),
+        "security.yml must run Dependency Review with a severity threshold"
+    );
+    assert!(
+        workflow.contains("security-events: write"),
+        "CodeQL must be allowed to upload SARIF security events"
+    );
+    assert!(
+        workflow.contains("pull-requests: write")
+            && workflow.contains("comment-summary-in-pr: always"),
+        "Dependency Review must be able to publish its PR summary"
+    );
+    assert!(
+        workflow.contains("pull_request:") && workflow.contains("branches: [develop]"),
+        "security checks must run for pull requests and develop pushes"
     );
 }
 

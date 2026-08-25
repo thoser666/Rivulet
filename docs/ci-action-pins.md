@@ -19,10 +19,14 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | Action | Version | Pinned SHA | Used in |
 | --- | --- | --- | --- |
 | `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | build-package.yml, ci.yml, nightly.yml |
-| `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | build-package.yml, ci.yml, nightly.yml, release.yml, signing-e2e.yml |
+| `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | build-package.yml, ci.yml, nightly.yml, release.yml, security.yml, signing-e2e.yml |
+| `actions/dependency-review-action` | `v4.9.0` | `2031cfc080254a8a887f58cffee85186f0e49e48` | security.yml |
 | `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | ci.yml, release.yml |
 | `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | build-package.yml |
-| `dtolnay/rust-toolchain` | `stable` | `4360b52568e2003a75bf9bc1d59f33a8e3fc893c` | build-package.yml, ci.yml, nightly.yml |
+| `dtolnay/rust-toolchain` | `stable` | `4360b52568e2003a75bf9bc1d59f33a8e3fc893c` | build-package.yml, ci.yml, nightly.yml, security.yml |
+| `github/codeql-action/analyze` | `v3.37.8` | `42947a340483f03ba47bb1a039b2c519aab3df85` | security.yml |
+| `github/codeql-action/autobuild` | `v3.37.8` | `42947a340483f03ba47bb1a039b2c519aab3df85` | security.yml |
+| `github/codeql-action/init` | `v3.37.8` | `42947a340483f03ba47bb1a039b2c519aab3df85` | security.yml |
 | `softprops/action-gh-release` | `v3.0.2` | `3d0d9888cb7fd7b750713d6e236d1fcb99157228` | ci.yml, release.yml |
 <!-- action-pins-table:end -->
 
