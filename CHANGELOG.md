@@ -1,5 +1,8 @@
 # Changelog
 
+## [0.59.0-alpha.1] - 2026-08-25
+- feat(scenes): add cut and fade transitions
+
 ## [0.58.0-alpha.1] - 2026-08-25
 - feat(composition): add per-scene source editor
 
