@@ -236,7 +236,7 @@ studio mode, and multi-view/projectors.
 - [ ] **Scene hotkeys & auto-switching** — a hotkey for every scene, plus window-focus-driven auto scene switching (OBS auto-scene-switcher workflow)
 - [x] Sources — window capture (monitor + individual windows, Linux & Windows)
 - [x] **Source composition** (layers, position, scaling, cropping — each scene stores its own layout per source; switching scenes auto-moves sources to their saved positions) — the Scenes view now provides a source/layer editor for per-scene transform, crop, visibility, lock, z-order, and duplication; native media rendering and transform copy/paste remain follow-up work
-- [x] **Transitions** — Cut and configurable Fade transitions are selectable in the Scenes view; stinger transitions remain open
+- [x] **Transitions** — Cut and configurable Fade transitions are selectable in the Scenes view, with a non-blocking progress indicator; stinger transitions remain open
 - [ ] Overlays (picture-in-picture, banners)
 - [ ] Chroma key / green screen
 - [ ] Studio mode (preview/program)

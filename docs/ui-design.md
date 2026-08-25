@@ -93,7 +93,7 @@ The top bar and navigation use the shared translucent `theme::glass_frame()`.
   this palette or `StatusColors`; image white is only valid as a texture tint.
 - **Scene management**: keep the active collection and profile visible near scene controls. Duplication must create a fresh identity and must not implicitly bind the copy to existing scenes; provide explicit feedback for the resulting action. Collections/profiles currently provide named context; persistence/import/export and applying profile-specific settings are follow-up work.
 - **Composition**: scene bindings own their transform, crop, visibility, lock, and z-order. Composition edits must target the binding—not the source default—so the same source can be laid out differently per scene. The Scenes view exposes these properties in a layer/source editor; native media rendering, transform copy/paste, and binding-level undo history remain follow-up work.
-- **Transitions**: expose Cut and Fade beside scene controls. Fade duration is bounded and shown in milliseconds; scene switches start a transition without blocking the egui frame loop. Stinger transitions are a later extension.
+- **Transitions**: expose Cut and Fade beside scene controls. Fade duration is bounded and shown in milliseconds; scene switches start a transition without blocking the egui frame loop. Use `request_repaint_after` for progress updates rather than a busy loop. Stinger transitions are a later extension.
 - **Scene history**: expose undo/redo actions near scene management controls,
   disable them when unavailable, and keep `Ctrl+Z` / `Ctrl+Y` reserved for scene
   history unless a text field currently owns keyboard input.

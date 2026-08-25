@@ -1820,6 +1820,16 @@ impl RivuletApp {
     /// and add/rename/remove scenes. Pure state logic is testable via the
     /// `SceneManager` in rivulet-core; this method only renders and calls it.
     fn draw_scenes_view(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
+        if self.scene_transition.is_active() {
+            let progress = self.scene_transition.progress_at(Instant::now());
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(16));
+            if progress < 1.0 {
+                ui.add(egui::ProgressBar::new(progress).text(self.tr("transition_in_progress")));
+            } else {
+                self.scene_transition.clear();
+            }
+        }
         let active = self.scenes.active();
         let active_name = self
             .scenes

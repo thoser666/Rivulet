@@ -70,6 +70,10 @@ impl SceneTransition {
         self.progress_at(now) >= 1.0
     }
 
+    pub fn is_active(&self) -> bool {
+        self.started_at.is_some()
+    }
+
     pub fn clear(&mut self) {
         self.from = None;
         self.to = None;
