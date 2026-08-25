@@ -362,6 +362,15 @@ impl Locale {
                 ("transition", "Transition"),
                 ("transition_duration", "Duration"),
                 ("transition_in_progress", "Transitioning…"),
+                ("studio_mode", "Studio Mode"),
+                ("studio_mode_enabled", "Studio Mode enabled."),
+                ("studio_mode_disabled", "Studio Mode disabled."),
+                ("studio_program_label", "Program: {0}"),
+                ("studio_preview_label", "Preview: {0}"),
+                ("studio_take", "Take"),
+                ("studio_take_hint", "Take the selected Preview scene live with the configured transition."),
+                ("studio_preview_selected", "Preview selected: \"{0}\"."),
+                ("studio_taken", "Preview taken live: \"{0}\"."),
                 ("composition", "Source composition"),
                 ("composition_no_scene", "Select or create a scene first."),
                 ("composition_add_source", "Add source"),
@@ -639,6 +648,15 @@ impl Locale {
                 ("transition", "Übergang"),
                 ("transition_duration", "Dauer"),
                 ("transition_in_progress", "Übergang läuft…"),
+                ("studio_mode", "Studio-Modus"),
+                ("studio_mode_enabled", "Studio-Modus aktiviert."),
+                ("studio_mode_disabled", "Studio-Modus deaktiviert."),
+                ("studio_program_label", "Programm: {0}"),
+                ("studio_preview_label", "Vorschau: {0}"),
+                ("studio_take", "Übernehmen"),
+                ("studio_take_hint", "Die ausgewählte Vorschau mit dem konfigurierten Übergang live schalten."),
+                ("studio_preview_selected", "Vorschau ausgewählt: \"{0}\"."),
+                ("studio_taken", "Vorschau live geschaltet: \"{0}\"."),
                 ("composition", "Quellenkomposition"),
                 ("composition_no_scene", "Bitte zuerst eine Szene auswählen oder erstellen."),
                 ("composition_add_source", "Quelle hinzufügen"),
@@ -1035,6 +1053,16 @@ mod tests {
         assert_eq!(Locale::De.tr("scenes_active"), "Aktiv");
         assert_eq!(Locale::En.tr("scenes_switch_back"), "Switch back");
         assert_eq!(Locale::De.tr("scenes_switch_back"), "Zurückwechseln");
+        assert_eq!(Locale::En.tr("studio_mode"), "Studio Mode");
+        assert_eq!(Locale::De.tr("studio_mode"), "Studio-Modus");
+        assert_eq!(
+            Locale::En.tr_fmt("studio_taken", &["Live".to_string()]),
+            "Preview taken live: \"Live\"."
+        );
+        assert_eq!(
+            Locale::De.tr_fmt("studio_taken", &["Live".to_string()]),
+            "Vorschau live geschaltet: \"Live\"."
+        );
         let en = Locale::En.tr_fmt("scenes_switched", &["Game".to_string()]);
         assert_eq!(en, "Switched to \"Game\".");
         let de = Locale::De.tr_fmt("scenes_switched", &["Game".to_string()]);

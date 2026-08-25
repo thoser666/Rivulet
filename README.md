@@ -105,7 +105,9 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 > **#1 Priority**: Game capture (D3D/Vulkan/OpenGL hook, zero-overhead) — without this, Rivulet cannot replace OBS for gaming. Current: Window capture via WGC (Windows) / xcap (Linux) for gaming window selection. Roadmap: D3D11/D3D12 interposition (M3), Vulkan interposition (M3), OpenGL hook (M3) as architecture steps after M2.
 
 > **UI development:** new features should follow the navigation structure and
-> egui conventions in [`docs/ui-design.md`](docs/ui-design.md).
+> egui conventions in [`docs/ui-design.md`](docs/ui-design.md). Every milestone
+> also uses the reusable [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md)
+> for UI, usability, accessibility, reliability, and platform review.
 
 ### Milestone overview
 
@@ -113,7 +115,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 | --- | --- | --- | --- | --- |
 | M0 – Recording Foundation | Capture, Encoding, Audio, GUI | ✅ Done | — | [![M0](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F3&query=open_issues&label=M0&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/3) |
 | M1 – Solid Recording | Audio tracks, Hardware encoding, QoL, Overlay | ✅ Done (milestone closed) | — | [![M1](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F4&query=open_issues&label=M1&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/4) |
-| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 In progress (G1–G6 + S1–S4 + S6–S8 done; S5b browser source implementation in progress) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
+| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 In progress (Studio Mode done; UI/UX gate pending) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
 | M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | 🚧 In progress | — | [![M3](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F5&query=open_issues&label=M3&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/5) |
 | M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 🚧 Replay Buffer done | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 🚧 In progress (installers, signing, i18n done) | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
@@ -196,7 +198,7 @@ release channel only describes *how* the tag is built and published.
 The core concept of OBS: scenes, sources, and transitions. Core scene
 organisation, collections/profiles, duplication, and source transforms are now
 implemented. Remaining M2 work is focused on composition UX, transitions,
-studio mode, and multi-view/projectors.
+and multi-view/projectors. Studio Mode is now implemented with separate Preview/Program roles and a transition-aware Take action.
 
 **Priority for gaming streamers:**
 
@@ -239,11 +241,13 @@ studio mode, and multi-view/projectors.
 - [x] **Transitions** — Cut and configurable Fade transitions are selectable in the Scenes view, with a non-blocking progress indicator; stinger transitions remain open
 - [ ] Overlays (picture-in-picture, banners)
 - [ ] Chroma key / green screen
-- [ ] Studio mode (preview/program)
+- [x] **Studio mode (preview/program)** — separate Preview and Program scene roles with a Take action using Cut/Fade transitions; composition edits target Preview while Program remains live
 - [ ] **Multi-view & projectors** — scene grid (9-view) and fullscreen preview on a second display (projector)
 - [ ] **Scene snapshot** — one-click screenshot of the current scene/preview (PNG)
 
 **Goal:** The composable workspace OBS users expect.
+
+**M2 completion gate:** Before M2 is marked done, run the cross-platform UI/UX review in [`docs/m2-ui-ux-review.md`](docs/m2-ui-ux-review.md), following the common and M2-specific criteria in [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md). The gate covers core workflows, source-selection clarity, scene composition, transitions, accessibility, responsive layouts, diagnostics, and platform-specific behavior. Record the result in `docs/m2-ui-ux-review-report.md`; no Blocker/Critical findings may remain and every High finding must be fixed or explicitly assigned to a follow-up milestone.
 
 ---
 
@@ -399,9 +403,9 @@ studio mode, and multi-view/projectors.
 | Image & text sources | Done (S2 + S3 + S4 done) |
 | Browser sources | S5b contract/configuration done; native WebView adapter follow-up |
 | Audio sources (microphone, per-app, devices) | Done (S8 done) |
-| Scenes & transitions | In progress (scene management, collections/profiles, duplicate scene; transitions/studio open, M2) |
+| Scenes & transitions | In progress (scene management, collections/profiles, duplicate scene, Cut/Fade transitions, Studio Mode; stinger/multi-view open, M2) |
 | Scene collections & profiles | Partial (named collection/profile context; import/export and per-profile settings open, M2) |
-| Studio mode & multi-view | Open (M2) |
+| Studio mode & multi-view | Partial (Studio Mode done; multi-view/projectors open, M2) |
 | Source transforms & composition | ✅ Done (M2 S1) |
 | Hotkeys (incl. remapping, global) | Partial (record/pause/mute/save-replay; remapping planned M5) |
 | Undo/Redo | Done (M2) |

@@ -53,6 +53,9 @@ pub use scene::{Scene, SceneManager};
 pub mod transition;
 pub use transition::{SceneTransition, TransitionKind};
 
+pub mod studio;
+pub use studio::StudioMode;
+
 pub mod source;
 pub use source::{Crop, SceneSource, Source, SourceKind, SourceManager, Transform};
 

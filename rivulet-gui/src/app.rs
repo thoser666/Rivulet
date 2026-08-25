@@ -588,6 +588,8 @@ pub struct RivuletApp {
     #[serde(skip)]
     scene_transition: rivulet_core::SceneTransition,
     #[serde(skip)]
+    studio_mode: rivulet_core::StudioMode,
+    #[serde(skip)]
     scene_collection_input: String,
     #[serde(skip)]
     scene_profile_input: String,
@@ -800,6 +802,7 @@ impl Default for RivuletApp {
             transition_kind: rivulet_core::TransitionKind::Cut,
             transition_duration_ms: 300,
             scene_transition: rivulet_core::SceneTransition::default(),
+            studio_mode: rivulet_core::StudioMode::new(),
             scene_collection_input: String::new(),
             scene_profile_input: String::new(),
             source_manager: rivulet_core::SourceManager::new(),
@@ -1858,17 +1861,87 @@ impl RivuletApp {
                 self.scene_transition.clear();
             }
         }
-        let active = self.scenes.active();
-        let active_name = self
-            .scenes
-            .active_scene()
+        let active = if self.studio_mode.enabled() {
+            self.studio_mode.preview()
+        } else {
+            self.scenes.active()
+        };
+        let active_name = active
+            .and_then(|id| self.scenes.get(id))
             .map(|s| s.name.clone())
             .unwrap_or_else(|| self.tr("scenes_no_scenes").to_string());
         ui.label(
-            egui::RichText::new(self.tr_fmt("scenes_active_label", &[active_name]))
-                .strong()
-                .color(colors.success),
+            egui::RichText::new(self.tr_fmt(
+                if self.studio_mode.enabled() {
+                    "studio_preview_label"
+                } else {
+                    "scenes_active_label"
+                },
+                &[active_name],
+            ))
+            .strong()
+            .color(colors.success),
         );
+
+        let mut studio_enabled = self.studio_mode.enabled();
+        if ui
+            .checkbox(&mut studio_enabled, self.tr("studio_mode"))
+            .changed()
+        {
+            self.studio_mode
+                .set_enabled(studio_enabled, self.scenes.active());
+            self.scene_status = Some(
+                self.tr(if studio_enabled {
+                    "studio_mode_enabled"
+                } else {
+                    "studio_mode_disabled"
+                })
+                .to_string(),
+            );
+        }
+        if self.studio_mode.enabled() {
+            let program_name = self
+                .studio_mode
+                .program()
+                .and_then(|id| self.scenes.get(id))
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| "—".to_string());
+            let preview_name = self
+                .studio_mode
+                .preview()
+                .and_then(|id| self.scenes.get(id))
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| "—".to_string());
+            ui.horizontal(|ui| {
+                ui.label(self.tr_fmt("studio_program_label", std::slice::from_ref(&program_name)));
+                ui.label(self.tr_fmt("studio_preview_label", std::slice::from_ref(&preview_name)));
+                let take = theme::accent_button(ui, self.tr("studio_take"))
+                    .on_hover_text(self.tr("studio_take_hint"));
+                if take.clicked() {
+                    let now = Instant::now();
+                    if let Some(transition) = self.studio_mode.take(
+                        self.transition_kind,
+                        std::time::Duration::from_millis(self.transition_duration_ms),
+                        now,
+                    ) {
+                        if let Some(target) = self.studio_mode.program() {
+                            let from = self.scenes.active();
+                            if self.scenes.switch_to(target) {
+                                self.scene_transition = transition;
+                                self.scene_status =
+                                    Some(self.tr_fmt(
+                                        "studio_taken",
+                                        std::slice::from_ref(&preview_name),
+                                    ));
+                                if from == Some(target) {
+                                    self.scene_transition.clear();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
         let name_hint = self.tr("scenes_name_placeholder");
         let add_label = self.tr("scenes_add").to_owned();
@@ -1884,7 +1957,7 @@ impl RivuletApp {
             }
             let switch_back_response = ui
                 .add_enabled(
-                    active.is_some(),
+                    active.is_some() && !self.studio_mode.enabled(),
                     egui::Button::new(self.tr("scenes_switch_back")),
                 )
                 .on_hover_text(self.tr("scenes_switch_back"));
@@ -2031,6 +2104,7 @@ impl RivuletApp {
                     .map(|s| s.name.clone())
                     .unwrap_or_default();
                 if self.scenes.remove(id) {
+                    self.studio_mode.remove_scene(id);
                     self.scene_status = Some(self.tr_fmt("scenes_removed", &[name]));
                 }
             }
@@ -2040,7 +2114,10 @@ impl RivuletApp {
                     .get(id)
                     .map(|s| s.name.clone())
                     .unwrap_or_default();
-                if self.scenes.switch_to(id) {
+                if self.studio_mode.enabled() {
+                    self.studio_mode.set_preview(Some(id));
+                    self.scene_status = Some(self.tr_fmt("studio_preview_selected", &[name]));
+                } else if self.scenes.switch_to(id) {
                     let now = Instant::now();
                     self.scene_transition = rivulet_core::SceneTransition::new(
                         self.transition_kind,
@@ -2062,7 +2139,12 @@ impl RivuletApp {
     fn draw_source_composition(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
         ui.separator();
         ui.label(egui::RichText::new(self.tr("composition")).strong());
-        let Some(scene_id) = self.scenes.active() else {
+        let scene_id = if self.studio_mode.enabled() {
+            self.studio_mode.preview()
+        } else {
+            self.scenes.active()
+        };
+        let Some(scene_id) = scene_id else {
             ui.colored_label(colors.hint, self.tr("composition_no_scene"));
             return;
         };

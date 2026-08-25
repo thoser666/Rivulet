@@ -3,7 +3,10 @@
 This document describes the GUI's structure and the egui conventions new
 features must follow. It is the single reference for *where* UI code lives and
 *how* it is written, so the growing feature set (M1 recording, M2 scenes,
-M3 streaming, M9 assistant) stays consistent and navigable.
+M3 streaming, M9 assistant) stays consistent and navigable. The M2 completion
+gate is the cross-platform workflow and usability review in
+[`m2-ui-ux-review.md`](m2-ui-ux-review.md); new UI work must remain testable
+against that checklist.
 
 The GUI is a single egui/eframe application in `rivulet-gui/`:
 
@@ -93,7 +96,16 @@ The top bar and navigation use the shared translucent `theme::glass_frame()`.
   this palette or `StatusColors`; image white is only valid as a texture tint.
 - **Scene management**: keep the active collection and profile visible near scene controls. Duplication must create a fresh identity and must not implicitly bind the copy to existing scenes; provide explicit feedback for the resulting action. Collections/profiles currently provide named context; persistence/import/export and applying profile-specific settings are follow-up work.
 - **Composition**: scene bindings own their transform, crop, visibility, lock, and z-order. Composition edits must target the binding—not the source default—so the same source can be laid out differently per scene. The Scenes view exposes these properties in a layer/source editor; native media rendering, transform copy/paste, and binding-level undo history remain follow-up work.
-- **Transitions**: expose Cut and Fade beside scene controls. Fade duration is bounded and shown in milliseconds; scene switches start a transition without blocking the egui frame loop. Use `request_repaint_after` for progress updates rather than a busy loop. Stinger transitions are a later extension.
+- **Transitions**: expose Cut and Fade beside scene controls. Fade duration is bounded and shown in
+  milliseconds; scene switches start a transition without blocking the egui frame loop. Use
+  `request_repaint_after` for progress updates rather than a busy loop. Stinger transitions are a later extension.
+- **Studio Mode**: keep Preview and Program roles explicit. Selecting a scene changes Preview only;
+  `Take` promotes it to Program through the configured Cut/Fade transition. Composition editing in
+  Studio Mode targets Preview, while the live Program scene remains unchanged until Take.
+- **M2 reviewability**: every new scene/source workflow must have a visible active state,
+  immediate success/error feedback, keyboard/focus behavior, and a documented failure path.
+  Validate it across the profiles and workflows in [`m2-ui-ux-review.md`](m2-ui-ux-review.md)
+  before marking the related roadmap item complete.
 - **Scene history**: expose undo/redo actions near scene management controls,
   disable them when unavailable, and keep `Ctrl+Z` / `Ctrl+Y` reserved for scene
   history unless a text field currently owns keyboard input.
