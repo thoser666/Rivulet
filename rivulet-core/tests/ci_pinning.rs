@@ -316,6 +316,25 @@ fn dependabot_auto_merge_workflow_is_wired_up() {
 }
 
 #[test]
+fn develop_required_checks_have_stable_job_names() {
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("name: Pinning-Tests")
+            && ci.contains("cargo test -p rivulet-core --test ci_pinning")
+            && ci.contains("name: CI")
+            && ci.contains("needs: [lints, beta_gate, build_and_test, pinning_tests]"),
+        "CI must expose dedicated Pinning-Tests and aggregate CI checks"
+    );
+
+    let security = read(".github/workflows/security.yml");
+    assert!(
+        security.contains("name: CodeQL (${{ matrix.language }})")
+            && security.contains("name: Dependency Review"),
+        "security.yml must expose the CodeQL and Dependency Review check names"
+    );
+}
+
+#[test]
 fn security_workflow_enables_codeql_and_dependency_review() {
     let workflow = read(".github/workflows/security.yml");
     assert!(

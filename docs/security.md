@@ -61,10 +61,31 @@ modeling or maintainer review.
 
 ## Required Repository Settings
 
+The active `develop` branch ruleset requires pull requests and these exact status
+checks before merging:
+
+- `CI` — aggregate of the lint, beta-gate, three-platform build/test, and
+  pinning jobs.
+- `CodeQL (rust)` — the repository-owned Rust CodeQL analysis.
+- `Dependency Review` — pull-request dependency security review.
+- `Pinning-Tests` — dedicated SHA-pinning regression tests.
+
+Direct updates to `develop` are blocked. The only bypass actor is the GitHub
+Actions integration used by the release workflow, which must push the generated
+version commit and release tag. The ruleset also prevents deletion and
+non-fast-forward updates.
+
+Inspect the live ruleset with:
+
+```bash
+gh api repos/thoser666/rivulet/rulesets \
+  --jq '.[] | select(.name == "develop") | {id, name, enforcement, bypass_actors, conditions, rules}'
+```
+
 Configure these settings in **Settings -> Rules -> Rulesets** or the equivalent
 branch protection UI for `develop`:
 
-- Require the normal CI checks and the `Security` checks before merging.
+- Require the checks listed above before merging.
 - Require CodeQL alerts to be resolved when CodeQL is made a blocking check.
 - Keep pull-request approvals enabled for changes to workflows and packaging.
 - Keep Actions permissions restricted to the minimum required by each workflow.

@@ -590,6 +590,11 @@ The expected state is `secret_scanning.status=enabled` and
 GitHub and cannot be represented fully in a repository file. See
 [`docs/security.md`](docs/security.md) for incident handling and plan limitations.
 
+The `develop` branch ruleset requires `CI`, `CodeQL (rust)`, `Dependency Review`,
+and `Pinning-Tests` before merge and blocks direct updates. The release workflow's
+GitHub Actions integration is the only configured bypass for its generated version
+commit and tag push; see [`docs/security.md`](docs/security.md) for verification.
+
 Beta-readiness is evaluated on every push by `scripts/check-beta-gate.py`
 (CI job `Beta-Gate readiness`): it parses the roadmap checkboxes for M1/M3
 and the 3-OS CI build matrix, and checks the signing secrets, the latest CI
