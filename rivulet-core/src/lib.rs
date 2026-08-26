@@ -50,6 +50,9 @@ pub use region::CaptureRegion;
 pub mod scene;
 pub use scene::{Scene, SceneManager};
 
+pub mod scene_snapshot;
+pub use scene_snapshot::{SceneSnapshot, SnapshotLayer};
+
 pub mod transition;
 pub use transition::{SceneTransition, TransitionKind};
 

@@ -243,7 +243,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [ ] Chroma key / green screen
 - [x] **Studio mode (preview/program)** — separate Preview and Program scene roles with a Take action using Cut/Fade transitions; composition edits target Preview while Program remains live
 - [ ] **Multi-view & projectors** — scene grid (9-view) and fullscreen preview on a second display (projector)
-- [ ] **Scene snapshot** — one-click screenshot of the current scene/preview (PNG)
+- [x] **Scene snapshot** — one-click export of the active scene or Studio Mode Preview as a PNG layout snapshot. Visible layers, scene-local transforms, opacity, visibility, z-order, collection, and profile are captured deterministically; native source-pixel rendering remains a follow-up when platform source renderers are connected. *Done: `rivulet-core/src/scene_snapshot.rs` + localized Scenes-view export button; unit tests cover ordering, visibility, dimensions, and alpha blending.*
 
 **Goal:** The composable workspace OBS users expect.
 
@@ -655,6 +655,8 @@ cargo run -p rivulet-gui -- --no-frame-timeout 30
 ```
 
 ### Assets
+
+Scene snapshots are exported from the Scenes view with **Save scene snapshot**. The export is a deterministic 1920×1080 RGBA8 PNG of the current scene layout: visible source layers are ordered by z-order and rendered with their transform and opacity. Since native source-pixel rendering is platform-specific and not yet connected to the scene compositor, source kinds use stable layout colors; this keeps exports reproducible and makes the remaining renderer integration explicit.
 
 The README thumbnail (`docs/thumbnail.png`), the GitHub social preview
 (`docs/social-preview.png`), the OpenGraph fallback (`docs/opengraph.png`), the

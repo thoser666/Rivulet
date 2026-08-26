@@ -355,6 +355,11 @@ impl Locale {
                 ("scenes_removed", "Scene \"{0}\" removed."),
                 ("scenes_switched", "Switched to \"{0}\"."),
                 ("scenes_active_label", "Active scene: {0}"),
+                ("scenes_save_snapshot", "Save scene snapshot"),
+                ("scenes_save_snapshot_hint", "Export the active scene layout as a PNG image."),
+                ("scenes_snapshot_no_scene", "Select or create a scene before exporting a snapshot."),
+                ("scenes_snapshot_saved", "Scene snapshot saved to {0}."),
+                ("scenes_snapshot_failed", "Could not save scene snapshot: {0}"),
                 ("scenes_collection", "Collection"),
                 ("scenes_profile", "Profile"),
                 ("scenes_duplicate", "Duplicate"),
@@ -641,6 +646,11 @@ impl Locale {
                 ("scenes_removed", "Szene \"{0}\" entfernt."),
                 ("scenes_switched", "Gewechselt zu \"{0}\"."),
                 ("scenes_active_label", "Aktive Szene: {0}"),
+                ("scenes_save_snapshot", "Szenen-Snapshot speichern"),
+                ("scenes_save_snapshot_hint", "Das Layout der aktiven Szene als PNG-Bild exportieren."),
+                ("scenes_snapshot_no_scene", "Vor dem Export zuerst eine Szene auswählen oder erstellen."),
+                ("scenes_snapshot_saved", "Szenen-Snapshot gespeichert unter {0}."),
+                ("scenes_snapshot_failed", "Szenen-Snapshot konnte nicht gespeichert werden: {0}"),
                 ("scenes_collection", "Sammlung"),
                 ("scenes_profile", "Profil"),
                 ("scenes_duplicate", "Duplizieren"),
@@ -761,6 +771,23 @@ mod tests {
         assert_eq!(
             en_keys, de_keys,
             "every locale must define exactly the same keys in the same order"
+        );
+    }
+
+    #[test]
+    fn scene_snapshot_keys_translate_in_both_locales() {
+        assert_eq!(Locale::En.tr("scenes_save_snapshot"), "Save scene snapshot");
+        assert_eq!(
+            Locale::De.tr("scenes_save_snapshot"),
+            "Szenen-Snapshot speichern"
+        );
+        assert_eq!(
+            Locale::En.tr_fmt("scenes_snapshot_saved", &["scene.png".to_string()]),
+            "Scene snapshot saved to scene.png."
+        );
+        assert_eq!(
+            Locale::De.tr_fmt("scenes_snapshot_saved", &["scene.png".to_string()]),
+            "Szenen-Snapshot gespeichert unter scene.png."
         );
     }
 

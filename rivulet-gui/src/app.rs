@@ -2038,6 +2038,14 @@ impl RivuletApp {
             self.scenes.profile()
         ));
 
+        ui.horizontal(|ui| {
+            let snapshot_response = theme::accent_button(ui, self.tr("scenes_save_snapshot"))
+                .on_hover_text(self.tr("scenes_save_snapshot_hint"));
+            if snapshot_response.clicked() {
+                self.save_scene_snapshot();
+            }
+        });
+
         let ordered = self.scenes.ordered_scenes();
         if ordered.is_empty() {
             ui.label(self.tr("scenes_no_scenes"));
@@ -2131,6 +2139,57 @@ impl RivuletApp {
 
         if let Some(status) = &self.scene_status {
             ui.colored_label(colors.info, status);
+        }
+    }
+
+    /// Export the active scene (or Studio Mode Preview) as a deterministic PNG.
+    ///
+    /// The exported image represents the current scene layout. Native source
+    /// pixels are intentionally not synthesized here; platform source
+    /// renderers can replace the tile renderer without changing this workflow.
+    fn save_scene_snapshot(&mut self) {
+        let scene_id = if self.studio_mode.enabled() {
+            self.studio_mode.preview()
+        } else {
+            self.scenes.active()
+        };
+        let Some(scene_id) = scene_id else {
+            self.scene_status = Some(self.tr("scenes_snapshot_no_scene").to_owned());
+            return;
+        };
+        let Some(scene) = self.scenes.get(scene_id) else {
+            self.scene_status = Some(self.tr("scenes_snapshot_no_scene").to_owned());
+            return;
+        };
+        let scene_name = scene.name.clone();
+        let snapshot = rivulet_core::SceneSnapshot::from_scene(
+            scene,
+            &self.source_manager,
+            self.scenes.collection(),
+            self.scenes.profile(),
+        );
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("PNG image", &["png"])
+            .set_file_name(format!(
+                "rivulet-scene-{}.png",
+                sanitize_file_name(&scene_name)
+            ))
+            .save_file()
+        else {
+            return;
+        };
+        let image =
+            image::RgbaImage::from_raw(snapshot.width, snapshot.height, snapshot.render_rgba())
+                .expect("SceneSnapshot::render_rgba must match its dimensions");
+        match image.save_with_format(&path, image::ImageFormat::Png) {
+            Ok(()) => {
+                self.scene_status =
+                    Some(self.tr_fmt("scenes_snapshot_saved", &[path.display().to_string()]));
+            }
+            Err(error) => {
+                self.scene_status =
+                    Some(self.tr_fmt("scenes_snapshot_failed", &[error.to_string()]));
+            }
         }
     }
 
@@ -4424,6 +4483,26 @@ fn should_abort_for_stalled_frames(
     now.duration_since(last_activity) >= timeout
 }
 
+/// Keep a scene name safe for use as a suggested snapshot file name.
+fn sanitize_file_name(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | ' ') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let trimmed = sanitized.trim();
+    if trimmed.is_empty() {
+        "scene".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// Format a byte count for display (B, KB, MB, GB).
 fn format_bytes(bytes: u64) -> String {
     const KB: f64 = 1024.0;
@@ -5112,6 +5191,19 @@ mod tests {
             resolve_monitor_label(Some(0), Some("")),
             Some(String::new())
         );
+    }
+
+    // ── Scene snapshot file names ─────────────────────────────────
+
+    #[test]
+    fn snapshot_file_name_replaces_unsafe_characters() {
+        assert_eq!(sanitize_file_name("Live: 16/9?"), "Live_ 16_9_");
+    }
+
+    #[test]
+    fn snapshot_file_name_uses_scene_fallback_for_blank_names() {
+        assert_eq!(sanitize_file_name("   "), "scene");
+        assert_eq!(sanitize_file_name("***"), "___");
     }
 
     // ── Game-window live preview refresh ─────────────────────────

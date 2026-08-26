@@ -102,6 +102,7 @@ The top bar and navigation use the shared translucent `theme::glass_frame()`.
 - **Studio Mode**: keep Preview and Program roles explicit. Selecting a scene changes Preview only;
   `Take` promotes it to Program through the configured Cut/Fade transition. Composition editing in
   Studio Mode targets Preview, while the live Program scene remains unchanged until Take.
+- **Scene snapshots**: keep the export action beside scene context controls and clearly state what is exported. The current cross-platform snapshot is a deterministic 1920×1080 layout PNG with visible layers, scene-local transforms, opacity, visibility, and z-order. It uses stable source-kind tiles until native source renderers are connected; this limitation must remain visible in product documentation.
 - **M2 reviewability**: every new scene/source workflow must have a visible active state,
   immediate success/error feedback, keyboard/focus behavior, and a documented failure path.
   Validate it across the profiles and workflows in [`m2-ui-ux-review.md`](m2-ui-ux-review.md)
