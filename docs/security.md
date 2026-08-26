@@ -47,7 +47,11 @@ these settings.
 - **OpenSSF Scorecard** on pushes to `develop`, pull requests, weekly scheduled
   scans, and manual dispatch. The workflow publishes the result to the OpenSSF
   API, stores the SARIF artifact for 14 days, and uploads a separate
-  `openssf-scorecard` category to GitHub Code Scanning.
+  `openssf-scorecard` category to GitHub Code Scanning. Its required check is
+  named `OpenSSF Scorecard`.
+- **Security** is an aggregate required check. It requires CodeQL to succeed and
+  accepts the Dependency Review job as either successful or skipped when the
+  event is not a pull request.
 
 Every third-party action in the security workflows is pinned to a full commit
 SHA. The pins are listed in [`ci-action-pins.md`](ci-action-pins.md) and enforced
@@ -66,6 +70,8 @@ checks before merging:
 
 - `CI` — aggregate of the lint, beta-gate, three-platform build/test, and
   pinning jobs.
+- `Security` — aggregate of CodeQL and Dependency Review.
+- `OpenSSF Scorecard` — repository supply-chain analysis.
 - `CodeQL (rust)` — the repository-owned Rust CodeQL analysis.
 - `Dependency Review` — pull-request dependency security review.
 - `Pinning-Tests` — dedicated SHA-pinning regression tests.

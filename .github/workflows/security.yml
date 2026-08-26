@@ -69,3 +69,27 @@ jobs:
         with:
           fail-on-severity: high
           comment-summary-in-pr: always
+
+  security_gate:
+    name: Security
+    if: ${{ always() }}
+    needs: [codeql, dependency-review]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require security checks to pass
+        env:
+          CODEQL_RESULT: ${{ needs.codeql.result }}
+          DEPENDENCY_REVIEW_RESULT: ${{ needs.dependency-review.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$CODEQL_RESULT" != "success" ]]; then
+            echo "CodeQL finished with: $CODEQL_RESULT" >&2
+            exit 1
+          fi
+          if [[ "$DEPENDENCY_REVIEW_RESULT" != "success" && "$DEPENDENCY_REVIEW_RESULT" != "skipped" ]]; then
+            echo "Dependency Review finished with: $DEPENDENCY_REVIEW_RESULT" >&2
+            exit 1
+          fi

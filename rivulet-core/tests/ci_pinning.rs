@@ -329,8 +329,15 @@ fn develop_required_checks_have_stable_job_names() {
     let security = read(".github/workflows/security.yml");
     assert!(
         security.contains("name: CodeQL (${{ matrix.language }})")
-            && security.contains("name: Dependency Review"),
-        "security.yml must expose the CodeQL and Dependency Review check names"
+            && security.contains("name: Dependency Review")
+            && security.contains("name: Security")
+            && security.contains("needs: [codeql, dependency-review]"),
+        "security.yml must expose stable CodeQL, Dependency Review, and Security check names"
+    );
+    let scorecard = read(".github/workflows/scorecard.yml");
+    assert!(
+        scorecard.contains("name: OpenSSF Scorecard"),
+        "scorecard.yml must expose a stable OpenSSF Scorecard check name"
     );
 }
 
@@ -345,8 +352,11 @@ fn security_workflow_enables_codeql_and_dependency_review() {
     );
     assert!(
         workflow.contains("actions/dependency-review-action@")
-            && workflow.contains("fail-on-severity: high"),
-        "security.yml must run Dependency Review with a severity threshold"
+            && workflow.contains("fail-on-severity: high")
+            && workflow.contains("name: Security")
+            && workflow.contains("CODEQL_RESULT")
+            && workflow.contains("DEPENDENCY_REVIEW_RESULT"),
+        "security.yml must run Dependency Review and aggregate both security checks"
     );
     assert!(
         workflow.contains("security-events: write"),
@@ -367,7 +377,8 @@ fn security_workflow_enables_codeql_and_dependency_review() {
 fn scorecard_workflow_is_wired_for_sarif_and_provenance() {
     let workflow = read(".github/workflows/scorecard.yml");
     assert!(
-        workflow.contains("ossf/scorecard-action@")
+        workflow.contains("name: OpenSSF Scorecard")
+            && workflow.contains("ossf/scorecard-action@")
             && workflow.contains("results_format: sarif")
             && workflow.contains("publish_results: true"),
         "scorecard.yml must run OpenSSF Scorecard and publish SARIF results"
