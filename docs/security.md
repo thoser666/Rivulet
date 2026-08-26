@@ -70,10 +70,17 @@ checks before merging:
 - `Dependency Review` — pull-request dependency security review.
 - `Pinning-Tests` — dedicated SHA-pinning regression tests.
 
-Direct updates to `develop` are blocked. The only bypass actor is the GitHub
-Actions integration used by the release workflow, which must push the generated
-version commit and release tag. The ruleset also prevents deletion and
-non-fast-forward updates.
+Direct updates to `develop` are blocked for ordinary contributors. Because this
+is a personal repository, GitHub does not allow the `github-actions` integration
+to be registered as a ruleset bypass actor. The active fallback is the
+`RepositoryRole` administrator bypass, which is broader than a release-only
+exception and must therefore be used sparingly. The ruleset also prevents
+deletions and non-fast-forward updates.
+
+The release workflow still uses `GITHUB_TOKEN` to push generated version commits
+and tags. Verify each release run after a ruleset change; if GitHub rejects that
+push, move versioning/tagging to an administrator-approved pull request or use a
+separately scoped release credential rather than weakening the ruleset further.
 
 Inspect the live ruleset with:
 

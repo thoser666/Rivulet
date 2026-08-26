@@ -591,9 +591,10 @@ GitHub and cannot be represented fully in a repository file. See
 [`docs/security.md`](docs/security.md) for incident handling and plan limitations.
 
 The `develop` branch ruleset requires `CI`, `CodeQL (rust)`, `Dependency Review`,
-and `Pinning-Tests` before merge and blocks direct updates. The release workflow's
-GitHub Actions integration is the only configured bypass for its generated version
-commit and tag push; see [`docs/security.md`](docs/security.md) for verification.
+and `Pinning-Tests` before merge and blocks direct updates for ordinary
+contributors. GitHub does not allow an Actions-only bypass on this personal
+repository, so the active exception is the broader administrator bypass needed
+by the release automation; see [`docs/security.md`](docs/security.md) for details.
 
 Beta-readiness is evaluated on every push by `scripts/check-beta-gate.py`
 (CI job `Beta-Gate readiness`): it parses the roadmap checkboxes for M1/M3
