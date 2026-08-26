@@ -408,6 +408,15 @@ fn audit_lockfile_uses_fixed_quick_xml_releases() {
 }
 
 #[test]
+fn lockfile_does_not_reintroduce_yanked_core2() {
+    let lock = read("Cargo.lock");
+    assert!(
+        !lock.contains("name = \"core2\""),
+        "the yanked core2 crate must not return through optional image codecs"
+    );
+}
+
+#[test]
 fn cargo_dependency_security_gates_are_wired_up() {
     let deny = read("deny.toml");
     assert!(

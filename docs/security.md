@@ -80,8 +80,10 @@ cargo deny check --all-features
 ```
 
 The CI actions install and run these tools in isolated Ubuntu jobs. The lockfile
-is committed so CI and local audits resolve the same dependency versions. No
-security advisory is ignored in the repository at present.
+is committed so CI and local audits resolve the same dependency versions. The
+GUI and capture crates disable unused optional image codecs so the yanked
+`core2` crate is not pulled in through AVIF support. No security advisory is
+ignored in the repository at present.
 
 Scorecard requires `id-token: write` for signed, repository-bound publication.
 The workflow sets `persist-credentials: false` during checkout and does not

@@ -10,7 +10,6 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 xcap = { workspace = true }
-image = "0.25"
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }

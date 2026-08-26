@@ -43,7 +43,7 @@ dirs = "6.0"
 tempfile = "3.15"
 
 # Image processing library for the icon
-image = { version = "0.25.1", features = ["png"] }
+image = { version = "0.25.1", default-features = false, features = ["png", "ico"] }
 
 # Monitor/display capture on all platforms; used for monitor previews in the
 # region editor (on Linux also for capture itself)
