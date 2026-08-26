@@ -49,8 +49,9 @@ these settings.
   API, stores the SARIF artifact for 14 days, and uploads a separate
   `openssf-scorecard` category to GitHub Code Scanning. Its required check is
   named `OpenSSF Scorecard`.
-- **Cargo Audit** checks the lockfile against the RustSec Advisory Database and
-  fails on advisories or warnings.
+- **Cargo Audit** checks the committed lockfile against the RustSec Advisory
+  Database and fails on vulnerabilities; informational warnings remain visible
+  in the step summary.
 - **Cargo Deny** enforces the checked-in `deny.toml` policy for advisories, bans,
   licenses, and dependency sources.
 - **Security** is an aggregate required check. It requires CodeQL, Cargo Audit,
@@ -66,20 +67,21 @@ by `rivulet-core/tests/ci_pinning.rs`.
 `deny.toml` is the reviewed policy for dependency hygiene:
 
 - RustSec advisories and yanked releases fail the gate.
-- Unmaintained crates and duplicate versions are warnings until explicitly
-  triaged.
+- Unmaintained advisories are evaluated for workspace dependencies; duplicate
+  versions are warnings until explicitly triaged.
 - Only the crates.io registry is allowed; Git dependencies are not allowed.
 - Dependencies must use one of the explicitly allowed SPDX licenses.
 
 Run the same checks locally when the tools are installed:
 
 ```bash
-cargo audit --deny warnings
+cargo audit
 cargo deny check --all-features
 ```
 
-The CI actions install and run these tools in isolated Ubuntu jobs. No audit
-advisory is ignored in the repository at present.
+The CI actions install and run these tools in isolated Ubuntu jobs. The lockfile
+is committed so CI and local audits resolve the same dependency versions. No
+security advisory is ignored in the repository at present.
 
 Scorecard requires `id-token: write` for signed, repository-bound publication.
 The workflow sets `persist-credentials: false` during checkout and does not

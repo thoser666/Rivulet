@@ -378,11 +378,42 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
 }
 
 #[test]
+fn audit_lockfile_uses_fixed_quick_xml_releases() {
+    let lock = read("Cargo.lock").replace("\r\n", "\n");
+    let versions: Vec<&str> = lock
+        .split("[[package]]")
+        .filter(|package| package.contains("name = \"quick-xml\""))
+        .filter_map(|package| {
+            package
+                .lines()
+                .find(|line| line.starts_with("version = \""))
+                .and_then(|line| line.split('"').nth(1))
+        })
+        .collect();
+    assert!(
+        !versions.is_empty(),
+        "Cargo.lock must contain the quick-xml package"
+    );
+    for version in versions {
+        let minor = version
+            .split('.')
+            .nth(1)
+            .and_then(|minor| minor.parse::<u64>().ok())
+            .expect("quick-xml version must be valid semver");
+        assert!(
+            minor >= 41,
+            "quick-xml {version} is below the RustSec-fixed 0.41 release"
+        );
+    }
+}
+
+#[test]
 fn cargo_dependency_security_gates_are_wired_up() {
     let deny = read("deny.toml");
     assert!(
         deny.contains("[advisories]")
             && deny.contains("yanked = \"deny\"")
+            && deny.contains("unmaintained = \"workspace\"")
             && deny.contains("[licenses]")
             && deny.contains("[sources]")
             && deny.contains("unknown-registry = \"deny\"")
@@ -395,6 +426,7 @@ fn cargo_dependency_security_gates_are_wired_up() {
         workflow.contains("name: Cargo Audit")
             && workflow.contains("name: Cargo Deny")
             && workflow.contains("actions-rust-lang/audit@")
+            && workflow.contains("denyWarnings: false")
             && workflow.contains("EmbarkStudios/cargo-deny-action@")
             && workflow.contains("CARGO_AUDIT_RESULT")
             && workflow.contains("CARGO_DENY_RESULT"),
@@ -420,6 +452,7 @@ fn security_workflow_enables_codeql_and_dependency_review() {
             && workflow.contains("CARGO_AUDIT_RESULT")
             && workflow.contains("CARGO_DENY_RESULT")
             && workflow.contains("actions-rust-lang/audit@")
+            && workflow.contains("denyWarnings: false")
             && workflow.contains("EmbarkStudios/cargo-deny-action@"),
         "security.yml must run and aggregate CodeQL, Dependency Review, cargo-audit, and cargo-deny"
     );

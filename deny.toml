@@ -4,7 +4,7 @@
 [advisories]
 version = 2
 yanked = "deny"
-unmaintained = "warn"
+unmaintained = "workspace"
 ignore = []
 
 [bans]

@@ -7,7 +7,6 @@ ffprobe.exe
 
 # Rust build artifacts
 target/
-Cargo.lock
 
 # Debug artifacts
 **/*.rs.bk

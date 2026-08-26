@@ -82,7 +82,11 @@ jobs:
       - name: Audit Rust dependencies
         uses: actions-rust-lang/audit@72c09e02f132669d52284a3323acdb503cfc1a24 # v1.2.7
         with:
-          denyWarnings: true
+          # cargo-audit warnings (for example unmaintained crates) remain in
+          # the step summary. Cargo Deny is the separate gate for yanked and
+          # workspace-unmaintained dependencies; audit must fail on actual
+          # RustSec vulnerabilities, not informational warnings.
+          denyWarnings: false
 
   cargo_deny:
     name: Cargo Deny
