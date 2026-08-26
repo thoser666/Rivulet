@@ -313,6 +313,11 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [ ] Multi-language support (locale files fully wired)
 - [ ] **MIDI device support** (map controllers like Korg NanoKontrol to scene switches, volume faders, filter toggles) — *frequently requested for live production and music streams*
 - [ ] **Global hotkeys & remapping UI** — OBS-style hotkey settings: per-action rebinding, global hotkeys that work while the app is unfocused
+- [ ] **Multi-channel distribution rollout** — tracked in [`docs/release-platforms.md`](docs/release-platforms.md):
+  - [x] **Stage 1 – GitHub Releases:** canonical artifacts, checksums, changelog, and updater source (already active; signing is enabled when release secrets are configured).
+  - [ ] **Stage 2 – WinGet + Flathub:** first external channels after stable package identity, signing, Flatpak metadata, and review are complete.
+  - [ ] **Stage 3 – Homebrew Cask + Steam:** macOS cask after notarization; Steam for Windows/macOS after beta stability, App/Depot setup, and SteamPipe verification.
+  - [ ] **Stage 4 – Microsoft Store:** optional MSIX/Partner Center channel after the MSIX packaging decision.
 
 **Goal:** OBS core parity across all platforms, with a plugin model structurally superior to OBS (WASM instead of a C ABI), plus OBS compat as a transition bridge.
 
@@ -327,6 +332,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [ ] Deterministic pipeline (controllable engine clock, reproducible output from the same inputs)
 - [ ] Headless CLI: capture/rendering without a GUI (`rivulet record ...`), usable as binary and library
 - [ ] CI-friendly rendering: generate video from code (Remotion approach, native in Rust) — e.g. batch creation, tests, per-frame screenshots
+- [ ] Reproducible distribution inputs: deterministic packages, SHA-256 manifests, and post-publish verification for the M5 channel rollout (see [`docs/release-platforms.md`](docs/release-platforms.md))
 - [ ] Pipeline inspector/diagnostics tooling (analogous to `gst-inspect`, `gst-launch`), embedded in the engine
 - [ ] Deterministic tests as first-class citizens (golden-frame tests, exact PTS/DTS verification)
 
@@ -481,6 +487,23 @@ Every two seconds the example prints the live health status, e.g.
 
 ---
 
+## 📦 Release platforms
+
+GitHub Releases is Rivulet's canonical, signed distribution channel. The
+recommended expansion path is **WinGet** for Windows and **Flathub** for Linux,
+followed by **Homebrew Cask** for macOS and **Steam** for the gaming audience;
+Microsoft Store/MSIX is a later option. All external channels must publish the
+same version and checksums as GitHub Releases and should initially be limited
+to beta/stable builds.
+
+The manual, dry-run-first workflow
+[Distribution Readiness](.github/workflows/distribution-readiness.yml)
+checks release assets for each planned channel without submitting anything
+externally. See [docs/release-platforms.md](docs/release-platforms.md) for
+prerequisites and activation checklists.
+
+---
+
 ## 🛠 Development
 
 ### Diagnostics and crash logs
@@ -574,6 +597,9 @@ The repository security baseline is enabled and enforced in two layers:
   Code Scanning.
 - **Dependency Review:** the same workflow reviews pull-request dependency
   changes and fails on high-severity advisories; it posts a summary to the PR.
+- **Cargo Audit + Cargo Deny:** the Security workflow checks RustSec advisories,
+  yanked crates, licenses, dependency sources, and the checked-in `deny.toml`
+  policy.
 - **OpenSSF Scorecard:** `.github/workflows/scorecard.yml` evaluates supply-chain
   practices weekly and on repository changes, publishes the signed result, and
   uploads a separate SARIF category to Code Scanning.

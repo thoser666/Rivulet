@@ -1,0 +1,128 @@
+name: Distribution Readiness
+
+# This workflow prepares the distribution channels without changing external
+# stores. It is intentionally manual and dry-run-first: store credentials,
+# package manifests, and publisher approvals must be configured before a
+# publishing job is added.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing GitHub Release tag to inspect (for example v0.64.0-alpha.1)"
+        required: true
+        type: string
+      platform:
+        description: "Distribution channel to validate"
+        required: true
+        type: choice
+        options:
+          - github
+          - winget
+          - flathub
+          - homebrew
+          - steam
+          - microsoft-store
+        default: github
+      dry_run:
+        description: "Only validate and publish a plan; do not submit to a store"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate-release:
+    name: Validate ${{ inputs.platform }} distribution
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      PLATFORM: ${{ inputs.platform }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Inspect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json tagName,isDraft,isPrerelease,assets \
+            --jq '{tag: .tagName, draft: .isDraft, prerelease: .isPrerelease, assets: [.assets[].name]}' \
+            | tee release-assets.json
+
+          if jq -e '.draft == true' release-assets.json >/dev/null; then
+            echo "::error::The selected release is still a draft."
+            exit 1
+          fi
+
+      - name: Validate channel prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets="$(jq -r '.assets[]' release-assets.json)"
+          has_asset() {
+            grep -Fxq "$1" <<<"$assets"
+          }
+          require_asset() {
+            if ! has_asset "$1"; then
+              echo "::error::Release $RELEASE_TAG is missing required asset: $1"
+              exit 1
+            fi
+          }
+
+          case "$PLATFORM" in
+            github)
+              echo "GitHub Releases is the canonical distribution channel and is already active."
+              ;;
+            winget)
+              require_asset rivulet-windows-x86_64.msi
+              require_asset rivulet-windows-x86_64-portable.zip
+              echo "winget readiness: package artifacts exist; the manifest still needs a winget-pkgs submission."
+              ;;
+            flathub)
+              require_asset rivulet-linux-x86_64.AppImage
+              echo "Flathub readiness: the Linux binary exists; a Flatpak manifest and Flathub review are still required."
+              ;;
+            homebrew)
+              require_asset rivulet-macos-aarch64.dmg
+              echo "Homebrew readiness: the macOS DMG exists; a cask formula and tap submission are still required."
+              ;;
+            steam)
+              require_asset rivulet-windows-x86_64-portable.zip
+              echo "Steam readiness: the Windows payload exists; Steam App/Depot configuration and SteamPipe upload are still required."
+              ;;
+            microsoft-store)
+              echo "::error::Microsoft Store is not ready: the release pipeline does not produce an MSIX package yet."
+              exit 1
+              ;;
+            *)
+              echo "::error::Unsupported distribution platform: $PLATFORM"
+              exit 1
+              ;;
+          esac
+
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "Dry run: no external store or package index was modified."
+          else
+            echo "::error::Publishing is intentionally not enabled yet. Configure the channel-specific credentials and review the release-platforms guide first."
+            exit 1
+          fi
+
+      - name: Publish distribution plan
+        shell: bash
+        run: |
+          {
+            echo "## Distribution readiness"
+            echo
+            echo "- Release: $RELEASE_TAG"
+            echo "- Channel: $PLATFORM"
+            echo "- Mode: dry run"
+            echo
+            echo "No external store submission was performed. See the release-platforms guide in the repository for activation prerequisites."
+          } >> "$GITHUB_STEP_SUMMARY"

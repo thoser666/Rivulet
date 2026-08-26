@@ -49,13 +49,37 @@ these settings.
   API, stores the SARIF artifact for 14 days, and uploads a separate
   `openssf-scorecard` category to GitHub Code Scanning. Its required check is
   named `OpenSSF Scorecard`.
-- **Security** is an aggregate required check. It requires CodeQL to succeed and
-  accepts the Dependency Review job as either successful or skipped when the
-  event is not a pull request.
+- **Cargo Audit** checks the lockfile against the RustSec Advisory Database and
+  fails on advisories or warnings.
+- **Cargo Deny** enforces the checked-in `deny.toml` policy for advisories, bans,
+  licenses, and dependency sources.
+- **Security** is an aggregate required check. It requires CodeQL, Cargo Audit,
+  and Cargo Deny to succeed and accepts the Dependency Review job as either
+  successful or skipped when the event is not a pull request.
 
 Every third-party action in the security workflows is pinned to a full commit
 SHA. The pins are listed in [`ci-action-pins.md`](ci-action-pins.md) and enforced
 by `rivulet-core/tests/ci_pinning.rs`.
+
+### Cargo dependency policy
+
+`deny.toml` is the reviewed policy for dependency hygiene:
+
+- RustSec advisories and yanked releases fail the gate.
+- Unmaintained crates and duplicate versions are warnings until explicitly
+  triaged.
+- Only the crates.io registry is allowed; Git dependencies are not allowed.
+- Dependencies must use one of the explicitly allowed SPDX licenses.
+
+Run the same checks locally when the tools are installed:
+
+```bash
+cargo audit --deny warnings
+cargo deny check --all-features
+```
+
+The CI actions install and run these tools in isolated Ubuntu jobs. No audit
+advisory is ignored in the repository at present.
 
 Scorecard requires `id-token: write` for signed, repository-bound publication.
 The workflow sets `persist-credentials: false` during checkout and does not
@@ -70,7 +94,7 @@ checks before merging:
 
 - `CI` — aggregate of the lint, beta-gate, three-platform build/test, and
   pinning jobs.
-- `Security` — aggregate of CodeQL and Dependency Review.
+- `Security` — aggregate of CodeQL, Dependency Review, Cargo Audit, and Cargo Deny.
 - `OpenSSF Scorecard` — repository supply-chain analysis.
 - `CodeQL (rust)` — the repository-owned Rust CodeQL analysis.
 - `Dependency Review` — pull-request dependency security review.

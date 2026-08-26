@@ -22,6 +22,7 @@ const WORKFLOWS: &[&str] = &[
     "dependabot-auto-merge.yml",
     "security.yml",
     "scorecard.yml",
+    "distribution-readiness.yml",
 ];
 
 /// The reviewed pins. `(action@sha, human-readable version)` — the version
@@ -72,6 +73,14 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
     (
         "actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48",
         "v4.9.0",
+    ),
+    (
+        "actions-rust-lang/audit@72c09e02f132669d52284a3323acdb503cfc1a24",
+        "v1.2.7",
+    ),
+    (
+        "EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25",
+        "v2.1.1",
     ),
     (
         "ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc",
@@ -331,13 +340,65 @@ fn develop_required_checks_have_stable_job_names() {
         security.contains("name: CodeQL (${{ matrix.language }})")
             && security.contains("name: Dependency Review")
             && security.contains("name: Security")
-            && security.contains("needs: [codeql, dependency-review]"),
+            && security.contains("needs: [codeql, dependency-review, cargo_audit, cargo_deny]"),
         "security.yml must expose stable CodeQL, Dependency Review, and Security check names"
     );
     let scorecard = read(".github/workflows/scorecard.yml");
     assert!(
         scorecard.contains("name: OpenSSF Scorecard"),
         "scorecard.yml must expose a stable OpenSSF Scorecard check name"
+    );
+}
+
+#[test]
+fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
+    let workflow = read(".github/workflows/distribution-readiness.yml");
+    assert!(
+        workflow.contains("workflow_dispatch:")
+            && workflow.contains("type: choice")
+            && workflow.contains("default: true")
+            && workflow.contains("DRY_RUN"),
+        "distribution workflow must be manually triggered and dry-run-first"
+    );
+    assert!(
+        workflow.contains("platform:")
+            && workflow.contains("- winget")
+            && workflow.contains("- flathub")
+            && workflow.contains("- homebrew")
+            && workflow.contains("- steam")
+            && workflow.contains("- microsoft-store"),
+        "distribution workflow must expose the documented channels"
+    );
+    assert!(
+        workflow.contains("Publishing is intentionally not enabled yet")
+            && workflow.contains("contents: read")
+            && !workflow.contains("contents: write"),
+        "distribution preparation must not publish or request write access"
+    );
+}
+
+#[test]
+fn cargo_dependency_security_gates_are_wired_up() {
+    let deny = read("deny.toml");
+    assert!(
+        deny.contains("[advisories]")
+            && deny.contains("yanked = \"deny\"")
+            && deny.contains("[licenses]")
+            && deny.contains("[sources]")
+            && deny.contains("unknown-registry = \"deny\"")
+            && deny.contains("unknown-git = \"deny\""),
+        "deny.toml must define advisory, license, and dependency-source policy"
+    );
+
+    let workflow = read(".github/workflows/security.yml");
+    assert!(
+        workflow.contains("name: Cargo Audit")
+            && workflow.contains("name: Cargo Deny")
+            && workflow.contains("actions-rust-lang/audit@")
+            && workflow.contains("EmbarkStudios/cargo-deny-action@")
+            && workflow.contains("CARGO_AUDIT_RESULT")
+            && workflow.contains("CARGO_DENY_RESULT"),
+        "security.yml must run and aggregate Cargo Audit and Cargo Deny"
     );
 }
 
@@ -355,8 +416,12 @@ fn security_workflow_enables_codeql_and_dependency_review() {
             && workflow.contains("fail-on-severity: high")
             && workflow.contains("name: Security")
             && workflow.contains("CODEQL_RESULT")
-            && workflow.contains("DEPENDENCY_REVIEW_RESULT"),
-        "security.yml must run Dependency Review and aggregate both security checks"
+            && workflow.contains("DEPENDENCY_REVIEW_RESULT")
+            && workflow.contains("CARGO_AUDIT_RESULT")
+            && workflow.contains("CARGO_DENY_RESULT")
+            && workflow.contains("actions-rust-lang/audit@")
+            && workflow.contains("EmbarkStudios/cargo-deny-action@"),
+        "security.yml must run and aggregate CodeQL, Dependency Review, cargo-audit, and cargo-deny"
     );
     assert!(
         workflow.contains("security-events: write"),
