@@ -2,6 +2,7 @@
 name = "rivulet-streaming"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 
 [dependencies]
 anyhow = "1.0"

@@ -67,10 +67,18 @@ by `rivulet-core/tests/ci_pinning.rs`.
 `deny.toml` is the reviewed policy for dependency hygiene:
 
 - RustSec advisories and yanked releases fail the gate.
+- The fixed releases for the advisories detected on the previous CI run are
+  `anyhow >= 1.0.103` (`RUSTSEC-2026-0190`), `bytes >= 1.11.1`
+  (`RUSTSEC-2026-0007`), and `crossbeam-epoch >= 0.9.20`
+  (`RUSTSEC-2026-0204`). These minimums are regression-tested against the
+  committed lockfile; advisories are not silenced with an ignore entry.
 - Unmaintained advisories are evaluated for workspace dependencies; duplicate
   versions are warnings until explicitly triaged.
 - Only the crates.io registry is allowed; Git dependencies are not allowed.
-- Dependencies must use one of the explicitly allowed SPDX licenses.
+- Dependencies must use one of the explicitly allowed SPDX licenses. Every
+  first-party workspace crate inherits the `MIT` license from the root manifest
+  via `license.workspace = true`, so cargo-deny does not treat local packages as
+  unlicensed.
 
 Run the same checks locally when the tools are installed:
 
@@ -83,7 +91,9 @@ The CI actions install and run these tools in isolated Ubuntu jobs. The lockfile
 is committed so CI and local audits resolve the same dependency versions. The
 GUI and capture crates disable unused optional image codecs so the yanked
 `core2` crate is not pulled in through AVIF support. No security advisory is
-ignored in the repository at present.
+ignored in the repository at present. If a future audit reports a new
+advisory, upgrade the dependency or document a bounded, reviewed mitigation
+before considering any temporary exception.
 
 Scorecard requires `id-token: write` for signed, repository-bound publication.
 The workflow sets `persist-credentials: false` during checkout and does not

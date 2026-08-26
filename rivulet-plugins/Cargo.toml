@@ -2,6 +2,7 @@
 name = "rivulet-plugins"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 
 [dependencies]
 rivulet-core = { path = "../rivulet-core" }

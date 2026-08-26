@@ -2,6 +2,7 @@
 name = "rivulet-audio"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 description = "System and microphone audio capture for Rivulet"
 
 [dependencies]

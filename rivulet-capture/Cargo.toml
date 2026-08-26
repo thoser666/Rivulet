@@ -2,6 +2,7 @@
 name = "rivulet-capture"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 description = "Screen and window capture for Rivulet"
 
 [dependencies]

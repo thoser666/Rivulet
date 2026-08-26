@@ -2,6 +2,7 @@
 name = "rivulet-vulkan-layer"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 description = "Vulkan implicit layer for zero-overhead game capture (G3)"
 
 # cdylib produces the .dll/.so that the Vulkan loader loads into the game

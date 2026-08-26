@@ -3,6 +3,7 @@ name = "rivulet-updater"
 version.workspace = true
 edition = "2021"
 rust-version = "1.70"
+license.workspace = true
 description = "Update checks and installation for Rivulet via GitHub Releases"
 
 [dependencies]

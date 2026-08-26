@@ -2,6 +2,7 @@
 name = "rivulet-opengl-hook-dll"
 version.workspace = true
 edition = "2021"
+license.workspace = true
 description = "Injected DLL for OpenGL wglSwapBuffers interception (G4)"
 
 [lib]

@@ -408,6 +408,61 @@ fn audit_lockfile_uses_fixed_quick_xml_releases() {
 }
 
 #[test]
+fn audited_dependencies_remain_on_fixed_releases() {
+    let lock = read("Cargo.lock").replace("\r\n", "\n");
+    for (name, minimum) in [
+        ("anyhow", (1, 0, 103)),
+        ("bytes", (1, 11, 1)),
+        ("crossbeam-epoch", (0, 9, 20)),
+    ] {
+        let package = lock
+            .split("[[package]]")
+            .find(|package| package.contains(&format!("name = \"{name}\"")))
+            .unwrap_or_else(|| panic!("Cargo.lock must contain {name}"));
+        let version = package
+            .lines()
+            .find(|line| line.starts_with("version = \""))
+            .and_then(|line| line.split('"').nth(1))
+            .unwrap_or_else(|| panic!("{name} must have a lockfile version"));
+        let mut parts = version.split('.').map(|part| part.parse::<u64>().unwrap());
+        let actual = (
+            parts.next().unwrap(),
+            parts.next().unwrap(),
+            parts.next().unwrap(),
+        );
+        assert!(
+            actual >= minimum,
+            "{name} {version} is below the RustSec-fixed release {}.{}.{}",
+            minimum.0,
+            minimum.1,
+            minimum.2
+        );
+    }
+}
+
+#[test]
+fn workspace_manifests_declare_the_workspace_license() {
+    for manifest in [
+        "rivulet-audio/Cargo.toml",
+        "rivulet-capture/Cargo.toml",
+        "rivulet-core/Cargo.toml",
+        "rivulet-gui/Cargo.toml",
+        "rivulet-launcher/Cargo.toml",
+        "rivulet-obs-compat/Cargo.toml",
+        "rivulet-opengl-hook-dll/Cargo.toml",
+        "rivulet-plugins/Cargo.toml",
+        "rivulet-streaming/Cargo.toml",
+        "rivulet-updater/Cargo.toml",
+        "rivulet-vulkan-layer/Cargo.toml",
+    ] {
+        assert!(
+            read(manifest).contains("license.workspace = true"),
+            "{manifest} must inherit the workspace license for cargo-deny"
+        );
+    }
+}
+
+#[test]
 fn lockfile_does_not_reintroduce_yanked_core2() {
     let lock = read("Cargo.lock");
     assert!(
