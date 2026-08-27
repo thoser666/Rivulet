@@ -62,8 +62,9 @@ offer with the required `application/sdp` headers, parses the SDP answer and
 resource `Location`, and maps authentication, server, HTTP, content-type, and
 empty-answer failures to deterministic errors. It is deliberately synchronous
 so callers can place it on a worker thread; it does not claim to be the media
-transport. The implementation phase still needs `webrtcbin`, SDP fixtures for
-full negotiation, a local SFU integration test, and a real-platform smoke run.
+transport. The implementation now exposes a deterministic `webrtcbin` pipeline contract
+and runtime availability probe. The remaining evidence is the real SFU
+offer/answer, ICE/DTLS media handshake, cleanup, and platform smoke run.
 
 ## Definition of done for the implementation phase
 

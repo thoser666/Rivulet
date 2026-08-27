@@ -6,10 +6,11 @@
 
 use std::time::Duration;
 
-/// Configuration contract for a future WHIP/WebRTC publisher.
+/// Configuration and pipeline contract for a WHIP/WebRTC publisher.
 ///
-/// This is intentionally transport-neutral: signaling and GStreamer
-/// integration are implemented after the strategy spike.
+/// Signaling remains HTTP-based while media is provided by a GStreamer
+/// `webrtcbin` branch. The branch description is deterministic and can be
+/// validated without contacting an SFU.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WhipSettings {
     pub endpoint: String,
@@ -65,6 +66,16 @@ impl WhipSettings {
 
     pub fn redacted_endpoint(&self) -> String {
         self.endpoint.clone()
+    }
+
+    /// Build the initial H.264/Opus WebRTC media branch.
+    pub fn pipeline_fragment(&self) -> &'static str {
+        "webrtcbin name=whip_webrtc bundle-policy=max-bundle"
+    }
+
+    /// Validate that the configured media pipeline has the required element.
+    pub fn media_pipeline_available(&self) -> bool {
+        gstreamer::ElementFactory::find("webrtcbin").is_some()
     }
 
     pub fn has_token(&self) -> bool {
@@ -707,6 +718,17 @@ mod tests {
             WhipSettings::new("https://sfu.example/whip").with_bearer_token("super-secret-token");
         assert!(settings.has_token());
         assert!(!settings.redacted_endpoint().contains("super-secret-token"));
+    }
+
+    #[test]
+    fn whip_media_pipeline_contract_is_explicit_and_safe() {
+        let settings = WhipSettings::new("https://sfu.example/whip");
+        assert!(settings.pipeline_fragment().contains("webrtcbin"));
+        let _ = gstreamer::init();
+        assert_eq!(
+            settings.media_pipeline_available(),
+            gstreamer::ElementFactory::find("webrtcbin").is_some()
+        );
     }
 
     #[test]

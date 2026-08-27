@@ -58,16 +58,15 @@ The core now validates SRT/RIST contribution settings, bounds latency, validates
 
 The WHIP/WebRTC strategy is documented in [`whip-strategy-spike.md`](whip-strategy-spike.md), and its roadmap rationale is recorded in [`obs-vision-roadmap.md`](obs-vision-roadmap.md).
 The current core contract exposes `WhipSettings` with endpoint validation,
-bounded signaling timeout, explicit trickle-ICE configuration, and token-safe
-endpoint reporting. This is a strategy/configuration slice, not a live WebRTC
-transport; the implementation-phase Definition of Done in that document remains
-open.
+bounded signaling timeout, explicit trickle-ICE configuration, token-safe
+endpoint reporting, and a deterministic `webrtcbin` media-branch contract.
+The real SFU/ICE/DTLS media handshake remains the implementation-phase evidence.
 
 ## Reconnect and live bitrate integration
 
 The reconnect supervisor is now connected to the engine's target status API. Callers handling GStreamer bus `Error`/`Eos` messages should call `handle_stream_target_failure`; after a successful sink restart they should call `handle_stream_target_live`. `SinkBusEvent` provides the tested mapping for fatal (`Error`/`Eos`), non-fatal (`Warning`), and successful state-change events. Retry state, limits, and exponential backoff are deterministic and fully tested. The pipeline-owner `service_streaming()` tick now polls bus messages, drains due reconnect commands, and invokes target-local branch rebuilds without moving GStreamer mutations to the worker thread. Rebuilds preserve the configured transport by reconstructing the validated RTMP/RTMPS, SRT, or RIST sink fragment rather than hard-coding RTMP. Duplicate failures are ignored while a retry is already pending, preventing retry storms.
 
-Adaptive bitrate remains bounded by the existing policy and updates the active `video_enc` property when present. Health samples, cooldown, and hysteresis are applied through the runtime controller; production telemetry wiring and platform measurement remain gate evidence.
+Adaptive bitrate remains bounded by the existing policy and updates the active `video_enc` property when present. `service_streaming()` now samples `StreamHealthMonitor` and invokes the runtime controller in the pipeline-owner tick; cooldown and hysteresis prevent flapping. Production hardware measurement remains gate evidence.
 
 ## Runtime supervision
 

@@ -351,6 +351,7 @@ impl RivuletEngine {
     /// targets. This is intended for the pipeline-owner tick; it never blocks.
     pub fn service_streaming(&mut self) -> anyhow::Result<Vec<String>> {
         self.poll_stream_bus();
+        self.service_adaptive_bitrate();
         let commands = self.drain_reconnect_commands();
         let mut rebuilt = Vec::new();
         for command in commands {
@@ -361,6 +362,16 @@ impl RivuletEngine {
             }
         }
         Ok(rebuilt)
+    }
+
+    /// Apply the latest stream-health sample to the bounded live bitrate controller.
+    /// This is called from the non-blocking streaming-owner tick.
+    pub fn service_adaptive_bitrate(&mut self) -> bool {
+        let Some(health) = self.stream_health.as_mut() else {
+            return false;
+        };
+        let status = health.stats().status;
+        self.reconfigure_stream_bitrate(status)
     }
 
     /// Process pending GStreamer bus messages without blocking the caller.
