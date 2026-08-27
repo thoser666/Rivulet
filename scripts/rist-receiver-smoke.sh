@@ -10,6 +10,6 @@ docker network create "$NETWORK" >/dev/null
 docker run -d --name "$RECEIVER" --network "$NETWORK" "$IMAGE" sh -ceu 'gst-launch-1.0 -q -e ristsrc address=0.0.0.0 port=10080 ! fakesink sync=false' >/dev/null
 sleep 2
 docker run --rm --name "$SENDER" --network "$NETWORK" "$IMAGE" \
-  gst-launch-1.0 -e videotestsrc num-buffers=30 ! videoconvert ! x264enc tune=zerolatency ! \
-  rtpmp2tpay ! ristsink address="$RECEIVER" port=10080 >/dev/null
+  gst-launch-1.0 -e videotestsrc num-buffers=30 ! videoconvert ! \
+  x264enc tune=zerolatency ! h264parse ! mpegtsmux ! ristsink address="$RECEIVER" port=10080 >/dev/null
 echo "RIST receiver smoke test passed (image: $IMAGE)"

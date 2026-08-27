@@ -333,7 +333,7 @@ fn rist_receiver_smoke_is_wired_up() {
     assert!(read("scripts/rist-receiver-smoke.sh").contains("address="));
     let smoke = read("scripts/rist-receiver-smoke.sh");
     assert!(!smoke.contains("ristsink uri="));
-    assert!(smoke.contains("rtpmp2tpay ! ristsink"));
+    assert!(smoke.contains("h264parse ! mpegtsmux ! ristsink"));
 }
 
 #[test]

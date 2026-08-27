@@ -117,7 +117,7 @@ impl ContributionSettings {
                 let endpoint = self.endpoint.trim_start_matches("rist://");
                 let (address, port) = endpoint.split_once(':').unwrap_or((endpoint, "1968"));
                 format!(
-                    "rtpmp2tpay ! ristsink address=\"{}\" port={} latency={} ",
+                    "h264parse ! mpegtsmux ! ristsink address=\"{}\" port={} latency={} ",
                     address,
                     port,
                     self.latency.as_millis()
