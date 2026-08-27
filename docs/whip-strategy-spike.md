@@ -57,10 +57,13 @@ whether the session is local or remote, but never display bearer tokens.
 
 ## Explicit non-goals of this spike
 
-This document does not claim a live WebRTC transport. It defines the architecture
-and acceptance boundaries. The implementation phase still needs a dependency
-review, SDP fixtures, a local SFU integration test, and a real-platform smoke
-run.
+The signaling slice now provides `WhipSettings::post_offer`, which sends an SDP
+offer with the required `application/sdp` headers, parses the SDP answer and
+resource `Location`, and maps authentication, server, HTTP, content-type, and
+empty-answer failures to deterministic errors. It is deliberately synchronous
+so callers can place it on a worker thread; it does not claim to be the media
+transport. The implementation phase still needs `webrtcbin`, SDP fixtures for
+full negotiation, a local SFU integration test, and a real-platform smoke run.
 
 ## Definition of done for the implementation phase
 

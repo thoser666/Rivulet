@@ -19,6 +19,8 @@ pub struct WhipSettings {
 }
 
 impl WhipSettings {
+    pub const SDP_CONTENT_TYPE: &'static str = "application/sdp";
+
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),
@@ -70,6 +72,90 @@ impl WhipSettings {
             .as_deref()
             .is_some_and(|token| !token.is_empty())
     }
+
+    /// Perform the WHIP SDP offer/answer exchange.
+    ///
+    /// The transport is kept here as a small, synchronous signaling operation;
+    /// callers should run it off the UI thread. Media transport remains owned
+    /// by the eventual GStreamer `webrtcbin` integration.
+    pub fn post_offer(&self, offer_sdp: &str) -> anyhow::Result<WhipSession> {
+        self.validate().map_err(anyhow::Error::msg)?;
+        if offer_sdp.trim().is_empty() {
+            anyhow::bail!("WHIP offer SDP is empty");
+        }
+        let mut request = ureq::post(&self.endpoint)
+            .header("Content-Type", Self::SDP_CONTENT_TYPE)
+            .header("Accept", Self::SDP_CONTENT_TYPE)
+            .config()
+            .timeout_global(Some(self.connect_timeout))
+            .build();
+        if let Some(token) = self
+            .bearer_token
+            .as_deref()
+            .filter(|token| !token.is_empty())
+        {
+            request = request.header("Authorization", &format!("Bearer {token}"));
+        }
+        let response = request.send(offer_sdp.as_bytes())?;
+        let status = response.status().into();
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let resource_url = response
+            .headers()
+            .get("location")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        let body = response.into_body().read_to_string()?;
+        parse_whip_response(
+            status,
+            content_type.as_deref(),
+            resource_url.as_deref(),
+            &body,
+        )
+        .map_err(anyhow::Error::msg)
+    }
+}
+
+/// Response from a WHIP offer/answer exchange.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhipSession {
+    pub resource_url: Option<String>,
+    pub answer_sdp: String,
+}
+
+/// Map an HTTP response from a WHIP endpoint to a deterministic result.
+pub fn parse_whip_response(
+    status: u16,
+    content_type: Option<&str>,
+    resource_url: Option<&str>,
+    body: &str,
+) -> Result<WhipSession, &'static str> {
+    if status == 401 || status == 403 {
+        return Err("WHIP authentication failed");
+    }
+    if status >= 500 {
+        return Err("WHIP server failure; retry may succeed");
+    }
+    if !(200..300).contains(&status) {
+        return Err("WHIP negotiation failed");
+    }
+    if !content_type
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .starts_with(WhipSettings::SDP_CONTENT_TYPE)
+    {
+        return Err("WHIP response must use application/sdp");
+    }
+    if body.trim().is_empty() {
+        return Err("WHIP response contains an empty SDP answer");
+    }
+    Ok(WhipSession {
+        resource_url: resource_url.map(str::to_owned),
+        answer_sdp: body.to_owned(),
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -488,6 +574,26 @@ mod tests {
         assert!(WhipSettings::new("http://127.0.0.1:8889/whip")
             .validate()
             .is_ok());
+    }
+
+    #[test]
+    fn whip_response_requires_successful_sdp_content() {
+        let response = parse_whip_response(
+            201,
+            Some("application/sdp; charset=utf-8"),
+            Some("https://sfu.example/resource/1"),
+            "v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\n",
+        )
+        .unwrap();
+        assert_eq!(
+            response.resource_url.as_deref(),
+            Some("https://sfu.example/resource/1")
+        );
+        assert!(response.answer_sdp.starts_with("v=0"));
+        assert!(parse_whip_response(401, Some("application/sdp"), None, "v=0").is_err());
+        assert!(parse_whip_response(503, Some("application/sdp"), None, "v=0").is_err());
+        assert!(parse_whip_response(201, Some("text/plain"), None, "v=0").is_err());
+        assert!(parse_whip_response(201, Some("application/sdp"), None, "").is_err());
     }
 
     #[test]
