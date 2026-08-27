@@ -121,6 +121,8 @@ pub struct RivuletEngine {
     is_recording: bool,
     output_path: Option<PathBuf>,
     stream_settings: Option<StreamSettings>,
+    stream_targets: Option<MultistreamSettings>,
+    stream_target_states: Vec<StreamTargetState>,
     /// Video encoder used for the H.264 video branch. Defaults to the best
     /// available encoder detected at construction time.
     video_encoder: VideoEncoder,
@@ -168,6 +170,8 @@ impl Default for RivuletEngine {
             is_recording: false,
             output_path: None,
             stream_settings: None,
+            stream_targets: None,
+            stream_target_states: Vec::new(),
             video_encoder: best_encoder(),
             video_codec: VideoCodec::default(),
             preset: RecordingPreset::default(),
@@ -214,6 +218,23 @@ impl RivuletEngine {
     /// Must be called before recording starts.
     pub fn set_stream_settings(&mut self, settings: Option<StreamSettings>) {
         self.stream_settings = settings;
+        self.stream_targets = None;
+        self.stream_target_states.clear();
+    }
+
+    /// Configure independent streaming targets. The primary settings remain
+    /// the compatibility fallback when no target list is supplied.
+    pub fn set_multistream_settings(&mut self, settings: Option<MultistreamSettings>) {
+        self.stream_targets = settings;
+        self.stream_target_states = self
+            .stream_targets
+            .as_ref()
+            .map(|value| vec![StreamTargetState::Connecting; value.targets.len()])
+            .unwrap_or_default();
+    }
+
+    pub fn stream_target_states(&self) -> &[StreamTargetState] {
+        &self.stream_target_states
     }
 
     /// Whether the engine is configured to stream.
@@ -282,6 +303,25 @@ impl RivuletEngine {
     }
 
     /// The configured target video bitrate in kbit/s.
+    /// Update the active encoder bitrate. Returns whether the encoder property
+    /// was changed; callers can invoke this from their health polling loop.
+    pub fn reconfigure_stream_bitrate(&mut self, status: StreamHealthStatus) -> bool {
+        let Some(settings) = self.stream_settings.as_ref() else {
+            return false;
+        };
+        let changed = settings
+            .adaptive_bitrate
+            .reconfigure_live_encoder(&mut self.encoder_bitrate_kbps, status);
+        if changed {
+            if let Some(pipeline) = self.pipeline.as_ref() {
+                if let Some(encoder) = pipeline.by_name("video_enc") {
+                    encoder.set_property("bitrate", self.encoder_bitrate_kbps);
+                }
+            }
+        }
+        changed
+    }
+
     pub fn video_bitrate(&self) -> u32 {
         self.encoder_bitrate_kbps
     }
@@ -431,30 +471,35 @@ impl RivuletEngine {
             .stream_settings
             .as_ref()
             .expect("Stream settings must be set");
-        let location = settings.location();
-        tracing::info!(location = %location, delay_ms = settings.delay.latency_ms(), tracks = settings.multitrack_video.effective_tracks(), "Initializing streaming pipeline");
+        tracing::info!(
+            delay_ms = settings.delay.latency_ms(),
+            tracks = settings.multitrack_video.effective_tracks(),
+            "Initializing streaming pipeline"
+        );
         let mut s = self.video_branch_str();
         s.push_str(&self.audio_branch_str(true));
-        let sink_prefix = if settings.delay.enabled {
+        let delay = if settings.delay.enabled {
             format!(
-                "identity name=stream_delay single-segment=true sleep-time={}",
+                " ! identity name=stream_delay single-segment=true sleep-time={} ",
                 settings.delay.duration.as_nanos() as u64
             )
         } else {
             String::new()
         };
-        let track_prefix = if settings.multitrack_video.effective_tracks() > 1 {
-            format!(
-                " # multitrack-video tracks={} ",
-                settings.multitrack_video.effective_tracks()
-            )
-        } else {
-            String::new()
-        };
-        s.push_str(&format!(
-            "flvmux name=mux streamable=true ! {}rtmp2sink location=\"{}\"{}",
-            sink_prefix, location, track_prefix
-        ));
+        let targets = self
+            .stream_targets
+            .as_ref()
+            .map(|targets| targets.targets.clone())
+            .unwrap_or_else(|| vec![StreamTarget::new("primary", settings.clone())]);
+        let mut fanout = String::from("flvmux name=mux streamable=true");
+        for (index, target) in targets.iter().enumerate() {
+            fanout.push_str(&format!(
+                " ! tee name=stream_tee_{index} stream_tee_{index}. ! queue{} ! rtmp2sink name=stream_sink_{index} location=\\\"{}\\\"",
+                delay,
+                target.settings.location()
+            ));
+        }
+        s.push_str(&fanout);
         s
     }
 

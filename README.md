@@ -262,12 +262,12 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] Platform integrations (Twitch, Kick, YouTube via RTMPS; custom)
 - [x] Custom RTMP server support (arbitrary `rtmp://`/`rtmps://` URLs)
 - [x] **Stream key management and stream presets** — validated Twitch/YouTube/Kick/custom endpoints, masked key display, TLS enforcement for platform presets, and Low/Standard/High/Custom quality presets; keys are never exposed by the UI masking API
-- [x] **Adaptive bitrate** — bounded policy with live reconfiguration decisions, configurable minimum/maximum/step, reducing bitrate on Poor health and recovering on Good health; GStreamer property updates and network monitoring remain follow-up
-- [x] **Stream delay** — configurable, bounded packet delay policy integrated into the streaming pipeline; reconnect-aware delay management remains a follow-up
+- [x] **Adaptive bitrate** — bounded policy applies changed values to the active GStreamer encoder, reducing bitrate on Poor health and recovering on Good health; network monitoring and cooldown remain follow-up
+- [x] **Stream delay** — configurable, bounded per-target packet delay integrated into fan-out branches; reconnect-aware buffering and backoff remain follow-up
 - [x] **Multitrack Video** — bounded multi-representation configuration (1–4 tracks) and pipeline metadata; per-track encoder/transport negotiation remains a follow-up
 - [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible) — SDP offer/answer signaling with secure endpoint validation is implemented via `WhipSettings::post_offer`; media transport still requires `webrtcbin`, ICE lifecycle, and SFU smoke tests. See [`docs/whip-strategy-spike.md`](docs/whip-strategy-spike.md).; vision-approved in [`docs/obs-vision-roadmap.md`](docs/obs-vision-roadmap.md)
 - [x] **SRT/RIST configuration contract** — validated protocol-specific endpoints, bounded latency, passphrase validation/redaction, and sink-fragment generation; live GStreamer transport/interoperability remains open
-- [x] **Multistreaming** — validated multi-target configuration with independent sink fragments, retry-target selection, up to four named RTMP/RTMPS destinations, duplicate-name protection, secret masking, and removal support. Full GStreamer lifecycle and UI wiring remain follow-up work. *Tracked in [#70](https://github.com/thoser666/Rivulet/issues/70).*
+- [x] **Multistreaming** — GStreamer fan-out with one named branch/sink per validated RTMP/RTMPS target, up to four named destinations, independent target states, retry-target selection, duplicate-name protection, and secret masking; production bus monitoring/retry scheduling remains follow-up work. *Tracked in [#70](https://github.com/thoser666/Rivulet/issues/70).*
 - [ ] **NDI output** — LAN contribution/monitoring for production setups
 - [ ] **VOD track** — separate copyright-safe audio track for the VOD recording while streaming (Twitch VOD workflow)
 

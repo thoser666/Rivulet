@@ -39,7 +39,7 @@ presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the fu
 
 ## Multistreaming scope
 
-The multistreaming slice now provides independent sink fragments and retry-target selection. A transport supervisor can attach each fragment to the shared encoded stream and retry only Failed/Degraded targets; one target's state does not determine another's. Full GStreamer tee/fan-out lifecycle and live per-target health remain integration work.
+The multistreaming slice now builds a GStreamer fan-out with one named tee branch and RTMP sink per target. Target configuration and lifecycle state remain independent; the primary target is retained as a compatibility fallback. Production per-target bus monitoring and retry scheduling remain follow-up work.
 
 
 ## SRT/RIST contribution contract
@@ -57,9 +57,9 @@ open.
 
 ## Scope boundary
 
-The adaptive-bitrate implementation provides a bounded policy plus a deterministic live-encoder reconfiguration decision; the GStreamer encoder property update and network monitor remain integration work.
+The adaptive-bitrate implementation provides a bounded policy and applies changed values to the active `video_enc` bitrate property. Health polling/network measurement and cooldown policy remain follow-up work.
 
-Stream delay is applied as a bounded outgoing stage and exposes reconnect delay semantics; reconnect-aware buffering, retry backoff, and user-visible live controls remain follow-up work. Multitrack Video currently validates and carries the representation count,
+Stream delay is applied per fan-out branch as a bounded outgoing stage and exposes reconnect delay semantics; reconnect-aware buffering and retry backoff remain follow-up work. Multitrack Video currently validates and carries the representation count,
 but the RTMP/FLV transport still emits one negotiated track. Per-track encoder
 and transport negotiation requires a later protocol implementation.
 
