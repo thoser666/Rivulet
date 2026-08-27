@@ -44,7 +44,7 @@ The multistreaming slice now builds a GStreamer fan-out with one named tee branc
 
 ## SRT/RIST contribution contract
 
-The core now validates SRT/RIST contribution settings, bounds latency, validates optional SRT passphrases, redacts secrets from application-facing diagnostics, and emits protocol-specific sink fragments. The fan-out builder selects the matching sink element and refreshes plugin availability before runtime use; unavailable plugins are represented as a target-local `Unavailable` status and must not be reported as a healthy stream. Receiver interoperability remains an explicit runtime evidence requirement.
+The core now validates SRT/RIST contribution settings, bounds latency, validates optional SRT passphrases, redacts secrets from application-facing diagnostics, and emits protocol-specific sink fragments. The fan-out builder selects the matching sink element and refreshes plugin availability before runtime use; unavailable plugins are represented as a target-local `Unavailable` status and must not be reported as a healthy stream. Receiver interoperability is covered by `scripts/srt-receiver-smoke.sh`, which runs a finite GStreamer test stream against a receiver in a reproducible container image. CI builds `docker/srt-smoke/Dockerfile` without pulling mutable image layers and runs the smoke test as a required job; real-world endpoint testing remains an explicit runtime evidence requirement.
 
 ## WHIP strategy spike
 

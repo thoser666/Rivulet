@@ -116,12 +116,28 @@ jobs:
         run: cargo test -p rivulet-core --test ci_pinning --verbose
 
   ################################################################
+  # SRT interoperability smoke test
+  ################################################################
+  srt_receiver_smoke:
+    name: SRT Receiver Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build pinned SRT smoke image
+        run: docker build --pull=false -t rivulet-srt-smoke:ci docker/srt-smoke
+      - name: Run SRT receiver smoke test
+        env:
+          SRT_SMOKE_IMAGE: rivulet-srt-smoke:ci
+        run: bash scripts/srt-receiver-smoke.sh
+
+  ################################################################
   # REQUIRED CI AGGREGATE (stable check name for the develop ruleset)
   ################################################################
   ci:
     name: CI
     if: ${{ always() }}
-    needs: [lints, beta_gate, build_and_test, pinning_tests]
+    needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke]
     runs-on: ubuntu-latest
     steps:
       - name: Require all CI jobs to pass
@@ -132,7 +148,8 @@ jobs:
             "${{ needs.lints.result }}" \
             "${{ needs.beta_gate.result }}" \
             "${{ needs.build_and_test.result }}" \
-            "${{ needs.pinning_tests.result }}"; do
+            "${{ needs.pinning_tests.result }}" \
+            "${{ needs.srt_receiver_smoke.result }}"; do
             if [[ "$result" != "success" ]]; then
               echo "A required CI job finished with: $result" >&2
               exit 1
