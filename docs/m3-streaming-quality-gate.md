@@ -1,7 +1,7 @@
 # M3 Streaming Quality Gate
 
 This document records the feature-level gate for stream-key management, stream
-presets, and adaptive bitrate. It supplements the full M3 gate in
+presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the full M3 gate in
 [`milestone-quality-gates.md`](milestone-quality-gates.md).
 
 ## Completed in this increment
@@ -23,6 +23,9 @@ presets, and adaptive bitrate. It supplements the full M3 gate in
   pipeline as a non-blocking delay element.
 - Multitrack Video configuration accepts one to four representations and keeps
   the existing single-track transport behavior explicit until negotiation lands.
+- Multistream target configuration supports up to four independently named
+  targets, validates each endpoint/key, rejects duplicate names, masks keys, and
+  removes targets without mutating unrelated entries.
 
 ## Automated evidence
 
@@ -31,10 +34,20 @@ presets, and adaptive bitrate. It supplements the full M3 gate in
   pipeline location construction.
 - Existing workspace tests continue to cover RTMP/RTMPS pipeline construction,
   health classification, and dual-output routing.
+- Multistream model tests cover target limits, duplicate-name rejection, invalid
+  target immutability, removal, and secret masking.
+
+## Multistreaming scope
+
+The first multistreaming slice is the shared, validated target model. Each target
+has an independent identity and configuration, which is the basis for later
+transport fan-out and per-target health/retry isolation. The current GStreamer
+pipeline still has one RTMP sink; it must not be presented as simultaneous live
+fan-out until that transport integration is implemented.
 
 ## WHIP strategy spike
 
-The WHIP/WebRTC strategy is documented in [`whip-strategy-spike.md`](whip-strategy-spike.md).
+The WHIP/WebRTC strategy is documented in [`whip-strategy-spike.md`](whip-strategy-spike.md), and its roadmap rationale is recorded in [`obs-vision-roadmap.md`](obs-vision-roadmap.md).
 The current core contract exposes `WhipSettings` with endpoint validation,
 bounded signaling timeout, explicit trickle-ICE configuration, and token-safe
 endpoint reporting. This is a strategy/configuration slice, not a live WebRTC
@@ -75,6 +88,10 @@ included in screenshots.
       latency; test the maximum bound and disabled state.
 - [ ] Configure two to four video representations and verify the selected count;
       confirm the UI does not claim that RTMP/FLV is carrying multiple tracks yet.
+- [ ] Add multiple stream targets, verify duplicate names and invalid endpoints are
+      rejected, and confirm each target's key remains masked.
+- [ ] Verify one target failure cannot stop healthy targets once transport fan-out
+      is implemented; until then, record this as an open integration check.
 - [ ] Validate the WHIP endpoint and verify that non-loopback HTTP is rejected;
       confirm bearer tokens never appear in status, logs, or diagnostics.
 - [ ] Test the view at the M3 viewport profiles from the common quality-gate

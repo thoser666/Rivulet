@@ -265,9 +265,9 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] **Adaptive bitrate** — bounded policy with configurable minimum/maximum/step, reducing bitrate on Poor health and recovering on Good health; automatic network-driven pipeline reconfiguration remains a follow-up
 - [x] **Stream delay** — configurable, bounded packet delay policy integrated into the streaming pipeline; reconnect-aware delay management remains a follow-up
 - [x] **Multitrack Video** — bounded multi-representation configuration (1–4 tracks) and pipeline metadata; per-track encoder/transport negotiation remains a follow-up
-- [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible) — strategy spike complete in [`docs/whip-strategy-spike.md`](docs/whip-strategy-spike.md); implementation requires `webrtcbin`, SDP/ICE signaling, and SFU smoke tests
+- [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible) — strategy spike complete in [`docs/whip-strategy-spike.md`](docs/whip-strategy-spike.md); implementation requires `webrtcbin`, SDP/ICE signaling, and SFU smoke tests; vision-approved in [`docs/obs-vision-roadmap.md`](docs/obs-vision-roadmap.md)
 - [ ] **SRT/RIST** for professional contribution/relay
-- [ ] **Multistreaming** — simultaneous output to multiple platforms (native multi-ingest, Restream-style). *Tracked in [#70](https://github.com/thoser666/Rivulet/issues/70).*
+- [x] **Multistreaming** — validated multi-target configuration with up to four independently named RTMP/RTMPS destinations, duplicate-name protection, per-target secret masking, and removal support. Network fan-out, per-target live health, retry isolation, and UI wiring remain follow-up work. *Tracked in [#70](https://github.com/thoser666/Rivulet/issues/70).*
 - [ ] **NDI output** — LAN contribution/monitoring for production setups
 - [ ] **VOD track** — separate copyright-safe audio track for the VOD recording while streaming (Twitch VOD workflow)
 
@@ -425,7 +425,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 | Remux & file management | Open (M4) |
 | Virtual camera | Open (M4) |
 | Streaming (RTMP/RTMPS, platforms) | Partial (RTMPS Twitch/Kick/YouTube; validated presets and key handling) |
-| Multistreaming | Open (M3) |
+| Multistreaming | Partial (validated multi-target model; transport fan-out and UI remain open) |
 | Adaptive bitrate | Partial (bounded policy implemented; live encoder reconfiguration remains open) |
 | WebRTC/WHIP, SRT/RIST, NDI | WHIP strategy spike complete; transport implementation open (M3) |
 | VOD track | Open (M3) |
@@ -447,7 +447,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 
 ## 🔄 OBS upstream feature monitoring
 
-A weekly GitHub Actions workflow checks the latest OBS release notes for new feature candidates, evaluates their fit against Rivulet's machine-readable vision pillars, and publishes an advisory report plus a review queue in [`docs/obs-vision-candidates.md`](docs/obs-vision-candidates.md). Run it locally with `python3 scripts/check-obs-upstream.py --self-test` or inspect [`docs/obs-upstream-check.md`](docs/obs-upstream-check.md). Candidates require maintainer review before changing the parity checklist; features that do not fit the vision are not added merely for parity.
+A weekly GitHub Actions workflow checks the latest OBS release notes for new feature candidates, evaluates their fit against Rivulet's machine-readable vision pillars, and publishes an advisory report plus a review queue in [`docs/obs-vision-candidates.md`](docs/obs-vision-candidates.md). Maintainer-approved candidates are recorded in the curated [`docs/obs-vision-roadmap.md`](docs/obs-vision-roadmap.md) before being promoted into the milestone roadmap. Run it locally with `python3 scripts/check-obs-upstream.py --self-test` or inspect [`docs/obs-upstream-check.md`](docs/obs-upstream-check.md). Candidates require maintainer review before changing the parity checklist; features that do not fit the vision are not added merely for parity.
 
 ## 🧪 UI smoke tests
 

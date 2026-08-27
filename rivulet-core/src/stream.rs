@@ -232,7 +232,91 @@ impl MultitrackVideo {
     }
 }
 
-#[derive(Debug, Clone)]
+/// A separately monitored RTMP/RTMPS output target for multistreaming.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StreamTarget {
+    pub name: String,
+    pub settings: StreamSettings,
+}
+
+impl StreamTarget {
+    pub fn new(name: impl Into<String>, settings: StreamSettings) -> Self {
+        Self {
+            name: name.into(),
+            settings,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.name.trim().is_empty() {
+            return Err("stream target name is empty");
+        }
+        self.settings.validate()
+    }
+
+    pub fn masked_key(&self) -> String {
+        self.settings.masked_key()
+    }
+}
+
+/// Independent lifecycle state for one multistream output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamTargetState {
+    Offline,
+    Connecting,
+    Live,
+    Degraded,
+    Failed,
+}
+
+/// Configuration and deterministic state for multiple independent targets.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MultistreamSettings {
+    pub targets: Vec<StreamTarget>,
+}
+
+impl MultistreamSettings {
+    pub const MAX_TARGETS: usize = 4;
+
+    pub fn add_target(&mut self, target: StreamTarget) -> Result<(), &'static str> {
+        target.validate()?;
+        if self.targets.len() >= Self::MAX_TARGETS {
+            return Err("maximum number of stream targets reached");
+        }
+        if self
+            .targets
+            .iter()
+            .any(|existing| existing.name == target.name)
+        {
+            return Err("stream target name already exists");
+        }
+        self.targets.push(target);
+        Ok(())
+    }
+
+    pub fn remove_target(&mut self, name: &str) -> Option<StreamTarget> {
+        self.targets
+            .iter()
+            .position(|target| target.name == name)
+            .map(|index| self.targets.remove(index))
+    }
+
+    pub fn validate_all(&self) -> Result<(), &'static str> {
+        if self.targets.is_empty() {
+            return Err("at least one stream target is required");
+        }
+        self.targets.iter().try_for_each(StreamTarget::validate)
+    }
+
+    pub fn target_names(&self) -> Vec<&str> {
+        self.targets
+            .iter()
+            .map(|target| target.name.as_str())
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamSettings {
     pub platform: StreamPlatform,
     pub ingest_url: String,
@@ -422,6 +506,51 @@ mod tests {
                 .with_trickle_ice(true)
                 .trickle_ice
         );
+    }
+
+    #[test]
+    fn multistream_targets_are_validated_and_limited() {
+        let mut settings = MultistreamSettings::default();
+        for index in 0..MultistreamSettings::MAX_TARGETS {
+            settings
+                .add_target(StreamTarget::new(
+                    format!("target-{index}"),
+                    StreamSettings::custom("rtmp://localhost/live", format!("key-{index}")),
+                ))
+                .unwrap();
+        }
+        assert!(settings
+            .add_target(StreamTarget::new(
+                "overflow",
+                StreamSettings::custom("rtmp://localhost/live", "overflow")
+            ))
+            .is_err());
+        assert_eq!(
+            settings.target_names().len(),
+            MultistreamSettings::MAX_TARGETS
+        );
+        assert!(settings.validate_all().is_ok());
+    }
+
+    #[test]
+    fn multistream_targets_isolate_duplicate_names_and_removal() {
+        let target = StreamTarget::new("Twitch", StreamSettings::twitch("secret-twitch-key"));
+        let mut settings = MultistreamSettings::default();
+        settings.add_target(target.clone()).unwrap();
+        assert!(settings.add_target(target).is_err());
+        assert_eq!(
+            settings.remove_target("Twitch").unwrap().masked_key(),
+            "se••••"
+        );
+        assert!(settings.validate_all().is_err());
+    }
+
+    #[test]
+    fn multistream_target_validation_rejects_invalid_target_without_mutating_state() {
+        let mut settings = MultistreamSettings::default();
+        let invalid = StreamTarget::new("", StreamSettings::twitch("key"));
+        assert!(settings.add_target(invalid).is_err());
+        assert!(settings.targets.is_empty());
     }
 
     #[test]
