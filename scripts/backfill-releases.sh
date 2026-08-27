@@ -18,6 +18,17 @@
 # (two parallel runs once corrupted a draft release).
 set -euo pipefail
 
+# Ensure gh executable is available on Windows/WSL environments
+if ! command -v gh >/dev/null 2>&1; then
+  if command -v gh.exe >/dev/null 2>&1; then
+    gh() { gh.exe "$@"; }
+  elif [[ -f "/mnt/c/Program Files/GitHub CLI/gh.exe" ]]; then
+    gh() { "/mnt/c/Program Files/GitHub CLI/gh.exe" "$@"; }
+  elif [[ -f "/c/Program Files/GitHub CLI/gh.exe" ]]; then
+    gh() { "/c/Program Files/GitHub CLI/gh.exe" "$@"; }
+  fi
+fi
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="${RIVULET_BACKFILL_WORK:-/tmp/backfill-releases}"
 LOCK="$WORK/.lock"
@@ -64,17 +75,18 @@ alpha_tags() {
   git ls-remote --tags origin 2>/dev/null \
     | grep -v '\^{}' \
     | sed 's|.*refs/tags/||' \
-    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$' || true
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-alpha\.[0-9]+$' \
+    | tr -d '\r' || true
 }
 
 published_tags() {
   gh release list --limit 200 --json tagName,isDraft -q \
-    '.[] | select(.isDraft == false) | .tagName' 2>/dev/null || true
+    '.[] | select(.isDraft == false) | .tagName' 2>/dev/null | tr -d '\r' || true
 }
 
 draft_tags() {
   gh release list --limit 200 --json tagName,isDraft -q \
-    '.[] | select(.isDraft == true) | .tagName' 2>/dev/null || true
+    '.[] | select(.isDraft == true) | .tagName' 2>/dev/null | tr -d '\r' || true
 }
 
 # Resolve the workflow run that produced a tag. The tag points at the
@@ -83,7 +95,7 @@ draft_tags() {
 run_for_tag() {
   local tag="$1"
   local feat_sha
-  feat_sha="$(git rev-parse "$tag^" 2>/dev/null || echo '')"
+  feat_sha="$(git rev-parse --verify "$tag^" 2>/dev/null || true)"
   if [[ -z "$feat_sha" ]]; then
     echo ""
     return
@@ -233,7 +245,7 @@ EOF
   if ! gh release view "$tag" >/dev/null 2>&1; then
     log "  creating draft release"
     gh release create "$tag" --draft --prerelease \
-      --title "Rivulet $version" --notes "$notes" || log "  create failed"
+      --title "Rivulet $version" --notes "$notes"
   fi
 
   for f in \
@@ -247,12 +259,12 @@ EOF
     "$REPO_DIR/docs/social-preview.png"; do
     if [[ -f "$f" ]]; then
       log "  uploading $(basename "$f")"
-      gh release upload "$tag" "$f" --clobber || log "  upload failed: $f"
+      gh release upload "$tag" "$f" --clobber
     fi
   done
 
   log "  publishing $tag"
-  gh release edit "$tag" --draft=false || log "  publish failed for $tag"
+  gh release edit "$tag" --draft=false
   log ">>> $tag done"
 done
 
