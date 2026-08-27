@@ -10,6 +10,8 @@ name: Release (Alpha)
 # Every qualifying push produces a versioned alpha release (tag vX.Y.Z-alpha.N)
 # including installable packages (portable/MSI, AppImage, DMG) and a formal
 # GitHub release. Merged Dependabot pull requests do not trigger the build.
+# Version preparation is deliberately performed on a temporary release branch;
+# develop is protected and must only be changed through a pull request.
 #
 # For the higher maturity levels (beta/rc/stable) see the tag-based release
 # path in ci.yml ("refs/tags/v*").
@@ -20,6 +22,11 @@ on:
   # Manually trigger an alpha release (e.g. after CI repairs, when
   # no new feature commit is pending).
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional explicit version (for example 0.65.0-alpha.1)"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -110,20 +117,27 @@ jobs:
           COUNT="$(git tag -l "v${NEXT}-alpha.*" | wc -l)"
           COUNT=$((COUNT + 1))
           VERSION="${NEXT}-alpha.${COUNT}"
+          if [[ -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+          fi
           TAG="v${VERSION}"
           echo "Next version: $VERSION (tag: $TAG)"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-          # Update Cargo.toml + CHANGELOG and commit them.
+          # Update Cargo.toml + CHANGELOG and commit them on an isolated
+          # release branch. Protected `develop` must not be pushed directly.
           bash scripts/update-version.sh "$VERSION"
           bash scripts/update-changelog.sh "$VERSION"
 
+          RELEASE_BRANCH="release/$TAG"
+          git switch -c "$RELEASE_BRANCH"
           git add Cargo.toml rivulet-*/Cargo.toml CHANGELOG.md
           git commit -m "chore(release): prepare $TAG"
-          git push origin develop
+          git push --set-upstream origin "$RELEASE_BRANCH"
 
-          # Set and push the tag.
+          # Set and push the tag only after the release branch exists. The
+          # release branch is merged by the normal PR/ruleset flow later.
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"
 
