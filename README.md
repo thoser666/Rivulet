@@ -447,7 +447,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 
 ## 🔄 OBS upstream feature monitoring
 
-A weekly GitHub Actions workflow checks the latest OBS release notes for new feature candidates and publishes an advisory report. Run it locally with `python3 scripts/check-obs-upstream.py --self-test` or inspect [`docs/obs-upstream-check.md`](docs/obs-upstream-check.md). Candidates require maintainer review before changing the parity checklist.
+A weekly GitHub Actions workflow checks the latest OBS release notes for new feature candidates, evaluates their fit against Rivulet's machine-readable vision pillars, and publishes an advisory report. Run it locally with `python3 scripts/check-obs-upstream.py --self-test` or inspect [`docs/obs-upstream-check.md`](docs/obs-upstream-check.md). Candidates require maintainer review before changing the parity checklist; features that do not fit the vision are not added merely for parity.
 
 ## 🧪 UI smoke tests
 

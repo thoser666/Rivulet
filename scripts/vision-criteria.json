@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "criteria": [
+    {
+      "id": "deterministic",
+      "name": "Deterministic and automatable",
+      "description": "Improves reproducible, scriptable, headless, or testable workflows.",
+      "keywords": ["automation", "automated", "deterministic", "headless", "script", "remote", "api", "websocket", "hotkey"]
+    },
+    {
+      "id": "embeddable",
+      "name": "Embeddable Rust engine",
+      "description": "Can be exposed through a stable library/API without GUI-only coupling.",
+      "keywords": ["api", "library", "plugin", "wasm", "embedded", "sdk"]
+    },
+    {
+      "id": "modern-rendering",
+      "name": "Modern and efficient rendering",
+      "description": "Uses or enables modern GPU, zero-copy, low-overhead, or efficient media paths.",
+      "keywords": ["gpu", "zero-copy", "vulkan", "webgpu", "performance", "low-latency", "hardware"]
+    },
+    {
+      "id": "cross-platform",
+      "name": "Cross-platform parity",
+      "description": "Improves equivalent workflows across supported desktop platforms.",
+      "keywords": ["windows", "linux", "macos", "cross-platform", "platform", "wayland", "pipewire"]
+    },
+    {
+      "id": "privacy-first",
+      "name": "Privacy and user control",
+      "description": "Improves local-first operation, explicit consent, safety, or secret handling.",
+      "keywords": ["privacy", "local", "permission", "secure", "redact", "offline", "consent"]
+    },
+    {
+      "id": "streamer-value",
+      "name": "Direct streamer value",
+      "description": "Meaningfully improves recording, streaming, scene production, or creator workflow.",
+      "keywords": ["stream", "record", "scene", "source", "audio", "video", "overlay", "capture", "replay"]
+    }
+  ],
+  "decision": {
+    "strong_fit_minimum": 2,
+    "review_minimum": 1,
+    "not_aligned_below": 1
+  }
+}

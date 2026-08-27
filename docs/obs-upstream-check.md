@@ -1,9 +1,24 @@
-# OBS upstream feature check
+# OBS upstream feature and vision check
 
 `check-obs-upstream.py` checks the latest OBS Studio GitHub release and extracts
 release-note lines that look like feature additions. Candidates are compared
-with the versioned catalog in `scripts/obs-features.json` and printed as either
-already represented or needing review.
+with the versioned catalog in `scripts/obs-features.json` and classified against
+Rivulet's product vision in `scripts/vision-criteria.json`.
+
+## Vision decisions
+
+The report assigns each new candidate one of three advisory decisions:
+
+- **strong-fit**: matches at least two vision pillars; prioritize roadmap
+  evaluation because it supports Rivulet's differentiation.
+- **review**: matches one pillar; assess scope, user value, and opportunity cost
+  before adding it.
+- **not-aligned**: matches no pillar; do not add it solely to chase OBS parity.
+
+The current pillars are deterministic/automatable workflows, an embeddable Rust
+engine, modern efficient rendering, cross-platform parity, privacy and user
+control, and direct streamer value. Keyword matching is deliberately a first
+triage only; maintainers make the final product decision.
 
 ## Automation
 
@@ -23,4 +38,5 @@ python3 scripts/check-obs-upstream.py --fixture scripts/obs-upstream-fixture.jso
 
 A GitHub API/network failure exits as **unverified** (code 2); it must not be
 interpreted as proof of feature parity. After reviewing a candidate, update
-`obs-features.json`, the README checklist, and the appropriate milestone/issue.
+`obs-features.json`, the README checklist, and the appropriate milestone/issue
+only when the candidate fits the product vision.
