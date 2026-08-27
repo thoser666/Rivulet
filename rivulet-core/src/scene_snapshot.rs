@@ -75,7 +75,7 @@ impl SceneSnapshot {
     pub fn render_rgba(&self) -> Vec<u8> {
         let pixel_count = self.width as usize * self.height as usize;
         let mut pixels = vec![0u8; pixel_count * 4];
-        for pixel in pixels.chunks_exact_mut(4) {
+        for pixel in pixels.as_chunks_mut::<4>().0 {
             pixel.copy_from_slice(&[18, 22, 29, 255]);
         }
 
