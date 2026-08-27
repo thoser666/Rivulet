@@ -6,6 +6,72 @@
 
 use std::time::Duration;
 
+/// Configuration contract for a future WHIP/WebRTC publisher.
+///
+/// This is intentionally transport-neutral: signaling and GStreamer
+/// integration are implemented after the strategy spike.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhipSettings {
+    pub endpoint: String,
+    pub bearer_token: Option<String>,
+    pub connect_timeout: Duration,
+    pub trickle_ice: bool,
+}
+
+impl WhipSettings {
+    pub fn new(endpoint: impl Into<String>) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            bearer_token: None,
+            connect_timeout: Duration::from_secs(10),
+            trickle_ice: false,
+        }
+    }
+
+    pub fn with_bearer_token(mut self, token: impl Into<String>) -> Self {
+        self.bearer_token = Some(token.into());
+        self
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.connect_timeout = timeout.clamp(Duration::from_secs(2), Duration::from_secs(60));
+        self
+    }
+
+    pub fn with_trickle_ice(mut self, enabled: bool) -> Self {
+        self.trickle_ice = enabled;
+        self
+    }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        let loopback = self.endpoint.starts_with("http://127.0.0.1")
+            || self.endpoint.starts_with("http://localhost")
+            || self.endpoint.starts_with("http://[::1]");
+        if !self.endpoint.starts_with("https://") && !loopback {
+            return Err("WHIP endpoint must use https:// unless it is loopback development HTTP");
+        }
+        if self.endpoint.trim_end_matches('/').len() <= "https://".len() {
+            return Err("WHIP endpoint is empty");
+        }
+        if self.connect_timeout < Duration::from_secs(2)
+            || self.connect_timeout > Duration::from_secs(60)
+        {
+            return Err("WHIP connect timeout must be between 2 and 60 seconds");
+        }
+        Ok(())
+    }
+
+    pub fn redacted_endpoint(&self) -> String {
+        self.endpoint.clone()
+    }
+
+    pub fn has_token(&self) -> bool {
+        self.bearer_token
+            .as_deref()
+            .is_some_and(|token| !token.is_empty())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamPlatform {
     Twitch,
@@ -320,6 +386,44 @@ mod tests {
             42000
         );
     }
+    #[test]
+    fn whip_settings_enforce_secure_endpoints_and_bounded_timeout() {
+        assert!(WhipSettings::new("https://sfu.example/whip")
+            .with_timeout(Duration::from_secs(1))
+            .validate()
+            .is_ok());
+        assert_eq!(
+            WhipSettings::new("https://sfu.example/whip")
+                .with_timeout(Duration::from_secs(1))
+                .connect_timeout,
+            Duration::from_secs(2)
+        );
+        assert!(WhipSettings::new("http://remote.example/whip")
+            .validate()
+            .is_err());
+        assert!(WhipSettings::new("http://127.0.0.1:8889/whip")
+            .validate()
+            .is_ok());
+    }
+
+    #[test]
+    fn whip_credentials_are_never_part_of_the_redacted_endpoint() {
+        let settings =
+            WhipSettings::new("https://sfu.example/whip").with_bearer_token("super-secret-token");
+        assert!(settings.has_token());
+        assert!(!settings.redacted_endpoint().contains("super-secret-token"));
+    }
+
+    #[test]
+    fn whip_trickle_ice_is_explicitly_configurable() {
+        assert!(!WhipSettings::new("https://sfu.example/whip").trickle_ice);
+        assert!(
+            WhipSettings::new("https://sfu.example/whip")
+                .with_trickle_ice(true)
+                .trickle_ice
+        );
+    }
+
     #[test]
     fn existing_location_behavior_is_preserved() {
         let s = StreamSettings::youtube("key")

@@ -265,7 +265,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] **Adaptive bitrate** — bounded policy with configurable minimum/maximum/step, reducing bitrate on Poor health and recovering on Good health; automatic network-driven pipeline reconfiguration remains a follow-up
 - [x] **Stream delay** — configurable, bounded packet delay policy integrated into the streaming pipeline; reconnect-aware delay management remains a follow-up
 - [x] **Multitrack Video** — bounded multi-representation configuration (1–4 tracks) and pipeline metadata; per-track encoder/transport negotiation remains a follow-up
-- [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible)
+- [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible) — strategy spike complete in [`docs/whip-strategy-spike.md`](docs/whip-strategy-spike.md); implementation requires `webrtcbin`, SDP/ICE signaling, and SFU smoke tests
 - [ ] **SRT/RIST** for professional contribution/relay
 - [ ] **Multistreaming** — simultaneous output to multiple platforms (native multi-ingest, Restream-style). *Tracked in [#70](https://github.com/thoser666/Rivulet/issues/70).*
 - [ ] **NDI output** — LAN contribution/monitoring for production setups
@@ -427,7 +427,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 | Streaming (RTMP/RTMPS, platforms) | Partial (RTMPS Twitch/Kick/YouTube; validated presets and key handling) |
 | Multistreaming | Open (M3) |
 | Adaptive bitrate | Partial (bounded policy implemented; live encoder reconfiguration remains open) |
-| WebRTC/WHIP, SRT/RIST, NDI | Open (M3) |
+| WebRTC/WHIP, SRT/RIST, NDI | WHIP strategy spike complete; transport implementation open (M3) |
 | VOD track | Open (M3) |
 | Multi-track audio | Partial (2 tracks; VOD track planned M3) |
 | Plugin ecosystem & OBS compatibility | Open |
@@ -447,7 +447,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 
 ## 🔄 OBS upstream feature monitoring
 
-A weekly GitHub Actions workflow checks the latest OBS release notes for new feature candidates, evaluates their fit against Rivulet's machine-readable vision pillars, and publishes an advisory report. Run it locally with `python3 scripts/check-obs-upstream.py --self-test` or inspect [`docs/obs-upstream-check.md`](docs/obs-upstream-check.md). Candidates require maintainer review before changing the parity checklist; features that do not fit the vision are not added merely for parity.
+A weekly GitHub Actions workflow checks the latest OBS release notes for new feature candidates, evaluates their fit against Rivulet's machine-readable vision pillars, and publishes an advisory report plus a review queue in [`docs/obs-vision-candidates.md`](docs/obs-vision-candidates.md). Run it locally with `python3 scripts/check-obs-upstream.py --self-test` or inspect [`docs/obs-upstream-check.md`](docs/obs-upstream-check.md). Candidates require maintainer review before changing the parity checklist; features that do not fit the vision are not added merely for parity.
 
 ## 🧪 UI smoke tests
 

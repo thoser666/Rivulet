@@ -32,6 +32,15 @@ presets, and adaptive bitrate. It supplements the full M3 gate in
 - Existing workspace tests continue to cover RTMP/RTMPS pipeline construction,
   health classification, and dual-output routing.
 
+## WHIP strategy spike
+
+The WHIP/WebRTC strategy is documented in [`whip-strategy-spike.md`](whip-strategy-spike.md).
+The current core contract exposes `WhipSettings` with endpoint validation,
+bounded signaling timeout, explicit trickle-ICE configuration, and token-safe
+endpoint reporting. This is a strategy/configuration slice, not a live WebRTC
+transport; the implementation-phase Definition of Done in that document remains
+open.
+
 ## Scope boundary
 
 The adaptive-bitrate implementation currently provides a deterministic policy
@@ -66,6 +75,8 @@ included in screenshots.
       latency; test the maximum bound and disabled state.
 - [ ] Configure two to four video representations and verify the selected count;
       confirm the UI does not claim that RTMP/FLV is carrying multiple tracks yet.
+- [ ] Validate the WHIP endpoint and verify that non-loopback HTTP is rejected;
+      confirm bearer tokens never appear in status, logs, or diagnostics.
 - [ ] Test the view at the M3 viewport profiles from the common quality-gate
       matrix, including narrow windows and long custom endpoint names.
 

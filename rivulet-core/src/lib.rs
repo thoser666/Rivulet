@@ -38,6 +38,7 @@ pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 pub mod stream;
 pub use stream::{
     AdaptiveBitrate, MultitrackVideo, StreamDelay, StreamPlatform, StreamPreset, StreamSettings,
+    WhipSettings,
 };
 
 pub mod i18n;

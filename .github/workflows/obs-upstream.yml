@@ -21,10 +21,12 @@ jobs:
           python3 -m json.tool scripts/vision-criteria.json >/dev/null
           python3 scripts/check-obs-upstream.py --self-test
 
-      - name: Check latest OBS release and vision fit
+      - name: Check latest OBS release and update vision documentation
         id: upstream
         continue-on-error: true
-        run: python3 scripts/check-obs-upstream.py | tee "$RUNNER_TEMP/obs-upstream-report.md"
+        run: |
+          python3 scripts/check-obs-upstream.py --update-doc | tee "$RUNNER_TEMP/obs-upstream-report.md"
+          cp docs/obs-vision-candidates.md "$RUNNER_TEMP/obs-vision-candidates.md"
 
       - name: Publish report
         if: always()
@@ -35,5 +37,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v7.1.0
         with:
           name: obs-upstream-report
-          path: ${{ runner.temp }}/obs-upstream-report.md
+          path: |
+            ${{ runner.temp }}/obs-upstream-report.md
+            ${{ runner.temp }}/obs-vision-candidates.md
           if-no-files-found: warn

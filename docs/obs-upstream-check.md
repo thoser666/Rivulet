@@ -24,9 +24,11 @@ triage only; maintainers make the final product decision.
 
 `.github/workflows/obs-upstream.yml` runs weekly and can also be started with
 `workflow_dispatch`. It publishes the report in the Actions step summary and
-uploads it as an artifact. The workflow does not modify `develop`, create issues,
-or automatically change the parity checklist: release notes are editorial and
-need human classification.
+uploads it as an artifact. It also generates the committed-format document
+`docs/obs-vision-candidates.md` in the runner and includes it in the artifact.
+The workflow does not modify `develop`, create issues, or automatically change
+the parity checklist: release notes are editorial and need human classification.
+The generated candidate document is a review queue, not product approval.
 
 ## Local usage
 
@@ -39,4 +41,6 @@ python3 scripts/check-obs-upstream.py --fixture scripts/obs-upstream-fixture.jso
 A GitHub API/network failure exits as **unverified** (code 2); it must not be
 interpreted as proof of feature parity. After reviewing a candidate, update
 `obs-features.json`, the README checklist, and the appropriate milestone/issue
-only when the candidate fits the product vision.
+only when the candidate fits the product vision. Strong-fit candidates can be
+copied into `docs/obs-vision-candidates.md` with `--update-doc`; after review,
+maintainers may promote them into the README roadmap and a milestone issue.
