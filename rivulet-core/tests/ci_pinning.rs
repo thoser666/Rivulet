@@ -330,6 +330,8 @@ fn rist_receiver_smoke_is_wired_up() {
     assert!(workflow.contains("name: RIST Receiver Smoke"));
     assert!(workflow.contains("rist-receiver-smoke.sh"));
     assert!(read("scripts/rist-receiver-smoke.sh").contains("ristsrc"));
+    assert!(read("scripts/rist-receiver-smoke.sh").contains("address="));
+    assert!(!read("scripts/rist-receiver-smoke.sh").contains("ristsink uri="));
 }
 
 #[test]

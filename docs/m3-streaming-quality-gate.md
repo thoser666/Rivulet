@@ -29,7 +29,8 @@ presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the fu
 
 ## RIST interoperability
 
-CI now includes a dedicated RIST receiver smoke job using
+The RIST sink uses the plugin's supported `address`, `port`, and `latency`
+properties rather than the unsupported `uri` property. CI now includes a dedicated RIST receiver smoke job using
 `docker/rist-smoke/Dockerfile` and `scripts/rist-receiver-smoke.sh`. The test
 uses a finite MPEG-TS test source, a listener receiver, and a caller sender;
 plugin availability and real receiver compatibility remain explicit evidence.

@@ -113,11 +113,16 @@ impl ContributionSettings {
                     ),
                 }
             }
-            ContributionProtocol::Rist => format!(
-                "ristsink uri=\"{}\" latency={} ",
-                self.endpoint,
-                self.latency.as_millis()
-            ),
+            ContributionProtocol::Rist => {
+                let endpoint = self.endpoint.trim_start_matches("rist://");
+                let (address, port) = endpoint.split_once(':').unwrap_or((endpoint, "1968"));
+                format!(
+                    "ristsink address=\"{}\" port={} latency={} ",
+                    address,
+                    port,
+                    self.latency.as_millis()
+                )
+            }
         }
     }
 }
@@ -175,6 +180,17 @@ mod tests {
             settings.validated_pipeline_sink_fragment(),
             Err("contribution endpoint must use the selected protocol scheme")
         );
+    }
+
+    #[test]
+    fn rist_fragment_uses_supported_properties() {
+        let fragment =
+            ContributionSettings::new(ContributionProtocol::Rist, "rist://receiver:10080")
+                .pipeline_sink_fragment();
+        assert!(fragment.contains("ristsink"));
+        assert!(fragment.contains("address=\"receiver\""));
+        assert!(fragment.contains("port=10080"));
+        assert!(!fragment.contains("uri="));
     }
 
     #[test]
