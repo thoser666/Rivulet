@@ -137,6 +137,10 @@ jobs:
           # local branch that fails with a non-fast-forward push.
           if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" >/dev/null 2>&1; then
             git fetch origin "$RELEASE_BRANCH"
+            # The version/changelog scripts intentionally modify the checkout
+            # before branch selection. Reset those generated changes before
+            # switching to an existing remote branch; otherwise checkout aborts.
+            git reset --hard HEAD
             git switch -C "$RELEASE_BRANCH" "origin/$RELEASE_BRANCH"
           else
             git switch -c "$RELEASE_BRANCH"

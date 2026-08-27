@@ -330,7 +330,8 @@ fn release_workflow_reuses_existing_release_branches() {
     assert!(
         workflow.contains("git ls-remote --exit-code --heads origin \"$RELEASE_BRANCH\"")
             && workflow.contains("git switch -C \"$RELEASE_BRANCH\" \"origin/$RELEASE_BRANCH\"")
-            && workflow.contains("git diff --cached --quiet"),
+            && workflow.contains("git diff --cached --quiet")
+            && workflow.contains("git reset --hard HEAD"),
         "release workflow must handle retries on an existing release branch idempotently"
     );
 }

@@ -88,8 +88,10 @@ release branch, then builds all platform packages, and only after the matrix
 succeeds creates or reuses the tag and publishes the GitHub Release. A tag
 without a release is considered a failed run and must be repaired with
 `scripts/backfill-releases.sh --check` followed by the targeted backfill.
-Retries for the same alpha version reuse the existing `release/<tag>` branch
-and skip an empty version-bump commit, preventing non-fast-forward failures.
+Retries for the same alpha version reuse the existing `release/<tag>` branch.
+The workflow resets the generated version/changelog changes before switching to
+that branch and skips an empty version-bump commit, preventing checkout and
+non-fast-forward failures.
 Manual verification should inspect the workflow summary and confirm the tag,
 release URL, prerelease flag, and uploaded assets.
 
