@@ -399,6 +399,9 @@ jobs:
       - name: Test pre-Rust launcher with missing GUI binary
         run: cargo test -p rivulet-launcher --test pre_rust_smoke --verbose
 
+      - name: Cross-platform UI smoke test
+        run: cargo test -p rivulet-gui --test ui_smoke --verbose
+
       - name: Test
         run: cargo test --workspace --verbose
 

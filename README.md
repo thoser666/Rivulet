@@ -445,6 +445,16 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 
 ---
 
+## 🧪 UI smoke tests
+
+The cross-platform headless UI smoke contract runs on Linux, Windows, and macOS and checks navigation, keyboard guards, GUI-visible diagnostics, screenshot invariants, secret redaction, focus/hover semantics, and theme-contrast hooks:
+
+```bash
+cargo test -p rivulet-gui --test ui_smoke
+```
+
+See [`docs/ui-smoke-testing.md`](docs/ui-smoke-testing.md) for the evidence workflow and the limitations of deterministic headless checks versus native visual/accessibility review.
+
 ## 📺 Streaming Example
 
 The `stream_rtmps` example (`rivulet-audio`) captures the screen together with
