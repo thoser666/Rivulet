@@ -36,7 +36,9 @@ pub mod metrics;
 pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 
 pub mod stream;
-pub use stream::{AdaptiveBitrate, StreamPlatform, StreamPreset, StreamSettings};
+pub use stream::{
+    AdaptiveBitrate, MultitrackVideo, StreamDelay, StreamPlatform, StreamPreset, StreamSettings,
+};
 
 pub mod i18n;
 pub use i18n::Locale;
@@ -421,17 +423,33 @@ impl RivuletEngine {
     }
 
     fn build_streaming_pipeline_str(&self) -> String {
-        let location = self
+        let settings = self
             .stream_settings
             .as_ref()
-            .expect("Stream settings must be set")
-            .location();
-        tracing::info!(location = %location, "Initializing streaming pipeline");
+            .expect("Stream settings must be set");
+        let location = settings.location();
+        tracing::info!(location = %location, delay_ms = settings.delay.latency_ms(), tracks = settings.multitrack_video.effective_tracks(), "Initializing streaming pipeline");
         let mut s = self.video_branch_str();
         s.push_str(&self.audio_branch_str(true));
+        let sink_prefix = if settings.delay.enabled {
+            format!(
+                "identity name=stream_delay single-segment=true sleep-time={}",
+                settings.delay.duration.as_nanos() as u64
+            )
+        } else {
+            String::new()
+        };
+        let track_prefix = if settings.multitrack_video.effective_tracks() > 1 {
+            format!(
+                " # multitrack-video tracks={} ",
+                settings.multitrack_video.effective_tracks()
+            )
+        } else {
+            String::new()
+        };
         s.push_str(&format!(
-            "flvmux name=mux streamable=true ! rtmp2sink location=\"{}\"",
-            location
+            "flvmux name=mux streamable=true ! {}rtmp2sink location=\"{}\"{}",
+            sink_prefix, location, track_prefix
         ));
         s
     }
@@ -2002,6 +2020,8 @@ mod tests {
             stream_key: String::new(),
             preset: StreamPreset::Standard,
             adaptive_bitrate: AdaptiveBitrate::default(),
+            delay: StreamDelay::default(),
+            multitrack_video: MultitrackVideo::default(),
         }));
         let path = std::env::temp_dir().join("rivulet_test_overlay_dual.mp4");
         engine.start_local_recording(path.clone());
@@ -2128,6 +2148,8 @@ mod tests {
             stream_key: String::new(),
             preset: StreamPreset::Standard,
             adaptive_bitrate: AdaptiveBitrate::default(),
+            delay: StreamDelay::default(),
+            multitrack_video: MultitrackVideo::default(),
         }));
         engine.start_streaming();
         let pipeline_str = engine.build_pipeline_str().unwrap();
@@ -2155,6 +2177,8 @@ mod tests {
             stream_key: String::new(),
             preset: StreamPreset::Standard,
             adaptive_bitrate: AdaptiveBitrate::default(),
+            delay: StreamDelay::default(),
+            multitrack_video: MultitrackVideo::default(),
         }));
         let path = std::env::temp_dir().join("rivulet_replay_dual.mp4");
         engine.start_local_recording(path.clone());

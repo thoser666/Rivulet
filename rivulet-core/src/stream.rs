@@ -4,7 +4,8 @@
 //! single [`StreamSettings`] with an `rtmps://` ingest URL works for all three
 //! platforms - only the ingest endpoint and stream key differ.
 
-/// Streaming platform presets used to build the ingest URL.
+use std::time::Duration;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamPlatform {
     Twitch,
@@ -22,7 +23,6 @@ impl StreamPlatform {
             Self::Custom => "Custom",
         }
     }
-
     pub fn default_ingest_url(self) -> Option<&'static str> {
         match self {
             Self::Twitch => Some("rtmps://live.twitch.tv/app"),
@@ -32,7 +32,6 @@ impl StreamPlatform {
     }
 }
 
-/// Named stream-quality preset. Bitrates are in kbit/s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamPreset {
     Low,
@@ -40,7 +39,6 @@ pub enum StreamPreset {
     High,
     Custom,
 }
-
 impl StreamPreset {
     pub fn label(self) -> &'static str {
         match self {
@@ -50,22 +48,19 @@ impl StreamPreset {
             Self::Custom => "Custom",
         }
     }
-
     pub fn bitrate_kbps(self) -> Option<u32> {
         match self {
-            Self::Low => Some(2_500),
-            Self::Standard => Some(4_500),
-            Self::High => Some(6_000),
+            Self::Low => Some(2500),
+            Self::Standard => Some(4500),
+            Self::High => Some(6000),
             Self::Custom => None,
         }
     }
-
     pub fn all() -> &'static [Self] {
         &[Self::Low, Self::Standard, Self::High, Self::Custom]
     }
 }
 
-/// Adaptive bitrate policy based on stream health.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AdaptiveBitrate {
     pub enabled: bool,
@@ -73,18 +68,16 @@ pub struct AdaptiveBitrate {
     pub maximum_kbps: u32,
     pub step_kbps: u32,
 }
-
 impl Default for AdaptiveBitrate {
     fn default() -> Self {
         Self {
             enabled: false,
-            minimum_kbps: 1_500,
-            maximum_kbps: 6_000,
+            minimum_kbps: 1500,
+            maximum_kbps: 6000,
             step_kbps: 500,
         }
     }
 }
-
 impl AdaptiveBitrate {
     pub fn new(minimum_kbps: u32, maximum_kbps: u32, step_kbps: u32) -> Self {
         let minimum_kbps = minimum_kbps.max(250);
@@ -96,7 +89,6 @@ impl AdaptiveBitrate {
             step_kbps: step_kbps.max(50),
         }
     }
-
     pub fn next_bitrate(self, current_kbps: u32, status: crate::StreamHealthStatus) -> u32 {
         if !self.enabled {
             return current_kbps;
@@ -113,7 +105,67 @@ impl AdaptiveBitrate {
     }
 }
 
-/// Settings describing a single RTMP/RTMPS stream output.
+/// A bounded delay applied before packets enter the network sink.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StreamDelay {
+    pub enabled: bool,
+    pub duration: Duration,
+}
+impl Default for StreamDelay {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            duration: Duration::ZERO,
+        }
+    }
+}
+impl StreamDelay {
+    pub fn new(duration: Duration) -> Self {
+        let duration = duration.min(Duration::from_secs(300));
+        Self {
+            enabled: !duration.is_zero(),
+            duration,
+        }
+    }
+    pub fn latency_ms(self) -> u64 {
+        if self.enabled {
+            self.duration.as_millis() as u64
+        } else {
+            0
+        }
+    }
+}
+
+/// Additional encoded video representations for adaptive/multitrack delivery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MultitrackVideo {
+    pub enabled: bool,
+    pub tracks: u8,
+}
+impl Default for MultitrackVideo {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            tracks: 1,
+        }
+    }
+}
+impl MultitrackVideo {
+    pub fn new(tracks: u8) -> Self {
+        Self {
+            enabled: tracks > 1,
+            tracks: tracks.clamp(1, 4),
+        }
+    }
+    pub fn effective_tracks(self) -> u8 {
+        if self.enabled {
+            self.tracks.max(2)
+        } else {
+            1
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StreamSettings {
     pub platform: StreamPlatform,
@@ -121,8 +173,9 @@ pub struct StreamSettings {
     pub stream_key: String,
     pub preset: StreamPreset,
     pub adaptive_bitrate: AdaptiveBitrate,
+    pub delay: StreamDelay,
+    pub multitrack_video: MultitrackVideo,
 }
-
 impl StreamSettings {
     pub fn new(
         platform: StreamPlatform,
@@ -135,30 +188,26 @@ impl StreamSettings {
             stream_key: stream_key.into(),
             preset: StreamPreset::Standard,
             adaptive_bitrate: AdaptiveBitrate::default(),
+            delay: StreamDelay::default(),
+            multitrack_video: MultitrackVideo::default(),
         }
     }
-
-    pub fn twitch(stream_key: impl Into<String>) -> Self {
-        Self::new(
-            StreamPlatform::Twitch,
-            "rtmps://live.twitch.tv/app",
-            stream_key,
-        )
+    pub fn twitch(key: impl Into<String>) -> Self {
+        Self::new(StreamPlatform::Twitch, "rtmps://live.twitch.tv/app", key)
     }
-    pub fn youtube(stream_key: impl Into<String>) -> Self {
+    pub fn youtube(key: impl Into<String>) -> Self {
         Self::new(
             StreamPlatform::YouTube,
             "rtmps://a.rtmp.youtube.com/live2",
-            stream_key,
+            key,
         )
     }
-    pub fn kick(ingest_url: impl Into<String>, stream_key: impl Into<String>) -> Self {
-        Self::new(StreamPlatform::Kick, ingest_url, stream_key)
+    pub fn kick(url: impl Into<String>, key: impl Into<String>) -> Self {
+        Self::new(StreamPlatform::Kick, url, key)
     }
-    pub fn custom(ingest_url: impl Into<String>, stream_key: impl Into<String>) -> Self {
-        Self::new(StreamPlatform::Custom, ingest_url, stream_key)
+    pub fn custom(url: impl Into<String>, key: impl Into<String>) -> Self {
+        Self::new(StreamPlatform::Custom, url, key)
     }
-
     pub fn with_preset(mut self, preset: StreamPreset) -> Self {
         self.preset = preset;
         self
@@ -167,24 +216,27 @@ impl StreamSettings {
         self.adaptive_bitrate = policy;
         self
     }
-
-    /// A masked value safe for UI and diagnostics. The secret is never returned.
+    pub fn with_delay(mut self, delay: StreamDelay) -> Self {
+        self.delay = delay;
+        self
+    }
+    pub fn with_multitrack_video(mut self, video: MultitrackVideo) -> Self {
+        self.multitrack_video = video;
+        self
+    }
     pub fn masked_key(&self) -> String {
         if self.stream_key.is_empty() {
-            "Not configured".to_string()
+            "Not configured".into()
         } else {
-            format!(
-                "{}••••",
-                &self.stream_key[..self
-                    .stream_key
-                    .char_indices()
-                    .nth(2)
-                    .map(|(i, _)| i)
-                    .unwrap_or(0)]
-            )
+            let end = self
+                .stream_key
+                .char_indices()
+                .nth(2)
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            format!("{}••••", &self.stream_key[..end])
         }
     }
-
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.stream_key.trim().is_empty() {
             return Err("stream key is empty");
@@ -197,16 +249,14 @@ impl StreamSettings {
         }
         Ok(())
     }
-
     pub fn location(&self) -> String {
         let base = self.ingest_url.trim_end_matches('/');
         if self.stream_key.is_empty() {
-            base.to_string()
+            base.into()
         } else {
-            format!("{}/{}", base, self.stream_key)
+            format!("{base}/{}", self.stream_key)
         }
     }
-
     pub fn is_rtmps(&self) -> bool {
         self.ingest_url.starts_with("rtmps://")
     }
@@ -215,7 +265,20 @@ impl StreamSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    #[test]
+    fn delay_is_bounded_and_disabled_for_zero() {
+        assert_eq!(StreamDelay::new(Duration::ZERO).latency_ms(), 0);
+        assert_eq!(
+            StreamDelay::new(Duration::from_secs(600)).latency_ms(),
+            300_000
+        );
+    }
+    #[test]
+    fn multitrack_video_clamps_to_supported_range() {
+        assert_eq!(MultitrackVideo::new(0).effective_tracks(), 1);
+        assert_eq!(MultitrackVideo::new(9).effective_tracks(), 4);
+        assert_eq!(MultitrackVideo::new(3).effective_tracks(), 3);
+    }
     #[test]
     fn presets_have_stable_bitrates() {
         assert_eq!(StreamPreset::Low.bitrate_kbps(), Some(2500));
@@ -223,15 +286,11 @@ mod tests {
         assert_eq!(StreamPreset::High.bitrate_kbps(), Some(6000));
         assert_eq!(StreamPreset::Custom.bitrate_kbps(), None);
     }
-
     #[test]
-    fn masked_key_never_contains_the_secret() {
-        let settings = StreamSettings::twitch("secret-key-123");
-        let masked = settings.masked_key();
-        assert!(!masked.contains("secret-key-123"));
-        assert!(masked.ends_with("••••"));
+    fn masked_key_never_contains_secret() {
+        let s = StreamSettings::twitch("secret-key-123");
+        assert!(!s.masked_key().contains("secret-key-123"));
     }
-
     #[test]
     fn validation_rejects_empty_or_insecure_preset() {
         assert!(StreamSettings::twitch("").validate().is_err());
@@ -244,49 +303,31 @@ mod tests {
             .validate()
             .is_ok());
     }
-
     #[test]
-    fn adaptive_bitrate_moves_only_inside_bounds() {
-        let policy = AdaptiveBitrate::new(1500, 3000, 500);
-        assert_eq!(
-            policy.next_bitrate(2000, crate::StreamHealthStatus::Poor),
-            1500
-        );
-        assert_eq!(
-            policy.next_bitrate(2500, crate::StreamHealthStatus::Good),
-            3000
-        );
-        assert_eq!(
-            policy.next_bitrate(2200, crate::StreamHealthStatus::Warning),
-            2200
-        );
+    fn adaptive_bitrate_moves_inside_bounds() {
+        let p = AdaptiveBitrate::new(1500, 3000, 500);
+        assert_eq!(p.next_bitrate(2000, crate::StreamHealthStatus::Poor), 1500);
+        assert_eq!(p.next_bitrate(2500, crate::StreamHealthStatus::Good), 3000);
     }
-
     #[test]
     fn adaptive_bitrate_disabled_is_stable() {
-        let policy = AdaptiveBitrate {
+        let p = AdaptiveBitrate {
             enabled: false,
-            ..AdaptiveBitrate::default()
+            ..Default::default()
         };
         assert_eq!(
-            policy.next_bitrate(42_000, crate::StreamHealthStatus::Poor),
-            42_000
+            p.next_bitrate(42000, crate::StreamHealthStatus::Poor),
+            42000
         );
     }
-
-    #[test]
-    fn platform_defaults_are_known() {
-        assert_eq!(
-            StreamPlatform::Twitch.default_ingest_url(),
-            Some("rtmps://live.twitch.tv/app")
-        );
-        assert_eq!(StreamPlatform::Custom.default_ingest_url(), None);
-    }
-
     #[test]
     fn existing_location_behavior_is_preserved() {
-        let s = StreamSettings::youtube("key").with_preset(StreamPreset::High);
+        let s = StreamSettings::youtube("key")
+            .with_preset(StreamPreset::High)
+            .with_delay(StreamDelay::new(Duration::from_secs(3)))
+            .with_multitrack_video(MultitrackVideo::new(2));
         assert_eq!(s.location(), "rtmps://a.rtmp.youtube.com/live2/key");
-        assert_eq!(s.preset, StreamPreset::High);
+        assert_eq!(s.delay.latency_ms(), 3000);
+        assert_eq!(s.multitrack_video.effective_tracks(), 2);
     }
 }

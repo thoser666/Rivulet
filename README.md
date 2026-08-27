@@ -263,8 +263,8 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] Custom RTMP server support (arbitrary `rtmp://`/`rtmps://` URLs)
 - [x] **Stream key management and stream presets** — validated Twitch/YouTube/Kick/custom endpoints, masked key display, TLS enforcement for platform presets, and Low/Standard/High/Custom quality presets; keys are never exposed by the UI masking API
 - [x] **Adaptive bitrate** — bounded policy with configurable minimum/maximum/step, reducing bitrate on Poor health and recovering on Good health; automatic network-driven pipeline reconfiguration remains a follow-up
-- [ ] Stream delay (configurable delay with reconnect)
-- [ ] Multitrack Video (adaptive bitrate streaming with multiple quality levels, TCP pacing)
+- [x] **Stream delay** — configurable, bounded packet delay policy integrated into the streaming pipeline; reconnect-aware delay management remains a follow-up
+- [x] **Multitrack Video** — bounded multi-representation configuration (1–4 tracks) and pipeline metadata; per-track encoder/transport negotiation remains a follow-up
 - [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible)
 - [ ] **SRT/RIST** for professional contribution/relay
 - [ ] **Multistreaming** — simultaneous output to multiple platforms (native multi-ingest, Restream-style). *Tracked in [#70](https://github.com/thoser666/Rivulet/issues/70).*

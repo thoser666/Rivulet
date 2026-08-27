@@ -117,11 +117,17 @@ Review the complete lifecycle on every supported streaming platform or protocol:
   lowers quality on Poor health, and recovers conservatively on Good health; the
   current policy layer must not be presented as live encoder reconfiguration until
   that integration is complete.
+- Verify stream delay is opt-in, bounded, visible in status, and does not block the
+  UI; test zero, typical, and maximum accepted delay values.
+- Verify Multitrack Video clearly reports the selected track count and refuses
+  unsupported values; do not claim per-track transport negotiation until it is
+  implemented.
 - Test narrow windows and long platform/server names.
 
 Exit evidence: a redacted stream-health recording or screenshots, preset and
-validation results, adaptive-bitrate boundary tests, reconnect results, and a
-protocol/platform compatibility table.
+validation results, adaptive-bitrate boundary tests, delay-boundary tests,
+multitrack configuration tests, reconnect results, and a protocol/platform
+compatibility table.
 
 ### M4: Advanced Output and Capture
 
