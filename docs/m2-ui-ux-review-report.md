@@ -4,7 +4,7 @@
 - Review date (UTC): 2026-08-27
 - Reviewers: Rivulet maintainers (automated evidence review; manual platform execution noted below)
 - Profiles executed: P1–P5 evidence matrix; automated cross-platform builds and quality checks
-- Overall result: `CONDITIONAL`
+- Overall result: `CONDITIONAL PASS`
 
 ## Summary
 
@@ -82,7 +82,7 @@ an open gate finding because the current M2 scope does not advertise native macO
 - [x] Conditional pass; all remaining findings are Medium and assigned to follow-up work.
 - [ ] Failed; release-blocking work remains.
 
-M2 may be treated as functionally complete, but the milestone must not be used to claim
-beta platform parity. The report is linked from the M2 roadmap gate in `README.md`; release
-notes should reference this report. Native projector routing, native source rendering, and
-macOS capture parity remain explicit post-M2 work.
+M2 is complete for its functional scope. The milestone must not be used to claim beta
+platform parity: native projector routing, native source rendering, browser adapters, and
+macOS capture parity remain explicit post-M2 work. The report is linked from the M2 roadmap
+gate in `README.md`; release notes should reference this report.

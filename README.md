@@ -115,7 +115,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 | --- | --- | --- | --- | --- |
 | M0 – Recording Foundation | Capture, Encoding, Audio, GUI | ✅ Done | — | [![M0](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F3&query=open_issues&label=M0&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/3) |
 | M1 – Solid Recording | Audio tracks, Hardware encoding, QoL, Overlay | ✅ Done (milestone closed) | — | [![M1](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F4&query=open_issues&label=M1&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/4) |
-| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | 🚧 In progress (Studio Mode done; UI/UX gate pending) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
+| M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | ✅ Complete (UI/UX gate passed conditionally; follow-ups assigned) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
 | M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | 🚧 In progress | — | [![M3](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F5&query=open_issues&label=M3&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/5) |
 | M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 🚧 Replay Buffer done | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 🚧 In progress (installers, signing, i18n done) | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
@@ -193,7 +193,7 @@ release channel only describes *how* the tag is built and published.
 
 ### 🎨 M2 – Scenes & Composition
 
-**Status: In progress**
+**Status: Complete (conditional UI/UX gate)**
 
 The core concept of OBS: scenes, sources, and transitions. Core scene
 organisation, collections/profiles, duplication, and source transforms are now
@@ -247,7 +247,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 
 **Goal:** The composable workspace OBS users expect.
 
-**M2 completion gate:** The functional M2 checklist is complete. Before M2 is marked done, run the cross-platform UI/UX review in [`docs/m2-ui-ux-review.md`](docs/m2-ui-ux-review.md), following the common and M2-specific criteria in [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md). The gate covers core workflows, source-selection clarity, scene composition, transitions, accessibility, responsive layouts, diagnostics, and platform-specific behavior. Record the result in `docs/m2-ui-ux-review-report.md`; no Blocker/Critical findings may remain and every High finding must be fixed or explicitly assigned to a follow-up milestone.
+**M2 completion gate:** ✅ Complete. The cross-platform UI/UX review followed [`docs/m2-ui-ux-review.md`](docs/m2-ui-ux-review.md) and the common/M2-specific criteria in [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md). The recorded result is a conditional pass in [`docs/m2-ui-ux-review-report.md`](docs/m2-ui-ux-review-report.md): zero Blocker/Critical findings and zero open High findings. Remaining Medium follow-ups (native projector routing, native source rendering, and native browser adapters) are explicitly assigned to M5/M8 and are not hidden.
 
 ---
 
