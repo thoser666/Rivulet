@@ -331,7 +331,9 @@ fn develop_required_checks_have_stable_job_names() {
         ci.contains("name: Pinning-Tests")
             && ci.contains("cargo test -p rivulet-core --test ci_pinning")
             && ci.contains("name: CI")
-            && ci.contains("needs: [lints, beta_gate, build_and_test, pinning_tests]"),
+            && ci.contains(
+                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke]"
+            ),
         "CI must expose dedicated Pinning-Tests and aggregate CI checks"
     );
 

@@ -12,7 +12,15 @@ trap cleanup EXIT
 
 docker network create "$NETWORK" >/dev/null
 docker run -d --name "rivulet-srt-receiver-$$" --network "$NETWORK" "$IMAGE" >/dev/null
-sleep 2
+# The receiver image is used as a network endpoint; wait until Docker DNS can
+# resolve the service before starting the sender.
+for _ in $(seq 1 20); do
+  if docker run --rm --network "$NETWORK" "$IMAGE" getent hosts "rivulet-srt-receiver-$$" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.5
+done
+
 
 docker run --rm --name "rivulet-srt-sender-$$" --network "$NETWORK" \
   -e GST_DEBUG=2 \
@@ -20,7 +28,7 @@ docker run --rm --name "rivulet-srt-sender-$$" --network "$NETWORK" \
     command -v gst-launch-1.0 >/dev/null
     gst-launch-1.0 -e \
       videotestsrc num-buffers=30 ! videoconvert ! x264enc tune=zerolatency ! mpegtsmux ! \
-      srtsink uri="srt://rivulet-srt-receiver:'"$PORT"'" wait-for-connection=false
+      srtsink uri="srt://rivulet-srt-receiver-'"$$"':'"$PORT"'" wait-for-connection=false
   '
 
 echo "SRT receiver smoke test passed (image: $IMAGE)"
