@@ -115,6 +115,7 @@ The top bar and navigation use the shared translucent `theme::glass_frame()`.
   immediate success/error feedback, keyboard/focus behavior, and a documented failure path.
   Validate it across the profiles and workflows in [`m2-ui-ux-review.md`](m2-ui-ux-review.md)
   before marking the related roadmap item complete.
+- **Scene hotkeys and auto-switching**: assign visible, conflict-free F1–F8 shortcuts per scene and ignore them while text input is focused. Auto-switch rules use exact window-title matching and must remain opt-in with visible feedback; native OS focus notifications remain a follow-up.
 - **Scene history**: expose undo/redo actions near scene management controls,
   disable them when unavailable, and keep `Ctrl+Z` / `Ctrl+Y` reserved for scene
   history unless a text field currently owns keyboard input.

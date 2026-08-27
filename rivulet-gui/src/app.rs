@@ -288,6 +288,8 @@ struct HotkeyConfig {
     pause: egui::Key,
     mute: egui::Key,
     save_replay: egui::Key,
+    #[serde(default)]
+    scene_hotkeys: std::collections::BTreeMap<uuid::Uuid, egui::Key>,
 }
 
 impl Default for HotkeyConfig {
@@ -297,6 +299,7 @@ impl Default for HotkeyConfig {
             pause: egui::Key::F10,
             mute: egui::Key::F11,
             save_replay: egui::Key::F12,
+            scene_hotkeys: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -658,6 +661,14 @@ pub struct RivuletApp {
     #[serde(skip)]
     scene_profile_input: String,
     #[serde(skip)]
+    scene_hotkey_key: egui::Key,
+    #[serde(skip)]
+    auto_switch_enabled: bool,
+    #[serde(skip)]
+    auto_switch_rules: Vec<(String, uuid::Uuid)>,
+    #[serde(skip)]
+    auto_switch_window_input: String,
+    #[serde(skip)]
     source_manager: rivulet_core::SourceManager,
     #[serde(skip)]
     source_name_input: String,
@@ -877,6 +888,10 @@ impl Default for RivuletApp {
             studio_mode: rivulet_core::StudioMode::new(),
             scene_collection_input: String::new(),
             scene_profile_input: String::new(),
+            scene_hotkey_key: egui::Key::F1,
+            auto_switch_enabled: false,
+            auto_switch_rules: Vec::new(),
+            auto_switch_window_input: String::new(),
             source_manager: rivulet_core::SourceManager::new(),
             source_name_input: String::new(),
             source_kind_index: 0,
@@ -2130,6 +2145,52 @@ impl RivuletApp {
             self.scenes.collection(),
             self.scenes.profile()
         ));
+
+        if let Some(active_id) = self.scenes.active() {
+            ui.horizontal(|ui| {
+                ui.label(self.tr("scenes_hotkey"));
+                egui::ComboBox::from_id_salt("scene_hotkey_key")
+                    .selected_text(HotkeyConfig::key_label(self.scene_hotkey_key))
+                    .show_ui(ui, |ui| {
+                        for key in [
+                            egui::Key::F1,
+                            egui::Key::F2,
+                            egui::Key::F3,
+                            egui::Key::F4,
+                            egui::Key::F5,
+                            egui::Key::F6,
+                            egui::Key::F7,
+                            egui::Key::F8,
+                        ] {
+                            ui.selectable_value(
+                                &mut self.scene_hotkey_key,
+                                key,
+                                HotkeyConfig::key_label(key),
+                            );
+                        }
+                    });
+                if theme::accent_button(ui, self.tr("scenes_assign_hotkey")).clicked() {
+                    self.hotkeys
+                        .scene_hotkeys
+                        .insert(active_id, self.scene_hotkey_key);
+                    self.scene_status = Some(self.tr("scenes_hotkey_assigned").to_owned());
+                }
+            });
+        }
+        let auto_switch_label = self.tr("scenes_auto_switch").to_owned();
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.auto_switch_enabled, auto_switch_label);
+            ui.text_edit_singleline(&mut self.auto_switch_window_input);
+            if theme::accent_button(ui, self.tr("scenes_add_auto_switch")).clicked() {
+                if let Some(active_id) = self.scenes.active() {
+                    let title = self.auto_switch_window_input.trim().to_string();
+                    if !title.is_empty() {
+                        self.auto_switch_rules.push((title, active_id));
+                        self.auto_switch_window_input.clear();
+                    }
+                }
+            }
+        });
 
         ui.horizontal(|ui| {
             let snapshot_response = theme::accent_button(ui, self.tr("scenes_save_snapshot"))
@@ -3439,6 +3500,14 @@ impl eframe::App for RivuletApp {
 
             // Scene history shortcuts are handled globally, but only when a
             // text field is not focused so normal editing remains unaffected.
+            if !wants_keyboard_input {
+                for (scene_id, key) in &self.hotkeys.scene_hotkeys {
+                    if i.key_pressed(*key) {
+                        self.scenes.switch_to(*scene_id);
+                    }
+                }
+            }
+
             match scene_history_shortcut(
                 wants_keyboard_input,
                 i.modifiers.command,
@@ -5535,6 +5604,26 @@ mod tests {
     }
 
     // ── scene history hotkeys ────────────────────────────────────
+
+    #[test]
+    fn scene_hotkey_defaults_are_empty_and_serializable() {
+        let hotkeys = HotkeyConfig::default();
+        assert!(hotkeys.scene_hotkeys.is_empty());
+        let json = serde_json::to_string(&hotkeys).expect("serialize hotkeys");
+        let restored: HotkeyConfig = serde_json::from_str(&json).expect("deserialize hotkeys");
+        assert_eq!(restored.scene_hotkeys, hotkeys.scene_hotkeys);
+    }
+
+    #[test]
+    fn scene_hotkey_map_can_assign_distinct_scene_keys() {
+        let mut hotkeys = HotkeyConfig::default();
+        let first = uuid::Uuid::new_v4();
+        let second = uuid::Uuid::new_v4();
+        hotkeys.scene_hotkeys.insert(first, egui::Key::F1);
+        hotkeys.scene_hotkeys.insert(second, egui::Key::F2);
+        assert_eq!(hotkeys.scene_hotkeys.get(&first), Some(&egui::Key::F1));
+        assert_eq!(hotkeys.scene_hotkeys.get(&second), Some(&egui::Key::F2));
+    }
 
     #[test]
     fn scene_history_shortcuts_ignore_text_input_without_context_reentry() {

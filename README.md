@@ -235,7 +235,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] **Undo/Redo** (Ctrl+Z / Ctrl+Y) — scene add/remove/rename/switch operations are undoable; toolbar buttons are disabled when no history is available
 - [x] **Scene collections & profiles** — named collection/profile context plus JSON import/export are available in the Scenes view; applying profile-specific encoder settings remains follow-up work. *Tracked in [#69](https://github.com/thoser666/Rivulet/issues/69).*
 - [x] **Duplicate scene / source** — one-click scene duplication with fresh identity and copied properties, plus source duplication with no accidental bindings; scene-local binding duplication is available from the composition editor
-- [ ] **Scene hotkeys & auto-switching** — a hotkey for every scene, plus window-focus-driven auto scene switching (OBS auto-scene-switcher workflow)
+- [x] **Scene hotkeys & auto-switching** — assign per-scene F1–F8 hotkeys and define window-title auto-switch rules; focus integration beyond title matching remains a follow-up
 - [x] Sources — window capture (monitor + individual windows, Linux & Windows)
 - [x] **Source composition** (layers, position, scaling, cropping — each scene stores its own layout per source; switching scenes auto-moves sources to their saved positions) — the Scenes view now provides a source/layer editor for per-scene transform, crop, visibility, lock, z-order, and duplication; native media rendering and transform copy/paste remain follow-up work
 - [x] **Transitions** — Cut and configurable Fade transitions are selectable in the Scenes view, with a non-blocking progress indicator; stinger transitions remain open
