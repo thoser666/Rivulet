@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.65.0-alpha.8] - 2026-08-27
+- feat(filters): add per-source chroma key controls
+- feat(m2): complete scene workflow controls and quality docs
+- fix(ci): satisfy redundant closure lint in scene export
+- feat(scenes): add profile workflows and scene overlays
+- feat(scenes): add scene hotkeys and auto-switch rules
+- feat(scenes): add collection import export and duplication workflows
+- fix(ci): prepare releases without protected branch push
+- fix(gui): satisfy live preview clippy
+- fix(core): satisfy snapshot clippy lint
+- feat(gui): add recording live preview
+- feat(gui): add deterministic scene snapshots
+- fix(ci): resolve current RustSec advisories
+- fix(ci): remove yanked image codec dependency
+- fix(ci): resolve cargo audit dependency failures
+- ci: add dependency gates and distribution readiness
+- ci: require security and scorecard checks
+- docs(ci): refresh generated action pin table
+- docs(security): document develop ruleset bypass
+- ci: add required develop branch checks
+
 ## [0.64.0-alpha.1] - 2026-08-25
 - feat(security): add OpenSSF Scorecard analysis
 
