@@ -117,7 +117,7 @@ impl ContributionSettings {
                 let endpoint = self.endpoint.trim_start_matches("rist://");
                 let (address, port) = endpoint.split_once(':').unwrap_or((endpoint, "1968"));
                 format!(
-                    "h264parse ! mpegtsmux alignment=7 ! ristsink address=\"{}\" port={} latency={} ",
+                    "h264parse ! mpegtsmux alignment=7 ! capsfilter caps=\\\"video/mpegts,systemstream=true,packetsize=188\\\" ! ristsink address=\"{}\" port={} latency={} ",
                     address,
                     port,
                     self.latency.as_millis()
