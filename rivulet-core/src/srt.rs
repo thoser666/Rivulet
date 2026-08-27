@@ -117,7 +117,7 @@ impl ContributionSettings {
                 let endpoint = self.endpoint.trim_start_matches("rist://");
                 let (address, port) = endpoint.split_once(':').unwrap_or((endpoint, "1968"));
                 format!(
-                    "h264parse ! mpegtsmux alignment=7 ! application/x-rtp,media=video,encoding-name=MP2T,clock-rate=90000,payload=33 ! ristsink address=\"{}\" port={} latency={} ",
+                    "h264parse ! mpegtsmux alignment=7 ! ristsink address=\"{}\" port={} latency={} ",
                     address,
                     port,
                     self.latency.as_millis()
@@ -191,6 +191,7 @@ mod tests {
         assert!(fragment.contains("address=\"receiver\""));
         assert!(fragment.contains("port=10080"));
         assert!(!fragment.contains("uri="));
+        assert!(!fragment.contains("application/x-rtp"));
     }
 
     #[test]

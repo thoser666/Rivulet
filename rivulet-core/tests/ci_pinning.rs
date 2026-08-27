@@ -334,7 +334,8 @@ fn rist_receiver_smoke_is_wired_up() {
     let smoke = read("scripts/rist-receiver-smoke.sh");
     assert!(!smoke.contains("ristsink uri="));
     assert!(smoke.contains("h264parse ! mpegtsmux alignment=7 !"));
-    assert!(smoke.contains("application/x-rtp") && smoke.contains("ristsink"));
+    assert!(smoke.contains("ristsink"));
+    assert!(!smoke.contains("application/x-rtp"));
 }
 
 #[test]
