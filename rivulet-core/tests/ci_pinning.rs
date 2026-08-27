@@ -331,7 +331,9 @@ fn rist_receiver_smoke_is_wired_up() {
     assert!(workflow.contains("rist-receiver-smoke.sh"));
     assert!(read("scripts/rist-receiver-smoke.sh").contains("ristsrc"));
     assert!(read("scripts/rist-receiver-smoke.sh").contains("address="));
-    assert!(!read("scripts/rist-receiver-smoke.sh").contains("ristsink uri="));
+    let smoke = read("scripts/rist-receiver-smoke.sh");
+    assert!(!smoke.contains("ristsink uri="));
+    assert!(smoke.contains("rtpmp2tpay ! ristsink"));
 }
 
 #[test]
@@ -352,10 +354,11 @@ fn resource_efficiency_gate_is_wired_up() {
 fn release_workflow_reuses_existing_release_branches() {
     let workflow = read(".github/workflows/release.yml");
     assert!(
-        workflow.contains("git ls-remote --exit-code --heads origin \"$RELEASE_BRANCH\"")
-            && workflow.contains("git switch -C \"$RELEASE_BRANCH\" \"origin/$RELEASE_BRANCH\"")
+        workflow.contains("git fetch origin \"$RELEASE_BRANCH\"")
+            && workflow.contains("git show-ref --verify")
+            && workflow.contains("git push --set-upstream origin \"HEAD:$RELEASE_BRANCH\"")
             && workflow.contains("git diff --cached --quiet")
-            && workflow.contains("git reset --hard HEAD"),
+            && workflow.contains("git reset --hard \"$REMOTE_TIP\""),
         "release workflow must handle retries on an existing release branch idempotently"
     );
 }

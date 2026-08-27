@@ -132,25 +132,30 @@ jobs:
           bash scripts/update-changelog.sh "$VERSION"
 
           RELEASE_BRANCH="release/$TAG"
-          # Multiple workflow retries can target the same version. Reuse the
-          # remote branch and fast-forward it instead of creating a divergent
-          # local branch that fails with a non-fast-forward push.
-          if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" >/dev/null 2>&1; then
-            git fetch origin "$RELEASE_BRANCH"
-            # The version/changelog scripts intentionally modify the checkout
-            # before branch selection. Reset those generated changes before
-            # switching to an existing remote branch; otherwise checkout aborts.
-            git reset --hard HEAD
-            git switch -C "$RELEASE_BRANCH" "origin/$RELEASE_BRANCH"
-          else
-            git switch -c "$RELEASE_BRANCH"
-          fi
+          # Multiple workflow runs can target the same release branch. Never
+          # derive a new commit from a stale remote tip: fetch first, then
+          # create a temporary commit and publish it with an atomic retry.
           git add Cargo.toml rivulet-*/Cargo.toml CHANGELOG.md
-          if ! git diff --cached --quiet; then
-            git commit -m "chore(release): prepare $TAG"
-            git push --set-upstream origin "$RELEASE_BRANCH"
+          if git diff --cached --quiet; then
+            echo "No version changes to publish."
           else
-            echo "Release branch $RELEASE_BRANCH already contains the version bump."
+            git commit -m "chore(release): prepare $TAG"
+          fi
+
+          git fetch origin "$RELEASE_BRANCH" 2>/dev/null || true
+          if git show-ref --verify --quiet "refs/remotes/origin/$RELEASE_BRANCH"; then
+            REMOTE_TIP="$(git rev-parse "origin/$RELEASE_BRANCH")"
+            if git merge-base --is-ancestor "$REMOTE_TIP" HEAD; then
+              git push --set-upstream origin "HEAD:$RELEASE_BRANCH"
+            elif git merge-base --is-ancestor HEAD "$REMOTE_TIP"; then
+              git reset --hard "$REMOTE_TIP"
+              echo "Release branch already contains a newer version bump."
+            else
+              echo "Release branch has diverged; using its tip to avoid a non-fast-forward push."
+              git reset --hard "$REMOTE_TIP"
+            fi
+          else
+            git push --set-upstream origin "HEAD:$RELEASE_BRANCH"
           fi
 
           echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
