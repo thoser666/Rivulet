@@ -240,7 +240,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] **Source composition** (layers, position, scaling, cropping — each scene stores its own layout per source; switching scenes auto-moves sources to their saved positions) — the Scenes view now provides a source/layer editor for per-scene transform, crop, visibility, lock, z-order, and duplication; native media rendering and transform copy/paste remain follow-up work
 - [x] **Transitions** — Cut and configurable Fade transitions are selectable in the Scenes view, with a non-blocking progress indicator; stinger transitions remain open
 - [x] **Scene overlays** — optional text overlay with localized controls in the Scenes view; image/PiP overlays remain follow-up work
-- [ ] Chroma key / green screen
+- [x] **Chroma key / green screen** — per-source enablement and similarity/smoothness controls; renderer-specific activation remains documented as a follow-up
 - [x] **Studio mode (preview/program)** — separate Preview and Program scene roles with a Take action using Cut/Fade transitions; composition edits target Preview while Program remains live
 - [x] **Multi-view & projectors** — optional scene-grid mode and projector-preview lifecycle controls; native fullscreen second-display routing remains a platform follow-up
 - [x] **Scene snapshot** — one-click export of the active scene or Studio Mode Preview as a PNG layout snapshot. Visible layers, scene-local transforms, opacity, visibility, z-order, collection, and profile are captured deterministically; native source-pixel rendering remains a follow-up when platform source renderers are connected. *Done: `rivulet-core/src/scene_snapshot.rs` + localized Scenes-view export button; unit tests cover ordering, visibility, dimensions, and alpha blending.*
@@ -281,7 +281,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 
 - [x] **Replay buffer / instant replay** — *essential for gaming streamers (clip moments without recording the whole session); ring buffer (H.264+AAC) with instant replay save via F12 hotkey or GUI button*
 - [ ] Virtual camera output
-- [ ] Video filters & effects (color correction, LUT, blur, sharpen, chroma key refinement)
+- [ ] Video filters & effects (color correction, LUT, blur, sharpen, chroma key refinement); basic chroma-key configuration is available per source
 - [ ] **Audio filters** (noise suppression RNNoise/NVIDIA, noise gate, compressor, limiter, expander, gain, 10-band EQ)
 - [ ] **Audio ducking** (sidechain compression — lower music/crowd while the mic speaks)
 - [ ] **VST 3.x support** — *231 votes on OBS Ideas, $3000 bounty; most modern plugins are VST3-only*

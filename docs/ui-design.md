@@ -116,6 +116,7 @@ The top bar and navigation use the shared translucent `theme::glass_frame()`.
   Validate it across the profiles and workflows in [`m2-ui-ux-review.md`](m2-ui-ux-review.md)
   before marking the related roadmap item complete.
 - **Scene hotkeys and auto-switching**: assign visible, conflict-free F1–F8 shortcuts per scene and ignore them while text input is focused. Auto-switch rules use exact window-title matching and must remain opt-in with visible feedback; native OS focus notifications remain a follow-up.
+- **Chroma key**: expose the filter per source with a clear opt-in state and bounded similarity/smoothness controls. Keep the filter disabled by default and show that renderer support is required for pixel-level removal.
 - **Scene overlays**: keep optional text overlays visually separate from recording burn-in overlays. Show the enabled state and editable text inline, and reserve image/PiP overlays for a later renderer-backed implementation.
 - **Scene history**: expose undo/redo actions near scene management controls,
   disable them when unavailable, and keep `Ctrl+Z` / `Ctrl+Y` reserved for scene

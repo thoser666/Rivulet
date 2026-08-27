@@ -1,6 +1,40 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Chroma-key settings for removing a target color from a video source.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ChromaKey {
+    pub enabled: bool,
+    pub color: [u8; 3],
+    pub similarity: f32,
+    pub smoothness: f32,
+    pub spill_reduction: f32,
+}
+
+impl Default for ChromaKey {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            color: [0, 255, 0],
+            similarity: 0.4,
+            smoothness: 0.1,
+            spill_reduction: 0.0,
+        }
+    }
+}
+
+impl ChromaKey {
+    pub fn pipeline_fragment(self) -> String {
+        if !self.enabled {
+            return String::new();
+        }
+        format!(
+            " ! chroma-key color=0x{:02X}{:02X}{:02X} similarity={:.3} smoothness={:.3} spill-reduction={:.3} ",
+            self.color[0], self.color[1], self.color[2], self.similarity.clamp(0.0, 1.0), self.smoothness.clamp(0.0, 1.0), self.spill_reduction.clamp(0.0, 1.0)
+        )
+    }
+}
+
 /// The kind of source (determines what data it carries and how it renders).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SourceKind {
@@ -102,6 +136,9 @@ pub struct Source {
     pub locked: bool,
     /// Z-order for rendering within a scene (higher = on top).
     pub z_order: i32,
+    /// Optional chroma-key filter applied by the renderer.
+    #[serde(default)]
+    pub chroma_key: ChromaKey,
 }
 
 impl Source {
@@ -114,6 +151,7 @@ impl Source {
             visible: true,
             locked: false,
             z_order: 0,
+            chroma_key: ChromaKey::default(),
         }
     }
 
@@ -521,6 +559,40 @@ mod tests {
     }
 
     // ── Source ───────────────────────────────────────────────────
+
+    #[test]
+    fn chroma_key_defaults_are_safe_and_disabled() {
+        let key = ChromaKey::default();
+        assert!(!key.enabled);
+        assert_eq!(key.color, [0, 255, 0]);
+        assert!(key.pipeline_fragment().is_empty());
+    }
+
+    #[test]
+    fn enabled_chroma_key_generates_bounded_pipeline_fragment() {
+        let key = ChromaKey {
+            enabled: true,
+            color: [10, 20, 30],
+            similarity: 2.0,
+            smoothness: -1.0,
+            spill_reduction: 0.5,
+        };
+        let fragment = key.pipeline_fragment();
+        assert!(fragment.contains("chroma-key"));
+        assert!(fragment.contains("color=0x0A141E"));
+        assert!(fragment.contains("similarity=1.000"));
+        assert!(fragment.contains("smoothness=0.000"));
+    }
+
+    #[test]
+    fn source_chroma_key_survives_serde_round_trip() {
+        let mut source = Source::new("Camera".to_string(), SourceKind::Webcam);
+        source.chroma_key.enabled = true;
+        source.chroma_key.similarity = 0.7;
+        let json = serde_json::to_string(&source).expect("serialize source");
+        let restored: Source = serde_json::from_str(&json).expect("deserialize source");
+        assert_eq!(restored.chroma_key, source.chroma_key);
+    }
 
     #[test]
     fn source_new_creates_unique_id_and_name() {

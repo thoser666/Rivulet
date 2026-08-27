@@ -2633,6 +2633,40 @@ impl RivuletApp {
         });
     }
 
+    fn draw_chroma_key_panel(&mut self, ui: &mut egui::Ui) {
+        let Some(source_id) = self.selected_composition_source else {
+            return;
+        };
+        let Some(source) = self.source_manager.get_source(source_id).cloned() else {
+            return;
+        };
+        ui.separator();
+        ui.label(egui::RichText::new(self.tr("chroma_key")).strong());
+        let mut enabled = source.chroma_key.enabled;
+        let label = self.tr("chroma_key_enabled").to_owned();
+        if ui.checkbox(&mut enabled, label).changed() {
+            if let Some(source) = self.source_manager.get_source_mut(source_id) {
+                source.chroma_key.enabled = enabled;
+            }
+        }
+        if enabled {
+            let mut similarity = source.chroma_key.similarity;
+            let mut smoothness = source.chroma_key.smoothness;
+            ui.add(
+                egui::Slider::new(&mut similarity, 0.0..=1.0)
+                    .text(self.tr("chroma_key_similarity")),
+            );
+            ui.add(
+                egui::Slider::new(&mut smoothness, 0.0..=1.0)
+                    .text(self.tr("chroma_key_smoothness")),
+            );
+            if let Some(source) = self.source_manager.get_source_mut(source_id) {
+                source.chroma_key.similarity = similarity;
+                source.chroma_key.smoothness = smoothness;
+            }
+        }
+    }
+
     fn draw_scene_overlay_panel(&mut self, ui: &mut egui::Ui) {
         ui.separator();
         ui.label(egui::RichText::new(self.tr("scene_overlay")).strong());
@@ -4611,6 +4645,7 @@ impl eframe::App for RivuletApp {
             if self.view == AppView::Scenes {
                 self.draw_source_composition(ui, &colors);
                 self.draw_scene_overlay_panel(ui);
+                self.draw_chroma_key_panel(ui);
                 self.draw_browser_source_panel(ui, &colors);
             }
 
