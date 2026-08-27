@@ -1,11 +1,16 @@
 {
+  "schema_version": 1,
   "profiles": [
     {
       "name": "ci-synthetic",
+      "platform": "linux",
       "cpu_delta_percent": 0.0,
+      "gpu_utilization_percent": 35.0,
       "memory_growth_mb": 0.0,
       "frame_time_regression_percent": 0.0,
-      "p99_frame_time_ms": 16.67
+      "p95_frame_time_ms": 16.67,
+      "p99_frame_time_ms": 16.67,
+      "one_percent_low_fps": 60.0
     }
   ]
 }

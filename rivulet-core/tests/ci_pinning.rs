@@ -342,7 +342,9 @@ fn resource_efficiency_gate_is_wired_up() {
     assert!(checker.contains("MAX_CPU_DELTA_PERCENT"));
     assert!(checker.contains("MAX_MEMORY_GROWTH_MB"));
     assert!(checker.contains("MAX_FRAME_TIME_REGRESSION_PERCENT"));
-    assert!(fixture.contains("ci-synthetic"));
+    assert!(fixture.contains("schema_version"));
+    assert!(fixture.contains("p95_frame_time_ms"));
+    assert!(fixture.contains("one_percent_low_fps"));
     assert!(ci.contains("resource-efficiency-check.py"));
 }
 
