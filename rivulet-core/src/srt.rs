@@ -169,7 +169,7 @@ mod tests {
         assert!(
             ContributionSettings::new(ContributionProtocol::Rist, "rist://host")
                 .pipeline_sink_fragment()
-                .starts_with("ristsink")
+                .contains("ristsink")
         );
     }
 

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use crate::{AdaptiveBitrate, StreamHealthStatus};
+use crate::{AdaptiveBitrate, StreamHealthStatus, StreamStats};
 
 /// A deterministic controller that avoids bitrate flapping during transient
 /// health changes. Callers supply a monotonic elapsed time so it is easy to
@@ -33,6 +33,16 @@ impl AdaptiveBitrateController {
             required_samples: required_samples.max(1),
             ..Self::default()
         }
+    }
+
+    pub fn update_from_telemetry(
+        &mut self,
+        policy: AdaptiveBitrate,
+        current_kbps: &mut u32,
+        telemetry: &StreamStats,
+        now: Duration,
+    ) -> bool {
+        self.update(policy, current_kbps, telemetry.status, now)
     }
 
     pub fn update(
@@ -127,6 +137,24 @@ impl DelaySupervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn telemetry_update_uses_observed_health_status() {
+        let policy = AdaptiveBitrate::new(1000, 3000, 500);
+        let mut controller = AdaptiveBitrateController::new(Duration::ZERO, 1);
+        let mut bitrate = 2000;
+        let mut telemetry = StreamStats::offline();
+        telemetry.status = StreamHealthStatus::Poor;
+        telemetry.sink_latency_ms = Some(250.0);
+        telemetry.queue_fill_ratio = Some(0.95);
+        assert!(controller.update_from_telemetry(
+            policy,
+            &mut bitrate,
+            &telemetry,
+            Duration::from_secs(1)
+        ));
+        assert_eq!(bitrate, 1500);
+    }
 
     #[test]
     fn bitrate_controller_requires_stable_samples_and_cooldown() {

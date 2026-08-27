@@ -370,8 +370,24 @@ impl RivuletEngine {
         let Some(health) = self.stream_health.as_mut() else {
             return false;
         };
-        let status = health.stats().status;
-        self.reconfigure_stream_bitrate(status)
+        let stats = health.stats();
+        let Some(settings) = self.stream_settings.as_ref() else {
+            return false;
+        };
+        let changed = self.bitrate_controller.update_from_telemetry(
+            settings.adaptive_bitrate,
+            &mut self.encoder_bitrate_kbps,
+            &stats,
+            self.reconnect_started
+                .map(|started| started.elapsed())
+                .unwrap_or_default(),
+        );
+        if changed {
+            if let Some(encoder) = self.pipeline.as_ref().and_then(|p| p.by_name("video_enc")) {
+                encoder.set_property("bitrate", self.encoder_bitrate_kbps);
+            }
+        }
+        changed
     }
 
     /// Process pending GStreamer bus messages without blocking the caller.

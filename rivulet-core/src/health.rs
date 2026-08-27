@@ -43,6 +43,12 @@ pub struct StreamStats {
     pub uptime_secs: u64,
     /// Fraction of dropped frames over all sent+dropped frames (0.0 .. 1.0).
     pub dropped_ratio: f64,
+    /// Bytes sent per second measured over the active window.
+    pub throughput_bps: f64,
+    /// Optional sink/network latency reported by the transport.
+    pub sink_latency_ms: Option<f64>,
+    /// Queue fill ratio reported by the transport, when available.
+    pub queue_fill_ratio: Option<f64>,
 }
 
 impl StreamStats {
@@ -57,6 +63,9 @@ impl StreamStats {
             fps: 0.0,
             uptime_secs: 0,
             dropped_ratio: 0.0,
+            throughput_bps: 0.0,
+            sink_latency_ms: None,
+            queue_fill_ratio: None,
         }
     }
 }
@@ -74,6 +83,8 @@ pub struct StreamHealthMonitor {
     frames_sent: u64,
     frames_dropped: u64,
     bytes_sent: u64,
+    sink_latency_ms: Option<f64>,
+    queue_fill_ratio: Option<f64>,
     /// Sliding window samples `(timestamp, bytes, frames)`.
     window: VecDeque<(Instant, u64, u64)>,
 }
@@ -97,6 +108,8 @@ impl StreamHealthMonitor {
             frames_sent: 0,
             frames_dropped: 0,
             bytes_sent: 0,
+            sink_latency_ms: None,
+            queue_fill_ratio: None,
             window: VecDeque::new(),
         }
     }
@@ -107,6 +120,16 @@ impl StreamHealthMonitor {
         self.bytes_sent = self.bytes_sent.saturating_add(bytes as u64);
         self.window.push_back((Instant::now(), bytes as u64, 1));
         self.prune_window();
+    }
+
+    /// Record transport telemetry from the active sink.
+    pub fn record_network_telemetry(
+        &mut self,
+        sink_latency_ms: Option<f64>,
+        queue_fill_ratio: Option<f64>,
+    ) {
+        self.sink_latency_ms = sink_latency_ms.map(|value| value.max(0.0));
+        self.queue_fill_ratio = queue_fill_ratio.map(|value| value.clamp(0.0, 1.0));
     }
 
     /// Record a frame that could not be pushed into the pipeline.
@@ -174,6 +197,9 @@ impl StreamHealthMonitor {
             fps,
             uptime_secs,
             dropped_ratio,
+            throughput_bps: kbps * 1000.0,
+            sink_latency_ms: self.sink_latency_ms,
+            queue_fill_ratio: self.queue_fill_ratio,
         }
     }
 
@@ -334,5 +360,16 @@ mod tests {
         assert_eq!(s.status, StreamHealthStatus::Offline);
         assert_eq!(s.frames_sent, 0);
         assert_eq!(s.kbps, 0.0);
+        assert_eq!(s.throughput_bps, 0.0);
+        assert!(s.sink_latency_ms.is_none());
+    }
+
+    #[test]
+    fn network_telemetry_is_clamped_and_exposed() {
+        let mut monitor = StreamHealthMonitor::new(2_500.0, 30.0);
+        monitor.record_network_telemetry(Some(-10.0), Some(2.0));
+        let stats = monitor.stats();
+        assert_eq!(stats.sink_latency_ms, Some(0.0));
+        assert_eq!(stats.queue_fill_ratio, Some(1.0));
     }
 }
