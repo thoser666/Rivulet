@@ -30,7 +30,7 @@ presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the fu
 ## RIST interoperability
 
 The RIST sink uses the plugin's supported `address`, `port`, and `latency`
-properties rather than the unsupported `uri` property. The smoke sender parses H.264 and muxes it as MPEG-TS before `ristsink`; the Ubuntu GStreamer RIST element accepts the MPEG-TS stream directly, while a raw H.264 stream cannot be linked to the RIST sink. CI now includes a dedicated RIST receiver smoke job using
+properties rather than the unsupported `uri` property. The smoke sender parses H.264, muxes it as MPEG-TS with packet alignment, and packetizes it with `rtpmp2tpay` before `ristsink`. This supplies the RTP caps required by the Ubuntu GStreamer RIST element; a raw `mpegtsmux ! ristsink` link is not accepted by that plugin. CI now includes a dedicated RIST receiver smoke job using
 `docker/rist-smoke/Dockerfile` and `scripts/rist-receiver-smoke.sh`. The test
 uses a finite MPEG-TS test source, a listener receiver, and a caller sender;
 plugin availability and real receiver compatibility remain explicit evidence.
