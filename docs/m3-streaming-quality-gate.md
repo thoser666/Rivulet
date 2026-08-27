@@ -45,6 +45,10 @@ transport fan-out and per-target health/retry isolation. The current GStreamer
 pipeline still has one RTMP sink; it must not be presented as simultaneous live
 fan-out until that transport integration is implemented.
 
+## SRT/RIST contribution contract
+
+The core now validates SRT/RIST contribution settings, bounds latency, validates optional SRT passphrases, redacts secrets from application-facing diagnostics, and emits protocol-specific sink fragments. This is the configuration slice; live GStreamer transport and interoperability evidence remain open.
+
 ## WHIP strategy spike
 
 The WHIP/WebRTC strategy is documented in [`whip-strategy-spike.md`](whip-strategy-spike.md), and its roadmap rationale is recorded in [`obs-vision-roadmap.md`](obs-vision-roadmap.md).
@@ -92,6 +96,7 @@ included in screenshots.
       rejected, and confirm each target's key remains masked.
 - [ ] Verify one target failure cannot stop healthy targets once transport fan-out
       is implemented; until then, record this as an open integration check.
+- [ ] Configure SRT and RIST endpoints and verify the protocol scheme, latency bounds, and passphrase validation.
 - [ ] Validate the WHIP endpoint and verify that non-loopback HTTP is rejected;
       confirm bearer tokens never appear in status, logs, or diagnostics.
 - [ ] Test the view at the M3 viewport profiles from the common quality-gate

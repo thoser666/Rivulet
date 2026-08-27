@@ -35,7 +35,9 @@ pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 pub mod metrics;
 pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 
+pub mod srt;
 pub mod stream;
+pub use srt::{ContributionProtocol, ContributionSettings};
 pub use stream::{
     parse_whip_response, AdaptiveBitrate, MultistreamSettings, MultitrackVideo, StreamDelay,
     StreamPlatform, StreamPreset, StreamSettings, StreamTarget, StreamTargetState, WhipSession,

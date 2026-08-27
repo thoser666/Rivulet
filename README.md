@@ -266,7 +266,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] **Stream delay** — configurable, bounded packet delay policy integrated into the streaming pipeline; reconnect-aware delay management remains a follow-up
 - [x] **Multitrack Video** — bounded multi-representation configuration (1–4 tracks) and pipeline metadata; per-track encoder/transport negotiation remains a follow-up
 - [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible) — SDP offer/answer signaling with secure endpoint validation is implemented via `WhipSettings::post_offer`; media transport still requires `webrtcbin`, ICE lifecycle, and SFU smoke tests. See [`docs/whip-strategy-spike.md`](docs/whip-strategy-spike.md).; vision-approved in [`docs/obs-vision-roadmap.md`](docs/obs-vision-roadmap.md)
-- [ ] **SRT/RIST** for professional contribution/relay
+- [x] **SRT/RIST configuration contract** — validated protocol-specific endpoints, bounded latency, passphrase validation/redaction, and sink-fragment generation; live GStreamer transport/interoperability remains open
 - [x] **Multistreaming** — validated multi-target configuration with up to four independently named RTMP/RTMPS destinations, duplicate-name protection, per-target secret masking, and removal support. Network fan-out, per-target live health, retry isolation, and UI wiring remain follow-up work. *Tracked in [#70](https://github.com/thoser666/Rivulet/issues/70).*
 - [ ] **NDI output** — LAN contribution/monitoring for production setups
 - [ ] **VOD track** — separate copyright-safe audio track for the VOD recording while streaming (Twitch VOD workflow)
@@ -427,7 +427,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 | Streaming (RTMP/RTMPS, platforms) | Partial (RTMPS Twitch/Kick/YouTube; validated presets and key handling) |
 | Multistreaming | Partial (validated multi-target model; transport fan-out and UI remain open) |
 | Adaptive bitrate | Partial (bounded policy implemented; live encoder reconfiguration remains open) |
-| WebRTC/WHIP, SRT/RIST, NDI | WHIP strategy spike complete; transport implementation open (M3) |
+| WebRTC/WHIP, SRT/RIST, NDI | WHIP signaling + SRT/RIST configuration contracts; live media transports open (M3) |
 | VOD track | Open (M3) |
 | Multi-track audio | Partial (2 tracks; VOD track planned M3) |
 | Plugin ecosystem & OBS compatibility | Open |
