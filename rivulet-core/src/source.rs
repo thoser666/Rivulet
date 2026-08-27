@@ -1,7 +1,8 @@
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// The kind of source (determines what data it carries and how it renders).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SourceKind {
     Image,
     Text,
@@ -36,7 +37,7 @@ impl SourceKind {
 /// Coordinates are in scene-local pixels.  The origin is the top-left
 /// corner of the scene canvas.  `opacity` ranges from 0.0 (fully
 /// transparent) to 1.0 (fully opaque).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transform {
     pub x: f32,
     pub y: f32,
@@ -89,7 +90,7 @@ impl Transform {
 
 /// A source in the application — identified by a UUID, carrying a kind,
 /// a default name, and per-source metadata.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Source {
     pub id: Uuid,
     pub name: String,
@@ -142,7 +143,7 @@ impl Source {
 /// Different scenes can position the same source differently.  When
 /// `transform_override` is `None`, the source's default transform is
 /// used.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SceneSource {
     pub source_id: Uuid,
     pub scene_id: Uuid,
@@ -154,7 +155,7 @@ pub struct SceneSource {
 }
 
 /// Per-scene crop rectangle in source pixels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Crop {
     pub left: u32,
     pub top: u32,
@@ -197,7 +198,7 @@ impl SceneSource {
 }
 
 /// Manages the collection of sources and their scene bindings.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SourceManager {
     sources: Vec<Source>,
     /// Scene → ordered list of scene-sources.
@@ -247,6 +248,28 @@ impl SourceManager {
 
     pub fn sources(&self) -> &[Source] {
         &self.sources
+    }
+
+    /// Copy a scene-local binding to a new source identity while preserving
+    /// its transform, crop, visibility, lock and z-order properties.
+    pub fn duplicate_binding(
+        &mut self,
+        source_id: Uuid,
+        scene_id: Uuid,
+        new_source_id: Uuid,
+    ) -> bool {
+        let Some(binding) = self
+            .bindings
+            .iter()
+            .find(|b| b.source_id == source_id && b.scene_id == scene_id)
+            .cloned()
+        else {
+            return false;
+        };
+        let mut copy = binding;
+        copy.source_id = new_source_id;
+        self.bindings.push(copy);
+        true
     }
 
     pub fn sources_by_kind(&self, kind: &SourceKind) -> Vec<&Source> {
@@ -586,6 +609,35 @@ mod tests {
         assert_ne!(original, duplicate);
         assert_eq!(mgr.get_source(duplicate).unwrap().name, "Camera copy");
         assert_eq!(mgr.source_count_in_scene(scene), 1);
+    }
+
+    #[test]
+    fn manager_duplicate_binding_preserves_scene_local_properties() {
+        let mut mgr = SourceManager::new();
+        let scene = Uuid::new_v4();
+        let original = mgr.add_source(Source::new("Original".to_string(), SourceKind::Image));
+        let copy = mgr.add_source(Source::new("Copy".to_string(), SourceKind::Image));
+        mgr.bind_source(
+            original,
+            scene,
+            Some(Transform::new(10.0, 20.0, 320.0, 240.0)),
+        );
+        mgr.set_crop(original, scene, Crop::new(1, 2, 3, 4));
+        mgr.set_visibility(original, scene, false);
+        mgr.set_locked(original, scene, true);
+        assert!(mgr.duplicate_binding(original, scene, copy));
+        let duplicate = mgr
+            .scene_sources(scene)
+            .into_iter()
+            .find(|binding| binding.source_id == copy)
+            .unwrap();
+        assert_eq!(
+            duplicate.transform_override,
+            Some(Transform::new(10.0, 20.0, 320.0, 240.0))
+        );
+        assert_eq!(duplicate.crop, Crop::new(1, 2, 3, 4));
+        assert!(!duplicate.visible);
+        assert!(duplicate.locked);
     }
 
     #[test]

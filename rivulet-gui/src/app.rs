@@ -676,6 +676,10 @@ pub struct RivuletApp {
     source_kind_index: usize,
     #[serde(skip)]
     selected_composition_source: Option<uuid::Uuid>,
+    #[serde(skip)]
+    scene_overlay_text: String,
+    #[serde(skip)]
+    scene_overlay_enabled: bool,
 
     // Auto-update
     #[serde(skip)]
@@ -896,6 +900,8 @@ impl Default for RivuletApp {
             source_name_input: String::new(),
             source_kind_index: 0,
             selected_composition_source: None,
+            scene_overlay_text: String::new(),
+            scene_overlay_enabled: false,
 
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
@@ -2608,11 +2614,8 @@ impl RivuletApp {
                                         .unwrap_or("Source")
                                 ),
                             ) {
-                                self.source_manager.bind_source(
-                                    new_id,
-                                    scene_id,
-                                    binding.transform_override.clone(),
-                                );
+                                self.source_manager
+                                    .duplicate_binding(source_id, scene_id, new_id);
                                 self.selected_composition_source = Some(new_id);
                             }
                         }
@@ -2620,6 +2623,16 @@ impl RivuletApp {
                 }
             });
         });
+    }
+
+    fn draw_scene_overlay_panel(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.label(egui::RichText::new(self.tr("scene_overlay")).strong());
+        let enabled_label = self.tr("scene_overlay_enabled").to_owned();
+        let text_hint = self.tr("scene_overlay_text").to_owned();
+        ui.checkbox(&mut self.scene_overlay_enabled, enabled_label);
+        ui.add(egui::TextEdit::singleline(&mut self.scene_overlay_text).hint_text(text_hint));
+        ui.label(self.tr("scene_overlay_hint"));
     }
 
     /// Configure the S5b browser source from the Scenes view. Rendering is
@@ -4575,6 +4588,7 @@ impl eframe::App for RivuletApp {
             }
             if self.view == AppView::Scenes {
                 self.draw_source_composition(ui, &colors);
+                self.draw_scene_overlay_panel(ui);
                 self.draw_browser_source_panel(ui, &colors);
             }
 
@@ -5604,6 +5618,13 @@ mod tests {
     }
 
     // ── scene history hotkeys ────────────────────────────────────
+
+    #[test]
+    fn scene_overlay_defaults_are_disabled_and_empty() {
+        let app = RivuletApp::default();
+        assert!(!app.scene_overlay_enabled);
+        assert!(app.scene_overlay_text.is_empty());
+    }
 
     #[test]
     fn scene_hotkey_defaults_are_empty_and_serializable() {
