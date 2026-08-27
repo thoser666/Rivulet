@@ -346,6 +346,8 @@ pub struct StreamTarget {
     pub settings: StreamSettings,
     /// Optional contribution transport. `None` preserves RTMP/RTMPS behavior.
     pub contribution: Option<crate::ContributionSettings>,
+    /// Whether this target's sink plugin was available when validated.
+    pub plugin_status: TargetPluginStatus,
 }
 
 impl StreamTarget {
@@ -354,12 +356,28 @@ impl StreamTarget {
             name: name.into(),
             settings,
             contribution: None,
+            plugin_status: TargetPluginStatus::NotApplicable,
         }
     }
 
     pub fn with_contribution(mut self, contribution: crate::ContributionSettings) -> Self {
+        self.plugin_status = TargetPluginStatus::Unavailable;
         self.contribution = Some(contribution);
         self
+    }
+
+    pub fn refresh_plugin_status(&mut self) {
+        self.plugin_status = self
+            .contribution
+            .as_ref()
+            .map(|value| {
+                if value.plugin_available() {
+                    TargetPluginStatus::Available
+                } else {
+                    TargetPluginStatus::Unavailable
+                }
+            })
+            .unwrap_or(TargetPluginStatus::NotApplicable);
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
@@ -376,6 +394,14 @@ impl StreamTarget {
     pub fn masked_key(&self) -> String {
         self.settings.masked_key()
     }
+}
+
+/// Availability of the sink plugin required by a target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetPluginStatus {
+    NotApplicable,
+    Available,
+    Unavailable,
 }
 
 /// Independent lifecycle state for one multistream output.
@@ -411,7 +437,7 @@ impl MultistreamSettings {
                 target
                     .contribution
                     .as_ref()
-                    .map(|contribution| contribution.pipeline_sink_fragment())
+                    .and_then(|contribution| contribution.validated_pipeline_sink_fragment().ok())
                     .unwrap_or_else(|| {
                         format!("rtmp2sink location=\\\"{}\\\"", target.settings.location())
                     })
@@ -691,6 +717,23 @@ mod tests {
                 .with_trickle_ice(true)
                 .trickle_ice
         );
+    }
+
+    #[test]
+    fn contribution_targets_refresh_plugin_status_without_affecting_rtmp() {
+        let mut rtmp = StreamTarget::new("rtmp", StreamSettings::custom("rtmp://host/live", "key"));
+        rtmp.refresh_plugin_status();
+        assert_eq!(rtmp.plugin_status, TargetPluginStatus::NotApplicable);
+        let mut srt = StreamTarget::new("srt", StreamSettings::custom("rtmp://host/live", "key"))
+            .with_contribution(crate::ContributionSettings::new(
+                crate::ContributionProtocol::Srt,
+                "srt://host:9000",
+            ));
+        srt.refresh_plugin_status();
+        assert!(matches!(
+            srt.plugin_status,
+            TargetPluginStatus::Available | TargetPluginStatus::Unavailable
+        ));
     }
 
     #[test]

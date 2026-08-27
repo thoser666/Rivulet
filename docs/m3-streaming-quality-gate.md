@@ -44,7 +44,7 @@ The multistreaming slice now builds a GStreamer fan-out with one named tee branc
 
 ## SRT/RIST contribution contract
 
-The core now validates SRT/RIST contribution settings, bounds latency, validates optional SRT passphrases, redacts secrets from application-facing diagnostics, and emits protocol-specific sink fragments. This is the configuration slice; The live transport path is now represented in the fan-out builder; plugin availability and receiver interoperability remain explicit runtime evidence requirements.
+The core now validates SRT/RIST contribution settings, bounds latency, validates optional SRT passphrases, redacts secrets from application-facing diagnostics, and emits protocol-specific sink fragments. The fan-out builder selects the matching sink element and refreshes plugin availability before runtime use; unavailable plugins are represented as a target-local `Unavailable` status and must not be reported as a healthy stream. Receiver interoperability remains an explicit runtime evidence requirement.
 
 ## WHIP strategy spike
 
@@ -57,7 +57,7 @@ open.
 
 ## Reconnect and live bitrate integration
 
-The reconnect supervisor is now connected to the engine's target status API. Callers handling GStreamer bus `Error`/`Eos` messages should call `handle_stream_target_failure`; after a successful sink restart they should call `handle_stream_target_live`. `SinkBusEvent` provides the tested mapping for fatal (`Error`/`Eos`), non-fatal (`Warning`), and successful state-change events. Retry state, limits, and exponential backoff are deterministic and fully tested. The pipeline-owner `service_streaming()` tick now polls bus messages, drains due reconnect commands, and invokes target-local branch rebuilds without moving GStreamer mutations to the worker thread.
+The reconnect supervisor is now connected to the engine's target status API. Callers handling GStreamer bus `Error`/`Eos` messages should call `handle_stream_target_failure`; after a successful sink restart they should call `handle_stream_target_live`. `SinkBusEvent` provides the tested mapping for fatal (`Error`/`Eos`), non-fatal (`Warning`), and successful state-change events. Retry state, limits, and exponential backoff are deterministic and fully tested. The pipeline-owner `service_streaming()` tick now polls bus messages, drains due reconnect commands, and invokes target-local branch rebuilds without moving GStreamer mutations to the worker thread. Rebuilds preserve the configured transport by reconstructing the validated RTMP/RTMPS, SRT, or RIST sink fragment rather than hard-coding RTMP. Duplicate failures are ignored while a retry is already pending, preventing retry storms.
 
 Adaptive bitrate remains bounded by the existing policy and updates the active `video_enc` property when present. Health polling, cooldown/hysteresis, and guaranteed execution on the GStreamer context remain follow-up work.
 
@@ -81,6 +81,16 @@ storage before stable releases. Until then, keys must be supplied through the
 existing protected runtime configuration and must never be committed, logged, or
 included in screenshots.
 
+## Release verification
+
+The alpha release workflow is intentionally two-phase: it first prepares a
+release branch, then builds all platform packages, and only after the matrix
+succeeds creates or reuses the tag and publishes the GitHub Release. A tag
+without a release is considered a failed run and must be repaired with
+`scripts/backfill-releases.sh --check` followed by the targeted backfill.
+Manual verification should inspect the workflow summary and confirm the tag,
+release URL, prerelease flag, and uploaded assets.
+
 ## Manual review checklist
 
 - [ ] Enter an empty key and confirm the stream action remains blocked with an
@@ -101,7 +111,7 @@ included in screenshots.
 - [ ] Verify one target failure cannot stop healthy targets; the supervisor contract
       already isolates retry state, while live bus-message wiring remains an
       integration check.
-- [ ] Configure SRT and RIST endpoints and verify the protocol scheme, latency bounds, and passphrase validation.
+- [ ] Configure SRT and RIST endpoints and verify the protocol scheme, latency bounds, passphrase validation, and target-local missing-plugin status.
 - [ ] Validate the WHIP endpoint and verify that non-loopback HTTP is rejected;
       confirm bearer tokens never appear in status, logs, or diagnostics.
 - [ ] Test the view at the M3 viewport profiles from the common quality-gate

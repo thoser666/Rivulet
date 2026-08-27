@@ -1,8 +1,6 @@
 //! Configuration and validation contracts for SRT/RIST contribution outputs.
 //!
-//! Transport negotiation is intentionally kept separate from this contract. The
-//! validated settings can be used by a future GStreamer srtsink/ristsink
-//! adapter without exposing secrets in diagnostics.
+//! Transport-specific settings for GStreamer `srtsink`/`ristsink` outputs.
 
 use std::time::Duration;
 
@@ -17,6 +15,13 @@ impl ContributionProtocol {
         match self {
             Self::Srt => "srt",
             Self::Rist => "rist",
+        }
+    }
+
+    pub fn sink_element_name(self) -> &'static str {
+        match self {
+            Self::Srt => "srtsink",
+            Self::Rist => "ristsink",
         }
     }
 }
@@ -82,12 +87,12 @@ impl ContributionSettings {
 
     /// Check whether the required GStreamer element is available in the
     /// current installation without constructing a pipeline.
+    pub fn sink_element_name(&self) -> &'static str {
+        self.protocol.sink_element_name()
+    }
+
     pub fn plugin_available(&self) -> bool {
-        let name = match self.protocol {
-            ContributionProtocol::Srt => "srtsink",
-            ContributionProtocol::Rist => "ristsink",
-        };
-        gstreamer::ElementFactory::find(name).is_some()
+        gstreamer::ElementFactory::find(self.sink_element_name()).is_some()
     }
 
     pub fn pipeline_sink_fragment(&self) -> String {
@@ -170,6 +175,12 @@ mod tests {
             settings.validated_pipeline_sink_fragment(),
             Err("contribution endpoint must use the selected protocol scheme")
         );
+    }
+
+    #[test]
+    fn sink_element_name_matches_transport() {
+        assert_eq!(ContributionProtocol::Srt.sink_element_name(), "srtsink");
+        assert_eq!(ContributionProtocol::Rist.sink_element_name(), "ristsink");
     }
 
     #[test]

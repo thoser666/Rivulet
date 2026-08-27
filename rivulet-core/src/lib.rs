@@ -48,8 +48,8 @@ pub mod stream;
 pub use srt::{ContributionProtocol, ContributionSettings};
 pub use stream::{
     parse_whip_response, AdaptiveBitrate, MultistreamSettings, MultitrackVideo, StreamDelay,
-    StreamPlatform, StreamPreset, StreamSettings, StreamTarget, StreamTargetState, WhipSession,
-    WhipSettings,
+    StreamPlatform, StreamPreset, StreamSettings, StreamTarget, StreamTargetState,
+    TargetPluginStatus, WhipSession, WhipSettings,
 };
 
 pub mod i18n;
@@ -284,7 +284,7 @@ impl RivuletEngine {
         let retry = self
             .reconnect_supervisor
             .as_mut()
-            .and_then(|supervisor| supervisor.mark_failed(target))
+            .and_then(|supervisor| supervisor.mark_failed_once(target))
             .unwrap_or(false);
         if let Some(index) = self
             .stream_targets
@@ -422,20 +422,27 @@ impl RivuletEngine {
         pipeline.remove(&sink)?;
         // Recreate the branch from the current target settings. The target
         // remains independent; failure is returned without stopping peers.
-        let target_settings = self
+        let target = self
             .stream_targets
             .as_ref()
             .and_then(|targets| targets.targets.get(index))
-            .map(|target| target.settings.clone())
+            .cloned()
             .ok_or_else(|| anyhow::anyhow!("stream target disappeared during rebuild"))?;
-        let rebuilt = gst::ElementFactory::make("rtmp2sink")
-            .name(&sink_name)
-            .property("location", target_settings.location())
-            .build()?;
+        let sink_fragment = target
+            .contribution
+            .as_ref()
+            .and_then(|contribution| contribution.validated_pipeline_sink_fragment().ok())
+            .unwrap_or_else(|| {
+                format!("rtmp2sink location=\\\"{}\\\"", target.settings.location())
+            });
+        let description = format!("{} name={sink_name}", sink_fragment);
+        let rebuilt = gst::parse::launch(&description)?
+            .downcast::<gst::Element>()
+            .map_err(|_| anyhow::anyhow!("rebuilt stream sink is not a GStreamer element"))?;
         pipeline.add(&rebuilt)?;
         rebuilt.sync_state_with_parent()?;
         self.pipeline = Some(pipeline);
-        self.handle_stream_target_live(target);
+        self.handle_stream_target_live(&target.name);
         Ok(true)
     }
 
@@ -742,14 +749,24 @@ impl RivuletEngine {
         let targets = self
             .stream_targets
             .as_ref()
-            .map(|targets| targets.targets.clone())
+            .map(|targets| {
+                targets
+                    .targets
+                    .iter()
+                    .cloned()
+                    .map(|mut target| {
+                        target.refresh_plugin_status();
+                        target
+                    })
+                    .collect::<Vec<_>>()
+            })
             .unwrap_or_else(|| vec![StreamTarget::new("primary", settings.clone())]);
         let mut fanout = String::from("flvmux name=mux streamable=true");
         for (index, target) in targets.iter().enumerate() {
             let sink_fragment = target
                 .contribution
                 .as_ref()
-                .map(|contribution| contribution.pipeline_sink_fragment())
+                .and_then(|contribution| contribution.validated_pipeline_sink_fragment().ok())
                 .unwrap_or_else(|| {
                     format!("rtmp2sink location=\\\"{}\\\"", target.settings.location())
                 });
@@ -2448,6 +2465,31 @@ mod tests {
         );
         engine.stop_recording();
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn streaming_pipeline_uses_contribution_sink_fragment() {
+        let mut engine = RivuletEngine::default();
+        let mut targets = MultistreamSettings::default();
+        targets
+            .add_target(
+                StreamTarget::new(
+                    "srt-target",
+                    StreamSettings::custom("rtmp://localhost/live", "unused"),
+                )
+                .with_contribution(ContributionSettings::new(
+                    ContributionProtocol::Srt,
+                    "srt://127.0.0.1:9000",
+                )),
+            )
+            .unwrap();
+        engine.set_stream_settings(Some(StreamSettings::custom("rtmp://localhost/live", "key")));
+        engine.set_multistream_settings(Some(targets));
+        engine.start_streaming();
+        let pipeline = engine.build_pipeline_str().unwrap();
+        assert!(pipeline.contains("srtsink"));
+        assert!(pipeline.contains("stream_sink_0"));
+        engine.stop_recording();
     }
 
     #[test]

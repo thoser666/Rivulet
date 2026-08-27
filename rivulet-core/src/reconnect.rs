@@ -143,6 +143,21 @@ impl StreamingReconnectSupervisor {
             None
         }
     }
+    /// Mark a target as failed only once while its retry is pending. This
+    /// prevents duplicate bus messages from multiplying retry workers.
+    pub fn mark_failed_once(&mut self, name: &str) -> Option<bool> {
+        self.targets
+            .iter_mut()
+            .find(|target| target.name == name)
+            .map(|target| {
+                if target.retry_at.is_some() || target.state == StreamTargetState::Connecting {
+                    false
+                } else {
+                    target.mark_failed(&self.policy)
+                }
+            })
+    }
+
     pub fn due_retries(&mut self, elapsed: Duration) -> Vec<String> {
         self.targets
             .iter_mut()
@@ -293,6 +308,15 @@ mod tests {
         assert_eq!(s.due_retries(Duration::from_secs(1)), vec!["target"]);
         assert_eq!(s.targets()[0].state, StreamTargetState::Connecting);
     }
+    #[test]
+    fn duplicate_failures_do_not_schedule_duplicate_retries() {
+        let mut supervisor =
+            StreamingReconnectSupervisor::new(vec!["target".into()], RetryPolicy::default());
+        assert_eq!(supervisor.mark_failed_once("target"), Some(true));
+        assert_eq!(supervisor.mark_failed_once("target"), Some(false));
+        assert_eq!(supervisor.targets()[0].attempts, 1);
+    }
+
     #[test]
     fn sink_name_resolution_is_strict_and_target_local() {
         assert_eq!(target_index_from_sink_name("stream_sink_2"), Some(2));
