@@ -39,7 +39,7 @@ presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the fu
 
 ## Multistreaming scope
 
-The multistreaming slice now builds a GStreamer fan-out with one named tee branch and RTMP sink per target. Target configuration and lifecycle state remain independent; the primary target is retained as a compatibility fallback. The reusable `StreamingReconnectSupervisor` provides per-target failure isolation, bounded exponential backoff, retry limits, and reset-on-success semantics. `RivuletEngine::poll_stream_reconnects()` exposes non-blocking due-retry claims for the runtime worker; actual branch reconstruction remains a follow-up integration check.
+The multistreaming slice now builds a GStreamer fan-out with one named tee branch and RTMP sink per target. Target configuration and lifecycle state remain independent; the primary target is retained as a compatibility fallback. The reusable `StreamingReconnectSupervisor` provides per-target failure isolation, bounded exponential backoff, retry limits, and reset-on-success semantics. `RivuletEngine::poll_stream_reconnects()` exposes non-blocking due-retry claims, and `ReconnectWorker` provides a cancellable timer that emits a target-local `RebuildBranch` command. The worker deliberately does not mutate GStreamer from a background thread; branch reconstruction must be performed by the pipeline owner on its GStreamer context.
 
 
 ## SRT/RIST contribution contract

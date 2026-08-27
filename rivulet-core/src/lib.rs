@@ -26,7 +26,8 @@ pub use replay::{save_replay, ReplayBuffer, ReplaySegment, ReplaySnapshot};
 pub mod reconnect;
 pub mod stream_runtime;
 pub use reconnect::{
-    RetryPolicy, SinkBusEvent, StreamingReconnectSupervisor, TargetReconnectState,
+    ReconnectCommand, ReconnectWorker, RetryPolicy, SinkBusEvent, StreamingReconnectSupervisor,
+    TargetReconnectState,
 };
 pub use stream_runtime::{AdaptiveBitrateController, DelaySupervisor};
 
