@@ -2310,9 +2310,11 @@ impl RivuletApp {
         else {
             return;
         };
-        match self.scenes.export_json().and_then(|json| {
-            std::fs::write(&path, json).map_err(|error| serde_json::Error::io(error))
-        }) {
+        match self
+            .scenes
+            .export_json()
+            .and_then(|json| std::fs::write(&path, json).map_err(serde_json::Error::io))
+        {
             Ok(()) => {
                 self.scene_status =
                     Some(self.tr_fmt("scenes_exported", &[path.display().to_string()]))
