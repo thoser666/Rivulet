@@ -56,7 +56,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 ### ✅ Currently Available
 
 - **Screen Capture** - Capture your primary monitor in real-time
-- **Window Capture** - Capture a single application window (games, etc.) in addition to full monitors, with a window picker in the GUI (Linux & Windows)
+- **Window Capture** - Capture a single application window (games, etc.) in addition to full monitors, with a window picker in the GUI (Linux & Windows); the Record view provides a live thumbnail so the target can be verified before starting
 - **Camera Capture** - Capture from USB/webcam devices via GStreamer's device provider API; dropdown selection of available cameras with configurable resolution and FPS; engine API `list_cameras()` / `start_camera_capture()`
 - **Game Capture** - Capture a specific game window using Windows Graphics Capture (Windows) or xcap window capture (Linux), with a checkbox toggle and window picker in the GUI
 - **Scene Organisation** - Folders (parent scenes), color coding, and search/filter for managing multiple scenes; engine API supports `parent` UUID and `color` u32 ARGB on `Scene` struct; engine API `list_game_windows()` / `start_game_capture()` (window listing uses `xdotool` on Linux)
@@ -77,7 +77,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Recording Overlay** - Burn-in timer (HH:MM:SS) and live FPS counter onto the recorded video via GStreamer `textoverlay`; toggle in the GUI, engine API `set_overlay_enabled(bool)` + `update_overlay_text(&str)`
 - **Replay Buffer / Instant Replay** - Ring buffer of the last N seconds (H.264+AAC, keyframe-aligned) kept while recording; save the clip as a standalone MP4 via the F12 hotkey or the GUI button; engine API `set_replay_duration()` / `save_replay()`
 - **Auto-Update** - Checks the GitHub Releases API on startup and manually for newer versions, downloads the matching platform package (MSI / AppImage / DMG) with a live progress bar and launches the installer; the alpha channel keeps up with every feature push
-- **Live Preview** - See what you're recording as you record
+- **Recording Live Preview** - The Record view shows a throttled thumbnail of the selected monitor or window before recording and continues with the actual encoder-bound frames while recording; the panel reports whether it is ready, waiting for the first frame, or active
 - **Sidebar Navigation** - Clean, DaVinci Resolve-style UI with a collapsible left sidebar (see [docs/ui-design.md](docs/ui-design.md))
   - Record - Main recording controls and preview
   - Mixer - Audio mixer with live level meter and volume sliders

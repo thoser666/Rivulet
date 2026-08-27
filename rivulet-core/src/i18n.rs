@@ -135,6 +135,11 @@ impl Locale {
                 ("stop_recording", "Stop recording"),
                 ("recording_in_progress", "Recording in progress ({0}s)"),
                 ("recording_metrics", "FPS {0} · Encoder load {1} · File {2}"),
+                ("recording_preview_title", "Recording preview"),
+                ("recording_preview_ready", "Preview ready"),
+                ("recording_preview_active", "Recording preview active"),
+                ("recording_preview_waiting", "Waiting for the first frame…"),
+                ("recording_preview_select_source", "Select a source to preview it."),
                 ("recording_saved", "Recording saved."),
                 ("no_source_selected", "No capture source selected."),
                 ("invalid_source", "Invalid selected source."),
@@ -429,6 +434,11 @@ impl Locale {
                     "recording_metrics",
                     "FPS {0} · Encoder-Last {1} · Datei {2}",
                 ),
+                ("recording_preview_title", "Aufnahmevorschau"),
+                ("recording_preview_ready", "Vorschau bereit"),
+                ("recording_preview_active", "Aufnahmevorschau aktiv"),
+                ("recording_preview_waiting", "Warte auf den ersten Frame…"),
+                ("recording_preview_select_source", "Wähle eine Quelle für die Vorschau aus."),
                 ("recording_saved", "Aufnahme gespeichert."),
                 ("no_source_selected", "Keine Aufnahmequelle ausgewählt."),
                 ("invalid_source", "Ausgewählte Quelle ist ungültig."),
@@ -753,6 +763,23 @@ mod tests {
         assert_eq!(de, "Aufnahme läuft (7s)");
         let missing = Locale::En.tr_fmt("does_not_exist", &["x".to_string()]);
         assert_eq!(missing, "does_not_exist");
+    }
+
+    #[test]
+    fn recording_preview_keys_translate_in_both_locales() {
+        assert_eq!(
+            Locale::En.tr("recording_preview_title"),
+            "Recording preview"
+        );
+        assert_eq!(Locale::De.tr("recording_preview_title"), "Aufnahmevorschau");
+        assert_eq!(
+            Locale::En.tr("recording_preview_select_source"),
+            "Select a source to preview it."
+        );
+        assert_eq!(
+            Locale::De.tr("recording_preview_select_source"),
+            "Wähle eine Quelle für die Vorschau aus."
+        );
     }
 
     #[test]

@@ -66,6 +66,40 @@ struct RegionPreview {
     drag_start: Option<egui::Pos2>,
 }
 
+/// Texture-backed thumbnail shared by all recording paths. It is updated from
+/// the frame that is sent to the encoder, so the user sees the effective crop
+/// and not a second, potentially different capture stream.
+#[derive(Default)]
+struct RecordingPreview {
+    texture: Option<egui::TextureHandle>,
+    width: u32,
+    height: u32,
+    last_update: Option<std::time::Instant>,
+}
+
+impl RecordingPreview {
+    fn update(&mut self, ctx: &egui::Context, data: &[u8], width: u32, height: u32) {
+        if !is_valid_rgba_frame(data, width, height) {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if !should_update_recording_preview(self.last_update, now) {
+            return;
+        }
+        let image =
+            egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], data);
+        if let Some(texture) = &mut self.texture {
+            texture.set(image, egui::TextureOptions::LINEAR);
+        } else {
+            self.texture =
+                Some(ctx.load_texture("recording_preview", image, egui::TextureOptions::LINEAR));
+        }
+        self.width = width;
+        self.height = height;
+        self.last_update = Some(now);
+    }
+}
+
 impl RegionPreview {
     fn new(ctx: &egui::Context, image: image::RgbaImage) -> Self {
         let full_width = image.width();
@@ -136,6 +170,13 @@ const GAME_PREVIEW_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::
 /// every frame).
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 const GAME_WINDOWS_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Maximum UI update rate for the recording thumbnail. The capture pipeline
+/// remains at its configured frame rate; only texture uploads are throttled.
+const RECORDING_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+const SOURCE_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Default maximum time to wait for the first captured frame before aborting
 /// a Windows recording with an error. The pipeline is only initialized once
@@ -387,6 +428,13 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
 #[cfg(target_os = "linux")]
 static TOKIO_RT: Lazy<Runtime> = Lazy::new(|| tokio::runtime::Runtime::new().unwrap());
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SourcePreviewTarget {
+    Monitor(String),
+    Window(String),
+}
+
 #[cfg(target_os = "linux")]
 enum BackendMessage {
     Stream(Stream, Fd),
@@ -545,6 +593,22 @@ pub struct RivuletApp {
     record_started: Instant,
     #[serde(skip)]
     last_frame_at: Option<Instant>,
+
+    /// Live thumbnail of the effective recording frame. The texture and
+    /// timestamps are runtime-only and therefore never persisted.
+    #[serde(skip)]
+    recording_preview: RecordingPreview,
+    #[serde(skip)]
+    pending_preview_frame: Option<RawFrame>,
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[serde(skip)]
+    source_preview_rx: Option<Receiver<RawFrame>>,
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[serde(skip)]
+    source_preview_stop: Option<Arc<AtomicBool>>,
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[serde(skip)]
+    source_preview_target: Option<SourcePreviewTarget>,
 
     /// Maximum time to wait for the first captured frame before aborting a
     /// Windows recording with an error. Configured at startup via the
@@ -783,6 +847,14 @@ impl Default for RivuletApp {
             last_error: None,
             record_started: Instant::now(),
             last_frame_at: None,
+            recording_preview: RecordingPreview::default(),
+            pending_preview_frame: None,
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            source_preview_rx: None,
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            source_preview_stop: None,
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            source_preview_target: None,
 
             no_frame_timeout: DEFAULT_NO_FRAME_TIMEOUT,
 
@@ -1733,12 +1805,17 @@ impl RivuletApp {
         let muted = self.is_muted;
         if let Some(rx) = &self.raw_rx {
             while let Ok(raw) = rx.try_recv() {
+                let frame = cropped_frame_for_region(
+                    self.region_enabled && self.selected_monitor_idx.is_some(),
+                    self.region,
+                    &raw,
+                )
+                .into_owned();
                 if !paused {
-                    let crop = self.region_enabled && self.selected_monitor_idx.is_some();
-                    let frame = cropped_frame_for_region(crop, self.region, &raw);
                     self.engine
                         .process_raw_frame(&frame.data, frame.width, frame.height);
                 }
+                self.pending_preview_frame = Some(frame);
                 self.last_frame_at = Some(Instant::now());
             }
         }
@@ -1749,6 +1826,11 @@ impl RivuletApp {
                     self.engine
                         .process_raw_frame(&frame.data, frame.width, frame.height);
                 }
+                self.pending_preview_frame = Some(RawFrame {
+                    data: frame.data.clone(),
+                    width: frame.width,
+                    height: frame.height,
+                });
                 self.last_frame_at = Some(Instant::now());
             }
         }
@@ -1759,6 +1841,11 @@ impl RivuletApp {
                     self.engine
                         .process_raw_frame(&frame.data, frame.width, frame.height);
                 }
+                self.pending_preview_frame = Some(RawFrame {
+                    data: frame.data.clone(),
+                    width: frame.width,
+                    height: frame.height,
+                });
                 self.last_frame_at = Some(Instant::now());
             }
         }
@@ -2530,6 +2617,237 @@ impl RivuletApp {
         applied
     }
 
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    fn stop_source_preview(&mut self) {
+        if let Some(stop) = &self.source_preview_stop {
+            stop.store(true, Ordering::SeqCst);
+        }
+        self.source_preview_stop = None;
+        self.source_preview_rx = None;
+        self.source_preview_target = None;
+    }
+
+    fn drain_source_preview(&mut self, ctx: &egui::Context) {
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        if let Some(rx) = &self.source_preview_rx {
+            let mut latest = None;
+            while let Ok(frame) = rx.try_recv() {
+                latest = Some(frame);
+            }
+            if let Some(frame) = latest {
+                self.recording_preview
+                    .update(ctx, &frame.data, frame.width, frame.height);
+            }
+        }
+    }
+
+    fn draw_recording_preview(&mut self, ui: &mut egui::Ui) {
+        let colors = theme::StatusColors::for_ui(ui);
+        ui.group(|ui| {
+            ui.label(egui::RichText::new(self.tr("recording_preview_title")).strong());
+            if let Some(preview) = &self.recording_preview.texture {
+                let max_width = ui.available_width().min(480.0).max(1.0);
+                let scale = (max_width / self.recording_preview.width.max(1) as f32)
+                    .min(0.5)
+                    .max(0.05);
+                let size = egui::vec2(
+                    self.recording_preview.width as f32 * scale,
+                    self.recording_preview.height as f32 * scale,
+                );
+                let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+                let alpha = theme::preview_fade_alpha(
+                    ui.ctx(),
+                    egui::Id::new("recording_preview_fade"),
+                    true,
+                );
+                ui.painter().image(
+                    preview.id(),
+                    rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::from_white_alpha((alpha * 255.0) as u8),
+                );
+                let state_key = if self.is_recording_active() {
+                    "recording_preview_active"
+                } else {
+                    "recording_preview_ready"
+                };
+                ui.label(
+                    egui::RichText::new(self.tr(state_key))
+                        .small()
+                        .color(colors.hint),
+                );
+            } else if self.is_recording_active() {
+                ui.colored_label(colors.warning, self.tr("recording_preview_waiting"));
+            } else {
+                ui.colored_label(colors.hint, self.tr("recording_preview_select_source"));
+            }
+        });
+    }
+
+    fn is_recording_active(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        if self.is_recording {
+            return true;
+        }
+        #[cfg(target_os = "windows")]
+        if self.is_windows_recording {
+            return true;
+        }
+        self.is_aux_recording
+    }
+
+    /// Update the shared thumbnail and drain a throttled preflight source.
+    fn update_recording_preview(&mut self, ctx: &egui::Context) {
+        // Keep the live thumbnail moving even when the rest of the UI is idle.
+        ctx.request_repaint_after(RECORDING_PREVIEW_INTERVAL);
+        if let Some(frame) = self.pending_preview_frame.take() {
+            self.recording_preview
+                .update(ctx, &frame.data, frame.width, frame.height);
+        }
+        self.drain_source_preview(ctx);
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        if self.is_recording_active() {
+            self.stop_source_preview();
+        } else {
+            self.ensure_source_preview();
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    fn ensure_source_preview(&mut self) {
+        let target = if self.use_game_capture {
+            None
+        } else if let Some(idx) = self.selected_monitor_idx_for_preview() {
+            self.preview_monitor_target(idx)
+        } else if let Some(idx) = self.selected_window_idx_for_preview() {
+            self.preview_window_target(idx)
+        } else {
+            None
+        };
+        if target != self.source_preview_target {
+            self.stop_source_preview();
+            if let Some(target) = target {
+                self.start_source_preview(target.clone());
+                self.source_preview_target = Some(target);
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn selected_monitor_idx_for_preview(&self) -> Option<usize> {
+        self.selected_monitor_idx
+    }
+    #[cfg(target_os = "linux")]
+    fn selected_monitor_idx_for_preview(&self) -> Option<usize> {
+        self.selected_monitor_idx
+    }
+    #[cfg(target_os = "windows")]
+    fn selected_window_idx_for_preview(&self) -> Option<usize> {
+        self.selected_window_idx
+    }
+    #[cfg(target_os = "linux")]
+    fn selected_window_idx_for_preview(&self) -> Option<usize> {
+        self.selected_window_idx
+    }
+
+    #[cfg(target_os = "windows")]
+    fn preview_monitor_target(&self, idx: usize) -> Option<SourcePreviewTarget> {
+        self.monitors
+            .get(idx)
+            .and_then(|m| m.name().ok())
+            .map(SourcePreviewTarget::Monitor)
+    }
+    #[cfg(target_os = "linux")]
+    fn preview_monitor_target(&self, idx: usize) -> Option<SourcePreviewTarget> {
+        self.monitors
+            .get(idx)
+            .and_then(|m| m.name().ok())
+            .map(SourcePreviewTarget::Monitor)
+    }
+    #[cfg(target_os = "windows")]
+    fn preview_window_target(&self, idx: usize) -> Option<SourcePreviewTarget> {
+        self.windows
+            .get(idx)
+            .and_then(|w| w.title().ok())
+            .map(SourcePreviewTarget::Window)
+    }
+    #[cfg(target_os = "linux")]
+    fn preview_window_target(&self, idx: usize) -> Option<SourcePreviewTarget> {
+        self.windows
+            .get(idx)
+            .and_then(|w| w.title().ok())
+            .map(SourcePreviewTarget::Window)
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    fn start_source_preview(&mut self, target: SourcePreviewTarget) {
+        let (tx, rx) = std::sync::mpsc::channel::<RawFrame>();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = Arc::clone(&stop);
+        match target {
+            SourcePreviewTarget::Monitor(name) => {
+                std::thread::spawn(move || {
+                    let monitors = xcap::Monitor::all().unwrap_or_default();
+                    let Some(monitor) = monitors
+                        .into_iter()
+                        .find(|m| m.name().unwrap_or_default() == name)
+                    else {
+                        return;
+                    };
+                    while !stop_thread.load(Ordering::SeqCst) {
+                        if let Ok(image) = monitor.capture_image() {
+                            if tx
+                                .send(RawFrame {
+                                    data: image.as_raw().to_vec(),
+                                    width: image.width(),
+                                    height: image.height(),
+                                })
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        std::thread::sleep(SOURCE_PREVIEW_INTERVAL);
+                    }
+                });
+            }
+            SourcePreviewTarget::Window(title) => {
+                std::thread::spawn(move || {
+                    while !stop_thread.load(Ordering::SeqCst) {
+                        let result = xcap::Window::all()
+                            .ok()
+                            .and_then(|windows| {
+                                windows
+                                    .into_iter()
+                                    .find(|w| w.title().ok().as_deref() == Some(title.as_str()))
+                            })
+                            .and_then(|window| window.capture_image().ok());
+                        if let Some(image) = result {
+                            if tx
+                                .send(RawFrame {
+                                    data: image.as_raw().to_vec(),
+                                    width: image.width(),
+                                    height: image.height(),
+                                })
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        std::thread::sleep(SOURCE_PREVIEW_INTERVAL);
+                    }
+                });
+            }
+        }
+        self.source_preview_rx = Some(rx);
+        self.source_preview_stop = Some(stop);
+    }
+
+    /// Draw a source thumbnail above the recording controls.
+    fn draw_recording_preview_panel(&mut self, ui: &mut egui::Ui) {
+        self.draw_recording_preview(ui);
+    }
+
     /// Live performance metrics line for the recording UI
     /// (FPS, encoder load, output file size).
     fn metrics_line(&mut self) -> String {
@@ -3101,12 +3419,17 @@ impl eframe::App for RivuletApp {
                     // at capture rates <= UI refresh every frame was eaten and
                     // no MP4 was ever written.
                     let ended = drain_frames_and_check_end(receiver, signal, |frame| {
+                        let frame = cropped_frame_for_region(
+                            self.region_enabled && self.selected_monitor_idx.is_some(),
+                            self.region,
+                            frame,
+                        )
+                        .into_owned();
                         if !self.is_paused {
-                            let crop = self.region_enabled && self.selected_monitor_idx.is_some();
-                            let frame = cropped_frame_for_region(crop, self.region, frame);
                             self.engine
                                 .process_raw_frame(&frame.data, frame.width, frame.height);
                         }
+                        self.pending_preview_frame = Some(frame);
                         self.last_frame_at = Some(Instant::now());
                     });
                     if ended {
@@ -3166,6 +3489,11 @@ impl eframe::App for RivuletApp {
                         self.engine
                             .process_raw_frame(&frame.data, frame.width, frame.height);
                     }
+                    self.pending_preview_frame = Some(RawFrame {
+                        data: frame.data.clone(),
+                        width: frame.width,
+                        height: frame.height,
+                    });
                     self.last_frame_at = Some(Instant::now());
                 }
             }
@@ -3176,6 +3504,11 @@ impl eframe::App for RivuletApp {
                         self.engine
                             .process_raw_frame(&frame.data, frame.width, frame.height);
                     }
+                    self.pending_preview_frame = Some(RawFrame {
+                        data: frame.data.clone(),
+                        width: frame.width,
+                        height: frame.height,
+                    });
                     self.last_frame_at = Some(Instant::now());
                 }
             }
@@ -3200,6 +3533,8 @@ impl eframe::App for RivuletApp {
                 self.last_error = Some(err);
             }
         }
+
+        self.update_recording_preview(ctx);
 
         egui::Panel::top("top_panel")
             .frame(theme::glass_frame(ui))
@@ -3247,6 +3582,7 @@ impl eframe::App for RivuletApp {
 
             // Hotkey hints (only on the Record view)
             if self.view == AppView::Record {
+                self.draw_recording_preview_panel(ui);
                 ui.horizontal(|ui| {
                     ui.label(
                         egui::RichText::new(format!(
@@ -4397,6 +4733,30 @@ fn game_window_preview_image(window_id: u64) -> Option<image::RgbaImage> {
     window.capture_image().ok()
 }
 
+/// Return whether a frame has a safe RGBA8 shape for an egui texture upload.
+fn is_valid_rgba_frame(data: &[u8], width: u32, height: u32) -> bool {
+    width > 0
+        && height > 0
+        && (width as usize)
+            .checked_mul(height as usize)
+            .and_then(|pixels| pixels.checked_mul(4))
+            == Some(data.len())
+}
+
+/// Decide whether a new frame may be uploaded to the recording thumbnail.
+///
+/// Capture continues at its configured rate, but texture uploads are limited
+/// to [`RECORDING_PREVIEW_INTERVAL`] so the preview cannot dominate the UI
+/// thread or GPU upload queue.
+fn should_update_recording_preview(
+    last_update: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> bool {
+    last_update
+        .map(|last| now.duration_since(last) >= RECORDING_PREVIEW_INTERVAL)
+        .unwrap_or(true)
+}
+
 /// Decide whether the live game-window preview needs a fresh frame.
 ///
 /// Extracted as a pure function so the refresh cadence is unit-testable:
@@ -5204,6 +5564,41 @@ mod tests {
     fn snapshot_file_name_uses_scene_fallback_for_blank_names() {
         assert_eq!(sanitize_file_name("   "), "scene");
         assert_eq!(sanitize_file_name("***"), "___");
+    }
+
+    // ── Recording preview validation and throttling ───────────────
+
+    #[test]
+    fn recording_preview_accepts_only_complete_rgba_frames() {
+        assert!(is_valid_rgba_frame(&[0; 16], 2, 2));
+        assert!(!is_valid_rgba_frame(&[0; 15], 2, 2));
+        assert!(!is_valid_rgba_frame(&[], 0, 2));
+        assert!(!is_valid_rgba_frame(&[], 2, 0));
+    }
+
+    #[test]
+    fn recording_preview_rejects_overflowing_dimensions() {
+        assert!(!is_valid_rgba_frame(&[], u32::MAX, u32::MAX));
+    }
+
+    #[test]
+    fn recording_preview_updates_without_a_previous_upload() {
+        let now = std::time::Instant::now();
+        assert!(should_update_recording_preview(None, now));
+    }
+
+    #[test]
+    fn recording_preview_does_not_upload_before_interval() {
+        let now = std::time::Instant::now();
+        let recent = now - std::time::Duration::from_millis(50);
+        assert!(!should_update_recording_preview(Some(recent), now));
+    }
+
+    #[test]
+    fn recording_preview_uploads_after_interval() {
+        let now = std::time::Instant::now();
+        let stale = now - (RECORDING_PREVIEW_INTERVAL + std::time::Duration::from_millis(1));
+        assert!(should_update_recording_preview(Some(stale), now));
     }
 
     // ── Game-window live preview refresh ─────────────────────────

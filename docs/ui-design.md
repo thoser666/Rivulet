@@ -62,8 +62,16 @@ The top bar and navigation use the shared translucent `theme::glass_frame()`.
   (via xcap) and refreshed on selection change or on a fixed interval
   (`GAME_PREVIEW_REFRESH_INTERVAL`), then drawn with
   `ui.painter().image(texture.id(), rect, uv, ...)`. Keep the refresh
-  decision (`should_refresh`) as pure logic so it is unit-testable, and show
-  a localized error when the frame cannot be captured.
+  decision (`should_refresh`) as pure logic so it is unit-testable, and show a
+  localized error when the frame cannot be captured.
+- **Recording thumbnail**: the Record view renders one shared thumbnail above
+  the recording controls. Before recording, it consumes a low-rate xcap
+  preflight stream for the selected monitor/window; during recording, it uses
+  the latest frame already handed to the encoder. Texture uploads are capped
+  at 5 Hz (`RECORDING_PREVIEW_INTERVAL`) and the preview has explicit ready,
+  waiting, and active states. Do not create a second full-rate recording
+  pipeline for the thumbnail.
+
 - **Live lists** (e.g. the game-window picker): while the picker is open its
   underlying list is re-enumerated periodically (`GAME_WINDOWS_REFRESH_INTERVAL`)
   so new/closed windows appear without manual action. Re-resolve the current
