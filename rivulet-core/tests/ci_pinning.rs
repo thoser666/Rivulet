@@ -325,6 +325,18 @@ fn dependabot_auto_merge_workflow_is_wired_up() {
 }
 
 #[test]
+fn resource_efficiency_gate_is_wired_up() {
+    let checker = read("scripts/resource-efficiency-check.py");
+    let fixture = read("scripts/resource-efficiency-sample.json");
+    let ci = read(".github/workflows/ci.yml");
+    assert!(checker.contains("MAX_CPU_DELTA_PERCENT"));
+    assert!(checker.contains("MAX_MEMORY_GROWTH_MB"));
+    assert!(checker.contains("MAX_FRAME_TIME_REGRESSION_PERCENT"));
+    assert!(fixture.contains("ci-synthetic"));
+    assert!(ci.contains("resource-efficiency-check.py"));
+}
+
+#[test]
 fn release_workflow_reuses_existing_release_branches() {
     let workflow = read(".github/workflows/release.yml");
     assert!(

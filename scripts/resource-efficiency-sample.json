@@ -1,0 +1,11 @@
+{
+  "profiles": [
+    {
+      "name": "ci-synthetic",
+      "cpu_delta_percent": 0.0,
+      "memory_growth_mb": 0.0,
+      "frame_time_regression_percent": 0.0,
+      "p99_frame_time_ms": 16.67
+    }
+  ]
+}

@@ -53,7 +53,10 @@ insufficient: p95/p99 frame time and 1% lows matter more for games.
 6. Investigate any regression before changing thresholds; do not hide it by
    averaging it away.
 
-CI can validate report schema, budgets, and deterministic policy tests. Real GPU,
+CI now runs `scripts/resource-efficiency-check.py` against a deterministic fixture,
+checking CPU delta, memory growth, p99 frame time, and frame-time regression.
+Hardware-specific reports should use the same JSON shape and be validated locally
+before attaching them to a milestone report. CI can validate report schema, budgets, and deterministic policy tests. Real GPU,
 power, and game measurements are hardware evidence and must be marked
 `PASS`, `BLOCKED`, or `N/A` with the reason.
 

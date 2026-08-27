@@ -27,6 +27,14 @@ presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the fu
   targets, validates each endpoint/key, rejects duplicate names, masks keys, and
   removes targets without mutating unrelated entries.
 
+## Resource-efficiency evidence
+
+The cross-cutting resource gate is executable via
+`scripts/resource-efficiency-check.py`. It validates CPU delta, memory growth,
+p99 frame time, and frame-time regression using a shared JSON report shape.
+The CI fixture is intentionally synthetic; real GPU/CPU measurements remain
+required as documented hardware evidence before claiming the M3 budget.
+
 ## Automated evidence
 
 - Stream model tests cover endpoint defaults, validation, masking, preset values,
