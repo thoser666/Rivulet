@@ -445,6 +445,10 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 
 ---
 
+## 🔄 OBS upstream feature monitoring
+
+A weekly GitHub Actions workflow checks the latest OBS release notes for new feature candidates and publishes an advisory report. Run it locally with `python3 scripts/check-obs-upstream.py --self-test` or inspect [`docs/obs-upstream-check.md`](docs/obs-upstream-check.md). Candidates require maintainer review before changing the parity checklist.
+
 ## 🧪 UI smoke tests
 
 The cross-platform headless UI smoke contract runs on Linux, Windows, and macOS and checks navigation, keyboard guards, GUI-visible diagnostics, screenshot invariants, secret redaction, focus/hover semantics, and theme-contrast hooks:

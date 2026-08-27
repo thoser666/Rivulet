@@ -1,0 +1,4 @@
+{
+  "tag_name": "30.0.0-test",
+  "body": "- Added a new projector mode\n- Fixed a crash\n- Supports multitrack video"
+}
