@@ -315,8 +315,8 @@ fn dependabot_auto_merge_workflow_is_wired_up() {
         "auto-merge must enable auto-merge so GitHub merges after required checks pass"
     );
     assert!(
-        wf.contains("gh pr review --approve"),
-        "auto-merge must approve the PR so required reviews don't block it"
+        !wf.contains("gh pr review --approve"),
+        "auto-merge must not attempt bot approval, which GitHub Actions tokens reject"
     );
     assert!(
         wf.contains("secrets.GITHUB_TOKEN"),
