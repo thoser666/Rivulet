@@ -203,11 +203,14 @@ Review perceived performance and hardware fallback behavior:
 - Startup, idle, preview, scene switch, and recording transitions remain
   responsive on supported hardware tiers.
 - CPU, GPU, memory, battery, and frame-time behavior is measured rather than
-  inferred from visual impression.
+  inferred from visual impression; apply the game-first targets in
+  [`resource-efficiency-goal.md`](resource-efficiency-goal.md).
 - GPU-direct and fallback paths show which backend is active and why.
 - Scaling, high-DPI rendering, color handling, and resize behavior remain stable.
 - Effects and compute filters provide progress or frame-budget feedback when
   they cannot keep up.
+- Capture and streaming leave bounded headroom for the game; p95/p99 frame-time,
+  idle CPU, memory stability, and fallback evidence are recorded.
 - Unsupported GPUs degrade gracefully without blank previews or silent output.
 
 Exit evidence: representative performance report, backend matrix, and screenshots

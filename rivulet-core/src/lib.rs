@@ -23,6 +23,13 @@ pub use game_capture::{GameCaptureConfig, GameCaptureFrame, GameWindow};
 pub mod replay;
 pub use replay::{save_replay, ReplayBuffer, ReplaySegment, ReplaySnapshot};
 
+pub mod reconnect;
+pub mod stream_runtime;
+pub use reconnect::{
+    RetryPolicy, SinkBusEvent, StreamingReconnectSupervisor, TargetReconnectState,
+};
+pub use stream_runtime::{AdaptiveBitrateController, DelaySupervisor};
+
 pub mod encoder;
 pub use encoder::{
     best_encoder, best_encoder_for_codec, detect_available_encoders,
@@ -123,6 +130,10 @@ pub struct RivuletEngine {
     stream_settings: Option<StreamSettings>,
     stream_targets: Option<MultistreamSettings>,
     stream_target_states: Vec<StreamTargetState>,
+    reconnect_supervisor: Option<StreamingReconnectSupervisor>,
+    bitrate_controller: AdaptiveBitrateController,
+    delay_supervisors: Vec<DelaySupervisor>,
+    reconnect_started: Option<Instant>,
     /// Video encoder used for the H.264 video branch. Defaults to the best
     /// available encoder detected at construction time.
     video_encoder: VideoEncoder,
@@ -172,6 +183,10 @@ impl Default for RivuletEngine {
             stream_settings: None,
             stream_targets: None,
             stream_target_states: Vec::new(),
+            reconnect_supervisor: None,
+            reconnect_started: None,
+            bitrate_controller: AdaptiveBitrateController::default(),
+            delay_supervisors: Vec::new(),
             video_encoder: best_encoder(),
             video_codec: VideoCodec::default(),
             preset: RecordingPreset::default(),
@@ -231,10 +246,87 @@ impl RivuletEngine {
             .as_ref()
             .map(|value| vec![StreamTargetState::Connecting; value.targets.len()])
             .unwrap_or_default();
+        self.reconnect_supervisor = self.stream_targets.as_ref().map(|value| {
+            StreamingReconnectSupervisor::new(
+                value.targets.iter().map(|target| target.name.clone()),
+                RetryPolicy::default(),
+            )
+        });
+        self.reconnect_started = self.reconnect_supervisor.as_ref().map(|_| Instant::now());
+        self.delay_supervisors = self
+            .stream_targets
+            .as_ref()
+            .map(|targets| {
+                targets
+                    .targets
+                    .iter()
+                    .map(|target| {
+                        DelaySupervisor::new(
+                            target.settings.delay.duration,
+                            Duration::from_secs(300),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
     }
 
     pub fn stream_target_states(&self) -> &[StreamTargetState] {
         &self.stream_target_states
+    }
+
+    /// Update one target from a GStreamer bus event and return whether the
+    /// target should be retried. This keeps bus handling target-local.
+    pub fn handle_stream_target_failure(&mut self, target: &str) -> bool {
+        let retry = self
+            .reconnect_supervisor
+            .as_mut()
+            .and_then(|supervisor| supervisor.mark_failed(target))
+            .unwrap_or(false);
+        if let Some(index) = self
+            .stream_targets
+            .as_ref()
+            .and_then(|targets| targets.targets.iter().position(|item| item.name == target))
+        {
+            self.stream_target_states[index] = StreamTargetState::Failed;
+        }
+        tracing::warn!(target, retry, "Streaming target failed");
+        retry
+    }
+
+    /// Mark a target live after its sink has connected or reconnected.
+    pub fn handle_stream_target_live(&mut self, target: &str) -> bool {
+        let found = self
+            .reconnect_supervisor
+            .as_mut()
+            .map(|supervisor| supervisor.mark_live(target))
+            .unwrap_or(false);
+        if let Some(index) = self
+            .stream_targets
+            .as_ref()
+            .and_then(|targets| targets.targets.iter().position(|item| item.name == target))
+        {
+            self.stream_target_states[index] = StreamTargetState::Live;
+        }
+        found
+    }
+
+    /// Poll non-blocking retry timers and claim targets whose backoff elapsed.
+    pub fn poll_stream_reconnects(&mut self) -> Vec<String> {
+        let Some(started) = self.reconnect_started else {
+            return Vec::new();
+        };
+        self.reconnect_supervisor
+            .as_mut()
+            .map(|supervisor| supervisor.due_retries(started.elapsed()))
+            .unwrap_or_default()
+    }
+
+    pub fn retryable_stream_targets(&self) -> Vec<&str> {
+        self.reconnect_supervisor
+            .as_ref()
+            .map(StreamingReconnectSupervisor::retryable_targets)
+            .unwrap_or_default()
     }
 
     /// Whether the engine is configured to stream.
@@ -305,6 +397,32 @@ impl RivuletEngine {
     /// The configured target video bitrate in kbit/s.
     /// Update the active encoder bitrate. Returns whether the encoder property
     /// was changed; callers can invoke this from their health polling loop.
+    pub fn update_stream_bitrate_from_health(
+        &mut self,
+        status: StreamHealthStatus,
+        elapsed: Duration,
+    ) -> bool {
+        let Some(settings) = self.stream_settings.as_ref() else {
+            return false;
+        };
+        let changed = self.bitrate_controller.update(
+            settings.adaptive_bitrate,
+            &mut self.encoder_bitrate_kbps,
+            status,
+            elapsed,
+        );
+        if changed {
+            if let Some(encoder) = self
+                .pipeline
+                .as_ref()
+                .and_then(|pipeline| pipeline.by_name("video_enc"))
+            {
+                encoder.set_property("bitrate", self.encoder_bitrate_kbps);
+            }
+        }
+        changed
+    }
+
     pub fn reconfigure_stream_bitrate(&mut self, status: StreamHealthStatus) -> bool {
         let Some(settings) = self.stream_settings.as_ref() else {
             return false;
@@ -493,10 +611,13 @@ impl RivuletEngine {
             .unwrap_or_else(|| vec![StreamTarget::new("primary", settings.clone())]);
         let mut fanout = String::from("flvmux name=mux streamable=true");
         for (index, target) in targets.iter().enumerate() {
-            fanout.push_str(&format!(
-                " ! tee name=stream_tee_{index} stream_tee_{index}. ! queue{} ! rtmp2sink name=stream_sink_{index} location=\\\"{}\\\"",
-                delay,
+            let sink = format!(
+                "rtmp2sink name=stream_sink_{index} location=\\\"{}\\\"",
                 target.settings.location()
+            );
+            fanout.push_str(&format!(
+                " ! tee name=stream_tee_{index} stream_tee_{index}. ! queue{} ! {}",
+                delay, sink
             ));
         }
         s.push_str(&fanout);
@@ -1057,6 +1178,9 @@ impl RivuletEngine {
         self.output_path = None;
         self.stream_health = None;
         self.recording_metrics = None;
+        self.reconnect_supervisor = None;
+        self.reconnect_started = None;
+        self.delay_supervisors.clear();
         self.is_recording = false;
         // Drop the buffered replay data: a clip is only meaningful while the
         // session that produced it is running. The replay setting itself

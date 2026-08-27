@@ -72,10 +72,47 @@ impl ContributionSettings {
             .is_some_and(|value| !value.is_empty())
     }
 
+    /// Return a GStreamer sink fragment after validating this contribution.
+    /// Invalid settings intentionally produce an empty fragment so callers can
+    /// skip an unavailable transport and report the validation error.
+    pub fn validated_pipeline_sink_fragment(&self) -> Result<String, &'static str> {
+        self.validate()?;
+        Ok(self.pipeline_sink_fragment())
+    }
+
+    /// Check whether the required GStreamer element is available in the
+    /// current installation without constructing a pipeline.
+    pub fn plugin_available(&self) -> bool {
+        let name = match self.protocol {
+            ContributionProtocol::Srt => "srtsink",
+            ContributionProtocol::Rist => "ristsink",
+        };
+        gstreamer::ElementFactory::find(name).is_some()
+    }
+
     pub fn pipeline_sink_fragment(&self) -> String {
         match self.protocol {
-            ContributionProtocol::Srt => format!("srtsink uri=\"{}\"", self.endpoint),
-            ContributionProtocol::Rist => format!("ristsink uri=\"{}\"", self.endpoint),
+            ContributionProtocol::Srt => {
+                let passphrase = self.passphrase.as_deref().filter(|value| !value.is_empty());
+                match passphrase {
+                    Some(value) => format!(
+                        "srtsink uri=\"{}\" passphrase=\"{}\" latency={} ",
+                        self.endpoint,
+                        value,
+                        self.latency.as_millis()
+                    ),
+                    None => format!(
+                        "srtsink uri=\"{}\" latency={} ",
+                        self.endpoint,
+                        self.latency.as_millis()
+                    ),
+                }
+            }
+            ContributionProtocol::Rist => format!(
+                "ristsink uri=\"{}\" latency={} ",
+                self.endpoint,
+                self.latency.as_millis()
+            ),
         }
     }
 }
@@ -123,6 +160,30 @@ mod tests {
             ContributionSettings::new(ContributionProtocol::Rist, "rist://host")
                 .pipeline_sink_fragment()
                 .starts_with("ristsink")
+        );
+    }
+
+    #[test]
+    fn validated_sink_rejects_wrong_scheme_before_pipeline_use() {
+        let settings = ContributionSettings::new(ContributionProtocol::Rist, "srt://host");
+        assert_eq!(
+            settings.validated_pipeline_sink_fragment(),
+            Err("contribution endpoint must use the selected protocol scheme")
+        );
+    }
+
+    #[test]
+    fn plugin_lookup_is_safe_and_protocol_specific() {
+        let _ = gstreamer::init();
+        let srt = ContributionSettings::new(ContributionProtocol::Srt, "srt://host");
+        let rist = ContributionSettings::new(ContributionProtocol::Rist, "rist://host");
+        assert_eq!(
+            srt.plugin_available(),
+            gstreamer::ElementFactory::find("srtsink").is_some()
+        );
+        assert_eq!(
+            rist.plugin_available(),
+            gstreamer::ElementFactory::find("ristsink").is_some()
         );
     }
 }

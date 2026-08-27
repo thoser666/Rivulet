@@ -39,7 +39,7 @@ presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the fu
 
 ## Multistreaming scope
 
-The multistreaming slice now builds a GStreamer fan-out with one named tee branch and RTMP sink per target. Target configuration and lifecycle state remain independent; the primary target is retained as a compatibility fallback. Production per-target bus monitoring and retry scheduling remain follow-up work.
+The multistreaming slice now builds a GStreamer fan-out with one named tee branch and RTMP sink per target. Target configuration and lifecycle state remain independent; the primary target is retained as a compatibility fallback. The reusable `StreamingReconnectSupervisor` now provides per-target failure isolation, bounded exponential backoff, retry limits, and reset-on-success semantics. Wiring bus messages and timers into the running GStreamer pipeline remains follow-up work.
 
 
 ## SRT/RIST contribution contract
@@ -54,6 +54,18 @@ bounded signaling timeout, explicit trickle-ICE configuration, and token-safe
 endpoint reporting. This is a strategy/configuration slice, not a live WebRTC
 transport; the implementation-phase Definition of Done in that document remains
 open.
+
+## Reconnect and live bitrate integration
+
+The reconnect supervisor is now connected to the engine's target status API. Callers handling GStreamer bus `Error`/`Eos` messages should call `handle_stream_target_failure`; after a successful sink restart they should call `handle_stream_target_live`. `SinkBusEvent` provides the tested mapping for fatal (`Error`/`Eos`), non-fatal (`Warning`), and successful state-change events. Retry state, limits, and exponential backoff are deterministic and fully tested. The actual asynchronous timer/branch rebuild remains platform-runtime work.
+
+Adaptive bitrate remains bounded by the existing policy and updates the active `video_enc` property when present. Health polling, cooldown/hysteresis, and guaranteed execution on the GStreamer context remain follow-up work.
+
+## Runtime supervision
+
+`StreamingReconnectSupervisor` now exposes non-blocking `due_retries()` polling, so a runtime worker can schedule branch-local reconnects without blocking the capture or UI thread. `SinkBusEvent` maps fatal sink events to the target-local retry state. `AdaptiveBitrateController` requires stable health samples and enforces a cooldown before changing the encoder bitrate. `DelaySupervisor` bounds and retains delayed media across a temporary disconnect.
+
+SRT/RIST settings now generate protocol-specific sink fragments including latency and, for SRT, the validated passphrase. `ContributionSettings::plugin_available()` provides a safe runtime check for `srtsink`/`ristsink` before a branch is started; missing plugins can therefore be reported per target instead of failing the complete fan-out. Receiver interoperability must still be verified on each supported platform.
 
 ## Scope boundary
 
@@ -86,8 +98,9 @@ included in screenshots.
       confirm the UI does not claim that RTMP/FLV is carrying multiple tracks yet.
 - [ ] Add multiple stream targets, verify duplicate names and invalid endpoints are
       rejected, and confirm each target's key remains masked.
-- [ ] Verify one target failure cannot stop healthy targets once transport fan-out
-      is implemented; until then, record this as an open integration check.
+- [ ] Verify one target failure cannot stop healthy targets; the supervisor contract
+      already isolates retry state, while live bus-message wiring remains an
+      integration check.
 - [ ] Configure SRT and RIST endpoints and verify the protocol scheme, latency bounds, and passphrase validation.
 - [ ] Validate the WHIP endpoint and verify that non-loopback HTTP is rejected;
       confirm bearer tokens never appear in status, logs, or diagnostics.
