@@ -125,7 +125,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build pinned SRT smoke image
-        run: docker build --pull=false -t rivulet-srt-smoke:ci docker/srt-smoke
+        run: docker build --pull=true -t rivulet-srt-smoke:ci docker/srt-smoke
       - name: Run SRT receiver smoke test
         env:
           SRT_SMOKE_IMAGE: rivulet-srt-smoke:ci
