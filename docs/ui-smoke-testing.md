@@ -31,6 +31,18 @@ recording error path, then attach redacted screenshots to the milestone review.
 Do not include stream keys, personal paths, or window titles containing private
 information.
 
+## egui regression snapshots
+
+The CI matrix also runs `rivulet-gui/tests/ui_regression.rs`. It verifies stable
+viewport contracts at 1280x800, 1024x768, and 800x600 plus deterministic
+interaction sequences for sidebar navigation, Tab focus cycling, Undo/Redo, and
+visible diagnostics.
+
+These are semantic snapshots rather than pixel goldens. They intentionally avoid
+font- and GPU-dependent PNG comparisons while still detecting accidental loss
+of required controls or interaction paths. Native visual evidence remains part
+of the milestone gate.
+
 ## Limitations
 
 This headless contract does not replace manual visual review or a native

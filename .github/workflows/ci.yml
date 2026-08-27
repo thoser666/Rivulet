@@ -402,6 +402,9 @@ jobs:
       - name: Cross-platform UI smoke test
         run: cargo test -p rivulet-gui --test ui_smoke --verbose
 
+      - name: egui UI regression snapshots
+        run: cargo test -p rivulet-gui --test ui_regression --verbose
+
       - name: Test
         run: cargo test --workspace --verbose
 
