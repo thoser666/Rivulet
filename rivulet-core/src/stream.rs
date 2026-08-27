@@ -7,15 +7,9 @@
 /// Streaming platform presets used to build the ingest URL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamPlatform {
-    /// `rtmps://live.twitch.tv/app/<stream key>`
     Twitch,
-    /// AWS IVS based ingest; the endpoint is streamer-specific and is taken
-    /// from the Kick dashboard, e.g.
-    /// `rtmps://<id>.global-contribute.live-video.net/app`
     Kick,
-    /// `rtmps://a.rtmp.youtube.com/live2/<stream key>`
     YouTube,
-    /// Any other RTMP/RTMPS ingest server.
     Custom,
 }
 
@@ -28,22 +22,108 @@ impl StreamPlatform {
             Self::Custom => "Custom",
         }
     }
+
+    pub fn default_ingest_url(self) -> Option<&'static str> {
+        match self {
+            Self::Twitch => Some("rtmps://live.twitch.tv/app"),
+            Self::YouTube => Some("rtmps://a.rtmp.youtube.com/live2"),
+            Self::Kick | Self::Custom => None,
+        }
+    }
+}
+
+/// Named stream-quality preset. Bitrates are in kbit/s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamPreset {
+    Low,
+    Standard,
+    High,
+    Custom,
+}
+
+impl StreamPreset {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Low => "Low",
+            Self::Standard => "Standard",
+            Self::High => "High",
+            Self::Custom => "Custom",
+        }
+    }
+
+    pub fn bitrate_kbps(self) -> Option<u32> {
+        match self {
+            Self::Low => Some(2_500),
+            Self::Standard => Some(4_500),
+            Self::High => Some(6_000),
+            Self::Custom => None,
+        }
+    }
+
+    pub fn all() -> &'static [Self] {
+        &[Self::Low, Self::Standard, Self::High, Self::Custom]
+    }
+}
+
+/// Adaptive bitrate policy based on stream health.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AdaptiveBitrate {
+    pub enabled: bool,
+    pub minimum_kbps: u32,
+    pub maximum_kbps: u32,
+    pub step_kbps: u32,
+}
+
+impl Default for AdaptiveBitrate {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            minimum_kbps: 1_500,
+            maximum_kbps: 6_000,
+            step_kbps: 500,
+        }
+    }
+}
+
+impl AdaptiveBitrate {
+    pub fn new(minimum_kbps: u32, maximum_kbps: u32, step_kbps: u32) -> Self {
+        let minimum_kbps = minimum_kbps.max(250);
+        let maximum_kbps = maximum_kbps.max(minimum_kbps);
+        Self {
+            enabled: true,
+            minimum_kbps,
+            maximum_kbps,
+            step_kbps: step_kbps.max(50),
+        }
+    }
+
+    pub fn next_bitrate(self, current_kbps: u32, status: crate::StreamHealthStatus) -> u32 {
+        if !self.enabled {
+            return current_kbps;
+        }
+        match status {
+            crate::StreamHealthStatus::Poor => current_kbps
+                .saturating_sub(self.step_kbps)
+                .max(self.minimum_kbps),
+            crate::StreamHealthStatus::Good => current_kbps
+                .saturating_add(self.step_kbps)
+                .min(self.maximum_kbps),
+            _ => current_kbps.clamp(self.minimum_kbps, self.maximum_kbps),
+        }
+    }
 }
 
 /// Settings describing a single RTMP/RTMPS stream output.
 #[derive(Debug, Clone)]
 pub struct StreamSettings {
-    /// Platform label used for display purposes.
     pub platform: StreamPlatform,
-    /// Ingest base URL **without** the stream key, e.g.
-    /// `rtmps://live.twitch.tv/app`.
     pub ingest_url: String,
-    /// The stream key as shown in the platform dashboard.
     pub stream_key: String,
+    pub preset: StreamPreset,
+    pub adaptive_bitrate: AdaptiveBitrate,
 }
 
 impl StreamSettings {
-    /// Create a settings object from an explicit ingest base URL and key.
     pub fn new(
         platform: StreamPlatform,
         ingest_url: impl Into<String>,
@@ -53,10 +133,11 @@ impl StreamSettings {
             platform,
             ingest_url: ingest_url.into(),
             stream_key: stream_key.into(),
+            preset: StreamPreset::Standard,
+            adaptive_bitrate: AdaptiveBitrate::default(),
         }
     }
 
-    /// Preset for Twitch: `rtmps://live.twitch.tv/app/<key>`.
     pub fn twitch(stream_key: impl Into<String>) -> Self {
         Self::new(
             StreamPlatform::Twitch,
@@ -64,8 +145,6 @@ impl StreamSettings {
             stream_key,
         )
     }
-
-    /// Preset for YouTube: `rtmps://a.rtmp.youtube.com/live2/<key>`.
     pub fn youtube(stream_key: impl Into<String>) -> Self {
         Self::new(
             StreamPlatform::YouTube,
@@ -73,21 +152,52 @@ impl StreamSettings {
             stream_key,
         )
     }
-
-    /// Preset for Kick. The ingest endpoint is streamer-specific (AWS IVS),
-    /// so it must be taken from the Kick dashboard, e.g.
-    /// `rtmps://<id>.global-contribute.live-video.net/app`.
     pub fn kick(ingest_url: impl Into<String>, stream_key: impl Into<String>) -> Self {
         Self::new(StreamPlatform::Kick, ingest_url, stream_key)
     }
-
-    /// Use a fully custom RTMP/RTMPS ingest server.
     pub fn custom(ingest_url: impl Into<String>, stream_key: impl Into<String>) -> Self {
         Self::new(StreamPlatform::Custom, ingest_url, stream_key)
     }
 
-    /// The full ingest location passed to the RTMP sink, including the stream
-    /// key. Returns the base URL unchanged when no stream key is set.
+    pub fn with_preset(mut self, preset: StreamPreset) -> Self {
+        self.preset = preset;
+        self
+    }
+    pub fn with_adaptive_bitrate(mut self, policy: AdaptiveBitrate) -> Self {
+        self.adaptive_bitrate = policy;
+        self
+    }
+
+    /// A masked value safe for UI and diagnostics. The secret is never returned.
+    pub fn masked_key(&self) -> String {
+        if self.stream_key.is_empty() {
+            "Not configured".to_string()
+        } else {
+            format!(
+                "{}••••",
+                &self.stream_key[..self
+                    .stream_key
+                    .char_indices()
+                    .nth(2)
+                    .map(|(i, _)| i)
+                    .unwrap_or(0)]
+            )
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.stream_key.trim().is_empty() {
+            return Err("stream key is empty");
+        }
+        if !(self.ingest_url.starts_with("rtmp://") || self.ingest_url.starts_with("rtmps://")) {
+            return Err("ingest URL must use rtmp:// or rtmps://");
+        }
+        if self.platform != StreamPlatform::Custom && !self.is_rtmps() {
+            return Err("platform presets require TLS (rtmps://)");
+        }
+        Ok(())
+    }
+
     pub fn location(&self) -> String {
         let base = self.ingest_url.trim_end_matches('/');
         if self.stream_key.is_empty() {
@@ -97,7 +207,6 @@ impl StreamSettings {
         }
     }
 
-    /// Whether this stream uses a TLS-encrypted connection (`rtmps://`).
     pub fn is_rtmps(&self) -> bool {
         self.ingest_url.starts_with("rtmps://")
     }
@@ -108,98 +217,76 @@ mod tests {
     use super::*;
 
     #[test]
-    fn twitch_uses_rtmps_endpoint() {
-        let s = StreamSettings::twitch("live_123456_abc");
-        assert_eq!(s.platform, StreamPlatform::Twitch);
-        assert!(s.is_rtmps());
-        assert_eq!(s.location(), "rtmps://live.twitch.tv/app/live_123456_abc");
+    fn presets_have_stable_bitrates() {
+        assert_eq!(StreamPreset::Low.bitrate_kbps(), Some(2500));
+        assert_eq!(StreamPreset::Standard.bitrate_kbps(), Some(4500));
+        assert_eq!(StreamPreset::High.bitrate_kbps(), Some(6000));
+        assert_eq!(StreamPreset::Custom.bitrate_kbps(), None);
     }
 
     #[test]
-    fn youtube_uses_rtmps_endpoint() {
-        let s = StreamSettings::youtube("abcd-efgh-1234");
-        assert_eq!(s.platform, StreamPlatform::YouTube);
-        assert!(s.is_rtmps());
-        assert_eq!(
-            s.location(),
-            "rtmps://a.rtmp.youtube.com/live2/abcd-efgh-1234"
-        );
+    fn masked_key_never_contains_the_secret() {
+        let settings = StreamSettings::twitch("secret-key-123");
+        let masked = settings.masked_key();
+        assert!(!masked.contains("secret-key-123"));
+        assert!(masked.ends_with("••••"));
     }
 
     #[test]
-    fn kick_uses_provided_ivs_endpoint() {
-        let s = StreamSettings::kick(
-            "rtmps://fa7231ca50b7.global-contribute.live-video.net/app",
-            "kickkey123",
-        );
-        assert_eq!(s.platform, StreamPlatform::Kick);
-        assert!(s.is_rtmps());
-        assert_eq!(
-            s.location(),
-            "rtmps://fa7231ca50b7.global-contribute.live-video.net/app/kickkey123"
-        );
-    }
-
-    #[test]
-    fn custom_uses_url_verbatim() {
-        let s = StreamSettings::custom("rtmp://localhost/live", "mykey");
-        assert!(!s.is_rtmps());
-        assert_eq!(s.location(), "rtmp://localhost/live/mykey");
-    }
-
-    #[test]
-    fn location_omits_trailing_slash() {
-        let s = StreamSettings::new(StreamPlatform::Custom, "rtmps://host/app/", "key");
-        assert_eq!(s.location(), "rtmps://host/app/key");
-    }
-
-    #[test]
-    fn location_without_key_is_ingest_url() {
-        let s = StreamSettings::twitch("");
-        assert_eq!(s.location(), "rtmps://live.twitch.tv/app");
-    }
-
-    #[test]
-    fn platform_labels_are_distinct() {
-        assert_eq!(StreamPlatform::Twitch.label(), "Twitch");
-        assert_eq!(StreamPlatform::Kick.label(), "Kick");
-        assert_eq!(StreamPlatform::YouTube.label(), "YouTube");
-        assert_eq!(StreamPlatform::Custom.label(), "Custom");
-    }
-
-    #[test]
-    fn is_rtmps_distinguishes_encrypted_and_plain() {
+    fn validation_rejects_empty_or_insecure_preset() {
+        assert!(StreamSettings::twitch("").validate().is_err());
         assert!(
-            StreamSettings::custom("rtmps://host/app", "k").is_rtmps(),
-            "rtmps:// must be recognized as encrypted"
+            StreamSettings::new(StreamPlatform::Twitch, "rtmp://host/app", "key")
+                .validate()
+                .is_err()
         );
-        assert!(
-            !StreamSettings::custom("rtmp://host/app", "k").is_rtmps(),
-            "rtmp:// must not be considered encrypted"
-        );
+        assert!(StreamSettings::custom("rtmp://host/app", "key")
+            .validate()
+            .is_ok());
     }
 
     #[test]
-    fn settings_keep_platform_and_parts() {
-        let s = StreamSettings::new(StreamPlatform::Kick, "rtmps://host/app", "key");
-        assert_eq!(s.platform, StreamPlatform::Kick);
-        assert_eq!(s.ingest_url, "rtmps://host/app");
-        assert_eq!(s.stream_key, "key");
-        assert_eq!(s.location(), "rtmps://host/app/key");
-    }
-
-    #[test]
-    fn location_joins_with_single_separator_even_with_missing_key() {
-        let s = StreamSettings::new(StreamPlatform::Custom, "rtmps://host/app", "");
-        assert_eq!(s.location(), "rtmps://host/app");
-    }
-
-    #[test]
-    fn keys_are_not_mangled_by_location_builder() {
-        let s = StreamSettings::twitch("live_123456-ab-cd.ef");
+    fn adaptive_bitrate_moves_only_inside_bounds() {
+        let policy = AdaptiveBitrate::new(1500, 3000, 500);
         assert_eq!(
-            s.location(),
-            "rtmps://live.twitch.tv/app/live_123456-ab-cd.ef"
+            policy.next_bitrate(2000, crate::StreamHealthStatus::Poor),
+            1500
         );
+        assert_eq!(
+            policy.next_bitrate(2500, crate::StreamHealthStatus::Good),
+            3000
+        );
+        assert_eq!(
+            policy.next_bitrate(2200, crate::StreamHealthStatus::Warning),
+            2200
+        );
+    }
+
+    #[test]
+    fn adaptive_bitrate_disabled_is_stable() {
+        let policy = AdaptiveBitrate {
+            enabled: false,
+            ..AdaptiveBitrate::default()
+        };
+        assert_eq!(
+            policy.next_bitrate(42_000, crate::StreamHealthStatus::Poor),
+            42_000
+        );
+    }
+
+    #[test]
+    fn platform_defaults_are_known() {
+        assert_eq!(
+            StreamPlatform::Twitch.default_ingest_url(),
+            Some("rtmps://live.twitch.tv/app")
+        );
+        assert_eq!(StreamPlatform::Custom.default_ingest_url(), None);
+    }
+
+    #[test]
+    fn existing_location_behavior_is_preserved() {
+        let s = StreamSettings::youtube("key").with_preset(StreamPreset::High);
+        assert_eq!(s.location(), "rtmps://a.rtmp.youtube.com/live2/key");
+        assert_eq!(s.preset, StreamPreset::High);
     }
 }

@@ -261,8 +261,8 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] Stream health and network stats (status via drop ratio/throughput, `stream_stats()` API)
 - [x] Platform integrations (Twitch, Kick, YouTube via RTMPS; custom)
 - [x] Custom RTMP server support (arbitrary `rtmp://`/`rtmps://` URLs)
-- [ ] Stream key management and stream presets
-- [ ] Adaptive bitrate
+- [x] **Stream key management and stream presets** — validated Twitch/YouTube/Kick/custom endpoints, masked key display, TLS enforcement for platform presets, and Low/Standard/High/Custom quality presets; keys are never exposed by the UI masking API
+- [x] **Adaptive bitrate** — bounded policy with configurable minimum/maximum/step, reducing bitrate on Poor health and recovering on Good health; automatic network-driven pipeline reconfiguration remains a follow-up
 - [ ] Stream delay (configurable delay with reconnect)
 - [ ] Multitrack Video (adaptive bitrate streaming with multiple quality levels, TCP pacing)
 - [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible)
@@ -424,9 +424,9 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 | Replay buffer | Done (ring buffer, F12 hotkey, save-to-MP4) |
 | Remux & file management | Open (M4) |
 | Virtual camera | Open (M4) |
-| Streaming (RTMP/RTMPS, platforms) | Partial (RTMPS Twitch/Kick/YouTube) |
+| Streaming (RTMP/RTMPS, platforms) | Partial (RTMPS Twitch/Kick/YouTube; validated presets and key handling) |
 | Multistreaming | Open (M3) |
-| Adaptive bitrate | Open (M3) |
+| Adaptive bitrate | Partial (bounded policy implemented; live encoder reconfiguration remains open) |
 | WebRTC/WHIP, SRT/RIST, NDI | Open (M3) |
 | VOD track | Open (M3) |
 | Multi-track audio | Partial (2 tracks; VOD track planned M3) |

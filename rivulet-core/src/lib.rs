@@ -36,7 +36,7 @@ pub mod metrics;
 pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 
 pub mod stream;
-pub use stream::{StreamPlatform, StreamSettings};
+pub use stream::{AdaptiveBitrate, StreamPlatform, StreamPreset, StreamSettings};
 
 pub mod i18n;
 pub use i18n::Locale;
@@ -2000,6 +2000,8 @@ mod tests {
             platform: StreamPlatform::Twitch,
             ingest_url: "rtmps://live.twitch.tv/app/test_key".into(),
             stream_key: String::new(),
+            preset: StreamPreset::Standard,
+            adaptive_bitrate: AdaptiveBitrate::default(),
         }));
         let path = std::env::temp_dir().join("rivulet_test_overlay_dual.mp4");
         engine.start_local_recording(path.clone());
@@ -2124,6 +2126,8 @@ mod tests {
             platform: StreamPlatform::Twitch,
             ingest_url: "rtmps://live.twitch.tv/app/test_key".into(),
             stream_key: String::new(),
+            preset: StreamPreset::Standard,
+            adaptive_bitrate: AdaptiveBitrate::default(),
         }));
         engine.start_streaming();
         let pipeline_str = engine.build_pipeline_str().unwrap();
@@ -2149,6 +2153,8 @@ mod tests {
             platform: StreamPlatform::Twitch,
             ingest_url: "rtmps://live.twitch.tv/app/test_key".into(),
             stream_key: String::new(),
+            preset: StreamPreset::Standard,
+            adaptive_bitrate: AdaptiveBitrate::default(),
         }));
         let path = std::env::temp_dir().join("rivulet_replay_dual.mp4");
         engine.start_local_recording(path.clone());

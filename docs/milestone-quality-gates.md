@@ -102,17 +102,26 @@ assigned to a follow-up milestone with an owner and issue.
 Review the complete lifecycle on every supported streaming platform or protocol:
 
 - Configure a destination without displaying or persisting a stream key in the
-  wrong place.
-- Validate URL, platform, codec, audio, and bitrate settings before connecting.
+  wrong place; the UI must mask the key and logs/diagnostics must never include it.
+- Validate URL, platform, codec, audio, and bitrate settings before connecting;
+  reject empty keys and non-TLS URLs for platform presets before starting.
+- Verify Twitch, YouTube, Kick, and custom presets show the selected destination,
+  quality preset, and effective bitrate without requiring the user to remember
+  endpoint details.
 - Start, observe, pause or stop, reconnect, and recover from network loss.
 - Distinguish Connecting, Good, Warning, Poor, Offline, and authentication
   failure states with actionable text.
 - Verify dual output does not duplicate controls or hide which output failed.
 - Confirm stream-key masking, safe clipboard behavior, and log redaction.
+- Verify adaptive bitrate is opt-in, stays within configured minimum/maximum bounds,
+  lowers quality on Poor health, and recovers conservatively on Good health; the
+  current policy layer must not be presented as live encoder reconfiguration until
+  that integration is complete.
 - Test narrow windows and long platform/server names.
 
-Exit evidence: a redacted stream-health recording or screenshots, reconnect
-results, and a protocol/platform compatibility table.
+Exit evidence: a redacted stream-health recording or screenshots, preset and
+validation results, adaptive-bitrate boundary tests, reconnect results, and a
+protocol/platform compatibility table.
 
 ### M4: Advanced Output and Capture
 
