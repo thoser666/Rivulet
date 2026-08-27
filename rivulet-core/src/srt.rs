@@ -117,7 +117,7 @@ impl ContributionSettings {
                 let endpoint = self.endpoint.trim_start_matches("rist://");
                 let (address, port) = endpoint.split_once(':').unwrap_or((endpoint, "1968"));
                 format!(
-                    "h264parse ! mpegtsmux alignment=7 ! capsfilter caps=\\\"video/mpegts,systemstream=true,packetsize=188\\\" ! ristsink address=\"{}\" port={} latency={} ",
+                    "h264parse ! mpegtsmux alignment=7 ! rtpmp2tpay ! ristsink address=\"{}\" port={} latency={} ",
                     address,
                     port,
                     self.latency.as_millis()
@@ -188,6 +188,7 @@ mod tests {
             ContributionSettings::new(ContributionProtocol::Rist, "rist://receiver:10080")
                 .pipeline_sink_fragment();
         assert!(fragment.contains("ristsink"));
+        assert!(fragment.contains("rtpmp2tpay"));
         assert!(fragment.contains("address=\"receiver\""));
         assert!(fragment.contains("port=10080"));
         assert!(!fragment.contains("uri="));
