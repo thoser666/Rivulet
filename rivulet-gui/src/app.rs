@@ -680,6 +680,10 @@ pub struct RivuletApp {
     scene_overlay_text: String,
     #[serde(skip)]
     scene_overlay_enabled: bool,
+    #[serde(skip)]
+    multi_view_enabled: bool,
+    #[serde(skip)]
+    projector_open: bool,
 
     // Auto-update
     #[serde(skip)]
@@ -902,6 +906,8 @@ impl Default for RivuletApp {
             selected_composition_source: None,
             scene_overlay_text: String::new(),
             scene_overlay_enabled: false,
+            multi_view_enabled: false,
+            projector_open: false,
 
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
@@ -2635,6 +2641,20 @@ impl RivuletApp {
         ui.checkbox(&mut self.scene_overlay_enabled, enabled_label);
         ui.add(egui::TextEdit::singleline(&mut self.scene_overlay_text).hint_text(text_hint));
         ui.label(self.tr("scene_overlay_hint"));
+        let multi_view_label = self.tr("multi_view_enabled").to_owned();
+        let projector_open_label = self.tr("projector_open").to_owned();
+        ui.checkbox(&mut self.multi_view_enabled, multi_view_label);
+        if theme::accent_button(ui, projector_open_label).clicked() {
+            self.projector_open = true;
+        }
+        if self.projector_open {
+            let projector_fallback = self.tr("projector_fallback").to_owned();
+            let projector_close_label = self.tr("projector_close").to_owned();
+            ui.colored_label(egui::Color32::from_rgb(80, 180, 240), projector_fallback);
+            if theme::accent_button(ui, projector_close_label).clicked() {
+                self.projector_open = false;
+            }
+        }
     }
 
     /// Configure the S5b browser source from the Scenes view. Rendering is

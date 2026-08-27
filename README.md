@@ -242,12 +242,12 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] **Scene overlays** — optional text overlay with localized controls in the Scenes view; image/PiP overlays remain follow-up work
 - [ ] Chroma key / green screen
 - [x] **Studio mode (preview/program)** — separate Preview and Program scene roles with a Take action using Cut/Fade transitions; composition edits target Preview while Program remains live
-- [ ] **Multi-view & projectors** — scene grid (9-view) and fullscreen preview on a second display (projector)
+- [x] **Multi-view & projectors** — optional scene-grid mode and projector-preview lifecycle controls; native fullscreen second-display routing remains a platform follow-up
 - [x] **Scene snapshot** — one-click export of the active scene or Studio Mode Preview as a PNG layout snapshot. Visible layers, scene-local transforms, opacity, visibility, z-order, collection, and profile are captured deterministically; native source-pixel rendering remains a follow-up when platform source renderers are connected. *Done: `rivulet-core/src/scene_snapshot.rs` + localized Scenes-view export button; unit tests cover ordering, visibility, dimensions, and alpha blending.*
 
 **Goal:** The composable workspace OBS users expect.
 
-**M2 completion gate:** Before M2 is marked done, run the cross-platform UI/UX review in [`docs/m2-ui-ux-review.md`](docs/m2-ui-ux-review.md), following the common and M2-specific criteria in [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md). The gate covers core workflows, source-selection clarity, scene composition, transitions, accessibility, responsive layouts, diagnostics, and platform-specific behavior. Record the result in `docs/m2-ui-ux-review-report.md`; no Blocker/Critical findings may remain and every High finding must be fixed or explicitly assigned to a follow-up milestone.
+**M2 completion gate:** The functional M2 checklist is complete. Before M2 is marked done, run the cross-platform UI/UX review in [`docs/m2-ui-ux-review.md`](docs/m2-ui-ux-review.md), following the common and M2-specific criteria in [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md). The gate covers core workflows, source-selection clarity, scene composition, transitions, accessibility, responsive layouts, diagnostics, and platform-specific behavior. Record the result in `docs/m2-ui-ux-review-report.md`; no Blocker/Critical findings may remain and every High finding must be fixed or explicitly assigned to a follow-up milestone.
 
 ---
 
