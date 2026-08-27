@@ -39,7 +39,7 @@ presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the fu
 
 ## Multistreaming scope
 
-The multistreaming slice now builds a GStreamer fan-out with one named tee branch and RTMP sink per target. Target configuration and lifecycle state remain independent; the primary target is retained as a compatibility fallback. The reusable `StreamingReconnectSupervisor` now provides per-target failure isolation, bounded exponential backoff, retry limits, and reset-on-success semantics. Wiring bus messages and timers into the running GStreamer pipeline remains follow-up work.
+The multistreaming slice now builds a GStreamer fan-out with one named tee branch and RTMP sink per target. Target configuration and lifecycle state remain independent; the primary target is retained as a compatibility fallback. The reusable `StreamingReconnectSupervisor` provides per-target failure isolation, bounded exponential backoff, retry limits, and reset-on-success semantics. `RivuletEngine::poll_stream_reconnects()` exposes non-blocking due-retry claims for the runtime worker; actual branch reconstruction remains a follow-up integration check.
 
 
 ## SRT/RIST contribution contract
@@ -69,9 +69,9 @@ SRT/RIST settings now generate protocol-specific sink fragments including latenc
 
 ## Scope boundary
 
-The adaptive-bitrate implementation provides a bounded policy and applies changed values to the active `video_enc` bitrate property. Health polling/network measurement and cooldown policy remain follow-up work.
+The adaptive-bitrate implementation provides a bounded policy and applies changed values to the active `video_enc` bitrate property. `AdaptiveBitrateController` adds stable-sample and cooldown protection; wiring real network telemetry into that controller remains follow-up work.
 
-Stream delay is applied per fan-out branch as a bounded outgoing stage and exposes reconnect delay semantics; reconnect-aware buffering and retry backoff remain follow-up work. Multitrack Video currently validates and carries the representation count,
+Stream delay is applied per fan-out branch as a bounded outgoing stage and exposes reconnect delay semantics; `DelaySupervisor` provides bounded reconnect retention, while attaching it to live per-branch queues remains follow-up work. Multitrack Video currently validates and carries the representation count,
 but the RTMP/FLV transport still emits one negotiated track. Per-track encoder
 and transport negotiation requires a later protocol implementation.
 
