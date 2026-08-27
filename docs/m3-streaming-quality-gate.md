@@ -39,11 +39,8 @@ presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the fu
 
 ## Multistreaming scope
 
-The first multistreaming slice is the shared, validated target model. Each target
-has an independent identity and configuration, which is the basis for later
-transport fan-out and per-target health/retry isolation. The current GStreamer
-pipeline still has one RTMP sink; it must not be presented as simultaneous live
-fan-out until that transport integration is implemented.
+The multistreaming slice now provides independent sink fragments and retry-target selection. A transport supervisor can attach each fragment to the shared encoded stream and retry only Failed/Degraded targets; one target's state does not determine another's. Full GStreamer tee/fan-out lifecycle and live per-target health remain integration work.
+
 
 ## SRT/RIST contribution contract
 
@@ -60,14 +57,9 @@ open.
 
 ## Scope boundary
 
-The adaptive-bitrate implementation currently provides a deterministic policy
-layer. It does not yet mutate a running GStreamer encoder or reconnect a live
-stream. That live reconfiguration is a separate M3 follow-up and must not be
-claimed as complete by the UI or release notes.
+The adaptive-bitrate implementation provides a bounded policy plus a deterministic live-encoder reconfiguration decision; the GStreamer encoder property update and network monitor remain integration work.
 
-Stream delay is currently applied to the outgoing pipeline as a bounded delay
-stage; reconnect-aware buffering and user-visible live controls remain follow-up
-work. Multitrack Video currently validates and carries the representation count,
+Stream delay is applied as a bounded outgoing stage and exposes reconnect delay semantics; reconnect-aware buffering, retry backoff, and user-visible live controls remain follow-up work. Multitrack Video currently validates and carries the representation count,
 but the RTMP/FLV transport still emits one negotiated track. Per-track encoder
 and transport negotiation requires a later protocol implementation.
 

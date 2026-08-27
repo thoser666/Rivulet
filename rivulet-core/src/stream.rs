@@ -241,6 +241,18 @@ impl AdaptiveBitrate {
             step_kbps: step_kbps.max(50),
         }
     }
+    /// Compute and apply the next bounded bitrate for a live encoder.
+    pub fn reconfigure_live_encoder(
+        &self,
+        current_kbps: &mut u32,
+        status: crate::StreamHealthStatus,
+    ) -> bool {
+        let next = self.next_bitrate(*current_kbps, status);
+        let changed = next != *current_kbps;
+        *current_kbps = next;
+        changed
+    }
+
     pub fn next_bitrate(self, current_kbps: u32, status: crate::StreamHealthStatus) -> u32 {
         if !self.enabled {
             return current_kbps;
@@ -279,6 +291,15 @@ impl StreamDelay {
             duration,
         }
     }
+    /// Return the delay duration used by a reconnecting pipeline.
+    pub fn reconnect_delay(self) -> Duration {
+        if self.enabled {
+            self.duration
+        } else {
+            Duration::ZERO
+        }
+    }
+
     pub fn latency_ms(self) -> u64 {
         if self.enabled {
             self.duration.as_millis() as u64
@@ -363,6 +384,40 @@ pub struct MultistreamSettings {
 
 impl MultistreamSettings {
     pub const MAX_TARGETS: usize = 4;
+
+    /// Build one independent sink description per configured target.
+    ///
+    /// The caller can attach each fragment to a shared encoded stream. Keeping
+    /// the fragments separate makes target failures isolatable by the eventual
+    /// transport supervisor.
+    pub fn sink_fragments(&self) -> Result<Vec<String>, &'static str> {
+        self.validate_all()?;
+        Ok(self
+            .targets
+            .iter()
+            .map(|target| {
+                format!(
+                    "{} location=\\\"{}\\\"",
+                    "rtmp2sink",
+                    target.settings.location()
+                )
+            })
+            .collect())
+    }
+
+    /// Determine which targets may be retried without affecting healthy peers.
+    pub fn retryable_targets(states: &[(String, StreamTargetState)]) -> Vec<String> {
+        states
+            .iter()
+            .filter(|(_, state)| {
+                matches!(
+                    state,
+                    StreamTargetState::Failed | StreamTargetState::Degraded
+                )
+            })
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
 
     pub fn add_target(&mut self, target: StreamTarget) -> Result<(), &'static str> {
         target.validate()?;
@@ -546,6 +601,16 @@ mod tests {
         assert_eq!(p.next_bitrate(2500, crate::StreamHealthStatus::Good), 3000);
     }
     #[test]
+    fn adaptive_reconfiguration_updates_only_when_policy_changes() {
+        let policy = AdaptiveBitrate::new(1500, 3000, 500);
+        let mut current = 2500;
+        assert!(policy.reconfigure_live_encoder(&mut current, crate::StreamHealthStatus::Poor));
+        assert_eq!(current, 2000);
+        assert!(!policy.reconfigure_live_encoder(&mut current, crate::StreamHealthStatus::Warning));
+        assert_eq!(current, 2000);
+    }
+
+    #[test]
     fn adaptive_bitrate_disabled_is_stable() {
         let p = AdaptiveBitrate {
             enabled: false,
@@ -612,6 +677,40 @@ mod tests {
                 .with_trickle_ice(true)
                 .trickle_ice
         );
+    }
+
+    #[test]
+    fn multistream_sink_fragments_and_retry_selection_are_independent() {
+        let mut settings = MultistreamSettings::default();
+        settings
+            .add_target(StreamTarget::new(
+                "one",
+                StreamSettings::custom("rtmp://one/live", "k1"),
+            ))
+            .unwrap();
+        settings
+            .add_target(StreamTarget::new(
+                "two",
+                StreamSettings::custom("rtmp://two/live", "k2"),
+            ))
+            .unwrap();
+        let fragments = settings.sink_fragments().unwrap();
+        assert_eq!(fragments.len(), 2);
+        assert!(fragments[0].contains("rtmp://one/live/k1"));
+        let retry = MultistreamSettings::retryable_targets(&[
+            ("one".into(), StreamTargetState::Live),
+            ("two".into(), StreamTargetState::Failed),
+        ]);
+        assert_eq!(retry, vec!["two"]);
+    }
+
+    #[test]
+    fn reconnect_delay_preserves_configured_latency() {
+        assert_eq!(
+            StreamDelay::new(Duration::from_secs(4)).reconnect_delay(),
+            Duration::from_secs(4)
+        );
+        assert_eq!(StreamDelay::default().reconnect_delay(), Duration::ZERO);
     }
 
     #[test]
