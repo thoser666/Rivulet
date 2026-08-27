@@ -70,7 +70,7 @@ offer/answer, ICE/DTLS media handshake, cleanup, and platform smoke run.
 
 - `WhipSettings` validates endpoint, timeout, token handling, and ICE options.
 - SDP offer/answer exchange is covered by deterministic HTTP mock tests.
-- GStreamer `webrtcbin` pipeline starts and reports state transitions.
+- GStreamer `webrtcbin` pipeline starts and reports state transitions (the element contract and availability probe are implemented; full SFU media negotiation remains the final integration item).
 - At least one local SFU/WHIP smoke test publishes H.264 + Opus successfully.
 - Reconnect and cleanup behavior are tested.
 - GUI exposes status and actionable errors without secrets.

@@ -135,12 +135,28 @@ jobs:
         run: bash scripts/srt-receiver-smoke.sh
 
   ################################################################
+  # RIST interoperability smoke test
+  ################################################################
+  rist_receiver_smoke:
+    name: RIST Receiver Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build RIST smoke image
+        run: docker build --pull=true -t rivulet-rist-smoke:ci docker/rist-smoke
+      - name: Run RIST receiver smoke test
+        env:
+          RIST_SMOKE_IMAGE: rivulet-rist-smoke:ci
+        run: bash scripts/rist-receiver-smoke.sh
+
+  ################################################################
   # REQUIRED CI AGGREGATE (stable check name for the develop ruleset)
   ################################################################
   ci:
     name: CI
     if: ${{ always() }}
-    needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke]
+    needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke]
     runs-on: ubuntu-latest
     steps:
       - name: Require all CI jobs to pass
@@ -152,7 +168,8 @@ jobs:
             "${{ needs.beta_gate.result }}" \
             "${{ needs.build_and_test.result }}" \
             "${{ needs.pinning_tests.result }}" \
-            "${{ needs.srt_receiver_smoke.result }}"; do
+            "${{ needs.srt_receiver_smoke.result }}" \
+            "${{ needs.rist_receiver_smoke.result }}"; do
             if [[ "$result" != "success" ]]; then
               echo "A required CI job finished with: $result" >&2
               exit 1

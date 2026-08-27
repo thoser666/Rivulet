@@ -27,6 +27,13 @@ presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the fu
   targets, validates each endpoint/key, rejects duplicate names, masks keys, and
   removes targets without mutating unrelated entries.
 
+## RIST interoperability
+
+CI now includes a dedicated RIST receiver smoke job using
+`docker/rist-smoke/Dockerfile` and `scripts/rist-receiver-smoke.sh`. The test
+uses a finite MPEG-TS test source, a listener receiver, and a caller sender;
+plugin availability and real receiver compatibility remain explicit evidence.
+
 ## Resource-efficiency evidence
 
 The cross-cutting resource gate is executable via
@@ -60,7 +67,8 @@ The WHIP/WebRTC strategy is documented in [`whip-strategy-spike.md`](whip-strate
 The current core contract exposes `WhipSettings` with endpoint validation,
 bounded signaling timeout, explicit trickle-ICE configuration, token-safe
 endpoint reporting, and a deterministic `webrtcbin` media-branch contract.
-The real SFU/ICE/DTLS media handshake remains the implementation-phase evidence.
+The real SFU/ICE/DTLS media handshake remains the implementation-phase evidence;
+`webrtcbin` availability and the deterministic branch contract are tested locally.
 
 ## Reconnect and live bitrate integration
 

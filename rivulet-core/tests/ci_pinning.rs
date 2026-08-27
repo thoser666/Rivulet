@@ -325,6 +325,14 @@ fn dependabot_auto_merge_workflow_is_wired_up() {
 }
 
 #[test]
+fn rist_receiver_smoke_is_wired_up() {
+    let workflow = read(".github/workflows/ci.yml");
+    assert!(workflow.contains("name: RIST Receiver Smoke"));
+    assert!(workflow.contains("rist-receiver-smoke.sh"));
+    assert!(read("scripts/rist-receiver-smoke.sh").contains("ristsrc"));
+}
+
+#[test]
 fn resource_efficiency_gate_is_wired_up() {
     let checker = read("scripts/resource-efficiency-check.py");
     let fixture = read("scripts/resource-efficiency-sample.json");
