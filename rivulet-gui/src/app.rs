@@ -2646,10 +2646,9 @@ impl RivuletApp {
         ui.group(|ui| {
             ui.label(egui::RichText::new(self.tr("recording_preview_title")).strong());
             if let Some(preview) = &self.recording_preview.texture {
-                let max_width = ui.available_width().min(480.0).max(1.0);
-                let scale = (max_width / self.recording_preview.width.max(1) as f32)
-                    .min(0.5)
-                    .max(0.05);
+                let max_width = ui.available_width().clamp(1.0, 480.0);
+                let scale =
+                    (max_width / self.recording_preview.width.max(1) as f32).clamp(0.05, 0.5);
                 let size = egui::vec2(
                     self.recording_preview.width as f32 * scale,
                     self.recording_preview.height as f32 * scale,
