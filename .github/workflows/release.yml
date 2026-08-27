@@ -132,10 +132,22 @@ jobs:
           bash scripts/update-changelog.sh "$VERSION"
 
           RELEASE_BRANCH="release/$TAG"
-          git switch -c "$RELEASE_BRANCH"
+          # Multiple workflow retries can target the same version. Reuse the
+          # remote branch and fast-forward it instead of creating a divergent
+          # local branch that fails with a non-fast-forward push.
+          if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$RELEASE_BRANCH"
+            git switch -C "$RELEASE_BRANCH" "origin/$RELEASE_BRANCH"
+          else
+            git switch -c "$RELEASE_BRANCH"
+          fi
           git add Cargo.toml rivulet-*/Cargo.toml CHANGELOG.md
-          git commit -m "chore(release): prepare $TAG"
-          git push --set-upstream origin "$RELEASE_BRANCH"
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(release): prepare $TAG"
+            git push --set-upstream origin "$RELEASE_BRANCH"
+          else
+            echo "Release branch $RELEASE_BRANCH already contains the version bump."
+          fi
 
           echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
 

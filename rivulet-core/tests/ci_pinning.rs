@@ -325,6 +325,17 @@ fn dependabot_auto_merge_workflow_is_wired_up() {
 }
 
 #[test]
+fn release_workflow_reuses_existing_release_branches() {
+    let workflow = read(".github/workflows/release.yml");
+    assert!(
+        workflow.contains("git ls-remote --exit-code --heads origin \"$RELEASE_BRANCH\"")
+            && workflow.contains("git switch -C \"$RELEASE_BRANCH\" \"origin/$RELEASE_BRANCH\"")
+            && workflow.contains("git diff --cached --quiet"),
+        "release workflow must handle retries on an existing release branch idempotently"
+    );
+}
+
+#[test]
 fn develop_required_checks_have_stable_job_names() {
     let ci = read(".github/workflows/ci.yml");
     assert!(
