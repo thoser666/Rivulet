@@ -2118,6 +2118,12 @@ impl RivuletApp {
             {
                 self.scenes.set_profile(self.scene_profile_input.trim());
             }
+            if theme::accent_button(ui, self.tr("scenes_export")).clicked() {
+                self.export_scene_collection();
+            }
+            if theme::accent_button(ui, self.tr("scenes_import")).clicked() {
+                self.import_scene_collection();
+            }
         });
         ui.label(format!(
             "{} / {}",
@@ -2226,6 +2232,48 @@ impl RivuletApp {
 
         if let Some(status) = &self.scene_status {
             ui.colored_label(colors.info, status);
+        }
+    }
+
+    fn export_scene_collection(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("JSON", &["json"])
+            .set_file_name("rivulet-scenes.json")
+            .save_file()
+        else {
+            return;
+        };
+        match self.scenes.export_json().and_then(|json| {
+            std::fs::write(&path, json).map_err(|error| serde_json::Error::io(error))
+        }) {
+            Ok(()) => {
+                self.scene_status =
+                    Some(self.tr_fmt("scenes_exported", &[path.display().to_string()]))
+            }
+            Err(error) => {
+                self.scene_status = Some(self.tr_fmt("scenes_export_failed", &[error.to_string()]))
+            }
+        }
+    }
+
+    fn import_scene_collection(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("JSON", &["json"])
+            .pick_file()
+        else {
+            return;
+        };
+        match std::fs::read_to_string(&path)
+            .map_err(|error| error.to_string())
+            .and_then(|json| {
+                rivulet_core::SceneManager::import_json(&json).map_err(|error| error.to_string())
+            }) {
+            Ok(manager) => {
+                self.scenes = manager;
+                self.scene_status =
+                    Some(self.tr_fmt("scenes_imported", &[path.display().to_string()]));
+            }
+            Err(error) => self.scene_status = Some(self.tr_fmt("scenes_import_failed", &[error])),
         }
     }
 

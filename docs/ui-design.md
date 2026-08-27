@@ -102,7 +102,7 @@ The top bar and navigation use the shared translucent `theme::glass_frame()`.
   overlays that dim a captured preview (e.g. the region editor) instead of a
   hard-coded alpha color. Component fills and text colors should derive from
   this palette or `StatusColors`; image white is only valid as a texture tint.
-- **Scene management**: keep the active collection and profile visible near scene controls. Duplication must create a fresh identity and must not implicitly bind the copy to existing scenes; provide explicit feedback for the resulting action. Collections/profiles currently provide named context; persistence/import/export and applying profile-specific settings are follow-up work.
+- **Scene management**: keep the active collection and profile visible near scene controls. Duplication must create a fresh identity and must not implicitly bind the copy to existing scenes; provide explicit feedback for the resulting action. Collections/profiles expose named context and JSON import/export; imported state starts with empty undo/redo history, while applying profile-specific settings remains a follow-up.
 - **Composition**: scene bindings own their transform, crop, visibility, lock, and z-order. Composition edits must target the binding—not the source default—so the same source can be laid out differently per scene. The Scenes view exposes these properties in a layer/source editor; native media rendering, transform copy/paste, and binding-level undo history remain follow-up work.
 - **Transitions**: expose Cut and Fade beside scene controls. Fade duration is bounded and shown in
   milliseconds; scene switches start a transition without blocking the egui frame loop. Use

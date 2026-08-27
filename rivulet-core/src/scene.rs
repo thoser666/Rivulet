@@ -1,6 +1,7 @@
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
     pub id: Uuid,
     pub name: String,
@@ -52,12 +53,14 @@ impl Scene {
 /// switching the active scene (the one whose sources are shown on output).
 /// Scene switches are tracked in a history stack so `switch_back` behaves
 /// like an undo (A → B → C, back → B, back → A).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SceneManager {
     scenes: Vec<Scene>,
     active: Option<Uuid>,
     history: Vec<Uuid>,
+    #[serde(skip)]
     undo_stack: Vec<SceneSnapshot>,
+    #[serde(skip)]
     redo_stack: Vec<SceneSnapshot>,
     collection: String,
     profile: String,
@@ -226,11 +229,28 @@ impl SceneManager {
     }
 
     pub fn set_collection(&mut self, name: impl Into<String>) {
+        let before = self.snapshot();
         self.collection = name.into();
+        self.record_change(before);
     }
 
     pub fn set_profile(&mut self, name: impl Into<String>) {
+        let before = self.snapshot();
         self.profile = name.into();
+        self.record_change(before);
+    }
+
+    /// Serialize the current scene collection and profile context.
+    pub fn export_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self)
+    }
+
+    /// Restore a scene collection from JSON. Undo/redo history starts empty.
+    pub fn import_json(json: &str) -> Result<Self, serde_json::Error> {
+        let mut manager: Self = serde_json::from_str(json)?;
+        manager.undo_stack.clear();
+        manager.redo_stack.clear();
+        Ok(manager)
     }
 
     /// Create a copy with fresh scene IDs so it can be edited independently.
@@ -487,6 +507,32 @@ mod tests {
         mgr.set_profile("Streaming");
         assert_eq!(mgr.collection(), "Gaming");
         assert_eq!(mgr.profile(), "Streaming");
+        assert!(mgr.undo());
+        assert_eq!(mgr.profile(), "Default");
+        assert!(mgr.undo());
+        assert_eq!(mgr.collection(), "Default");
+        assert!(mgr.redo());
+        assert_eq!(mgr.collection(), "Gaming");
+    }
+
+    #[test]
+    fn manager_collection_profile_round_trip_preserves_context_and_resets_history() {
+        let mut original = SceneManager::new();
+        original.add(Scene::new("Gameplay".to_string()));
+        original.set_collection("Gaming");
+        original.set_profile("Streaming");
+        let json = original.export_json().expect("export scene collection");
+        let restored = SceneManager::import_json(&json).expect("import scene collection");
+        assert_eq!(restored.collection(), "Gaming");
+        assert_eq!(restored.profile(), "Streaming");
+        assert_eq!(restored.scenes(), original.scenes());
+        assert!(!restored.can_undo());
+        assert!(!restored.can_redo());
+    }
+
+    #[test]
+    fn manager_import_rejects_invalid_json() {
+        assert!(SceneManager::import_json("not json").is_err());
     }
 
     #[test]
