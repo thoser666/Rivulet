@@ -107,7 +107,9 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 > **UI development:** new features should follow the navigation structure and
 > egui conventions in [`docs/ui-design.md`](docs/ui-design.md). Every milestone
 > also uses the reusable [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md)
-> for UI, usability, accessibility, reliability, and platform review.
+> for UI, usability, accessibility, reliability, platform, and resource-efficiency review.
+> The cross-cutting resource goal and measurement method are documented in
+> [`docs/resource-efficiency-goal.md`](docs/resource-efficiency-goal.md).
 
 ### Milestone overview
 

@@ -39,12 +39,12 @@ presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the fu
 
 ## Multistreaming scope
 
-The multistreaming slice now builds a GStreamer fan-out with one named tee branch and RTMP sink per target. Target configuration and lifecycle state remain independent; the primary target is retained as a compatibility fallback. The reusable `StreamingReconnectSupervisor` provides per-target failure isolation, bounded exponential backoff, retry limits, and reset-on-success semantics. `RivuletEngine::poll_stream_reconnects()` exposes non-blocking due-retry claims, and `ReconnectWorker` provides a cancellable timer that emits a target-local `RebuildBranch` command. The worker deliberately does not mutate GStreamer from a background thread; branch reconstruction must be performed by the pipeline owner on its GStreamer context.
+The multistreaming slice now builds a GStreamer fan-out with one named tee branch and a target-specific sink per target. RTMP/RTMPS targets use `rtmp2sink`; SRT/RIST targets use their validated `srtsink`/`ristsink` fragment and retain the same target-local lifecycle. Target configuration and lifecycle state remain independent; the primary target is retained as a compatibility fallback. The reusable `StreamingReconnectSupervisor` provides per-target failure isolation, bounded exponential backoff, retry limits, and reset-on-success semantics. `RivuletEngine::poll_stream_bus()` drains pending GStreamer bus messages without blocking, maps only `stream_sink_<index>` sources to target-local events, and starts retries for fatal sink events. `RivuletEngine::poll_stream_reconnects()` exposes non-blocking due-retry claims. On a target failure, `ReconnectWorker` now starts a cancellable target-local timer, and `RivuletEngine::drain_reconnect_commands()` lets the pipeline owner consume the resulting `RebuildBranch` command on its GStreamer context. `resolve_reconnect_command()` validates the command against the current target list before any mutation. Sink names are parsed strictly with `target_index_from_sink_name()`. The worker deliberately does not mutate GStreamer from a background thread; `rebuild_stream_target()` performs target-local sink teardown and recreation on the pipeline-owner context, then synchronizes the replacement sink with the running pipeline. A missing sink or target returns an error without stopping peer targets.
 
 
 ## SRT/RIST contribution contract
 
-The core now validates SRT/RIST contribution settings, bounds latency, validates optional SRT passphrases, redacts secrets from application-facing diagnostics, and emits protocol-specific sink fragments. This is the configuration slice; live GStreamer transport and interoperability evidence remain open.
+The core now validates SRT/RIST contribution settings, bounds latency, validates optional SRT passphrases, redacts secrets from application-facing diagnostics, and emits protocol-specific sink fragments. This is the configuration slice; The live transport path is now represented in the fan-out builder; plugin availability and receiver interoperability remain explicit runtime evidence requirements.
 
 ## WHIP strategy spike
 
@@ -57,7 +57,7 @@ open.
 
 ## Reconnect and live bitrate integration
 
-The reconnect supervisor is now connected to the engine's target status API. Callers handling GStreamer bus `Error`/`Eos` messages should call `handle_stream_target_failure`; after a successful sink restart they should call `handle_stream_target_live`. `SinkBusEvent` provides the tested mapping for fatal (`Error`/`Eos`), non-fatal (`Warning`), and successful state-change events. Retry state, limits, and exponential backoff are deterministic and fully tested. The actual asynchronous timer/branch rebuild remains platform-runtime work.
+The reconnect supervisor is now connected to the engine's target status API. Callers handling GStreamer bus `Error`/`Eos` messages should call `handle_stream_target_failure`; after a successful sink restart they should call `handle_stream_target_live`. `SinkBusEvent` provides the tested mapping for fatal (`Error`/`Eos`), non-fatal (`Warning`), and successful state-change events. Retry state, limits, and exponential backoff are deterministic and fully tested. The pipeline-owner `service_streaming()` tick now polls bus messages, drains due reconnect commands, and invokes target-local branch rebuilds without moving GStreamer mutations to the worker thread.
 
 Adaptive bitrate remains bounded by the existing policy and updates the active `video_enc` property when present. Health polling, cooldown/hysteresis, and guaranteed execution on the GStreamer context remain follow-up work.
 

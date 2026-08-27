@@ -171,6 +171,13 @@ pub enum ReconnectCommand {
     Shutdown,
 }
 
+/// Resolve a GStreamer sink name (`stream_sink_<index>`) to the configured
+/// target index. Unknown element names are ignored instead of affecting the
+/// whole pipeline.
+pub fn target_index_from_sink_name(name: &str) -> Option<usize> {
+    name.strip_prefix("stream_sink_")?.parse().ok()
+}
+
 /// A small worker that owns timing only; pipeline mutation stays with the
 /// caller, which can rebuild branches on the GStreamer context safely.
 pub struct ReconnectWorker {
@@ -196,6 +203,11 @@ impl ReconnectWorker {
     }
     pub fn try_recv(&self) -> Option<ReconnectCommand> {
         self.commands.try_recv().ok()
+    }
+
+    /// Drain all commands currently queued without blocking.
+    pub fn drain(&self) -> Vec<ReconnectCommand> {
+        self.commands.try_iter().collect()
     }
     pub fn cancel(&mut self) {
         let _ = self.stop.send(ReconnectCommand::Shutdown);
@@ -281,6 +293,13 @@ mod tests {
         assert_eq!(s.due_retries(Duration::from_secs(1)), vec!["target"]);
         assert_eq!(s.targets()[0].state, StreamTargetState::Connecting);
     }
+    #[test]
+    fn sink_name_resolution_is_strict_and_target_local() {
+        assert_eq!(target_index_from_sink_name("stream_sink_2"), Some(2));
+        assert_eq!(target_index_from_sink_name("stream_sink_x"), None);
+        assert_eq!(target_index_from_sink_name("other_sink_2"), None);
+    }
+
     #[test]
     fn worker_emits_branch_rebuild_after_backoff() {
         let worker = ReconnectWorker::start("target", Duration::from_millis(10));

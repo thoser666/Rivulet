@@ -344,6 +344,8 @@ impl MultitrackVideo {
 pub struct StreamTarget {
     pub name: String,
     pub settings: StreamSettings,
+    /// Optional contribution transport. `None` preserves RTMP/RTMPS behavior.
+    pub contribution: Option<crate::ContributionSettings>,
 }
 
 impl StreamTarget {
@@ -351,14 +353,24 @@ impl StreamTarget {
         Self {
             name: name.into(),
             settings,
+            contribution: None,
         }
+    }
+
+    pub fn with_contribution(mut self, contribution: crate::ContributionSettings) -> Self {
+        self.contribution = Some(contribution);
+        self
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.name.trim().is_empty() {
             return Err("stream target name is empty");
         }
-        self.settings.validate()
+        self.settings.validate()?;
+        if let Some(contribution) = &self.contribution {
+            contribution.validate()?;
+        }
+        Ok(())
     }
 
     pub fn masked_key(&self) -> String {
@@ -396,11 +408,13 @@ impl MultistreamSettings {
             .targets
             .iter()
             .map(|target| {
-                format!(
-                    "{} location=\\\"{}\\\"",
-                    "rtmp2sink",
-                    target.settings.location()
-                )
+                target
+                    .contribution
+                    .as_ref()
+                    .map(|contribution| contribution.pipeline_sink_fragment())
+                    .unwrap_or_else(|| {
+                        format!("rtmp2sink location=\\\"{}\\\"", target.settings.location())
+                    })
             })
             .collect())
     }

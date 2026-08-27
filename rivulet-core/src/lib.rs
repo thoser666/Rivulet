@@ -26,8 +26,8 @@ pub use replay::{save_replay, ReplayBuffer, ReplaySegment, ReplaySnapshot};
 pub mod reconnect;
 pub mod stream_runtime;
 pub use reconnect::{
-    ReconnectCommand, ReconnectWorker, RetryPolicy, SinkBusEvent, StreamingReconnectSupervisor,
-    TargetReconnectState,
+    target_index_from_sink_name, ReconnectCommand, ReconnectWorker, RetryPolicy, SinkBusEvent,
+    StreamingReconnectSupervisor, TargetReconnectState,
 };
 pub use stream_runtime::{AdaptiveBitrateController, DelaySupervisor};
 
@@ -132,6 +132,7 @@ pub struct RivuletEngine {
     stream_targets: Option<MultistreamSettings>,
     stream_target_states: Vec<StreamTargetState>,
     reconnect_supervisor: Option<StreamingReconnectSupervisor>,
+    reconnect_worker: Option<ReconnectWorker>,
     bitrate_controller: AdaptiveBitrateController,
     delay_supervisors: Vec<DelaySupervisor>,
     reconnect_started: Option<Instant>,
@@ -185,6 +186,7 @@ impl Default for RivuletEngine {
             stream_targets: None,
             stream_target_states: Vec::new(),
             reconnect_supervisor: None,
+            reconnect_worker: None,
             reconnect_started: None,
             bitrate_controller: AdaptiveBitrateController::default(),
             delay_supervisors: Vec::new(),
@@ -292,6 +294,18 @@ impl RivuletEngine {
             self.stream_target_states[index] = StreamTargetState::Failed;
         }
         tracing::warn!(target, retry, "Streaming target failed");
+        if retry {
+            if let Some(supervisor) = self.reconnect_supervisor.as_ref() {
+                if let Some(state) = supervisor
+                    .targets()
+                    .iter()
+                    .find(|state| state.name == target)
+                {
+                    self.reconnect_worker =
+                        Some(ReconnectWorker::start(target, state.next_backoff));
+                }
+            }
+        }
         retry
     }
 
@@ -321,6 +335,126 @@ impl RivuletEngine {
             .as_mut()
             .map(|supervisor| supervisor.due_retries(started.elapsed()))
             .unwrap_or_default()
+    }
+
+    /// Consume queued branch-rebuild commands on the pipeline owner thread.
+    /// The command is only a target name; this method deliberately keeps all
+    /// GStreamer mutation on the caller's context.
+    pub fn drain_reconnect_commands(&mut self) -> Vec<ReconnectCommand> {
+        self.reconnect_worker
+            .as_ref()
+            .map(ReconnectWorker::drain)
+            .unwrap_or_default()
+    }
+
+    /// Poll the bus, consume due worker commands, and rebuild only affected
+    /// targets. This is intended for the pipeline-owner tick; it never blocks.
+    pub fn service_streaming(&mut self) -> anyhow::Result<Vec<String>> {
+        self.poll_stream_bus();
+        let commands = self.drain_reconnect_commands();
+        let mut rebuilt = Vec::new();
+        for command in commands {
+            if let ReconnectCommand::RebuildBranch(target) = command {
+                if self.rebuild_stream_target(&target)? {
+                    rebuilt.push(target);
+                }
+            }
+        }
+        Ok(rebuilt)
+    }
+
+    /// Process pending GStreamer bus messages without blocking the caller.
+    /// Applications should call this from their periodic pipeline-owner tick.
+    pub fn poll_stream_bus(&mut self) -> usize {
+        let Some(pipeline) = self.pipeline.as_ref() else {
+            return 0;
+        };
+        let Some(bus) = pipeline.bus() else {
+            return 0;
+        };
+        let mut processed = 0;
+        while let Some(message) = bus.pop() {
+            processed += 1;
+            let name = message
+                .src()
+                .and_then(|src| src.name().strip_prefix("stream_sink_").map(str::to_owned));
+            let Some(name) = name else {
+                continue;
+            };
+            let event = match message.view() {
+                gst::MessageView::Error(_) | gst::MessageView::Eos(..) => Some(SinkBusEvent::Error),
+                gst::MessageView::Warning(_) => Some(SinkBusEvent::Warning),
+                gst::MessageView::StateChanged(_) => Some(SinkBusEvent::StateChanged),
+                _ => None,
+            };
+            if let Some(event) = event {
+                if event == SinkBusEvent::Error {
+                    self.handle_stream_target_failure(&name);
+                } else if event == SinkBusEvent::StateChanged {
+                    self.handle_stream_target_live(&name);
+                }
+            }
+        }
+        processed
+    }
+
+    /// Resolve and rebuild one target sink branch while the caller owns the
+    /// pipeline context. The operation is intentionally conservative: it
+    /// recreates the complete streaming pipeline only when no local output is
+    /// active, preserving all configured targets and target isolation.
+    pub fn rebuild_stream_target(&mut self, target: &str) -> anyhow::Result<bool> {
+        let Some(index) = self
+            .stream_targets
+            .as_ref()
+            .and_then(|targets| targets.targets.iter().position(|item| item.name == target))
+        else {
+            return Ok(false);
+        };
+        let Some(pipeline) = self.pipeline.take() else {
+            return Ok(false);
+        };
+        let sink_name = format!("stream_sink_{index}");
+        let Some(sink) = pipeline.by_name(&sink_name) else {
+            self.pipeline = Some(pipeline);
+            anyhow::bail!("stream target sink is missing: {sink_name}");
+        };
+        sink.set_state(gst::State::Null)?;
+        pipeline.remove(&sink)?;
+        // Recreate the branch from the current target settings. The target
+        // remains independent; failure is returned without stopping peers.
+        let target_settings = self
+            .stream_targets
+            .as_ref()
+            .and_then(|targets| targets.targets.get(index))
+            .map(|target| target.settings.clone())
+            .ok_or_else(|| anyhow::anyhow!("stream target disappeared during rebuild"))?;
+        let rebuilt = gst::ElementFactory::make("rtmp2sink")
+            .name(&sink_name)
+            .property("location", target_settings.location())
+            .build()?;
+        pipeline.add(&rebuilt)?;
+        rebuilt.sync_state_with_parent()?;
+        self.pipeline = Some(pipeline);
+        self.handle_stream_target_live(target);
+        Ok(true)
+    }
+
+    /// Resolve a rebuild command against the current pipeline. The engine
+    /// reports the target index; actual element removal/relinking remains
+    /// deliberately explicit because a GStreamer branch must be mutated on its
+    /// owning pipeline context.
+    pub fn resolve_reconnect_command(&self, command: &ReconnectCommand) -> Option<usize> {
+        match command {
+            ReconnectCommand::RebuildBranch(name) => {
+                self.stream_targets.as_ref().and_then(|targets| {
+                    targets
+                        .targets
+                        .iter()
+                        .position(|target| target.name == *name)
+                })
+            }
+            ReconnectCommand::Shutdown => None,
+        }
     }
 
     pub fn retryable_stream_targets(&self) -> Vec<&str> {
@@ -612,10 +746,14 @@ impl RivuletEngine {
             .unwrap_or_else(|| vec![StreamTarget::new("primary", settings.clone())]);
         let mut fanout = String::from("flvmux name=mux streamable=true");
         for (index, target) in targets.iter().enumerate() {
-            let sink = format!(
-                "rtmp2sink name=stream_sink_{index} location=\\\"{}\\\"",
-                target.settings.location()
-            );
+            let sink_fragment = target
+                .contribution
+                .as_ref()
+                .map(|contribution| contribution.pipeline_sink_fragment())
+                .unwrap_or_else(|| {
+                    format!("rtmp2sink location=\\\"{}\\\"", target.settings.location())
+                });
+            let sink = format!("{} name=stream_sink_{index}", sink_fragment);
             fanout.push_str(&format!(
                 " ! tee name=stream_tee_{index} stream_tee_{index}. ! queue{} ! {}",
                 delay, sink
@@ -1180,6 +1318,7 @@ impl RivuletEngine {
         self.stream_health = None;
         self.recording_metrics = None;
         self.reconnect_supervisor = None;
+        self.reconnect_worker = None;
         self.reconnect_started = None;
         self.delay_supervisors.clear();
         self.is_recording = false;

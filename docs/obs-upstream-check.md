@@ -43,4 +43,4 @@ interpreted as proof of feature parity. After reviewing a candidate, update
 `obs-features.json`, the README checklist, and the appropriate milestone/issue
 only when the candidate fits the product vision. Strong-fit candidates can be
 copied into `docs/obs-vision-candidates.md` with `--update-doc`; after review,
-maintainers may promote them into the README roadmap and a milestone issue.
+maintainers may promote them into [`obs-vision-roadmap.md`](obs-vision-roadmap.md), the README roadmap, and a milestone issue.

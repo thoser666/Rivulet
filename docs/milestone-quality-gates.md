@@ -78,6 +78,34 @@ validation, asset drift, signing/packaging tests, and parity checks. Hardware,
 GPU, WebView, and display-server checks must be marked `PASS`, `BLOCKED`, or
 `N/A` with a reason; they must not be silently omitted.
 
+## Cross-cutting resource-efficiency gate
+
+This gate applies to **every milestone M0–M9**, in addition to the milestone-specific checks below. It is scaled to the feature: a CLI or API feature may use process CPU/RAM and determinism measurements, while capture/rendering features must also measure frame time, GPU, queues, and power where available.
+
+Use [`resource-efficiency-goal.md`](resource-efficiency-goal.md) as the source of thresholds and methodology. Every milestone report must record:
+
+- CPU and GPU impact compared with a documented baseline;
+- p95/p99 frame-time impact and 1% lows for interactive video/game workflows;
+- memory usage and growth over a representative session;
+- behavior when a resource or hardware budget is unavailable;
+- queue bounds, cancellation, and UI responsiveness;
+- `PASS`, `BLOCKED`, or `N/A` for hardware-only measurements, including a reason.
+
+| Milestone | Minimum resource-efficiency evidence |
+| --- | --- |
+| M0 | Capture/recording CPU, GPU, RAM, frame-time baseline |
+| M1 | Encoder, audio, overlay, replay-buffer overhead |
+| M2 | Scene composition, preview, transitions, and source-count scaling |
+| M3 | Fan-out queues, reconnect isolation, bitrate and delay overhead |
+| M4 | Replay, filters, remux, and virtual-camera resource behavior |
+| M5 | Plugin, hotkey, updater, and cross-platform overhead/fallback behavior |
+| M6 | Headless resource limits and deterministic CI execution |
+| M7 | Host-application overhead, lifecycle, and bounded background work |
+| M8 | GPU-direct, zero-copy, renderer, thermal, and battery measurements |
+| M9 | Local model CPU/RAM/VRAM budget, responsiveness, and graceful degradation |
+
+A milestone cannot claim resource efficiency from compilation or unit tests alone. Attach the report or mark the measurement `BLOCKED`/`N/A`; never silently omit it.
+
 ## Milestone-specific gates
 
 ### M2: Scenes and Composition

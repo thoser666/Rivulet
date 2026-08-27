@@ -64,5 +64,5 @@ power, and game measurements are hardware evidence and must be marked
 - M3 owns streaming queue isolation and adaptive-quality behavior.
 - M8 owns zero-copy, WebGPU, and compute-path improvements.
 
-The goal is reviewed at every milestone quality gate. A release must not claim
+The goal is reviewed at every M0–M9 milestone quality gate. Each milestone report must include the applicable resource evidence or an explicit `BLOCKED`/`N/A` reason. A release must not claim
 "low overhead" solely because compilation or synthetic unit tests pass.
