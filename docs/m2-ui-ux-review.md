@@ -22,6 +22,9 @@ The review passes when all of the following are true:
   deferred, or platform-specific check.
 - The completed report is committed as `docs/m2-ui-ux-review-report.md` (copy
   the template below) and linked from the M2 release notes.
+- The report explicitly states whether evidence is **manual**, **automated**, or
+  **blocked**. A successful build is evidence of compilation only, not of usable
+  capture, permissions, rendering, audio, or display behavior.
 
 This is a product-quality gate. It does not replace automated unit, integration,
 or CI tests.
@@ -48,8 +51,12 @@ screenshots or recordings.
 
 ## Workflow matrix
 
-Mark each row `PASS`, `FAIL`, `BLOCKED`, or `N/A`. A `PASS` requires that the
-expected result is visible and that the UI remains responsive throughout.
+Mark each row `PASS`, `FAIL`, `BLOCKED`, or `N/A`, and include an evidence reference.
+`PASS` requires an actual manual or reproducible integration observation on the
+listed platform; unit tests and compilation alone cannot turn a platform row into
+`PASS`. Use `BLOCKED` when the required hardware/display/session is unavailable.
+Use `N/A` only when the workflow is intentionally unsupported and link the parity
+issue or roadmap decision.
 
 | ID | Workflow | Expected result | Windows | Linux | macOS | Evidence / issue |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -118,6 +125,9 @@ to the review artifact or CI run.
 | --- | --- | --- | --- | --- | --- | --- |
 | F-001 | Blocker/Critical/High/Medium/Low |  |  |  |  | Open |
 
+Do not leave the example finding in a completed report. Findings must have a stable
+ID, severity, owner, follow-up milestone/issue when deferred, and a retest result.
+
 Severity guidance:
 
 - `Blocker`: recording, recovery, or navigation cannot be completed.
@@ -141,16 +151,21 @@ Severity guidance:
 
 3. Create a clean test profile and launch Rivulet with diagnostics enabled. Keep
    the daily log and launcher diagnostics for the evidence bundle.
-4. Execute the workflows in order, then repeat the accessibility checks at the
-   display scales and themes listed in the matrix.
-5. Record every result immediately. Do not mark a row `PASS` from memory.
-6. Re-test every fixed finding on the same profile and record the new evidence.
-7. Complete the report, obtain a second reviewer for all `High` or higher
+4. Execute the workflows in order on each available platform profile, then repeat
+   the accessibility checks at the display scales and themes listed in the matrix.
+5. Record every result immediately. Do not mark a row `PASS` from memory. For
+   platform-dependent behavior, attach a screenshot, recording, or test-run link.
+6. For unavailable hardware, display servers, permissions, or platform features,
+   record `BLOCKED`/`N/A`, the reason, and the linked parity issue; do not infer
+   success from another platform's result.
+7. Re-test every fixed finding on the same profile and record the new evidence.
+8. Complete the report, obtain a second reviewer for all `High` or higher
    findings, and link the report from the release notes.
 
 ## Report template
 
-Copy this section to `docs/m2-ui-ux-review-report.md` for each review:
+Copy this section to `docs/m2-ui-ux-review-report.md` for each review. Replace all
+blank cells and remove placeholder rows before committing the report:
 
 ```markdown
 # M2 UI/UX Review Report
