@@ -59,7 +59,7 @@ open.
 
 The reconnect supervisor is now connected to the engine's target status API. Callers handling GStreamer bus `Error`/`Eos` messages should call `handle_stream_target_failure`; after a successful sink restart they should call `handle_stream_target_live`. `SinkBusEvent` provides the tested mapping for fatal (`Error`/`Eos`), non-fatal (`Warning`), and successful state-change events. Retry state, limits, and exponential backoff are deterministic and fully tested. The pipeline-owner `service_streaming()` tick now polls bus messages, drains due reconnect commands, and invokes target-local branch rebuilds without moving GStreamer mutations to the worker thread. Rebuilds preserve the configured transport by reconstructing the validated RTMP/RTMPS, SRT, or RIST sink fragment rather than hard-coding RTMP. Duplicate failures are ignored while a retry is already pending, preventing retry storms.
 
-Adaptive bitrate remains bounded by the existing policy and updates the active `video_enc` property when present. Health polling, cooldown/hysteresis, and guaranteed execution on the GStreamer context remain follow-up work.
+Adaptive bitrate remains bounded by the existing policy and updates the active `video_enc` property when present. Health samples, cooldown, and hysteresis are applied through the runtime controller; production telemetry wiring and platform measurement remain gate evidence.
 
 ## Runtime supervision
 
@@ -71,7 +71,7 @@ SRT/RIST settings now generate protocol-specific sink fragments including latenc
 
 The adaptive-bitrate implementation provides a bounded policy and applies changed values to the active `video_enc` bitrate property. `AdaptiveBitrateController` adds stable-sample and cooldown protection; wiring real network telemetry into that controller remains follow-up work.
 
-Stream delay is applied per fan-out branch as a bounded outgoing stage and exposes reconnect delay semantics; `DelaySupervisor` provides bounded reconnect retention, while attaching it to live per-branch queues remains follow-up work. Multitrack Video currently validates and carries the representation count,
+Stream delay is applied per fan-out branch as a bounded outgoing stage. `DelaySupervisor` retains bounded media across reconnects and counts overflow drops; each live branch now owns queue and delay stages, so queue overflow/underflow behavior is observable and testable. Multitrack Video currently validates and carries the representation count,
 but the RTMP/FLV transport still emits one negotiated track. Per-track encoder
 and transport negotiation requires a later protocol implementation.
 

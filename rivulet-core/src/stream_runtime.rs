@@ -76,6 +76,7 @@ pub struct DelaySupervisor {
     configured: Duration,
     buffered: Duration,
     max_buffer: Duration,
+    dropped: u64,
 }
 
 impl DelaySupervisor {
@@ -85,6 +86,7 @@ impl DelaySupervisor {
             configured: configured.min(max_buffer),
             buffered: Duration::ZERO,
             max_buffer,
+            dropped: 0,
         }
     }
 
@@ -95,8 +97,16 @@ impl DelaySupervisor {
         self.buffered
     }
 
+    pub fn dropped(&self) -> u64 {
+        self.dropped
+    }
+
     pub fn push(&mut self, amount: Duration) {
-        self.buffered = self.buffered.saturating_add(amount).min(self.max_buffer);
+        let next = self.buffered.saturating_add(amount);
+        if next > self.max_buffer {
+            self.dropped = self.dropped.saturating_add(1);
+        }
+        self.buffered = next.min(self.max_buffer);
     }
 
     pub fn consume(&mut self, amount: Duration) {
@@ -156,6 +166,7 @@ mod tests {
         let mut delay = DelaySupervisor::new(Duration::from_secs(10), Duration::from_secs(15));
         delay.push(Duration::from_secs(20));
         assert_eq!(delay.buffered(), Duration::from_secs(15));
+        assert_eq!(delay.dropped(), 1);
         delay.on_disconnect();
         assert_eq!(delay.on_reconnect(), Duration::from_secs(10));
         delay.consume(Duration::from_secs(4));
