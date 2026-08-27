@@ -21,10 +21,10 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | `EmbarkStudios/cargo-deny-action` | `v2.1.1` | `3c6349835b2b7b196a839186cb8b78e02f7b5f25` | security.yml |
 | `actions-rust-lang/audit` | `v1.2.7` | `72c09e02f132669d52284a3323acdb503cfc1a24` | security.yml |
 | `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | build-package.yml, ci.yml, nightly.yml |
-| `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | build-package.yml, ci.yml, distribution-readiness.yml, nightly.yml, release.yml, scorecard.yml, security.yml, signing-e2e.yml |
+| `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | build-package.yml, ci.yml, distribution-readiness.yml, nightly.yml, obs-upstream.yml, release.yml, scorecard.yml, security.yml, signing-e2e.yml |
 | `actions/dependency-review-action` | `v4.9.0` | `2031cfc080254a8a887f58cffee85186f0e49e48` | security.yml |
 | `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | ci.yml, release.yml |
-| `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | build-package.yml, scorecard.yml |
+| `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | build-package.yml, obs-upstream.yml, scorecard.yml |
 | `dtolnay/rust-toolchain` | `stable` | `4360b52568e2003a75bf9bc1d59f33a8e3fc893c` | build-package.yml, ci.yml, nightly.yml, security.yml |
 | `github/codeql-action/analyze` | `v3.37.8` | `42947a340483f03ba47bb1a039b2c519aab3df85` | security.yml |
 | `github/codeql-action/autobuild` | `v3.37.8` | `42947a340483f03ba47bb1a039b2c519aab3df85` | security.yml |
