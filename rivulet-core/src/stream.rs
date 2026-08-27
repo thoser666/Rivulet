@@ -721,6 +721,7 @@ mod tests {
 
     #[test]
     fn contribution_targets_refresh_plugin_status_without_affecting_rtmp() {
+        let _ = gstreamer::init();
         let mut rtmp = StreamTarget::new("rtmp", StreamSettings::custom("rtmp://host/live", "key"));
         rtmp.refresh_plugin_status();
         assert_eq!(rtmp.plugin_status, TargetPluginStatus::NotApplicable);

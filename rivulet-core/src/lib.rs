@@ -770,10 +770,11 @@ impl RivuletEngine {
                 .unwrap_or_else(|| {
                     format!("rtmp2sink location=\\\"{}\\\"", target.settings.location())
                 });
+            let branch =
+                format!(" ! queue name=stream_queue_{index} ! tee name=stream_branch_{index}");
             let sink = format!("{} name=stream_sink_{index}", sink_fragment);
             fanout.push_str(&format!(
-                " ! tee name=stream_tee_{index} stream_tee_{index}. ! queue{} ! {}",
-                delay, sink
+                "{branch} stream_branch_{index}. ! queue name=stream_output_queue_{index}{delay} ! {sink}"
             ));
         }
         s.push_str(&fanout);
