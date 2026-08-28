@@ -13,6 +13,12 @@ requiring a GPU, display server, or native window manager.
   navigation and status regions are present.
 - Screenshot-like text is checked for stream-key and RTMP URL leakage.
 - Focus/hover semantics and theme contrast hooks are present.
+- The Stream view exposes health state, rate, queue fill, underflow/overflow
+  counters, and sink latency with text labels; status is not conveyed by color
+  alone.
+- When multistreaming is configured, every target has its own labeled status,
+  queue fill, underflow, and overflow values; one target's failure remains
+  distinguishable from healthy targets.
 
 The test intentionally checks the stable UI contract instead of pixel-perfect
 raster output. Font, DPI, GPU driver, and compositor differences make exact

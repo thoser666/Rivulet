@@ -278,6 +278,45 @@ impl RivuletEngine {
         &self.stream_target_states
     }
 
+    /// Return the target names paired with their current lifecycle state.
+    pub fn stream_targets_with_states(&self) -> Vec<(String, StreamTargetState)> {
+        self.stream_targets
+            .as_ref()
+            .map(|settings| {
+                settings
+                    .targets
+                    .iter()
+                    .enumerate()
+                    .map(|(index, target)| {
+                        (
+                            target.name.clone(),
+                            self.stream_target_states
+                                .get(index)
+                                .copied()
+                                .unwrap_or(StreamTargetState::Offline),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Return per-target delay and queue telemetry in target order.
+    pub fn stream_target_telemetry(&self) -> Vec<(String, StreamTargetState, f64, u64, u64)> {
+        self.stream_targets_with_states()
+            .into_iter()
+            .enumerate()
+            .map(|(index, (name, state))| {
+                let (fill, underflows, overflows) = self
+                    .delay_supervisors
+                    .get(index)
+                    .map(|delay| (delay.fill_ratio(), delay.underflows(), delay.dropped()))
+                    .unwrap_or((0.0, 0, 0));
+                (name, state, fill, underflows, overflows)
+            })
+            .collect()
+    }
+
     /// Update one target from a GStreamer bus event and return whether the
     /// target should be retried. This keeps bus handling target-local.
     pub fn handle_stream_target_failure(&mut self, target: &str) -> bool {
@@ -1426,10 +1465,32 @@ impl RivuletEngine {
     /// Returns [`StreamStats::offline`] when the engine is not streaming (only
     /// local recording or nothing).
     pub fn stream_stats(&mut self) -> StreamStats {
-        self.stream_health
+        let mut stats = self
+            .stream_health
             .as_mut()
             .map(StreamHealthMonitor::stats)
-            .unwrap_or_else(StreamStats::offline)
+            .unwrap_or_else(StreamStats::offline);
+        if !self.delay_supervisors.is_empty() {
+            let total = self.delay_supervisors.len() as f64;
+            let fill = self
+                .delay_supervisors
+                .iter()
+                .map(DelaySupervisor::fill_ratio)
+                .sum::<f64>()
+                / total;
+            stats.queue_fill_ratio = Some(fill.clamp(0.0, 1.0));
+            stats.queue_overflows = self
+                .delay_supervisors
+                .iter()
+                .map(DelaySupervisor::dropped)
+                .sum();
+            stats.queue_underflows = self
+                .delay_supervisors
+                .iter()
+                .map(DelaySupervisor::underflows)
+                .sum();
+        }
+        stats
     }
 
     /// Current recording performance metrics (FPS, encoder load, file size).
@@ -2101,6 +2162,25 @@ mod tests {
         assert_eq!(stats.status, StreamHealthStatus::Offline);
         assert_eq!(stats.frames_sent, 0);
         assert_eq!(stats.dropped_ratio, 0.0);
+    }
+
+    #[test]
+    fn stream_target_telemetry_preserves_target_order_and_state() {
+        let mut engine = RivuletEngine::default();
+        let mut settings = MultistreamSettings::default();
+        settings
+            .add_target(StreamTarget::new("Twitch", StreamSettings::twitch("key")))
+            .unwrap();
+        settings
+            .add_target(StreamTarget::new("YouTube", StreamSettings::youtube("key")))
+            .unwrap();
+        engine.set_multistream_settings(Some(settings));
+        let telemetry = engine.stream_target_telemetry();
+        assert_eq!(telemetry.len(), 2);
+        assert_eq!(telemetry[0].0, "Twitch");
+        assert_eq!(telemetry[1].0, "YouTube");
+        assert_eq!(telemetry[0].1, StreamTargetState::Connecting);
+        assert_eq!(telemetry[0].2, 0.0);
     }
 
     /// `start_streaming` arms the engine for pure streaming; the health monitor

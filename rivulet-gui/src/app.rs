@@ -2,7 +2,9 @@
 
 use crate::theme;
 use eframe::egui;
-use rivulet_core::{CaptureRegion, Locale, RivuletEngine, SkippedFilter};
+use rivulet_core::{
+    CaptureRegion, Locale, RivuletEngine, SkippedFilter, StreamHealthStatus, StreamStats,
+};
 use std::sync::mpsc::Receiver;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -3035,6 +3037,100 @@ impl RivuletApp {
         self.tr_fmt("recording_metrics", &[fps, load, size])
     }
 
+    /// Draw transport health and delay telemetry without relying on color
+    /// alone. Queue counters are cumulative for the active stream and are
+    /// intentionally shown next to their labels for screen-reader-friendly
+    /// diagnostics.
+    fn draw_stream_health_panel(&mut self, ui: &mut egui::Ui, colors: theme::StatusColors) {
+        let stats: StreamStats = self.engine.stream_stats();
+        if matches!(stats.status, StreamHealthStatus::Offline) {
+            return;
+        }
+        let status = match stats.status {
+            StreamHealthStatus::Connecting => self.tr("stream_status_connecting"),
+            StreamHealthStatus::Good => self.tr("stream_status_good"),
+            StreamHealthStatus::Warning => self.tr("stream_status_warning"),
+            StreamHealthStatus::Poor => self.tr("stream_status_poor"),
+            StreamHealthStatus::Offline => self.tr("stream_status_offline"),
+        };
+        let status_color = match stats.status {
+            StreamHealthStatus::Good => colors.success,
+            StreamHealthStatus::Warning => colors.warning,
+            StreamHealthStatus::Poor => colors.error,
+            _ => colors.hint,
+        };
+        ui.group(|ui| {
+            ui.label(egui::RichText::new(self.tr("stream_health")).strong());
+            ui.horizontal(|ui| {
+                ui.label(self.tr("stream_status"));
+                ui.colored_label(status_color, status);
+                ui.label(format!(
+                    "{} ({:.0} kbps, {:.1} FPS)",
+                    self.tr("stream_rate"),
+                    stats.kbps,
+                    stats.fps
+                ));
+            });
+            let queue = stats
+                .queue_fill_ratio
+                .map(|value| format!("{:.0}%", value * 100.0))
+                .unwrap_or_else(|| self.tr("not_available").to_string());
+            ui.label(format!("{}: {}", self.tr("stream_queue_fill"), queue));
+            ui.label(format!(
+                "{}: {}",
+                self.tr("stream_queue_underflows"),
+                stats.queue_underflows
+            ));
+            ui.label(format!(
+                "{}: {}",
+                self.tr("stream_queue_overflows"),
+                stats.queue_overflows
+            ));
+            if let Some(latency) = stats.sink_latency_ms {
+                ui.label(format!(
+                    "{}: {:.0} ms",
+                    self.tr("stream_sink_latency"),
+                    latency
+                ));
+            }
+        });
+
+        let targets = self.engine.stream_target_telemetry();
+        if targets.is_empty() {
+            return;
+        }
+        ui.separator();
+        ui.label(egui::RichText::new(self.tr("stream_targets")).strong());
+        for (name, state, fill, underflows, overflows) in targets {
+            let state_label = match state {
+                rivulet_core::StreamTargetState::Offline => self.tr("stream_status_offline"),
+                rivulet_core::StreamTargetState::Connecting => self.tr("stream_status_connecting"),
+                rivulet_core::StreamTargetState::Live => self.tr("stream_status_good"),
+                rivulet_core::StreamTargetState::Degraded => self.tr("stream_status_warning"),
+                rivulet_core::StreamTargetState::Failed => self.tr("stream_status_poor"),
+            };
+            ui.group(|ui| {
+                ui.label(egui::RichText::new(name).strong());
+                ui.label(format!("{}: {}", self.tr("stream_status"), state_label));
+                ui.label(format!(
+                    "{}: {:.0}%",
+                    self.tr("stream_queue_fill"),
+                    fill * 100.0
+                ));
+                ui.label(format!(
+                    "{}: {}",
+                    self.tr("stream_queue_underflows"),
+                    underflows
+                ));
+                ui.label(format!(
+                    "{}: {}",
+                    self.tr("stream_queue_overflows"),
+                    overflows
+                ));
+            });
+        }
+    }
+
     /// Apply the configured replay buffer setting to the engine. Called
     /// before every recording start so the capture branches are part of the
     /// pipeline, and whenever the user changes the setting (even mid-
@@ -4474,6 +4570,11 @@ impl eframe::App for RivuletApp {
                     if let Some(status) = &self.record_status {
                         ui.colored_label(colors.info, status);
                     }
+                }
+
+                if self.view == AppView::Stream {
+                    self.draw_stream_health_panel(ui, colors);
+                    ui.label(self.tr("stream_health_help"));
                 }
 
                 if self.view == AppView::Mixer {
