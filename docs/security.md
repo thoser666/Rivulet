@@ -64,6 +64,12 @@ by `rivulet-core/tests/ci_pinning.rs`.
 
 ### Cargo dependency policy
 
+The lockfile is checked for yanked crates in CI. When RustSec reports a yanked
+transitive dependency, update the affected package explicitly (for example
+`cargo update -p chacha20`) and commit the resulting lockfile and checksum
+change. Do not silence the advisory or pin back to the yanked release.
+
+
 `deny.toml` is the reviewed policy for dependency hygiene:
 
 - RustSec advisories and yanked releases fail the gate.
@@ -88,8 +94,8 @@ cargo deny check --all-features
 ```
 
 The CI actions install and run these tools in isolated Ubuntu jobs. The lockfile
-is committed so CI and local audits resolve the same dependency versions. The
-GUI and capture crates disable unused optional image codecs so the yanked
+is committed so CI and local audits resolve the same dependency versions.The GUI and capture crates disable unused optional image codecs so the yanked
+
 `core2` crate is not pulled in through AVIF support. No security advisory is
 ignored in the repository at present. If a future audit reports a new
 advisory, upgrade the dependency or document a bounded, reviewed mitigation
