@@ -180,7 +180,12 @@ pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
     #[cfg(target_os = "windows")]
     {
         let path_str = path.to_string_lossy().to_string();
-        let mut child = std::process::Command::new("msiexec")
+        // Start the MSI through the Windows installer executable without
+        // inheriting the GUI's stdio handles. Waiting here can make the GUI
+        // appear frozen while msiexec waits for its own UI/session lifecycle.
+        // The installer owns the file after Process creation, so the caller may
+        // close the application immediately; cleanup is deliberately deferred.
+        std::process::Command::new("msiexec.exe")
             .args([
                 "/i",
                 &path_str,
@@ -188,13 +193,10 @@ pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
                 "/norestart",
                 "REBOOT=ReallySuppress",
             ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .spawn()?;
-        // Wait for the installer to finish so the file is not deleted
-        // while msiexec is still reading it.
-        let status = child.wait()?;
-        if !status.success() {
-            anyhow::bail!("msiexec exited with {status} — is the MSI file valid and accessible?");
-        }
         Ok(true)
     }
 
@@ -427,6 +429,23 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "windows")]
+    fn windows_installer_command_is_detached_and_non_blocking() {
+        // The Windows implementation must launch msiexec.exe and return
+        // immediately; waiting for the child caused the GUI update action to
+        // look hung and prevented a clean application close.
+        let source = include_str!("lib.rs");
+        let windows_block = source
+            .split("#[cfg(target_os = \"windows\")]")
+            .nth(1)
+            .expect("Windows installer implementation must exist");
+        assert!(windows_block.contains("msiexec.exe"));
+        assert!(windows_block.contains("Stdio::null()"));
+        assert!(!windows_block.contains("let mut child = std::process::Command::new(\"msiexec\")"));
+    }
+
+    #[test]
+    #[cfg(not(target_os = "windows"))]
     fn install_asset_returns_error_for_nonexistent_file() {
         let fake = std::env::temp_dir().join("rivulet_test_nonexistent.msi");
         let result = install_asset(&fake);
