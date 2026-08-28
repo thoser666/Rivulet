@@ -31,6 +31,23 @@ recording error path, then attach redacted screenshots to the milestone review.
 Do not include stream keys, personal paths, or window titles containing private
 information.
 
+## Accessibility contract
+
+The `ui_accessibility` integration test is a deterministic semantic guard for
+native egui screens. It checks that primary actions have labels, navigation has
+a defined focus order, errors are surfaced in the UI, status is not conveyed by
+color alone, narrow layouts remain responsive, and secrets remain redacted.
+These assertions are intentionally platform-neutral; manual accessibility
+review at the viewport/theme profiles remains required by the milestone gates.
+
+Run it locally with:
+
+```bash
+cargo test -p rivulet-gui --test ui_accessibility
+```
+
+CI runs this test in the existing Windows, Linux, and macOS build matrix.
+
 ## egui regression snapshots
 
 The CI matrix also runs `rivulet-gui/tests/ui_regression.rs`. It verifies stable
