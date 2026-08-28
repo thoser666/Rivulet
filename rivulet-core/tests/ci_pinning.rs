@@ -364,7 +364,7 @@ fn rist_receiver_smoke_is_wired_up() {
     assert!(smoke_script.contains("ristsrc"));
     assert!(smoke_script.contains("address="));
     assert!(smoke_script.contains("timeout --signal=TERM --kill-after=5s 30s"));
-    assert!(smoke_script.contains("did not become ready"));
+    assert!(smoke_script.contains("did not remain running"));
     let smoke = read("scripts/rist-receiver-smoke.sh");
     assert!(!smoke.contains("ristsink uri="));
     assert!(smoke.contains("h264parse ! mpegtsmux alignment=7 !"));
