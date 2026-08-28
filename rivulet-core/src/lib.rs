@@ -29,7 +29,7 @@ pub use reconnect::{
     target_index_from_sink_name, ReconnectCommand, ReconnectWorker, RetryPolicy, SinkBusEvent,
     StreamingReconnectSupervisor, TargetReconnectState,
 };
-pub use stream_runtime::{AdaptiveBitrateController, DelaySupervisor};
+pub use stream_runtime::{AdaptiveBitrateController, BitrateChange, DelaySupervisor};
 
 pub mod encoder;
 pub use encoder::{
@@ -650,6 +650,11 @@ impl RivuletEngine {
 
     pub fn video_bitrate(&self) -> u32 {
         self.encoder_bitrate_kbps
+    }
+
+    /// Returns the most recent live bitrate decision, including its reason.
+    pub fn last_bitrate_change(&self) -> Option<BitrateChange> {
+        self.bitrate_controller.last_change()
     }
 
     /// Enable or disable the recording overlay (timer + FPS counter burned

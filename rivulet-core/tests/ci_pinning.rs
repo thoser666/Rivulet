@@ -384,6 +384,17 @@ fn rist_receiver_smoke_is_wired_up() {
 }
 
 #[test]
+fn adaptive_bitrate_live_change_diagnostics_are_wired_up() {
+    let runtime = read("rivulet-core/src/stream_runtime.rs");
+    let engine = read("rivulet-core/src/lib.rs");
+    let docs = read("docs/m3-streaming-quality-gate.md");
+    assert!(runtime.contains("pub struct BitrateChange"));
+    assert!(runtime.contains("last_change_info"));
+    assert!(engine.contains("pub fn last_bitrate_change"));
+    assert!(docs.contains("last_bitrate_change()"));
+}
+
+#[test]
 fn resource_efficiency_gate_is_wired_up() {
     let checker = read("scripts/resource-efficiency-check.py");
     let fixture = read("scripts/resource-efficiency-sample.json");
