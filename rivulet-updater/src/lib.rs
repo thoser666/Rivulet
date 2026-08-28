@@ -171,6 +171,16 @@ pub fn download_asset_with_progress(
     Ok(())
 }
 
+/// Windows Installer exit status indicating success with a reboot required.
+pub const WINDOWS_INSTALLER_REBOOT_REQUIRED: i32 = 3010;
+
+/// Classify a Windows Installer exit code. MSI 3010 is a successful install;
+/// it only indicates that Windows recommends a reboot to finish applying it.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn windows_installer_exit_success(code: i32) -> bool {
+    code == 0 || code == WINDOWS_INSTALLER_REBOOT_REQUIRED
+}
+
 /// Launch the platform installer for a downloaded package.
 ///
 /// Returns `Ok(true)` when the application should quit right afterwards (the
@@ -453,6 +463,14 @@ mod tests {
             result.is_err(),
             "install_asset must fail for nonexistent file"
         );
+    }
+
+    #[test]
+    fn windows_installer_success_includes_reboot_required() {
+        assert!(windows_installer_exit_success(0));
+        assert!(windows_installer_exit_success(3010));
+        assert!(!windows_installer_exit_success(1603));
+        assert!(!windows_installer_exit_success(1));
     }
 
     #[test]

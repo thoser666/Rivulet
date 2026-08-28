@@ -24,3 +24,10 @@ The updater never logs or displays stream keys, tokens, or download credentials.
 The downloaded installer is cleaned up after a successful launch where the
 platform permits it; Windows cleanup is intentionally deferred because
 `msiexec.exe` may still hold the file after Rivulet exits.
+
+### Exit code 3010
+
+`msiexec` exit code **3010** means *success, reboot required*. It is not an
+update failure. Rivulet treats both `0` and `3010` as successful installer
+outcomes; the update is applied, while Windows may complete replacement after a
+restart. Codes such as `1603` remain errors and are shown in the update status.
