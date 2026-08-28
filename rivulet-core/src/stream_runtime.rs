@@ -87,6 +87,7 @@ pub struct DelaySupervisor {
     buffered: Duration,
     max_buffer: Duration,
     dropped: u64,
+    underflows: u64,
 }
 
 impl DelaySupervisor {
@@ -97,6 +98,7 @@ impl DelaySupervisor {
             buffered: Duration::ZERO,
             max_buffer,
             dropped: 0,
+            underflows: 0,
         }
     }
 
@@ -111,6 +113,23 @@ impl DelaySupervisor {
         self.dropped
     }
 
+    pub fn underflows(&self) -> u64 {
+        self.underflows
+    }
+
+    pub fn fill_ratio(&self) -> f64 {
+        if self.max_buffer.is_zero() {
+            0.0
+        } else {
+            (self.buffered.as_secs_f64() / self.max_buffer.as_secs_f64()).clamp(0.0, 1.0)
+        }
+    }
+
+    /// Record an underflow when a delayed branch has no media available.
+    pub fn record_underflow(&mut self) {
+        self.underflows = self.underflows.saturating_add(1);
+    }
+
     pub fn push(&mut self, amount: Duration) {
         let next = self.buffered.saturating_add(amount);
         if next > self.max_buffer {
@@ -120,6 +139,9 @@ impl DelaySupervisor {
     }
 
     pub fn consume(&mut self, amount: Duration) {
+        if amount > self.buffered {
+            self.record_underflow();
+        }
         self.buffered = self.buffered.saturating_sub(amount);
     }
 
@@ -199,5 +221,8 @@ mod tests {
         assert_eq!(delay.on_reconnect(), Duration::from_secs(10));
         delay.consume(Duration::from_secs(4));
         assert_eq!(delay.buffered(), Duration::from_secs(6));
+        assert!(delay.fill_ratio() > 0.0);
+        delay.consume(Duration::from_secs(10));
+        assert_eq!(delay.underflows(), 1);
     }
 }
