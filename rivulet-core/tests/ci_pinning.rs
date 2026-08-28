@@ -360,8 +360,11 @@ fn rist_receiver_smoke_is_wired_up() {
         "the diagnostic image must be built before it is inspected"
     );
     assert!(workflow.contains("rist-receiver-smoke.sh"));
-    assert!(read("scripts/rist-receiver-smoke.sh").contains("ristsrc"));
-    assert!(read("scripts/rist-receiver-smoke.sh").contains("address="));
+    let smoke_script = read("scripts/rist-receiver-smoke.sh");
+    assert!(smoke_script.contains("ristsrc"));
+    assert!(smoke_script.contains("address="));
+    assert!(smoke_script.contains("timeout --signal=TERM --kill-after=5s 30s"));
+    assert!(smoke_script.contains("did not become ready"));
     let smoke = read("scripts/rist-receiver-smoke.sh");
     assert!(!smoke.contains("ristsink uri="));
     assert!(smoke.contains("h264parse ! mpegtsmux alignment=7 !"));

@@ -30,14 +30,17 @@ presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the fu
 ## RIST interoperability
 
 The RIST sink uses the plugin's supported `address`, `port`, and `latency`
-properties rather than the unsupported `uri` property. The smoke sender parses H.264, muxes it as MPEG-TS with packet alignment, payloads it into RTP via `rtpmp2tpay`, and connects to `ristsink`, satisfying the `application/x-rtp` sink pad contract of GStreamer's `ristsink` element. CI now includes a dedicated RIST receiver smoke job using
+properties rather than the unsupported `uri` property. The smoke setup uses a caller/listener topology and validates the installed plugin contract before launching the pipeline; it does not assume that `ristsink` accepts an RTMP-style URI or arbitrary RTP caps. The smoke sender parses H.264, muxes it as MPEG-TS with packet alignment, payloads it into RTP via `rtpmp2tpay`, and connects to `ristsink`, satisfying the `application/x-rtp` sink pad contract of GStreamer's `ristsink` element. CI now includes a dedicated RIST receiver smoke job using
 `docker/rist-smoke/Dockerfile` and `scripts/rist-receiver-smoke.sh`. The test
 uses a finite MPEG-TS test source, a listener receiver, and a caller sender;
 plugin availability and real receiver compatibility remain explicit evidence.
 The diagnostic `gst-inspect-1.0` step runs after the image is built in the same
 job, so it never tries to pull the local-only `rivulet-rist-smoke:ci` tag from a
 registry. It prints the installed GStreamer/RIST pad contracts before the smoke
-pipeline executes, making future caps failures actionable. The lightweight
+pipeline executes, making future caps failures actionable. The smoke script
+also bounds receiver startup and sender execution with `timeout`; it polls for
+the receiver's PLAYING state and emits container logs on early exit or timeout,
+so a failed handshake cannot hang the CI job indefinitely. The lightweight
 `scripts/check-rist-pipeline.py` contract test runs before Docker and verifies the
 image build order, listener/caller properties, and absence of unsupported RTP
 caps. This catches wiring regressions even when Docker is unavailable locally.
@@ -94,7 +97,7 @@ SRT/RIST settings now generate protocol-specific sink fragments including latenc
 
 The adaptive-bitrate implementation provides a bounded policy and applies changed values to the active `video_enc` bitrate property. `AdaptiveBitrateController` adds stable-sample and cooldown protection and accepts a complete `StreamStats` telemetry snapshot. `StreamHealthMonitor` supplies rolling bitrate, FPS, bytes-per-second throughput, sent/dropped-frame counters, dropped ratio, and optional sink/queue measurements from the active pipeline. The resource-efficiency checker validates p95/p99 frame-time, 1% lows, CPU, memory, and optional GPU fields; real hardware baselines remain required before declaring the M3 performance gate complete.
 
-Stream delay is applied per fan-out branch as a bounded outgoing stage. `DelaySupervisor` retains bounded media across reconnects and counts overflow drops; each live branch now owns queue and delay stages, so queue overflow/underflow behavior is observable and testable. Multitrack Video currently validates and carries the representation count,
+Stream delay is applied per fan-out branch as a bounded outgoing stage. `DelaySupervisor` retains bounded media across reconnects, exposes a normalized fill ratio, counts overflow drops, and records underflows when a branch consumes more media than it has buffered. `StreamStats` aggregates queue fill, underflow, and overflow counters across targets so the GUI/diagnostics can expose delay health without conflating it with video-frame drops. Each live branch owns queue and delay stages, so queue overflow/underflow behavior is observable and testable. Multitrack Video currently validates and carries the representation count,
 but the RTMP/FLV transport still emits one negotiated track. Per-track encoder
 and transport negotiation requires a later protocol implementation.
 

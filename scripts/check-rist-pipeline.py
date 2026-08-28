@@ -10,6 +10,8 @@ assert "docker build --pull=true -t rivulet-rist-smoke:ci docker/rist-smoke" in 
 assert "name: Inspect RIST plugin" in workflow
 assert workflow.index("Build RIST smoke image for diagnostics") < workflow.index("Inspect RIST plugin")
 assert "ristsrc address=0.0.0.0 port=10080" in script
+assert "timeout --signal=TERM --kill-after=5s 30s" in script
+assert "receiver did not become ready" in script
 assert "ristsink address=\"$RECEIVER\" port=10080" in script
 assert "rtpmp2tpay" in script
 assert "application/x-rtp" not in script
