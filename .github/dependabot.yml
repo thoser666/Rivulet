@@ -1,19 +1,9 @@
-# Dependabot version updates.
-#
-# The github-actions entry keeps the SHA-pinned third-party actions current:
-# when a pinned action gets a new release, Dependabot opens a PR that updates
-# both the commit SHA and the human-readable version comment next to it
-# (e.g. `uses: actions/checkout@<sha> # v5.1.0`).
-#
-# Docs: https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
-
+# Dependency ownership is intentionally split:
+# - Renovate manages Cargo updates and the dependency dashboard.
+# - Dependabot manages GitHub Actions SHA pins and their version comments.
+# Keeping ecosystems separate avoids duplicate pull requests.
 version: 2
 updates:
-  - package-ecosystem: "cargo"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

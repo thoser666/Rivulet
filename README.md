@@ -594,6 +594,11 @@ repointed tag or branch cannot swap in a malicious commit;
 upstream version for reviewing Dependabot updates (its table is generated
 from the workflows by `scripts/generate-action-pins.py`). Dependabot PRs are
 approved and auto-merged via `.github/workflows/dependabot-auto-merge.yml`
+
+Dependency update ownership is split intentionally: Renovate handles grouped
+Cargo updates and the dependency dashboard (`renovate.json`), while Dependabot
+handles GitHub Actions SHA pins. This avoids duplicate update PRs; all updates
+remain subject to the required CI, security, and pinning checks.
 once the required checks (including the pinning tests) pass; this needs
 "Allow auto-merge" and branch protection enabled in the repo settings. A
 daily nightly job (`scripts/check-action-pins.py`) also compares every pinned

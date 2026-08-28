@@ -150,6 +150,23 @@ fn dependabot_updates_pinned_github_actions() {
         entry.contains("interval: \"weekly\""),
         "the github-actions entry must have a weekly schedule"
     );
+    assert!(
+        !config.contains("package-ecosystem: \"cargo\""),
+        "Dependabot must not duplicate Renovate's Cargo update ownership"
+    );
+}
+
+#[test]
+fn renovate_owns_grouped_cargo_updates() {
+    let config = read("renovate.json");
+    assert!(config.contains("\"enabledManagers\": [\"cargo\"]"));
+    assert!(config.contains("\":dependencyDashboard\""));
+    assert!(config.contains("\"groupName\": \"Rust dependencies\""));
+    assert!(config.contains("\"dependencyDashboardApproval\": true"));
+    assert!(
+        !config.contains("github-actions"),
+        "Renovate must not compete with Dependabot for GitHub Actions pins"
+    );
 }
 
 #[test]

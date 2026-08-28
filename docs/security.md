@@ -11,6 +11,8 @@ The following settings are enabled for `thoser666/Rivulet`:
 - **Secret Scanning** detects credentials in the repository and its history.
 - **Push Protection** blocks supported secrets before they are pushed.
 - **Dependabot Security Updates** is enabled for vulnerable dependency updates.
+- **Renovate** is configured for grouped Cargo version updates and its dependency dashboard;
+  Dependabot remains responsible for GitHub Actions SHA pins only.
 
 Secret Scanning and Push Protection are repository settings, not workflow files.
 They must therefore be checked through the GitHub UI or API after repository
@@ -57,6 +59,10 @@ these settings.
 - **Security** is an aggregate required check. It requires CodeQL, Cargo Audit,
   and Cargo Deny to succeed and accepts the Dependency Review job as either
   successful or skipped when the event is not a pull request.
+
+Dependency update ownership is deliberately split: Renovate manages Cargo
+updates, while Dependabot manages GitHub Actions SHA pins. This prevents duplicate
+PRs and keeps action-pin review separate from Rust dependency upgrades.
 
 Every third-party action in the security workflows is pinned to a full commit
 SHA. The pins are listed in [`ci-action-pins.md`](ci-action-pins.md) and enforced
