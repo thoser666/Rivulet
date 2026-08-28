@@ -37,10 +37,13 @@ plugin availability and real receiver compatibility remain explicit evidence.
 The diagnostic `gst-inspect-1.0` step runs after the image is built in the same
 job, so it never tries to pull the local-only `rivulet-rist-smoke:ci` tag from a
 registry. It prints the installed GStreamer/RIST pad contracts before the smoke
-pipeline executes, making future caps failures actionable. The smoke script
-also bounds receiver startup and sender execution with `timeout`; it polls for
-the receiver's PLAYING state and emits container logs on early exit or timeout,
-so a failed handshake cannot hang the CI job indefinitely. The lightweight
+pipeline executes, making future caps failures actionable.The smoke script
+also bounds receiver startup and sender execution with `timeout`; it uses the
+Ubuntu package's `gst-launch-1.0` binary name (not the nonexistent
+`gst-launch-1.0.0` name), polls for the receiver's PLAYING state, and emits
+container logs on early exit or timeout, so a failed handshake cannot hang the
+CI job indefinitely.
+ The lightweight
 `scripts/check-rist-pipeline.py` contract test runs before Docker and verifies the
 image build order, listener/caller properties, and absence of unsupported RTP
 caps. This catches wiring regressions even when Docker is unavailable locally.

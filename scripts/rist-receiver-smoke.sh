@@ -7,7 +7,7 @@ SENDER="rivulet-rist-sender-$$"
 cleanup() { docker rm -f "$RECEIVER" "$SENDER" >/dev/null 2>&1 || true; docker network rm "$NETWORK" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 docker network create "$NETWORK" >/dev/null
-docker run -d --name "$RECEIVER" --network "$NETWORK" "$IMAGE" sh -ceu 'timeout --signal=TERM --kill-after=5s 30s gst-launch-1.0.0 -q -e ristsrc address=0.0.0.0 port=10080 ! fakesink sync=false' >/dev/null
+docker run -d --name "$RECEIVER" --network "$NETWORK" "$IMAGE" sh -ceu 'timeout --signal=TERM --kill-after=5s 30s gst-launch-1.0 -q -e ristsrc address=0.0.0.0 port=10080 ! fakesink sync=false' >/dev/null
 receiver_ready=false
 for _ in $(seq 1 20); do
   if docker inspect -f '{{.State.Running}}' "$RECEIVER" 2>/dev/null | grep -q true; then
