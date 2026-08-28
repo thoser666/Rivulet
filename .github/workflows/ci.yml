@@ -58,6 +58,9 @@ jobs:
       - name: Build RIST smoke image for diagnostics
         run: docker build --pull=true -t rivulet-rist-smoke:ci docker/rist-smoke
 
+      - name: Check RIST pipeline contract
+        run: python3 scripts/check-rist-pipeline.py
+
       - name: Inspect RIST plugin
         run: |
           docker run --rm rivulet-rist-smoke:ci gst-launch-1.0 --version
