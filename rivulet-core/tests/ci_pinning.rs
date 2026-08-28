@@ -249,6 +249,10 @@ fn stale_pin_checker_is_wired_up() {
         checker.contains("--comment") && checker.contains("render_comment"),
         "check-action-pins.py must offer a --comment Markdown notification mode"
     );
+    assert!(
+        checker.contains("timeout=30"),
+        "check-action-pins.py must bound upstream lookups"
+    );
     let nightly = read(".github/workflows/nightly.yml");
     assert!(
         nightly.contains("check-action-pins.py"),

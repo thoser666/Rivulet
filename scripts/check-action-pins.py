@@ -54,7 +54,10 @@ def ls_remote(repo, *refs, tags=False):
         cmd.append("--tags")
     cmd.append(f"https://github.com/{repo}.git")
     cmd.extend(refs)
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"git ls-remote timed out for {repo}") from exc
     if proc.returncode != 0:
         raise RuntimeError(f"git ls-remote failed for {repo}: {proc.stderr.strip()}")
     return proc.stdout.splitlines()

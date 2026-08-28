@@ -66,7 +66,10 @@ PRs and keeps action-pin review separate from Rust dependency upgrades.
 
 Every third-party action in the security workflows is pinned to a full commit
 SHA. The pins are listed in [`ci-action-pins.md`](ci-action-pins.md) and enforced
-by `rivulet-core/tests/ci_pinning.rs`.
+by `rivulet-core/tests/ci_pinning.rs`. The nightly checker resolves each
+pinned ref with `git ls-remote`; each request has a 30-second timeout so a
+GitHub/network outage cannot hang the workflow indefinitely. It reports a
+newer major separately from same-major staleness.
 
 ### Cargo dependency policy
 
