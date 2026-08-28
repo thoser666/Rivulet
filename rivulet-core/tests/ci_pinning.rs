@@ -376,6 +376,8 @@ fn rist_receiver_smoke_is_wired_up() {
     assert!(smoke.contains("h264parse ! mpegtsmux alignment=7 !"));
     assert!(smoke.contains("rtpmp2tpay"));
     assert!(smoke.contains("ristsink"));
+    assert!(smoke.contains("sender_status"));
+    assert!(smoke.contains("-ne 124"));
     assert!(!smoke.contains("application/x-rtp"));
     let checker = read("scripts/check-rist-pipeline.py");
     assert!(checker.contains("RIST pipeline contract OK"));

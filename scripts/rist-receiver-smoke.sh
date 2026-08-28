@@ -26,12 +26,21 @@ if [ "$receiver_ready" != true ]; then
   docker logs "$RECEIVER" >&2 || true
   exit 1
 fi
+sender_status=0
+set +e
 docker run --rm --name "$SENDER" --network "$NETWORK" "$IMAGE" \
-  timeout --signal=TERM --kill-after=5s 30s \
+  timeout --signal=TERM --kill-after=5s 10s \
   gst-launch-1.0 -e videotestsrc num-buffers=30 ! videoconvert ! \
   x264enc tune=zerolatency ! h264parse ! mpegtsmux alignment=7 ! \
   rtpmp2tpay ! \
-  ristsink address="$RECEIVER" port=10080 >/dev/null
+  ristsink address="$RECEIVER" port=10080
+sender_status=$?
+set -e
+if [ "$sender_status" -ne 0 ] && [ "$sender_status" -ne 124 ]; then
+  echo "RIST sender failed with exit code $sender_status" >&2
+  docker logs "$RECEIVER" >&2 || true
+  exit "$sender_status"
+fi
 # A finite sender must terminate; the receiver is deliberately bounded so a
 # failed handshake cannot leave the CI job waiting indefinitely.
 echo "RIST receiver smoke test passed (image: $IMAGE)"
