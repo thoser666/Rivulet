@@ -328,6 +328,20 @@ fn dependabot_auto_merge_workflow_is_wired_up() {
 fn rist_receiver_smoke_is_wired_up() {
     let workflow = read(".github/workflows/ci.yml");
     assert!(workflow.contains("name: RIST Receiver Smoke"));
+    assert!(workflow.contains("name: Build RIST smoke image for diagnostics"));
+    assert!(
+        workflow.contains("docker build --pull=true -t rivulet-rist-smoke:ci docker/rist-smoke")
+    );
+    let inspect = workflow
+        .find("name: Inspect RIST plugin")
+        .expect("RIST inspection step");
+    let build = workflow
+        .find("name: Build RIST smoke image for diagnostics")
+        .expect("RIST diagnostic image build");
+    assert!(
+        build < inspect,
+        "the diagnostic image must be built before it is inspected"
+    );
     assert!(workflow.contains("rist-receiver-smoke.sh"));
     assert!(read("scripts/rist-receiver-smoke.sh").contains("ristsrc"));
     assert!(read("scripts/rist-receiver-smoke.sh").contains("address="));

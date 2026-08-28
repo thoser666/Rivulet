@@ -34,6 +34,10 @@ properties rather than the unsupported `uri` property. The smoke sender parses H
 `docker/rist-smoke/Dockerfile` and `scripts/rist-receiver-smoke.sh`. The test
 uses a finite MPEG-TS test source, a listener receiver, and a caller sender;
 plugin availability and real receiver compatibility remain explicit evidence.
+The diagnostic `gst-inspect-1.0` step runs after the image is built in the same
+job, so it never tries to pull the local-only `rivulet-rist-smoke:ci` tag from a
+registry. It prints the installed GStreamer/RIST pad contracts before the smoke
+pipeline executes, making future caps failures actionable.
 
 ## Resource-efficiency evidence
 
