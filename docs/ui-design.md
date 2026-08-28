@@ -1,5 +1,12 @@
 # Rivulet UI / Design Guide
 
+## Theme persistence
+
+The selected `System`, `Dark`, or `Light` theme is persisted with the eframe
+application state. Normal eframe saves and the native exit callback both cover
+window-close flows, so a theme selected immediately before clicking the window
+close button is restored on the next launch before the first rendered frame.
+
 This document describes the GUI's structure and the egui conventions new
 features must follow. It is the single reference for *where* UI code lives and
 *how* it is written, so the growing feature set (M1 recording, M2 scenes,

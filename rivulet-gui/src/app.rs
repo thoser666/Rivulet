@@ -3601,6 +3601,10 @@ impl eframe::App for RivuletApp {
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
 
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        tracing::info!(theme = ?self.theme, "Persisting theme preference on application exit");
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // ── Hotkey handling ────────────────────────────────────────
         let ctx = ui.ctx();
@@ -6016,6 +6020,19 @@ mod tests {
         assert_eq!(
             theme::ThemePreference::default(),
             theme::ThemePreference::System
+        );
+    }
+
+    #[test]
+    fn app_serialization_contains_selected_dark_theme() {
+        let app = RivuletApp {
+            theme: theme::ThemePreference::Dark,
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&app).expect("serialize app");
+        assert_eq!(
+            json.get("theme"),
+            Some(&serde_json::Value::String("Dark".into()))
         );
     }
 
