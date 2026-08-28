@@ -1,5 +1,84 @@
 # Changelog
 
+## [0.65.0-alpha.36] - 2026-08-28
+- fix(ci): harden action pin and RIST diagnostics
+- fix(gui): persist theme on application exit
+- fix(streaming): restore queue telemetry API
+- feat(streaming): show per-target queue telemetry
+- fix(ci): stabilize RIST receiver readiness check
+- fix(ci): bound RIST smoke test runtime
+- ci(deps): split Cargo and action update ownership
+- test(gui): add accessibility regression contract
+- fix(ci): validate RIST image diagnostics
+- fix(security): update yanked chacha20 dependency
+- fix(ci): build RIST image before inspection
+- fix(rist): payload MPEG-TS into RTP via rtpmp2tpay for ristsink
+- Inspect Rist plugin (#94)
+- fix(ci): declare RIST MPEG-TS caps
+- fix(ci): use native RIST MPEG-TS caps
+- fix(ci): stop Dependabot bot approval failures
+- feat(streaming): add network telemetry to adaptive bitrate
+- fix(ci): make RIST smoke caps explicit
+- fix(ci): provide RTP caps for RIST smoke
+- fix(ci): correct RIST MPEG-TS smoke pipeline
+- fix(ci): stabilize release retries and RIST pipeline
+- feat(perf): validate runtime resource telemetry
+- test(ci): include RIST in required checks
+- fix(ci): use valid RIST sink properties
+- test(ci): add RIST interoperability smoke test
+- feat(streaming): wire health-driven bitrate and WHIP contract
+- feat(ci): activate resource efficiency gate
+- feat(streaming): expose bounded delay overflow
+- fix(release): reset generated files before branch reuse
+- fix(ci): run SRT receiver in listener mode
+- fix(release): make version branch retries idempotent
+- fix(ci): stabilize SRT smoke and pinning checks
+- fix(ci): use valid SRT smoke image reference
+- feat(streaming): rebuild complete target branches
+- test(ci): add reproducible SRT receiver smoke test
+- feat(streaming): harden transport interoperability and reconnects
+- fix(release): always publish GitHub releases after tagging
+- feat(streaming): automate reconnect and transport fanout
+- feat(streaming): add cancellable reconnect worker
+- feat(streaming): add reconnect runtime contracts
+- feat(streaming): harden reconnect and transport supervision
+- feat(streaming): integrate multistream fanout
+- feat(streaming): add live policy and target fanout contracts
+- feat(streaming): add SRT and RIST contribution contract
+- feat(streaming): add WHIP signaling client
+- feat(streaming): add multistream target model
+- fix(ci): unify upload artifact action pin
+- feat(streaming): document WHIP strategy spike
+- ci: classify OBS features against product vision
+- ci: monitor OBS upstream feature releases
+- test(gui): add egui regression snapshot job
+- test(gui): add cross-platform UI smoke contract
+- feat(streaming): add delay and multitrack video support
+- feat(streaming): add stream presets and adaptive bitrate policy
+- docs(m2): reflect closed milestone status
+- docs(m2): close milestone with quality gate
+- docs(m2): clarify cross-platform UX review procedure
+- docs(m2): record cross-platform UI UX gate
+- feat(filters): add per-source chroma key controls
+- feat(m2): complete scene workflow controls and quality docs
+- fix(ci): satisfy redundant closure lint in scene export
+- feat(scenes): add profile workflows and scene overlays
+- feat(scenes): add scene hotkeys and auto-switch rules
+- feat(scenes): add collection import export and duplication workflows
+- fix(ci): prepare releases without protected branch push
+- fix(gui): satisfy live preview clippy
+- fix(core): satisfy snapshot clippy lint
+- feat(gui): add recording live preview
+- feat(gui): add deterministic scene snapshots
+- fix(ci): resolve current RustSec advisories
+- fix(ci): remove yanked image codec dependency
+- fix(ci): resolve cargo audit dependency failures
+- ci: add dependency gates and distribution readiness
+- ci: require security and scorecard checks
+- docs(ci): refresh generated action pin table
+- docs(security): document develop ruleset bypass
+- ci: add required develop branch checks
+
 ## [0.64.0-alpha.1] - 2026-08-25
 - feat(security): add OpenSSF Scorecard analysis
 
