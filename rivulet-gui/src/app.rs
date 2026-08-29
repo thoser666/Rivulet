@@ -248,7 +248,6 @@ impl AppView {
     /// Milestone of still-planned views (`None` once implemented).
     fn planned_milestone(self) -> Option<&'static str> {
         match self {
-            AppView::Stream => Some("M3"),
             AppView::Assistant => Some("M9"),
             _ => None,
         }
@@ -3297,12 +3296,7 @@ impl RivuletApp {
             *shared.lock().unwrap_or_else(|e| e.into_inner()) = state;
             ctx.request_repaint();
 
-            if quit_after {
-                // Do not touch egui's Context from the worker thread. epaint's
-                // debug lock detects this as a deadlock while the UI thread is
-                // inside `Context::input`. The UI observes this terminal state
-                // and closes the viewport on its next frame instead.
-            }
+            let _ = quit_after;
         });
     }
 
@@ -3379,6 +3373,28 @@ impl RivuletApp {
                 ui.colored_label(colors.error, self.tr_fmt("update_error", &[err]));
             }
             UpdateUi::Idle => {}
+        }
+    }
+
+    /// Render the implemented M3 streaming view.
+    fn draw_stream_view(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new(self.tr("streaming")).strong());
+        ui.separator();
+        ui.label(self.tr("stream_status"));
+        if self.engine.is_streaming() {
+            ui.colored_label(colors.success, self.tr("running"));
+        } else {
+            ui.label(self.tr("stopped"));
+        }
+        ui.label(self.tr("stream_m3_note"));
+        for (name, state, fill, underflows, overflows) in self.engine.stream_target_telemetry() {
+            ui.horizontal(|ui| {
+                ui.label(name);
+                ui.label(format!("{state:?}"));
+                ui.label(format!("queue {:.0}%", fill * 100.0));
+                ui.label(format!("underflow {underflows} / overflow {overflows}"));
+            });
         }
     }
 
@@ -4770,6 +4786,12 @@ impl eframe::App for RivuletApp {
                 ui.label(self.tr("screen_recording_unavailable"));
             }
 
+            // Streaming controls are implemented in M3 and must not render
+            // the generic planned-section placeholder.
+            if self.view == AppView::Stream {
+                self.draw_stream_view(ui, &colors);
+            }
+
             // Placeholder views (still-planned milestones)
             if let Some(milestone) = self.view.planned_milestone() {
                 ui.add_space(20.0);
@@ -5230,11 +5252,12 @@ mod tests {
             assert!(!view.nav_key().is_empty(), "view has no nav key");
         }
         assert_eq!(AppView::all().len(), 6);
+        assert!(AppView::Stream.planned_milestone().is_none());
     }
 
     #[test]
     fn placeholder_views_expose_their_milestone() {
-        assert_eq!(AppView::Stream.planned_milestone(), Some("M3"));
+        assert_eq!(AppView::Stream.planned_milestone(), None);
         assert_eq!(AppView::Assistant.planned_milestone(), Some("M9"));
         // Implemented views have no milestone banner (Scenes is now live).
         assert_eq!(AppView::Scenes.planned_milestone(), None);

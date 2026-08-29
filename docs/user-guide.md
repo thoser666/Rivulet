@@ -21,7 +21,7 @@ Die linke Sidebar ist in folgende Bereiche aufgeteilt:
 - **Record** – Aufnahmequelle, Vorschau und Aufnahmeaktionen
 - **Mixer** – Systemaudio, Mikrofon und Pegel
 - **Scenes** – Szenen, Quellen, Ebenen und Übergänge
-- **Stream** – Streaming-Ziele, Status und Netzwerkdiagnose
+- **Stream** – Streaming-Ziele, Status, Queue-Telemetrie und Netzwerkdiagnose
 - **Assistant** – derzeit vorbereitet
 - **Settings** – Sprache, Theme, Codec, Presets, Hotkeys und Updates
 
