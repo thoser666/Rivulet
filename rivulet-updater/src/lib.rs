@@ -187,6 +187,10 @@ pub fn windows_installer_exit_success(code: i32) -> bool {
 /// installer replaces the running files) and `Ok(false)` when it can stay open
 /// (the macOS DMG is only opened).
 pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
+    if !path.exists() {
+        anyhow::bail!("installer file does not exist: {}", path.display());
+    }
+
     #[cfg(target_os = "windows")]
     {
         let path_str = path.to_string_lossy().to_string();
@@ -455,7 +459,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "windows"))]
     fn install_asset_returns_error_for_nonexistent_file() {
         let fake = std::env::temp_dir().join("rivulet_test_nonexistent.msi");
         let result = install_asset(&fake);

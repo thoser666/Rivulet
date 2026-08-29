@@ -21,9 +21,10 @@ If clicking **Install** appears to do nothing:
    GitHub Release and run it manually.
 
 The updater never logs or displays stream keys, tokens, or download credentials.
+The installer path is validated for existence prior to launching process commands across all platforms.
 The downloaded installer is cleaned up after a successful launch where the
-platform permits it; Windows cleanup is intentionally deferred because
-`msiexec.exe` may still hold the file after Rivulet exits.
+platform permits it (e.g., when the application remains open after opening a DMG on macOS).
+On Windows, immediate file removal upon process launch is explicitly deferred to prevent deleting the `.msi` file while `msiexec.exe` is opening it.
 
 ### Exit code 3010
 

@@ -3282,9 +3282,13 @@ impl RivuletApp {
             let quit_after = result.as_ref().map(|quit| *quit).unwrap_or(false);
             let state = match result {
                 Ok(_) => {
-                    // Clean up the downloaded installer — no longer needed.
-                    if let Err(e) = std::fs::remove_file(&path) {
-                        tracing::warn!(path = %path.display(), error = %e, "Failed to remove downloaded installer");
+                    // Clean up the downloaded installer if the application is not quitting
+                    // (e.g. macOS where DMG is opened). On Windows/Linux where the app quits,
+                    // msiexec owns the file during launch so cleanup is deferred.
+                    if !quit_after {
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            tracing::warn!(path = %path.display(), error = %e, "Failed to remove downloaded installer");
+                        }
                     }
                     UpdateUi::Installed(version)
                 }
