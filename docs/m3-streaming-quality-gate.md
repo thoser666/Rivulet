@@ -85,8 +85,7 @@ The WHIP/WebRTC strategy is documented in [`whip-strategy-spike.md`](whip-strate
 The current core contract exposes `WhipSettings` with endpoint validation,
 bounded signaling timeout, explicit trickle-ICE configuration, token-safe
 endpoint reporting, and a deterministic `webrtcbin` media-branch contract.
-The real SFU/ICE/DTLS media handshake remains the implementation-phase evidence;
-`webrtcbin` availability and the deterministic branch contract are tested locally.
+The media preflight now exposes a deterministic H.264/Opus branch contract, required-element inventory, and a `Ready`-state GStreamer pipeline builder. The real SFU/ICE/DTLS media handshake remains the implementation-phase evidence; `webrtcbin` availability and the preflight branch are tested locally.
 
 ## Reconnect and live bitrate integration
 
@@ -151,6 +150,8 @@ release URL, prerelease flag, and uploaded assets.
 - [ ] Configure SRT and RIST endpoints and verify the protocol scheme, latency bounds, passphrase validation, and target-local missing-plugin status.
 - [ ] Validate the WHIP endpoint and verify that non-loopback HTTP is rejected;
       confirm bearer tokens never appear in status, logs, or diagnostics.
+- [ ] Run the WHIP media preflight and verify the H.264/Opus branch reaches
+      `READY`; then verify the real SFU offer/answer, ICE, DTLS, and SRTP path.
 - [ ] Test the view at the M3 viewport profiles from the common quality-gate
       matrix, including narrow windows and long custom endpoint names.
 

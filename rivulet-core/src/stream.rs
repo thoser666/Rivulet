@@ -6,6 +6,8 @@
 
 use std::time::Duration;
 
+use gstreamer::prelude::{Cast, ElementExt};
+
 /// Configuration and pipeline contract for a WHIP/WebRTC publisher.
 ///
 /// Signaling remains HTTP-based while media is provided by a GStreamer
@@ -73,9 +75,37 @@ impl WhipSettings {
         "webrtcbin name=whip_webrtc bundle-policy=max-bundle"
     }
 
-    /// Validate that the configured media pipeline has the required element.
+    /// Build the deterministic encoded-media portion attached to `webrtcbin`.
+    /// The caller supplies the capture/audio sources and performs pad linking
+    /// on the GStreamer context after negotiation.
+    pub fn media_branch_fragment(&self) -> &'static str {
+        "videoconvert ! queue ! x264enc tune=zerolatency ! h264parse ! whip_webrtc. audioconvert ! audioresample ! opusenc ! rtpopuspay ! whip_webrtc."
+    }
+
+    /// Validate that the configured pipeline can provide the required element.
     pub fn media_pipeline_available(&self) -> bool {
         gstreamer::ElementFactory::find("webrtcbin").is_some()
+    }
+
+    /// Return the required element names for a preflight check.
+    pub fn required_media_elements(&self) -> &'static [&'static str] {
+        &["webrtcbin", "x264enc", "h264parse", "opusenc", "rtpopuspay"]
+    }
+
+    /// Build and set the initial WebRTC pipeline to `Ready` without starting
+    /// network traffic. This is the safe preflight boundary before SDP/ICE.
+    pub fn build_media_pipeline(&self) -> anyhow::Result<gstreamer::Pipeline> {
+        self.validate().map_err(anyhow::Error::msg)?;
+        gstreamer::init().map_err(|e| anyhow::anyhow!("GStreamer init failed: {e}"))?;
+        let pipeline = gstreamer::parse::launch(&format!(
+            "{} {}",
+            self.pipeline_fragment(),
+            self.media_branch_fragment()
+        ))?
+        .downcast::<gstreamer::Pipeline>()
+        .map_err(|_| anyhow::anyhow!("WHIP media description did not create a pipeline"))?;
+        pipeline.set_state(gstreamer::State::Ready)?;
+        Ok(pipeline)
     }
 
     pub fn has_token(&self) -> bool {
@@ -724,6 +754,9 @@ mod tests {
     fn whip_media_pipeline_contract_is_explicit_and_safe() {
         let settings = WhipSettings::new("https://sfu.example/whip");
         assert!(settings.pipeline_fragment().contains("webrtcbin"));
+        assert!(settings.media_branch_fragment().contains("x264enc"));
+        assert!(settings.media_branch_fragment().contains("opusenc"));
+        assert_eq!(settings.required_media_elements().len(), 5);
         let _ = gstreamer::init();
         assert_eq!(
             settings.media_pipeline_available(),
