@@ -28,7 +28,10 @@ jobs:
       - name: Lint GitHub Actions workflows
         shell: bash
         run: |
-          bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          curl -sSL -o actionlint_1.7.12_linux_amd64.tar.gz \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint_1.7.12_linux_amd64.tar.gz" | sha256sum -c -
+          tar -xzf actionlint_1.7.12_linux_amd64.tar.gz
           ./actionlint -color
 
       - name: Install Rust toolchain
