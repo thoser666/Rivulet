@@ -7,7 +7,7 @@ SENDER="rivulet-rist-sender-$$"
 cleanup() { docker rm -f "$RECEIVER" "$SENDER" >/dev/null 2>&1 || true; docker network rm "$NETWORK" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 docker network create "$NETWORK" >/dev/null
-docker run -d --name "$RECEIVER" --network "$NETWORK" "$IMAGE" sh -ceu 'timeout --signal=TERM --kill-after=5s 30s gst-launch-1.0 -e ristsrc address=0.0.0.0 port=10080 ! identity silent=false name=receive_probe ! fakesink sync=false 2>&1' >/dev/null
+docker run -d --name "$RECEIVER" --network "$NETWORK" "$IMAGE" sh -ceu 'timeout --signal=TERM --kill-after=5s 30s gst-launch-1.0 -e ristsrc address=0.0.0.0 port=10080 ! identity silent=false dump=true name=receive_probe ! fakesink sync=false 2>&1' >/dev/null
 receiver_ready=false
 for _ in $(seq 1 20); do
   if docker inspect -f '{{.State.Running}}' "$RECEIVER" 2>/dev/null | grep -q true; then
@@ -43,7 +43,10 @@ if [ "$sender_status" -ne 0 ] && [ "$sender_status" -ne 124 ]; then
 fi
 # Confirm that the receiver actually processed at least one buffer. A running
 # receiver alone only proves that GStreamer started, not interoperability.
-received_buffers="$(docker logs "$RECEIVER" 2>&1 | grep -Ec 'chain[[:space:]]+\*+|last-message.*chain' || true)"
+# `identity dump=true` emits a stable hexadecimal buffer dump, unlike the
+# human-readable `last-message` field which is not printed by all GStreamer
+# versions.
+received_buffers="$(docker logs "$RECEIVER" 2>&1 | grep -Ec '^[0-9a-fA-F]{2}([[:space:]][0-9a-fA-F]{2})+' || true)"
 if [ "$received_buffers" -eq 0 ]; then
   echo "RIST receiver received no buffers" >&2
   docker logs "$RECEIVER" >&2 || true

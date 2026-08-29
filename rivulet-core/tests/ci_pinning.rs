@@ -367,9 +367,9 @@ fn rist_receiver_smoke_is_wired_up() {
     let smoke_script = read("scripts/rist-receiver-smoke.sh");
     assert!(smoke_script.contains("ristsrc"));
     assert!(smoke_script.contains("gst-launch-1.0 -e"));
-    assert!(smoke_script.contains("identity silent=false"));
+    assert!(smoke_script.contains("identity silent=false dump=true"));
     assert!(smoke_script.contains("received_buffers"));
-    assert!(smoke_script.contains("last-message"));
+    assert!(smoke_script.contains("hexadecimal buffer dump"));
     assert!(!smoke_script.contains("gst-launch-1.0.0"));
     assert!(smoke_script.contains("address="));
     assert!(smoke_script.contains("timeout --signal=TERM --kill-after=5s 30s"));
