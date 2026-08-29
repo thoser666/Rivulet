@@ -42,7 +42,9 @@ Ubuntu package's `gst-launch-1.0` binary name (not the nonexistent
 `gst-launch-1.0.0` name), polls for the receiver's PLAYING state, and emits
 container logs on early exit or timeout. A sender timeout (exit 124) is treated as
 an interoperability failure report rather than allowing the script to hang; other
-sender failures remain fatal.
+sender failures remain fatal. The receiver also includes a verbose `identity`
+probe and the smoke test requires at least one received buffer, so a merely
+running GStreamer process cannot produce a false positive.
 
  The lightweight
 `scripts/check-rist-pipeline.py` contract test runs before Docker and verifies the
@@ -62,6 +64,7 @@ required as documented hardware evidence before claiming the M3 budget.
 - Stream model tests cover endpoint defaults, validation, masking, preset values,
   adaptive-bitrate bounds, disabled behavior, and compatibility with existing
   pipeline location construction.
+- Reconnect tests cover exponential backoff, target isolation, duplicate-failure suppression, retry-window observation, and recovery.
 - Existing workspace tests continue to cover RTMP/RTMPS pipeline construction,
   health classification, and dual-output routing.
 - Multistream model tests cover target limits, duplicate-name rejection, invalid
@@ -87,7 +90,7 @@ The real SFU/ICE/DTLS media handshake remains the implementation-phase evidence;
 
 ## Reconnect and live bitrate integration
 
-The reconnect supervisor is now connected to the engine's target status API. Callers handling GStreamer bus `Error`/`Eos` messages should call `handle_stream_target_failure`; after a successful sink restart they should call `handle_stream_target_live`. `SinkBusEvent` provides the tested mapping for fatal (`Error`/`Eos`), non-fatal (`Warning`), and successful state-change events. Retry state, limits, and exponential backoff are deterministic and fully tested. The pipeline-owner `service_streaming()` tick now polls bus messages, drains due reconnect commands, and invokes target-local branch rebuilds without moving GStreamer mutations to the worker thread. Rebuilds preserve the configured transport by reconstructing the validated RTMP/RTMPS, SRT, or RIST sink fragment rather than hard-coding RTMP. Duplicate failures are ignored while a retry is already pending, preventing retry storms.
+The reconnect supervisor is now connected to the engine's target status API. Its retry window can be observed without mutating state, which makes delay/reconnect load tests deterministic: a target is only marked live after the pipeline owner confirms the replacement sink. Callers handling GStreamer bus `Error`/`Eos` messages should call `handle_stream_target_failure`; after a successful sink restart they should call `handle_stream_target_live`. `SinkBusEvent` provides the tested mapping for fatal (`Error`/`Eos`), non-fatal (`Warning`), and successful state-change events. Retry state, limits, and exponential backoff are deterministic and fully tested. The pipeline-owner `service_streaming()` tick now polls bus messages, drains due reconnect commands, and invokes target-local branch rebuilds without moving GStreamer mutations to the worker thread. Rebuilds preserve the configured transport by reconstructing the validated RTMP/RTMPS, SRT, or RIST sink fragment rather than hard-coding RTMP. Duplicate failures are ignored while a retry is already pending, preventing retry storms.
 
 Adaptive bitrate remains bounded by the existing policy and updates the active `video_enc` property when present. Each successful live change records the previous bitrate, new bitrate, and health reason through `last_bitrate_change()` for UI/diagnostics; stable-sample and cooldown guards prevent flapping. `service_streaming()` now samples `StreamHealthMonitor` and invokes the runtime controller in the pipeline-owner tick; cooldown and hysteresis prevent flapping. The monitor exposes rolling bitrate/FPS, throughput, dropped-frame ratio, optional sink latency, and queue fill ratio. The engine additionally exposes target-ordered delay telemetry with lifecycle state, queue fill, underflow, and overflow counters; the Stream view renders these values per configured destination. `record_network_telemetry()` clamps transport-provided latency and queue values before they reach policy decisions. Production hardware measurement remains gate evidence; CI validates the deterministic telemetry contract and budget limits.
 

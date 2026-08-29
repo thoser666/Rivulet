@@ -171,6 +171,16 @@ impl StreamingReconnectSupervisor {
             })
             .collect()
     }
+
+    /// Record a deterministic delay/reconnect observation for a target. The
+    /// target remains failed until the pipeline owner explicitly confirms that
+    /// its replacement sink is live.
+    pub fn observe_retry_window(&self, name: &str, elapsed: Duration) -> Option<bool> {
+        self.targets
+            .iter()
+            .find(|target| target.name == name)
+            .map(|target| target.retry_at.is_some_and(|retry_at| elapsed >= retry_at))
+    }
     pub fn retryable_targets(&self) -> Vec<&str> {
         self.targets
             .iter()
@@ -308,6 +318,28 @@ mod tests {
         assert_eq!(s.due_retries(Duration::from_secs(1)), vec!["target"]);
         assert_eq!(s.targets()[0].state, StreamTargetState::Connecting);
     }
+    #[test]
+    fn retry_window_is_observable_without_mutating_target_state() {
+        let mut supervisor = StreamingReconnectSupervisor::new(
+            vec!["target".into()],
+            RetryPolicy::new(2, Duration::from_secs(2), Duration::from_secs(5)),
+        );
+        supervisor.mark_failed("target");
+        assert_eq!(
+            supervisor.observe_retry_window("target", Duration::from_secs(1)),
+            Some(false)
+        );
+        assert_eq!(
+            supervisor.observe_retry_window("target", Duration::from_secs(2)),
+            Some(true)
+        );
+        assert_eq!(supervisor.targets()[0].state, StreamTargetState::Failed);
+        assert_eq!(
+            supervisor.observe_retry_window("missing", Duration::from_secs(2)),
+            None
+        );
+    }
+
     #[test]
     fn duplicate_failures_do_not_schedule_duplicate_retries() {
         let mut supervisor =
