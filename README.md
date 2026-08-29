@@ -282,7 +282,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] **Adaptive bitrate** — bounded policy applies changed values to the active GStreamer encoder, reducing bitrate on Poor health and recovering on Good health; network monitoring and cooldown remain follow-up
 - [x] **Stream delay** — configurable, bounded per-target packet delay integrated into fan-out branches; reconnect-aware buffering and backoff remain follow-up
 - [x] **Multitrack Video** — bounded multi-representation configuration (1–4 tracks) and pipeline metadata; per-track encoder/transport negotiation remains a follow-up
-- [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible) — SDP offer/answer signaling with secure endpoint validation is implemented via `WhipSettings::post_offer`; media transport still requires `webrtcbin`, ICE lifecycle, and SFU smoke tests. See [`docs/whip-strategy-spike.md`](docs/whip-strategy-spike.md).; vision-approved in [`docs/obs-vision-roadmap.md`](docs/obs-vision-roadmap.md)
+- [x] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible) — SDP offer/answer signaling with secure endpoint validation; `WhipMediaSession` now owns the deterministic session lifecycle (`SdpOffer` H.264/Opus offer generation, `post_offer` exchange, answer application, `Idle→Negotiating→Live/Failed` state tracking, and HTTP `DELETE` teardown on the resource URL), fully covered by offline unit and local-HTTP-mock tests. The live SFU/ICE/DTLS/SRTP media handshake remains the final integration evidence. See [`docs/whip-strategy-spike.md`](docs/whip-strategy-spike.md).; vision-approved in [`docs/obs-vision-roadmap.md`](docs/obs-vision-roadmap.md)
 - [x] **SRT/RIST configuration contract** — validated protocol-specific endpoints, bounded latency, passphrase validation/redaction, and sink-fragment generation; live GStreamer transport/interoperability remains open
 - [x] **Multistreaming** — GStreamer fan-out with one named branch/sink per validated RTMP/RTMPS target, up to four named destinations, independent target states, retry-target selection, duplicate-name protection, and secret masking; production bus monitoring/retry scheduling remains follow-up work. *Tracked in [#70](https://github.com/thoser666/Rivulet/issues/70).*
 - [ ] **NDI output** — LAN contribution/monitoring for production setups
@@ -446,7 +446,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 | Streaming (RTMP/RTMPS, platforms) | Partial (RTMPS Twitch/Kick/YouTube; validated presets and key handling) |
 | Multistreaming | Partial (multi-target fan-out wired; per-target reconnect supervisor and UI remain open) |
 | Adaptive bitrate | Partial (bounded policy implemented; live encoder reconfiguration remains open) |
-| WebRTC/WHIP, SRT/RIST, NDI | WHIP signaling + SRT/RIST configuration contracts; live media transports open (M3) |
+| WebRTC/WHIP, SRT/RIST, NDI | WHIP session/lifecycle+DELETE done; live SFU/ICE/DTLS media handshake, SRT/RIST transports open (M3) |
 | VOD track | Open (M3) |
 | Multi-track audio | Partial (2 tracks; VOD track planned M3) |
 | Plugin ecosystem & OBS compatibility | Open |

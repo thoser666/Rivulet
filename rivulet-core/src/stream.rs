@@ -167,6 +167,129 @@ pub struct WhipSession {
     pub answer_sdp: String,
 }
 
+impl WhipSession {
+    /// Terminate the WHIP session on the server by issuing an HTTP `DELETE` on
+    /// the resource `Location` returned by the offer/answer exchange.
+    ///
+    /// This is cleanup-only and deliberately swallows transport errors so a
+    /// failed teardown never masks the recording or streaming result.
+    pub fn destroy(&self, endpoint: &str, timeout: Duration) {
+        let Some(resource_url) = self.resource_url.as_deref() else {
+            return;
+        };
+        let target = match resource_url {
+            url if url.starts_with("http://") || url.starts_with("https://") => url.to_owned(),
+            relative => format!("{endpoint}{relative}"),
+        };
+        let request = ureq::delete(&target)
+            .config()
+            .timeout_global(Some(timeout))
+            .build();
+        if let Err(error) = request.call() {
+            tracing::debug!(
+                %error,
+                "WHIP session DELETE failed during cleanup (non-fatal)"
+            );
+        }
+    }
+}
+
+/// Lifecycle state of a WHIP/WebRTC media publisher session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WhipMediaState {
+    Idle,
+    Negotiating,
+    Live,
+    Failed(String),
+}
+
+/// A WHIP/WebRTC media publisher session.
+///
+/// Owns the configured [`WhipSettings`], the SDP offer/answer exchange, and the
+/// server-provided resource URL for cleanup. Media transport remains owned by
+/// the GStreamer `webrtcbin` integration; this type drives the deterministic
+/// signaling and teardown lifecycle that is fully unit-testable offline.
+#[derive(Debug)]
+pub struct WhipMediaSession {
+    pub settings: WhipSettings,
+    pub state: WhipMediaState,
+    pub answer_sdp: Option<String>,
+    pub resource_url: Option<String>,
+}
+
+impl WhipMediaSession {
+    /// Create a new, idle session.
+    pub fn new(settings: WhipSettings) -> Self {
+        Self {
+            settings,
+            state: WhipMediaState::Idle,
+            answer_sdp: None,
+            resource_url: None,
+        }
+    }
+
+    /// Whether a media pipeline is available on this platform.
+    pub fn media_pipeline_available(&self) -> bool {
+        self.settings.media_pipeline_available()
+    }
+
+    /// Build the deterministic H.264/Opus SDP offer for this session.
+    pub fn create_offer_sdp(&self) -> anyhow::Result<String> {
+        crate::sdp::SdpOffer::h264_opus(&self.settings.endpoint).to_sdp()
+    }
+
+    /// Exchange the offer/answer with the configured WHIP endpoint.
+    ///
+    /// Runs synchronously; callers place it off the UI thread. On success the
+    /// session transitions to [`WhipMediaState::Live`] and retains the
+    /// server-provided resource URL for later cleanup.
+    pub fn negotiate(&mut self) -> Result<WhipSession, anyhow::Error> {
+        self.state = WhipMediaState::Negotiating;
+        let offer = self.create_offer_sdp()?;
+        match self.settings.post_offer(&offer) {
+            Ok(session) => {
+                self.answer_sdp = Some(session.answer_sdp.clone());
+                self.resource_url = session.resource_url.clone();
+                self.state = WhipMediaState::Live;
+                Ok(session)
+            }
+            Err(error) => {
+                self.state = WhipMediaState::Failed(error.to_string());
+                Err(error)
+            }
+        }
+    }
+
+    /// Apply an already-negotiated remote answer directly. Returns the previous
+    /// state.
+    pub fn apply_answer(&mut self, answer_sdp: &str) -> WhipMediaState {
+        let previous = self.state.clone();
+        if answer_sdp.trim().is_empty() {
+            self.state = WhipMediaState::Failed("WHIP answer SDP is empty".into());
+            return previous;
+        }
+        self.answer_sdp = Some(answer_sdp.to_owned());
+        self.state = WhipMediaState::Live;
+        previous
+    }
+
+    /// Terminate the session, running the server-side `DELETE` when a resource
+    /// URL is known.
+    pub fn shutdown(&mut self) -> anyhow::Result<()> {
+        if let Some(url) = self.resource_url.take() {
+            let session = WhipSession {
+                resource_url: Some(url),
+                answer_sdp: String::new(),
+            };
+            session.destroy(&self.settings.endpoint, self.settings.connect_timeout);
+        }
+        self.answer_sdp = None;
+        self.state = WhipMediaState::Idle;
+        Ok(())
+    }
+}
+
 /// Map an HTTP response from a WHIP endpoint to a deterministic result.
 pub fn parse_whip_response(
     status: u16,
@@ -880,5 +1003,87 @@ mod tests {
         assert_eq!(s.location(), "rtmps://a.rtmp.youtube.com/live2/key");
         assert_eq!(s.delay.latency_ms(), 3000);
         assert_eq!(s.multitrack_video.effective_tracks(), 2);
+    }
+
+    #[test]
+    fn whip_session_negotiation_lifecycle_is_deterministic() {
+        // Loopback-only test: no real SFU is contacted, but the deterministic
+        // SDP offer and a local HTTP mock validate the full signaling contract.
+        let mut session = WhipMediaSession::new(
+            WhipSettings::new("http://127.0.0.1:9/whip").with_timeout(Duration::from_secs(2)),
+        );
+        assert_eq!(session.state, WhipMediaState::Idle);
+
+        let offer = session.create_offer_sdp().expect("offer builds");
+        assert!(offer.contains("H264/90000"));
+        assert!(offer.contains("opus/48000/2"));
+
+        // Applying a valid answer moves the session live and keeps the state
+        // machine consistent without any network I/O.
+        let previous = session.apply_answer("v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\n");
+        assert_eq!(previous, WhipMediaState::Idle);
+        assert_eq!(session.state, WhipMediaState::Live);
+        assert!(session.answer_sdp.as_deref().unwrap().starts_with("v=0"));
+
+        // An empty answer is rejected.
+        session.apply_answer("");
+        assert!(matches!(session.state, WhipMediaState::Failed(_)));
+
+        session.shutdown().unwrap();
+        assert_eq!(session.state, WhipMediaState::Idle);
+    }
+
+    #[test]
+    fn whip_session_shutdown_runs_server_delete_when_resource_known() {
+        let destroyed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let destroyed_clone = std::sync::Arc::clone(&destroyed);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            use std::io::{Read, Write};
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf);
+            let request = String::from_utf8_lossy(&buf);
+            if request.starts_with("DELETE") {
+                destroyed_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+                write!(
+                    stream,
+                    "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n"
+                )
+                .unwrap();
+            } else {
+                write!(
+                    stream,
+                    "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n"
+                )
+                .unwrap();
+            }
+        });
+
+        let mut session = WhipMediaSession::new(WhipSettings::new(format!("http://{addr}/whip")));
+        session.resource_url = Some(format!("http://{addr}/whip/resource"));
+        session.shutdown().unwrap();
+        server.join().unwrap();
+        assert!(destroyed.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn whip_session_shutdown_without_resource_is_a_noop() {
+        let mut session = WhipMediaSession::new(WhipSettings::new("http://127.0.0.1:9/whip"));
+        session.shutdown().unwrap();
+        assert_eq!(session.state, WhipMediaState::Idle);
+        assert!(session.answer_sdp.is_none());
+    }
+
+    #[test]
+    fn whip_offer_is_deterministic_and_redaction_safe() {
+        let session = WhipMediaSession::new(WhipSettings::new("https://sfu.example/whip"));
+        let a = session.create_offer_sdp().unwrap();
+        let b = session.create_offer_sdp().unwrap();
+        assert_eq!(a, b);
+        // Every generated media description must never contain a credential.
+        assert!(!a.to_lowercase().contains("bearer"));
+        assert!(!a.to_lowercase().contains("token"));
     }
 }

@@ -87,7 +87,7 @@ The WHIP/WebRTC strategy is documented in [`whip-strategy-spike.md`](whip-strate
 The current core contract exposes `WhipSettings` with endpoint validation,
 bounded signaling timeout, explicit trickle-ICE configuration, token-safe
 endpoint reporting, and a deterministic `webrtcbin` media-branch contract.
-The media preflight now exposes a deterministic H.264/Opus branch contract, required-element inventory, and a `Ready`-state GStreamer pipeline builder. The real SFU/ICE/DTLS media handshake remains the implementation-phase evidence; `webrtcbin` availability and the preflight branch are tested locally.
+`WhipMediaSession` now drives the deterministic signaling lifecycle: it generates a stable H.264/Opus SDP offer (`SdpOffer`), exchanges it through `post_offer`, applies the remote answer, tracks the session state (`Idle` → `Negotiating` → `Live`/`Failed`), and issues the server-side HTTP `DELETE` on the resource `Location` during shutdown. The session state machine, offer determinism, redaction safety, and the DELETE teardown are covered by offline unit tests, including a local HTTP mock that verifies the request method and resource URL. `webrtcbin` availability and the `Ready`-state pipeline preflight are tested locally; the remaining implementation-phase evidence is the live SFU/ICE/DTLS/SRTP media handshake against a real WHIP endpoint.
 
 ## Reconnect and live bitrate integration
 

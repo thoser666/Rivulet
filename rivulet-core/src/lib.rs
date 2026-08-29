@@ -43,13 +43,16 @@ pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 pub mod metrics;
 pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 
+pub mod sdp;
+pub use sdp::SdpOffer;
+
 pub mod srt;
 pub mod stream;
 pub use srt::{ContributionProtocol, ContributionSettings};
 pub use stream::{
     parse_whip_response, AdaptiveBitrate, MultistreamSettings, MultitrackVideo, StreamDelay,
     StreamPlatform, StreamPreset, StreamSettings, StreamTarget, StreamTargetState,
-    TargetPluginStatus, WhipSession, WhipSettings,
+    TargetPluginStatus, WhipMediaSession, WhipMediaState, WhipSession, WhipSettings,
 };
 
 pub mod i18n;
