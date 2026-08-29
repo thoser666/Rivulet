@@ -134,6 +134,30 @@ fn user_guide_is_linked_and_covers_core_workflows() {
 }
 
 #[test]
+#[test]
+fn m3_completion_report_is_linked_and_records_follow_ups() {
+    let readme = read("README.md");
+    let report = read("docs/m3-streaming-completion-report.md");
+    assert!(readme.contains("docs/m3-streaming-completion-report.md"));
+    for required in [
+        "## Summary",
+        "## Findings and explicit follow-ups",
+        "## Decision",
+        "CONDITIONAL PASS",
+        "F-M3-001",
+        "F-M3-002",
+        "F-M3-006",
+        "#70",
+        "#77",
+    ] {
+        assert!(
+            report.contains(required),
+            "M3 completion report must contain {required}"
+        );
+    }
+}
+
+#[test]
 fn third_party_actions_are_pinned_to_full_commit_sha() {
     for name in WORKFLOWS {
         let content = read(&format!(".github/workflows/{name}"));

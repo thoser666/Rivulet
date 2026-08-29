@@ -191,6 +191,9 @@ release URL, prerelease flag, and uploaded assets.
 
 ## Decision
 
-This increment passes its feature gate. M3 as a whole remains in progress until
-live encoder reconfiguration, reconnect/delay, and the remaining protocol and
-multistreaming work are complete.
+This increment passes its feature gate. The functional roadmap checklist for M3
+is complete (15/15) and the milestone completion is recorded in
+[`docs/m3-streaming-completion-report.md`](m3-streaming-completion-report.md),
+which assigns the remaining live-integration evidence (real SFU WHIP handshake,
+SRT/RIST receiver interop, multitrack transport, VOD routing, NDI LAN, production
+resource baselines, and OS-backed credential storage) to follow-up milestones.
