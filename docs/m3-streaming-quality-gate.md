@@ -130,6 +130,17 @@ The Twitch VOD workflow is modelled as `VodTrack` on `StreamSettings` with a
 Actual per-track GStreamer routing into the muxed output remains an integration
  item; the deterministic config and leakage guarantees are the tested contract.
 
+## NDI output
+
+NDI LAN contribution/monitoring is exposed as `NdiOutput` on the core: a
+validated source name and optional group, a quote-escaped GStreamer `ndisink`
+fragment that prevents pipeline-string breakout from a hostile name, an
+`ndisink` plugin-availability probe, and an off-by-default `active` flag so a
+feed is never published unintentionally. Coverage includes name/group
+validation, escape safety, group rendering, and a deterministic plugin probe.
+Real NewTek NDI runtime and LAN interoperability remain an integration
+follow-up.
+
 ## Release verification
 
 The alpha release workflow is intentionally two-phase: it first prepares a
@@ -172,6 +183,9 @@ release URL, prerelease flag, and uploaded assets.
 - [ ] Configure the VOD track and verify it is off by default, becomes active
       only when both `enabled` and `recorded` are set, and never appears in the
       live ingest or in any masked/redacted output.
+- [ ] Configure an NDI output with a normal and a quote-containing name; verify
+      the name/group validation, the escaped `ndisink` fragment (no raw quote
+      breakout), the off-by-default flag, and the availability probe result.
 - [ ] Test the view at the M3 viewport profiles from the common quality-gate
       matrix, including narrow windows and long custom endpoint names.
 

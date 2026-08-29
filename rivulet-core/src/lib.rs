@@ -43,6 +43,9 @@ pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 pub mod metrics;
 pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 
+pub mod ndi;
+pub use ndi::NdiOutput;
+
 pub mod sdp;
 pub use sdp::SdpOffer;
 

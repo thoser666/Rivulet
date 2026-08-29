@@ -285,7 +285,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible) — SDP offer/answer signaling with secure endpoint validation; `WhipMediaSession` now owns the deterministic session lifecycle (`SdpOffer` H.264/Opus offer generation, `post_offer` exchange, answer application, `Idle→Negotiating→Live/Failed` state tracking, and HTTP `DELETE` teardown on the resource URL), fully covered by offline unit and local-HTTP-mock tests. The live SFU/ICE/DTLS/SRTP media handshake remains the final integration evidence. See [`docs/whip-strategy-spike.md`](docs/whip-strategy-spike.md).; vision-approved in [`docs/obs-vision-roadmap.md`](docs/obs-vision-roadmap.md)
 - [x] **SRT/RIST configuration contract** — validated protocol-specific endpoints, bounded latency, passphrase validation/redaction, and sink-fragment generation; live GStreamer transport/interoperability remains open
 - [x] **Multistreaming** — GStreamer fan-out with one named branch/sink per validated RTMP/RTMPS target, up to four named destinations, independent target states, retry-target selection, duplicate-name protection, and secret masking; production bus monitoring/retry scheduling remains follow-up work. *Tracked in [#70](https://github.com/thoser666/Rivulet/issues/70).*
-- [ ] **NDI output** — LAN contribution/monitoring for production setups
+- [x] **NDI output** — LAN contribution/monitoring configuration contract (`NdiOutput` on `rivulet-core`): validated source name/group, quote-escaping so a hostile name cannot break the pipeline string, an `ndisink` availability probe, and a deterministic GStreamer fragment. Off by default so a feed is never published unintentionally. Real NewTek NDI runtime/LAN interoperability remains an integration follow-up.
 - [x] **VOD track** — separate copyright-safe audio track (`VodTrack` on `StreamSettings`) for the Twitch VOD workflow while streaming: deterministic `enabled`/`recorded` model that is only ever active when both are set, so it can never silently leak into the live ingest; unit tests confirm the `ivod` flag signal and off-by-default behavior. Actual per-track GStreamer routing into the muxed output remains an integration follow-up.
 
 **Goal:** Live streaming to the common platforms *and* low-latency protocols as native citizens instead of RTMP legacy.
@@ -446,7 +446,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 | Streaming (RTMP/RTMPS, platforms) | Partial (RTMPS Twitch/Kick/YouTube; validated presets and key handling) |
 | Multistreaming | Partial (multi-target fan-out wired; per-target reconnect supervisor and UI remain open) |
 | Adaptive bitrate | Partial (bounded policy implemented; live encoder reconfiguration remains open) |
-| WebRTC/WHIP, SRT/RIST, NDI | WHIP session/lifecycle+DELETE done; live SFU/ICE/DTLS media handshake, SRT/RIST transports open (M3) |
+| WebRTC/WHIP, SRT/RIST, NDI | WHIP session/lifecycle+DELETE; SRT/RIST + NDI config contracts done; live SFU/ICE/DTLS handshake + real NDI LAN interop open (M3) |
 | VOD track | Done (config model clean; per-track mux routing follow-up, M3) |
 | Multi-track audio | Partial (2 local tracks; VOD-track model in M3) |
 | Plugin ecosystem & OBS compatibility | Open |
