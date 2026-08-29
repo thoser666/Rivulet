@@ -46,7 +46,7 @@ fi
 # `identity dump=true` emits a stable hexadecimal buffer dump, unlike the
 # human-readable `last-message` field which is not printed by all GStreamer
 # versions.
-received_buffers="$(docker logs "$RECEIVER" 2>&1 | grep -Ec '^[0-9a-fA-F]{2}([[:space:]][0-9a-fA-F]{2})+' || true)"
+received_buffers="$(docker logs "$RECEIVER" 2>&1 | grep -Ec '^[[:xdigit:]]{8} .*: ([[:xdigit:]]{2} ){2,}' || true)"
 if [ "$received_buffers" -eq 0 ]; then
   echo "RIST receiver received no buffers" >&2
   docker logs "$RECEIVER" >&2 || true

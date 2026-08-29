@@ -44,9 +44,9 @@ container logs on early exit or timeout. A sender timeout (exit 124) is treated 
 an interoperability failure report rather than allowing the script to hang; other
 sender failures remain fatal. The receiver also includes a verbose `identity`
 probe (`dump=true`) and the smoke test requires at least one received buffer.
-The check uses the stable hexadecimal buffer dump emitted by `identity`, rather
-than version-dependent human-readable debug text; a merely running GStreamer
-process cannot produce a false positive.
+The check uses the stable `identity dump=true` line format (offset plus hex
+bytes) emitted by `identity`, rather than version-dependent human-readable
+debug text; a merely running GStreamer process cannot produce a false positive.
 
  The lightweight
 `scripts/check-rist-pipeline.py` contract test runs before Docker and verifies the

@@ -369,6 +369,7 @@ fn rist_receiver_smoke_is_wired_up() {
     assert!(smoke_script.contains("gst-launch-1.0 -e"));
     assert!(smoke_script.contains("identity silent=false dump=true"));
     assert!(smoke_script.contains("received_buffers"));
+    assert!(smoke_script.contains("[[:xdigit:]]{8}"));
     assert!(smoke_script.contains("hexadecimal buffer dump"));
     assert!(!smoke_script.contains("gst-launch-1.0.0"));
     assert!(smoke_script.contains("address="));
