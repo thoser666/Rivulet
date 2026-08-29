@@ -359,10 +359,20 @@ mod tests {
     #[test]
     fn worker_emits_branch_rebuild_after_backoff() {
         let worker = ReconnectWorker::start("target", Duration::from_millis(10));
-        thread::sleep(Duration::from_millis(30));
-        assert_eq!(
-            worker.try_recv(),
-            Some(ReconnectCommand::RebuildBranch("target".into()))
-        );
+        // Poll instead of sleeping a fixed amount: under parallel test load the
+        // worker thread can be starved, so a one-shot try_recv after a fixed
+        // sleep is flaky. Wait up to several seconds for the command.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(cmd) = worker.try_recv() {
+                assert_eq!(cmd, ReconnectCommand::RebuildBranch("target".into()));
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker never emitted RebuildBranch"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 }
