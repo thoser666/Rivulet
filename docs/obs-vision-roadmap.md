@@ -19,6 +19,7 @@ vision rather than merely copying OBS.
 | Remux and crash-safe file workflow | Reliability and deterministic output handling | M4 | MKV/MOV-to-MP4 remux with progress, cancellation, overwrite policy, recovery tests, and validated output files |
 | Global hotkeys and remapping | Automation and accessible control | M5 | Conflict-aware rebinding, global scope, reserved-key handling, persistence, and platform-specific permission feedback |
 | obs-websocket compatibility | Automation, embeddability, and ecosystem migration | M5 | Versioned compatible API subset, authentication, explicit permissions, deterministic command responses, and Stream Deck integration tests |
+| Optional Discord Rich Presence adapter | Streamer-oriented status visibility without coupling the engine to a platform SDK | M5 | Non-blocking adapter consumes `PresenceStatus`, has an explicit opt-out, never sends secrets or local identifiers, handles Discord unavailability gracefully, and includes lifecycle/privacy tests |
 
 ## Decision rules
 

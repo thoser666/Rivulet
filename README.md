@@ -93,6 +93,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Cross-Platform** - Windows, macOS, and Linux support (via xcap)
 - **Modern UI** - Clean interface built with egui
 - **Internationalized UI** - All visible strings are driven by locale files (English by default, German included)
+- **Activity status** - The UI exposes a privacy-safe “Rivulet nimmt auf / streamt” activity model, ready for an optional Discord Rich Presence adapter; stream keys, URLs, paths, and window titles are never included
 
 ---
 
@@ -334,6 +335,7 @@ must not be implied by beta parity.
 - [x] Installers (Windows MSI, macOS DMG, Linux AppImage) — automated in CI
 - [x] Code signing (signing automation present, secrets needed)
 - [ ] Telemetry (opt-in, privacy-friendly)
+- [ ] **Optional Discord Rich Presence adapter** — non-blocking activity updates using the Rivulet status model; explicit opt-out, no stream keys/URLs/paths/window titles, and graceful operation when Discord is unavailable. Planned after M5 ecosystem foundations.
 - [ ] Multi-language support (locale files fully wired)
 - [ ] **MIDI device support** (map controllers like Korg NanoKontrol to scene switches, volume faders, filter toggles) — *frequently requested for live production and music streams*
 - [ ] **Global hotkeys & remapping UI** — OBS-style hotkey settings: per-action rebinding, global hotkeys that work while the app is unfocused
@@ -460,6 +462,7 @@ must not be implied by beta parity.
 | obs-websocket / Streamdeck | Open (M5) |
 | Mobile remote & MIDI | Open (M5) |
 | Cloud & telemetry | Open (M4/M5) |
+| Discord Rich Presence | Planned (optional, privacy-safe activity status; M5) |
 | Multi-language support | Partial (DE/EN wired) |
 | Platform parity (Windows/macOS) | Open |
 | AI chat assistant | Open (M9) |
@@ -483,7 +486,7 @@ The cross-platform headless UI smoke contract runs on Linux, Windows, and macOS 
 cargo test -p rivulet-gui --test ui_smoke
 ```
 
-See [`docs/ui-smoke-testing.md`](docs/ui-smoke-testing.md) for the evidence workflow and the limitations of deterministic headless checks versus native visual/accessibility review.
+See [`docs/ui-smoke-testing.md`](docs/ui-smoke-testing.md) for the evidence workflow and the limitations of deterministic headless checks versus native visual/accessibility review. The optional activity-status contract is documented in [`docs/activity-status.md`](docs/activity-status.md).
 
 ## 📺 Streaming Example
 

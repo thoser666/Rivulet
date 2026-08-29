@@ -3,7 +3,8 @@
 use crate::theme;
 use eframe::egui;
 use rivulet_core::{
-    CaptureRegion, Locale, RivuletEngine, SkippedFilter, StreamHealthStatus, StreamStats,
+    CaptureRegion, Locale, PresenceActivity, PresenceStatus, RivuletEngine, SkippedFilter,
+    StreamHealthStatus, StreamStats,
 };
 use std::sync::mpsc::Receiver;
 use std::sync::{
@@ -3377,6 +3378,33 @@ impl RivuletApp {
     }
 
     /// Render the implemented M3 streaming view.
+    fn current_presence_status(&self) -> PresenceStatus {
+        let activity = if self.is_recording_active() && self.engine.is_streaming() {
+            PresenceActivity::RecordingAndStreaming
+        } else if self.is_recording_active() {
+            if self.is_paused {
+                PresenceActivity::Paused
+            } else {
+                PresenceActivity::Recording
+            }
+        } else if self.engine.is_streaming() {
+            PresenceActivity::Streaming
+        } else {
+            PresenceActivity::Idle
+        };
+        PresenceStatus::for_activity(activity)
+    }
+
+    fn draw_presence_status(&self, ui: &mut egui::Ui) {
+        let status = self.current_presence_status();
+        ui.group(|ui| {
+            ui.label(egui::RichText::new("Rivulet-Status").strong());
+            ui.label(status.details);
+            ui.label(status.state);
+            ui.small("Für Discord Rich Presence vorbereitet; keine Stream-Keys, URLs oder Dateipfade werden übertragen.");
+        });
+    }
+
     fn draw_stream_view(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
         ui.add_space(8.0);
         ui.label(egui::RichText::new(self.tr("streaming")).strong());
@@ -3388,6 +3416,7 @@ impl RivuletApp {
             ui.label(self.tr("stopped"));
         }
         ui.label(self.tr("stream_m3_note"));
+        self.draw_presence_status(ui);
         for (name, state, fill, underflows, overflows) in self.engine.stream_target_telemetry() {
             ui.horizontal(|ui| {
                 ui.label(name);

@@ -12,6 +12,8 @@ use std::time::{Duration, Instant};
 use gst::prelude::*;
 
 pub mod output;
+pub mod presence;
+pub use presence::{PresenceActivity, PresenceStatus};
 pub mod virtual_camera;
 pub use virtual_camera::{
     VirtualCamera, VirtualCameraConfig, VirtualCameraError, VirtualCameraFormat, VirtualCameraState,
