@@ -12,7 +12,7 @@
 
 *A Rust recording and streaming engine — built for performance, safety, reliability, and embeddability*
 
-[Features](#-features) • [Installation](#-installation) • [Roadmap](#-roadmap) • [Contributing](#-contributing)
+[Features](#-features) • [Installation](#-installation) • [Bedienungsanleitung](docs/user-guide.md) • [Roadmap](#-roadmap) • [Contributing](#-contributing)
 
 ![Rivulet](docs/thumbnail.png)
 
@@ -95,6 +95,11 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Internationalized UI** - All visible strings are driven by locale files (English by default, German included)
 
 ---
+
+## 📖 Bedienungsanleitung
+
+Der zentrale [Rivulet User Guide](docs/user-guide.md) erklärt Installation, Navigation,
+Aufnahme, Quellen, Live-Vorschau, Szenen, Streaming, Updates und Fehlerdiagnose.
 
 ## 🚀 Roadmap
 

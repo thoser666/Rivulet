@@ -93,6 +93,26 @@ fn is_full_sha(s: &str) -> bool {
 }
 
 #[test]
+fn user_guide_is_linked_and_covers_core_workflows() {
+    let readme = read("README.md");
+    let guide = read("docs/user-guide.md");
+    assert!(readme.contains("docs/user-guide.md"));
+    for required in [
+        "## 3. Eine Aufnahme erstellen",
+        "## 5. Szenen und Quellen",
+        "## 6. Live-Vorschau",
+        "## 7. Streaming einrichten",
+        "## 9. Updates",
+        "## 10. Logs und Fehler melden",
+        "Waiting",
+        "Fallback",
+        "3010",
+    ] {
+        assert!(guide.contains(required), "user guide must cover {required}");
+    }
+}
+
+#[test]
 fn third_party_actions_are_pinned_to_full_commit_sha() {
     for name in WORKFLOWS {
         let content = read(&format!(".github/workflows/{name}"));
