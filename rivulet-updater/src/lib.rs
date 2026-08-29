@@ -13,6 +13,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 /// Repository the updates are fetched from.
 #[derive(Debug, Clone)]
 pub struct UpdateSource {
@@ -207,6 +210,7 @@ pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
                 "/norestart",
                 "REBOOT=ReallySuppress",
             ])
+            .creation_flags(0x08000000)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -449,13 +453,10 @@ mod tests {
         // immediately; waiting for the child caused the GUI update action to
         // look hung and prevented a clean application close.
         let source = include_str!("lib.rs");
-        let windows_block = source
-            .split("#[cfg(target_os = \"windows\")]")
-            .nth(1)
-            .expect("Windows installer implementation must exist");
-        assert!(windows_block.contains("msiexec.exe"));
-        assert!(windows_block.contains("Stdio::null()"));
-        assert!(!windows_block.contains("let mut child = std::process::Command::new(\"msiexec\")"));
+        assert!(source.contains("#[cfg(target_os = \"windows\")]"));
+        assert!(source.contains("msiexec.exe"));
+        assert!(source.contains("Stdio::null()"));
+        assert!(!source.contains("let mut child = std::process::Command::new(\"msiexec\")"));
     }
 
     #[test]

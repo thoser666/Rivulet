@@ -911,3 +911,8 @@ real certificates exist.
   of the Beta-Gate.
 - With all secrets present, the next release build signs the packages; without
   them, unsigned packages are produced (the default).
+
+
+## Updater troubleshooting
+
+See [docs/updater-troubleshooting.md](docs/updater-troubleshooting.md) for Windows installer exit codes, update crash diagnostics, and recovery steps.

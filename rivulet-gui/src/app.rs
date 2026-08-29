@@ -3298,8 +3298,10 @@ impl RivuletApp {
             ctx.request_repaint();
 
             if quit_after {
-                std::thread::sleep(std::time::Duration::from_millis(1500));
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                // Do not touch egui's Context from the worker thread. epaint's
+                // debug lock detects this as a deadlock while the UI thread is
+                // inside `Context::input`. The UI observes this terminal state
+                // and closes the viewport on its next frame instead.
             }
         });
     }
@@ -3369,6 +3371,9 @@ impl RivuletApp {
                     self.tr("update_installed_restart").to_string(),
                 );
                 ui.label(self.tr_fmt("updates_new_version", &[version]));
+                // Closing is handled on the UI thread; egui Context is not
+                // thread-safe and must never be used by the installer worker.
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
             UpdateUi::Error(err) => {
                 ui.colored_label(colors.error, self.tr_fmt("update_error", &[err]));
