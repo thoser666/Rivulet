@@ -56,6 +56,16 @@ Die ausführliche, versionierte Startreferenz ist [`docs/user-guide.md`](user-gu
 Das Wiki sollte für neue Nutzer einfacher lesbare Einstiege anbieten und bei
 technischen Details dorthin zurückverweisen.
 
+## Mehrsprachigkeit
+
+Das Wiki ist bilingual: Englisch ist die kanonische Wiki-Sprache, Deutsch wird
+für die zentralen Nutzerseiten parallel gepflegt. Sprachpaare verwenden das
+Suffix `-de` (zum Beispiel `Home.md` und `Home-de.md`) und enthalten am Anfang
+einen Sprachumschalter. Technische Begriffe, Befehle, Pfade, Variablennamen und
+Fehlercodes bleiben unverändert. Fehlt eine Übersetzung, verweist die Seite
+sichtbar auf Englisch, statt eine veraltete Übersetzung zu liefern. Die
+Navigationsregeln stehen zusätzlich auf der Wiki-Seite `Languages`.
+
 ## Pflege-Regeln
 
 1. Jede Wiki-Seite nennt den getesteten Rivulet-Kanal oder Versionsstand.
