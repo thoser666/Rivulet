@@ -26,6 +26,15 @@ The downloaded installer is cleaned up after a successful launch where the
 platform permits it (e.g., when the application remains open after opening a DMG on macOS).
 On Windows, immediate file removal upon process launch is explicitly deferred to prevent deleting the `.msi` file while `msiexec.exe` is opening it.
 
+The MSI uses one stable `UpgradeCode`, installs into the fixed `Rivulet` folder,
+and performs a major upgrade before registering the new product. This prevents
+old and new versions from remaining as separate Control Panel entries. The
+Start Menu and desktop shortcuts target `rivulet-launcher.exe`, which resolves
+the GUI executable beside itself; they therefore continue to start the version
+that was actually installed by the upgrade. If an old shortcut still points to
+an older installation directory, delete and recreate that shortcut or launch
+Rivulet from the current Start Menu entry.
+
 ### Exit code 3010
 
 `msiexec` exit code **3010** means *success, reboot required*. It is not an

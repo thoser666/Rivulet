@@ -26,6 +26,11 @@ New-Item -ItemType Directory -Force -Path $bundle | Out-Null
 # 1. Application binaries. The launcher is the user-facing entry point:
 # it records failures from the GUI process that happen before Rust logging.
 Copy-Item (Join-Path $Staging "rivulet-gui.exe") (Join-Path $bundle "rivulet-gui.exe") -Force
+# The launcher is the stable entry point. It starts the version installed in
+# this directory and records pre-Rust diagnostics when the GUI fails.
+if (Test-Path (Join-Path $Staging "rivulet-launcher.exe")) {
+  Copy-Item (Join-Path $Staging "rivulet-launcher.exe") (Join-Path $bundle "rivulet-launcher.exe") -Force
+}
 Copy-Item (Join-Path $Staging "rivulet.exe") (Join-Path $bundle "rivulet.exe") -Force
 
 # 2. GStreamer runtime: all bin DLLs.
