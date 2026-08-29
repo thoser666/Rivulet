@@ -43,8 +43,10 @@ Ubuntu package's `gst-launch-1.0` binary name (not the nonexistent
 container logs on early exit or timeout. A sender timeout (exit 124) is treated as
 an interoperability failure report rather than allowing the script to hang; other
 sender failures remain fatal. The receiver also includes a verbose `identity`
-probe and the smoke test requires at least one received buffer, so a merely
-running GStreamer process cannot produce a false positive.
+probe and the smoke test requires at least one received buffer. The probe's
+`last-message` output is captured from the container logs (stderr is redirected
+into the container log stream), so a merely running GStreamer process cannot
+produce a false positive.
 
  The lightweight
 `scripts/check-rist-pipeline.py` contract test runs before Docker and verifies the
