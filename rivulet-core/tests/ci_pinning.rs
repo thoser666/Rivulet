@@ -134,7 +134,6 @@ fn user_guide_is_linked_and_covers_core_workflows() {
 }
 
 #[test]
-#[test]
 fn m3_completion_report_is_linked_and_records_follow_ups() {
     let readme = read("README.md");
     let report = read("docs/m3-streaming-completion-report.md");
