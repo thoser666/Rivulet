@@ -2,17 +2,12 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Supported frame formats for a virtual-camera output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum VirtualCameraFormat {
     Rgba,
+    #[default]
     Bgra,
     Nv12,
-}
-
-impl Default for VirtualCameraFormat {
-    fn default() -> Self {
-        Self::Bgra
-    }
 }
 
 /// Configuration shared by platform-specific virtual-camera backends.
@@ -60,20 +55,15 @@ impl VirtualCameraConfig {
 }
 
 /// Lifecycle state of a virtual-camera output.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum VirtualCameraState {
+    #[default]
     Stopped,
     Starting,
     Running,
     Stopping,
     Unavailable(String),
     Error(String),
-}
-
-impl Default for VirtualCameraState {
-    fn default() -> Self {
-        Self::Stopped
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
