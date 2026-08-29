@@ -93,6 +93,9 @@ jobs:
 
       - name: Check OBS feature-parity checklist
         run: |
+          echo "--- README head before parity check ---"
+          head -3 README.md
+          wc -c README.md
           python3 scripts/check-parity-checklist.py
           python3 scripts/check-parity-checklist.py --self-test
 
