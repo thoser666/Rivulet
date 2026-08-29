@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Keep wiki language-switch links and page pairs synchronized.
-
-The script intentionally does not machine-translate prose. It creates a reviewable
-translation task when an English page has no German counterpart and can commit/push
-only generated navigation metadata when requested.
-"""
+"""Keep wiki language-switch links and page pairs synchronized."""
 from __future__ import annotations
 
 import argparse
@@ -19,23 +14,23 @@ def run(*args: str) -> None:
 
 
 def sync(root: Path, check_only: bool) -> list[str]:
-    changes: list[str] = []
+    findings: list[str] = []
     for source in sorted(root.glob("*.md")):
         if source.stem.endswith("-de") or source.name == "Languages.md":
             continue
         target = root / f"{source.stem}-de.md"
         if not target.exists():
-            changes.append(f"translation required: {source.name} -> {target.name}")
+            findings.append(f"translation required: {source.name} -> {target.name}")
             continue
         german = target.read_text(encoding="utf-8")
-        if not ("[English](" in german or "[German](" in german):
-            changes.append(f"missing English switch: {target.name}")
+        if "[English](" not in german and "[German](" not in german:
+            findings.append(f"missing English switch: {target.name}")
             if not check_only:
                 target.write_text(
-                    f"[English]({source.stem}) · [Deutsch]({target.stem})\n\n" + german,
+                    f"[English]({source.stem}) · [Deutsch]({target.stem})\n\n{german}",
                     encoding="utf-8",
                 )
-    return changes
+    return findings
 
 
 def main() -> int:
@@ -45,12 +40,12 @@ def main() -> int:
     parser.add_argument("root", nargs="?", default=".freebuff-rivulet-wiki")
     args = parser.parse_args()
     root = Path(args.root)
-    changes = sync(root, check_only=args.check)
-    if changes:
+    findings = sync(root, check_only=args.check)
+    if findings:
         print("wiki synchronization findings:")
-        print("\n".join(f"- {item}" for item in changes))
+        print("\n".join(f"- {item}" for item in findings))
     if args.check:
-        return 1 if changes else 0
+        return 1 if findings else 0
     if args.publish:
         run("git", "-C", str(root), "config", "user.name", "github-actions[bot]")
         run("git", "-C", str(root), "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")

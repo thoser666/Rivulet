@@ -30,11 +30,7 @@ def check(root: Path) -> list[str]:
             continue
         text = source.read_text(encoding="utf-8")
         german_text = german.read_text(encoding="utf-8")
-        if not (GERMAN_LINK_RE.search(text) or WIKI_LANGUAGE_FILE_RE.search(text)):
-            # GitHub Wiki checkouts may normalize Markdown link syntax or line endings;
-            # the presence of the paired page is still the authoritative invariant.
-            if german.exists():
-                continue
+        if not GERMAN_LINK_RE.search(text):
             errors.append(f"missing German language link: {source.name}")
         if not re.search(r"\[(?:English|German)[^\]]*\]\(([^)]+)\)", german_text, re.IGNORECASE):
             errors.append(f"missing English language link: {german.name}")

@@ -25,7 +25,9 @@ jobs:
       - name: Check wiki links and translation drift
         run: python3 scripts/sync-wiki-translations.py --check .freebuff-rivulet-wiki
       - name: Publish synchronized wiki changes
-        if: github.event_name == 'schedule' && github.repository_owner == 'thoser666'
+        if: github.event_name == 'schedule' && github.repository_owner == 'thoser666' && env.WIKI_SYNC_TOKEN != ''
         env:
-          GH_TOKEN: ${{ secrets.WIKI_SYNC_TOKEN }}
-        run: python3 scripts/sync-wiki-translations.py --publish
+          WIKI_SYNC_TOKEN: ${{ secrets.WIKI_SYNC_TOKEN }}
+        run: |
+          git -C .freebuff-rivulet-wiki remote set-url origin "https://x-access-token:${WIKI_SYNC_TOKEN}@github.com/${{ github.repository }}.wiki.git"
+          python3 scripts/sync-wiki-translations.py --publish .freebuff-rivulet-wiki
