@@ -93,6 +93,27 @@ fn is_full_sha(s: &str) -> bool {
 }
 
 #[test]
+fn wiki_policy_and_user_guide_are_linked() {
+    let readme = read("README.md");
+    let policy = read("docs/wiki-content-policy.md");
+    assert!(readme.contains("github.com/thoser666/Rivulet/wiki"));
+    assert!(readme.contains("docs/wiki-content-policy.md"));
+    for required in [
+        "## Zweck des Wikis",
+        "## Was im Repository bleiben muss",
+        "## Pflege-Regeln",
+        "## Aktivierung und initiale Einrichtung",
+        "Definition of Done",
+        "docs/user-guide.md",
+    ] {
+        assert!(
+            policy.contains(required),
+            "wiki policy must contain {required}"
+        );
+    }
+}
+
+#[test]
 fn user_guide_is_linked_and_covers_core_workflows() {
     let readme = read("README.md");
     let guide = read("docs/user-guide.md");

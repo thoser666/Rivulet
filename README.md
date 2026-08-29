@@ -96,10 +96,17 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 
 ---
 
-## 📖 Bedienungsanleitung
+## 📖 Bedienungsanleitung und Wiki
 
 Der zentrale [Rivulet User Guide](docs/user-guide.md) erklärt Installation, Navigation,
 Aufnahme, Quellen, Live-Vorschau, Szenen, Streaming, Updates und Fehlerdiagnose.
+
+Für Einsteiger-How-tos, Plattformtipps, FAQ und Community-Workarounds ist das
+[GitHub Wiki](https://github.com/thoser666/Rivulet/wiki) vorgesehen. Die Grenzen
+zwischen versionierter Repository-Doku und Wiki sind in
+[`docs/wiki-content-policy.md`](docs/wiki-content-policy.md) beschrieben. Das
+Wiki muss in den GitHub-Repository-Settings durch einen Administrator aktiviert
+werden.
 
 ## 🚀 Roadmap
 
