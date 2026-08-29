@@ -157,6 +157,28 @@ fn m3_completion_report_is_linked_and_records_follow_ups() {
 }
 
 #[test]
+fn security_policy_is_linked_from_readme_and_docs() {
+    let readme = read("README.md");
+    let policy = read("SECURITY.md");
+    let security_docs = read("docs/security.md");
+    assert!(readme.contains("SECURITY.md"));
+    assert!(security_docs.contains("SECURITY.md"));
+    for required in [
+        "## Reporting a Vulnerability",
+        "security/advisories/new",
+        "## Scope",
+        "## Supported Versions",
+        "## Coordinated Disclosure",
+        "docs/m3-streaming-completion-report.md",
+    ] {
+        assert!(
+            policy.contains(required),
+            "SECURITY.md must contain {required}"
+        );
+    }
+}
+
+#[test]
 fn third_party_actions_are_pinned_to_full_commit_sha() {
     for name in WORKFLOWS {
         let content = read(&format!(".github/workflows/{name}"));

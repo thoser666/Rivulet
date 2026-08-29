@@ -4,6 +4,11 @@ Rivulet uses GitHub-native security controls plus repository-owned CI checks. Th
 controls are intentionally layered: repository settings prevent credential leaks,
 while workflows scan source and dependency changes.
 
+Public security reports are handled through [`SECURITY.md`](../SECURITY.md):
+support scope, the responsible-disclosure procedure, the private advisory
+channel, and the coordination timeline live there. This document records the
+enabled controls and the operational incident-response runbook.
+
 ## Enabled Repository Features
 
 The following settings are enabled for `thoser666/Rivulet`:

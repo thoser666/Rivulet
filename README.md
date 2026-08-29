@@ -661,6 +661,10 @@ The expected state is `secret_scanning.status=enabled` and
 GitHub and cannot be represented fully in a repository file. See
 [`docs/security.md`](docs/security.md) for incident handling and plan limitations.
 
+Security vulnerabilities are handled via responsible disclosure, outlined in
+[`SECURITY.md`](SECURITY.md): report privately through a security advisory,
+never in a public issue.
+
 The `develop` branch ruleset requires `CI`, `Security`, `OpenSSF Scorecard`,
 `CodeQL (rust)`, `Dependency Review`, and `Pinning-Tests` before merge and blocks
 direct updates for ordinary contributors. GitHub does not allow an Actions-only
