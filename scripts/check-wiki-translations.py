@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import sys
 
-PAIR_RE = re.compile(r"^\[(?:Deutsch|German)[^\]]*\]\(([^)]+)\)", re.MULTILINE)
+GERMAN_LINK_RE = re.compile(r"\[(?:Deutsch|German)[^\]]*\]\(([^)]+)\)", re.IGNORECASE)
 
 
 def page_target(value: str) -> Path:
@@ -29,9 +29,9 @@ def check(root: Path) -> list[str]:
             continue
         text = source.read_text(encoding="utf-8")
         german_text = german.read_text(encoding="utf-8")
-        if not PAIR_RE.search(text):
+        if not GERMAN_LINK_RE.search(text):
             errors.append(f"missing German language link: {source.name}")
-        if not re.search(r"\[(?:English|German)[^\]]*\]\(([^)]+)\)", german_text):
+        if not re.search(r"\[(?:English|German)[^\]]*\]\(([^)]+)\)", german_text, re.IGNORECASE):
             errors.append(f"missing English language link: {german.name}")
     return errors
 
