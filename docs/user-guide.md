@@ -129,6 +129,7 @@ Wenn die GUI startet, aber nicht reagiert:
 - Native Browser-Webview-Adapter sind noch plattformabhängig.
 - Vollständige Vulkan-/OpenGL-/DXGI-Performance muss auf echter Hardware gemessen werden.
 - WHIP benötigt noch den vollständigen ICE/DTLS/SRTP- und SFU-End-to-End-Nachweis.
+- Der VOD-Track (Twitch-Workflow) ist als deterministische Konfiguration vorhanden; die eigentliche pro-Track-GStreamer-Routing- und UI-Integration folgt noch.
 - RIST/SRT-Smoke-Tests prüfen die CI-Interoperabilität, ersetzen aber keinen Test gegen den produktiven Receiver.
 - macOS- und Linux-Funktionen können durch Berechtigungen, Wayland-Portale oder fehlende GStreamer-Plugins eingeschränkt sein.
 

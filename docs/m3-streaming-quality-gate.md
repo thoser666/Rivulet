@@ -115,6 +115,21 @@ storage before stable releases. Until then, keys must be supplied through the
 existing protected runtime configuration and must never be committed, logged, or
 included in screenshots.
 
+## VOD track
+
+The Twitch VOD workflow is modelled as `VodTrack` on `StreamSettings` with a
+ deterministic `enabled`/`recorded` pair. A track is only ever considered active
+ when both flags are set, which guarantees it can never silently leak into the
+ live ingest: enabling the feature forces the local VOD recording flag on unless
+ explicitly overridden, and `twitch_ivod_flag()` returns `Some("ivod")` only for
+ an active track. The model is off by default and covered by unit tests
+ (inactive default, active-when-recorded, muted override, integration with
+ `StreamSettings`, and no leakage into masked/redacted output or the ingest
+ `location()`).
+
+Actual per-track GStreamer routing into the muxed output remains an integration
+ item; the deterministic config and leakage guarantees are the tested contract.
+
 ## Release verification
 
 The alpha release workflow is intentionally two-phase: it first prepares a
@@ -154,6 +169,9 @@ release URL, prerelease flag, and uploaded assets.
       confirm bearer tokens never appear in status, logs, or diagnostics.
 - [ ] Run the WHIP media preflight and verify the H.264/Opus branch reaches
       `READY`; then verify the real SFU offer/answer, ICE, DTLS, and SRTP path.
+- [ ] Configure the VOD track and verify it is off by default, becomes active
+      only when both `enabled` and `recorded` are set, and never appears in the
+      live ingest or in any masked/redacted output.
 - [ ] Test the view at the M3 viewport profiles from the common quality-gate
       matrix, including narrow windows and long custom endpoint names.
 

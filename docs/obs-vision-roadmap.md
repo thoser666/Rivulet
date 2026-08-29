@@ -13,7 +13,7 @@ vision rather than merely copying OBS.
 | SRT/RIST contribution | Reliable low-latency transport and professional workflows | M3 | Configuration contract validated (endpoint, latency, passphrase); negotiated media pipeline, reconnect/error states, and interoperability tests remain open |
 | Multistreaming | Direct streamer value and automation | M3 | Multiple independent targets with per-target health, retry/isolation, secret redaction, and deterministic start/stop tests |
 | NDI output | Cross-platform production interoperability | M3 | NDI source discovery/output contract, bounded frame conversion, lifecycle/error handling, and LAN interoperability evidence |
-| VOD audio track | Streamer value and user control | M3 | Separate copyright-safe track in local recording, explicit routing UI, sync tests, and no accidental live-stream leakage |
+| VOD audio track | Streamer value and user control | M3 | `VodTrack` config model done (deterministic `enabled`/`recorded`, `ivod` flag, off-by-default, leakage-safe unit tests). Remaining: explicit routing UI and actual per-track GStreamer routing into the muxed output |
 | Virtual camera | Reusable output and ecosystem interoperability | M4 | Start/stop virtual camera lifecycle, format negotiation, permission errors, and consumer smoke test |
 | Audio ducking | Better live production workflow | M4 | Sidechain policy with bounded attenuation/attack/release, bypass/reset, tests, and clear mixer feedback |
 | Remux and crash-safe file workflow | Reliability and deterministic output handling | M4 | MKV/MOV-to-MP4 remux with progress, cancellation, overwrite policy, recovery tests, and validated output files |

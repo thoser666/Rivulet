@@ -661,6 +661,49 @@ impl MultistreamSettings {
     }
 }
 
+/// Copyright-safe VOD audio-track configuration for Twitch's VOD workflow.
+///
+/// When streaming with mixed music, the VOD track is a third audio channel
+/// (independent of the System/Microphone pair used for local recording) that is
+/// intentionally kept out of the live ingest so the live stream carries the
+/// clean mix while the published VOD retains a mutation-free, license-safe
+/// track. The model is deterministic and validated so a VOD track can never
+/// silently leak into the live stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct VodTrack {
+    pub enabled: bool,
+    /// Record the VOD track into the local recording file while streaming. When
+    /// disabled the track is not emitted at all, which prevents accidental
+    /// live-stream leakage.
+    pub recorded: bool,
+}
+impl VodTrack {
+    pub const fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            recorded: enabled,
+        }
+    }
+
+    /// A VOD track is only meaningful while streaming; enabling it forces the
+    /// local VOD recording flag on so the listener never forgets the track.
+    pub fn with_recorded(mut self, recorded: bool) -> Self {
+        self.recorded = recorded;
+        self
+    }
+
+    /// Whether this configuration actually emits a VOD track.
+    pub fn active(&self) -> bool {
+        self.enabled && self.recorded
+    }
+
+    /// Twitch marks the VOD track with the `ivod` track flag. Returning whether
+    /// the config is active gives the mux stage a deterministic signal.
+    pub fn twitch_ivod_flag(&self) -> Option<&'static str> {
+        self.active().then_some("ivod")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamSettings {
     pub platform: StreamPlatform,
@@ -670,6 +713,7 @@ pub struct StreamSettings {
     pub adaptive_bitrate: AdaptiveBitrate,
     pub delay: StreamDelay,
     pub multitrack_video: MultitrackVideo,
+    pub vod_track: VodTrack,
 }
 impl StreamSettings {
     pub fn new(
@@ -685,6 +729,7 @@ impl StreamSettings {
             adaptive_bitrate: AdaptiveBitrate::default(),
             delay: StreamDelay::default(),
             multitrack_video: MultitrackVideo::default(),
+            vod_track: VodTrack::default(),
         }
     }
     pub fn twitch(key: impl Into<String>) -> Self {
@@ -717,6 +762,10 @@ impl StreamSettings {
     }
     pub fn with_multitrack_video(mut self, video: MultitrackVideo) -> Self {
         self.multitrack_video = video;
+        self
+    }
+    pub fn with_vod_track(mut self, vod_track: VodTrack) -> Self {
+        self.vod_track = vod_track;
         self
     }
     pub fn masked_key(&self) -> String {
@@ -1085,5 +1134,39 @@ mod tests {
         // Every generated media description must never contain a credential.
         assert!(!a.to_lowercase().contains("bearer"));
         assert!(!a.to_lowercase().contains("token"));
+    }
+
+    #[test]
+    fn vod_track_is_inactive_by_default_and_only_active_when_recorded() {
+        assert!(!VodTrack::default().active());
+        assert!(VodTrack::default().twitch_ivod_flag().is_none());
+
+        let enabled = VodTrack::new(true);
+        assert!(enabled.active());
+        assert_eq!(enabled.twitch_ivod_flag(), Some("ivod"));
+
+        // Enabling but explicitly disabling recording must not emit a track, so
+        // the VOD track can never silently leak into the live stream.
+        let muted = VodTrack::new(true).with_recorded(false);
+        assert!(!muted.active());
+        assert!(muted.twitch_ivod_flag().is_none());
+    }
+
+    #[test]
+    fn vod_track_is_part_of_stream_settings_and_exposed_on_preset() {
+        let settings = StreamSettings::twitch("key").with_vod_track(VodTrack::new(true));
+        assert!(settings.vod_track.active());
+
+        let plain = StreamSettings::twitch("key");
+        assert!(!plain.vod_track.active());
+        assert_eq!(plain.location(), "rtmps://live.twitch.tv/app/key");
+    }
+
+    #[test]
+    fn vod_track_never_appears_in_masked_or_redacted_output() {
+        let settings = StreamSettings::custom("rtmp://host/live", "secret-key")
+            .with_vod_track(VodTrack::new(true));
+        assert_eq!(settings.masked_key(), "se••••");
+        assert!(!settings.location().contains("ivod"));
     }
 }

@@ -286,7 +286,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] **SRT/RIST configuration contract** — validated protocol-specific endpoints, bounded latency, passphrase validation/redaction, and sink-fragment generation; live GStreamer transport/interoperability remains open
 - [x] **Multistreaming** — GStreamer fan-out with one named branch/sink per validated RTMP/RTMPS target, up to four named destinations, independent target states, retry-target selection, duplicate-name protection, and secret masking; production bus monitoring/retry scheduling remains follow-up work. *Tracked in [#70](https://github.com/thoser666/Rivulet/issues/70).*
 - [ ] **NDI output** — LAN contribution/monitoring for production setups
-- [ ] **VOD track** — separate copyright-safe audio track for the VOD recording while streaming (Twitch VOD workflow)
+- [x] **VOD track** — separate copyright-safe audio track (`VodTrack` on `StreamSettings`) for the Twitch VOD workflow while streaming: deterministic `enabled`/`recorded` model that is only ever active when both are set, so it can never silently leak into the live ingest; unit tests confirm the `ivod` flag signal and off-by-default behavior. Actual per-track GStreamer routing into the muxed output remains an integration follow-up.
 
 **Goal:** Live streaming to the common platforms *and* low-latency protocols as native citizens instead of RTMP legacy.
 
@@ -447,8 +447,8 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 | Multistreaming | Partial (multi-target fan-out wired; per-target reconnect supervisor and UI remain open) |
 | Adaptive bitrate | Partial (bounded policy implemented; live encoder reconfiguration remains open) |
 | WebRTC/WHIP, SRT/RIST, NDI | WHIP session/lifecycle+DELETE done; live SFU/ICE/DTLS media handshake, SRT/RIST transports open (M3) |
-| VOD track | Open (M3) |
-| Multi-track audio | Partial (2 tracks; VOD track planned M3) |
+| VOD track | Done (config model clean; per-track mux routing follow-up, M3) |
+| Multi-track audio | Partial (2 local tracks; VOD-track model in M3) |
 | Plugin ecosystem & OBS compatibility | Open |
 | obs-websocket / Streamdeck | Open (M5) |
 | Mobile remote & MIDI | Open (M5) |

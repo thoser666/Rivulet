@@ -52,7 +52,7 @@ pub use srt::{ContributionProtocol, ContributionSettings};
 pub use stream::{
     parse_whip_response, AdaptiveBitrate, MultistreamSettings, MultitrackVideo, StreamDelay,
     StreamPlatform, StreamPreset, StreamSettings, StreamTarget, StreamTargetState,
-    TargetPluginStatus, WhipMediaSession, WhipMediaState, WhipSession, WhipSettings,
+    TargetPluginStatus, VodTrack, WhipMediaSession, WhipMediaState, WhipSession, WhipSettings,
 };
 
 pub mod i18n;
@@ -2468,6 +2468,7 @@ mod tests {
             adaptive_bitrate: AdaptiveBitrate::default(),
             delay: StreamDelay::default(),
             multitrack_video: MultitrackVideo::default(),
+            vod_track: VodTrack::default(),
         }));
         let path = std::env::temp_dir().join("rivulet_test_overlay_dual.mp4");
         engine.start_local_recording(path.clone());
@@ -2621,6 +2622,7 @@ mod tests {
             adaptive_bitrate: AdaptiveBitrate::default(),
             delay: StreamDelay::default(),
             multitrack_video: MultitrackVideo::default(),
+            vod_track: VodTrack::default(),
         }));
         engine.start_streaming();
         let pipeline_str = engine.build_pipeline_str().unwrap();
@@ -2650,6 +2652,7 @@ mod tests {
             adaptive_bitrate: AdaptiveBitrate::default(),
             delay: StreamDelay::default(),
             multitrack_video: MultitrackVideo::default(),
+            vod_track: VodTrack::default(),
         }));
         let path = std::env::temp_dir().join("rivulet_replay_dual.mp4");
         engine.start_local_recording(path.clone());
