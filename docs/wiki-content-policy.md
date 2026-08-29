@@ -63,8 +63,10 @@ für die zentralen Nutzerseiten parallel gepflegt. Sprachpaare verwenden das
 Suffix `-de` (zum Beispiel `Home.md` und `Home-de.md`) und enthalten am Anfang
 einen Sprachumschalter. Technische Begriffe, Befehle, Pfade, Variablennamen und
 Fehlercodes bleiben unverändert. Fehlt eine Übersetzung, verweist die Seite
-sichtbar auf Englisch, statt eine veraltete Übersetzung zu liefern. Die
-Navigationsregeln stehen zusätzlich auf der Wiki-Seite `Languages`.
+sichtbar auf Englisch, statt eine veraltete Übersetzung zu liefern.Die Navigationsregeln stehen zusätzlich auf der Wiki-Seite `Languages`. Der
+automatisierte Prüf- und Synchronisierungsprozess ist in
+[`docs/wiki-translation-workflow.md`](wiki-translation-workflow.md) beschrieben.
+
 
 ## Pflege-Regeln
 

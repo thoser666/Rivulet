@@ -103,7 +103,9 @@ Aufnahme, Quellen, Live-Vorschau, Szenen, Streaming, Updates und Fehlerdiagnose.
 
 Für Einsteiger-How-tos, Plattformtipps, FAQ und Community-Workarounds ist das
 [GitHub Wiki](https://github.com/thoser666/Rivulet/wiki) vorgesehen. Das Wiki ist
-bilingual (English/Deutsch) und bietet auf jeder Kernseite einen Sprachumschalter. Die Grenzen
+bilingual (English/Deutsch) und bietet auf jeder Kernseite einen Sprachumschalter.
+Fehlende Sprachpaare werden automatisch durch den Workflow geprüft; der Ablauf ist in
+[docs/wiki-translation-workflow.md](docs/wiki-translation-workflow.md) beschrieben. Die Grenzen
 zwischen versionierter Repository-Doku und Wiki sind in
 [`docs/wiki-content-policy.md`](docs/wiki-content-policy.md) beschrieben. Das
 Wiki muss in den GitHub-Repository-Settings durch einen Administrator aktiviert

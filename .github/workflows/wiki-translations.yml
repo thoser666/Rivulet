@@ -1,0 +1,31 @@
+name: Wiki translations
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  sync-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Checkout wiki
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: .freebuff-rivulet-wiki
+          fetch-depth: 1
+      - name: Validate language pairs
+        run: python3 scripts/check-wiki-translations.py
+      - name: Check wiki links and translation drift
+        run: python3 scripts/sync-wiki-translations.py --check
+      - name: Publish synchronized wiki changes
+        if: github.event_name == 'schedule' && github.repository_owner == 'thoser666'
+        env:
+          GH_TOKEN: ${{ secrets.WIKI_SYNC_TOKEN }}
+        run: python3 scripts/sync-wiki-translations.py --publish
