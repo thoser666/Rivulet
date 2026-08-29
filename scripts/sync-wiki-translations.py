@@ -28,7 +28,7 @@ def sync(root: Path, check_only: bool) -> list[str]:
             changes.append(f"translation required: {source.name} -> {target.name}")
             continue
         german = target.read_text(encoding="utf-8")
-        if "[English](" not in german and "[German](" not in german:
+        if not ("[English](" in german or "[German](" in german):
             changes.append(f"missing English switch: {target.name}")
             if not check_only:
                 target.write_text(

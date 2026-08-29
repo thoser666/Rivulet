@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import sys
 
-PAIR_RE = re.compile(r"^\[(?:Deutsch|German)[^\]]*\]\(([^)]+)\)")
+PAIR_RE = re.compile(r"^\[(?:Deutsch|German)[^\]]*\]\(([^)]+)\)", re.MULTILINE)
 
 
 def page_target(value: str) -> Path:
