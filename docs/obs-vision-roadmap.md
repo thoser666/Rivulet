@@ -14,7 +14,7 @@ vision rather than merely copying OBS.
 | Multistreaming | Direct streamer value and automation | M3 | Multiple independent targets with per-target health, retry/isolation, secret redaction, and deterministic start/stop tests |
 | NDI output | Cross-platform production interoperability | M3 | `NdiOutput` config contract done (validated name/group, quote-escaped GStreamer fragment, `ndisink` probe, off-by-default). Remaining: real NewTek NDI runtime/LAN interoperability evidence |
 | VOD audio track | Streamer value and user control | M3 | `VodTrack` config model done (deterministic `enabled`/`recorded`, `ivod` flag, off-by-default, leakage-safe unit tests). Remaining: explicit routing UI and actual per-track GStreamer routing into the muxed output |
-| Virtual camera | Reusable output and ecosystem interoperability | M4 | Start/stop virtual camera lifecycle, format negotiation, permission errors, and consumer smoke test |
+| Virtual camera | Reusable output and ecosystem interoperability | M4 | Platform-neutral contract with validated format/resolution/FPS and explicit lifecycle states; platform driver, permission handling, and consumer smoke test remain open |
 | Audio ducking | Better live production workflow | M4 | Sidechain policy with bounded attenuation/attack/release, bypass/reset, tests, and clear mixer feedback |
 | Remux and crash-safe file workflow | Reliability and deterministic output handling | M4 | MKV/MOV-to-MP4 remux with progress, cancellation, overwrite policy, recovery tests, and validated output files |
 | Global hotkeys and remapping | Automation and accessible control | M5 | Conflict-aware rebinding, global scope, reserved-key handling, persistence, and platform-specific permission feedback |

@@ -11,6 +11,12 @@ use std::time::{Duration, Instant};
 // Important: The prelude is still needed for methods like .set_state(), .by_name(), etc.
 use gst::prelude::*;
 
+pub mod output;
+pub mod virtual_camera;
+pub use virtual_camera::{
+    VirtualCamera, VirtualCameraConfig, VirtualCameraError, VirtualCameraFormat, VirtualCameraState,
+};
+
 pub mod audio;
 pub use audio::{AudioFrame, AudioTrack, SkippedFilter};
 
