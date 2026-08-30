@@ -337,6 +337,13 @@ impl Locale {
                 ("monitoring_volume", "Monitoring volume"),
                 ("powered_by", "Powered by"),
                 ("screen_recording_unavailable", "Screen recording is currently only available on Linux and Windows."),
+                // Activity presence
+                ("presence_ready", "Ready"),
+                ("presence_recording", "Recording"),
+                ("presence_streaming", "Streaming"),
+                ("presence_recording_streaming", "Recording + streaming"),
+                ("presence_paused", "Paused"),
+                ("presence_error", "Error"),
                 // Navigation
                 ("nav_record", "Record"),
                 ("nav_mixer", "Mixer"),
@@ -672,6 +679,13 @@ impl Locale {
                 ("monitoring_volume", "Monitoring-Lautstärke"),
                 ("powered_by", "Unterstützt von"),
                 ("screen_recording_unavailable", "Bildschirmaufnahme ist derzeit nur unter Linux und Windows verfügbar."),
+                // Activity presence
+                ("presence_ready", "Bereit"),
+                ("presence_recording", "Aufnahme"),
+                ("presence_streaming", "Streamt"),
+                ("presence_recording_streaming", "Aufnahme + Stream"),
+                ("presence_paused", "Pausiert"),
+                ("presence_error", "Fehler"),
                 // Navigation
                 ("nav_record", "Aufnehmen"),
                 ("nav_mixer", "Mixer"),

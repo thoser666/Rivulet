@@ -2,12 +2,16 @@
 
 Rivulet now exposes a platform-neutral activity-status contract for a Discord-style
 status message. The GUI shows the current product activity using the **Rivulet**
-name, for example:
+name. Activity labels are localized through the selected UI locale and may include
+the explicitly selected game name, for example:
 
-- `Rivulet nimmt auf`
-- `Rivulet streamt`
-- `Rivulet nimmt auf und streamt`
-- `Rivulet pausiert`
+- `Rivulet · Aufnahme` / `Aufnahme · Elden Ring`
+- `Rivulet · Streamt` / `Streamt · Elden Ring`
+- `Rivulet · Aufnahme + Stream` / `Aufnahme + Stream · Elden Ring`
+- `Rivulet · Pausiert` / `Pausiert · Elden Ring`
+
+Game names must be supplied from the user's game selection, not inferred from
+window titles or captured content.
 
 The contract lives in `rivulet-core::presence` and is deliberately separate from
 any Discord SDK or network client. It is therefore testable on every platform and
@@ -16,10 +20,9 @@ engine to a desktop integration.
 
 ## Privacy boundary
 
-The payload contains only the application name, a generic activity description,
-and a generic state. It must not contain stream keys, ingest URLs, local paths,
-window titles, usernames, or captured content. The current implementation does
-not contact Discord; a future adapter must make the integration explicitly
+The payload contains only the application name, a localized activity description,
+and an optional user-selected game name in the state. It must not contain stream
+keys, ingest URLs, local paths, window titles, usernames, or captured content. The current implementation does not contact Discord; a future adapter must make the integration explicitly
 optional and provide a clear opt-out in Settings.
 
 ## Roadmap
