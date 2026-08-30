@@ -220,6 +220,7 @@ enum AppView {
     Stream,
     Assistant,
     Settings,
+    Help,
 }
 
 impl AppView {
@@ -232,6 +233,7 @@ impl AppView {
             AppView::Stream,
             AppView::Assistant,
             AppView::Settings,
+            AppView::Help,
         ]
     }
 
@@ -244,6 +246,7 @@ impl AppView {
             AppView::Stream => "nav_stream",
             AppView::Assistant => "nav_assistant",
             AppView::Settings => "nav_settings",
+            AppView::Help => "nav_help",
         }
     }
 
@@ -3506,6 +3509,31 @@ impl RivuletApp {
         });
     }
 
+    fn draw_help_view(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new(self.tr("nav_help")).strong());
+        ui.separator();
+        ui.label(self.tr("help_intro"));
+        for (label, path) in [
+            (self.tr("help_user_guide"), "docs/user-guide.md"),
+            (self.tr("help_stream_setup"), "docs/stream-setup.md"),
+            (
+                self.tr("help_first_stream"),
+                "docs/first-stream-checklist.md",
+            ),
+            (
+                self.tr("help_troubleshooting"),
+                "docs/updater-troubleshooting.md",
+            ),
+        ] {
+            ui.horizontal(|ui| {
+                ui.label(label);
+                ui.monospace(path);
+            });
+        }
+        ui.small(self.tr("help_open_from_repository"));
+    }
+
     /// Render the implemented M3 streaming view.
     fn current_presence_status(&self) -> PresenceStatus {
         let activity = if self.is_recording_active() && self.engine.is_streaming() {
@@ -5073,6 +5101,9 @@ impl eframe::App for RivuletApp {
             if self.view == AppView::Stream {
                 self.draw_stream_view(ui, &colors);
             }
+            if self.view == AppView::Help {
+                self.draw_help_view(ui);
+            }
 
             // Placeholder views (still-planned milestones)
             if let Some(milestone) = self.view.planned_milestone() {
@@ -5547,7 +5578,8 @@ mod tests {
         for view in AppView::all() {
             assert!(!view.nav_key().is_empty(), "view has no nav key");
         }
-        assert_eq!(AppView::all().len(), 6);
+        assert_eq!(AppView::all().len(), 7);
+        assert_eq!(AppView::Help.nav_key(), "nav_help");
         assert!(AppView::Stream.planned_milestone().is_none());
     }
 

@@ -1,5 +1,13 @@
 # Rivulet-Bedienungsanleitung
 
+## Hilfe-Menü
+
+Die Sidebar enthält den Menüpunkt **Hilfe**. Dort sind die wichtigsten
+Markdown-Dokumente gebündelt: diese Bedienungsanleitung, die Stream-Einrichtung,
+die Checkliste für den ersten Stream und die Update-Fehlerbehebung. Die Ansicht
+zeigt bewusst die Dokumentationspfade; externe Links oder Netzwerkzugriffe
+werden nicht automatisch geöffnet.
+
 Diese Anleitung beschreibt die wichtigsten Arbeitsabläufe der aktuellen Alpha-Version. Rivulet entwickelt sich weiter; einzelne Funktionen können je nach Betriebssystem und installierten GStreamer-Komponenten unterschiedlich verfügbar sein.
 
 ## 1. Installation und erster Start
