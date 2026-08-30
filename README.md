@@ -103,7 +103,9 @@ Der zentrale [Rivulet User Guide](docs/user-guide.md) erklärt Installation, Nav
 Aufnahme, Quellen, Live-Vorschau, Szenen, Streaming, Updates und Fehlerdiagnose.
 
 Für den praktischen Einstieg gibt es die [Checkliste für den ersten Twitch-, YouTube-
-oder Kick-Stream](docs/first-stream-checklist.md).
+oder Kick-Stream](docs/first-stream-checklist.md) sowie die technische [Stream-Setup-
+Dokumentation](docs/stream-setup.md). Dort ist auch der lokale RTMPS-Smoke-Test
+mit seinen Grenzen beschrieben.
 
 Für Einsteiger-How-tos, Plattformtipps, FAQ und Community-Workarounds ist das
 [GitHub Wiki](https://github.com/thoser666/Rivulet/wiki) vorgesehen. Das Wiki ist

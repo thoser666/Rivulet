@@ -1,0 +1,73 @@
+# Stream-Setup in der GUI
+
+Der Stream-Tab unterstützt Plattform-Presets für Twitch, YouTube und Kick sowie
+benutzerdefinierte RTMP/RTMPS-Ziele.
+
+## Plattform und Preset
+
+- **Twitch:** `rtmps://live.twitch.tv/app`
+- **YouTube:** `rtmps://a.rtmp.youtube.com/live2`
+- **Kick:** eigene Stream-URL aus dem Creator Dashboard eintragen
+- **Custom:** beliebiger eigener `rtmp://`- oder `rtmps://`-Endpoint
+
+Die Qualitäts-Presets Low, Standard, High und Custom werden an die
+`StreamSettings` des Engines übergeben. Plattform-Presets akzeptieren nur
+TLS-geschützte `rtmps://`-URLs. Unverschlüsseltes `rtmp://` ist ausschließlich
+für Custom-Ziele vorgesehen.
+
+## Stream-Key-Sicherheit
+
+- Der Key wird im GUI als Passwortfeld eingegeben.
+- Der vollständige Key wird nie angezeigt oder in Presence-/Statusmeldungen
+  übertragen.
+- Keys gehören nicht in Git, Logs, Screenshots, Issues oder Chatnachrichten.
+- Bei Verdacht auf Offenlegung den Key sofort im jeweiligen Creator Dashboard
+  rotieren.
+- Die Validierung blockiert Start, wenn Endpoint oder Key ungültig sind.
+
+## Start und Stop
+
+1. Plattform auswählen.
+2. Bei Kick oder Custom den Ingest-Endpunkt eintragen.
+3. Stream-Key eingeben.
+4. Qualitäts-Preset auswählen.
+5. **Stream starten** klicken.
+6. Im Stream-Tab den Verbindungsstatus und die Queue-/Fehlerzähler beobachten.
+7. Zum Beenden **Stream stoppen** klicken.
+
+Start/Stop ist idempotent auf Engine-Ebene: Ein Stream wird nur mit gültiger
+Konfiguration gestartet; beim Stop werden Streaming-Zustand und aktive
+Transportüberwachung beendet.
+
+## Lokaler RTMPS-Smoke-Test
+
+Der Test `scripts/rtmps-smoke.sh` baut eine kleine Live-GStreamer-Pipeline mit
+`videotestsrc`, `x264enc`, `flvmux` und `rtmpsink` auf. Als Ziel dient ein lokaler
+TCP-Listener auf `127.0.0.1`; dadurch werden Pipeline-Aufbau, Encoding, FLV-Muxing
+und die Verbindung zum Sink realistisch geprüft, ohne einen öffentlichen Stream
+zu starten.
+
+```bash
+bash scripts/test-rtmps-smoke.sh   # statischer Sicherheits-/Vertragstest
+bash scripts/rtmps-smoke.sh        # benötigt lokal GStreamer
+```
+
+Alternativ kann ein vorbereitetes Container-Image verwendet werden:
+
+```bash
+RTMPS_SMOKE_IMAGE=rivulet-rtmps-smoke:ci bash scripts/rtmps-smoke.sh
+```
+
+Der Smoke-Test beweist **nicht**, dass Twitch, YouTube oder Kick den Stream
+akzeptieren. Nicht abgedeckt sind TLS-Zertifikatsprüfung des Plattform-Endpoints,
+Authentifizierung, Account-/Kanalberechtigungen, tatsächliche CDN-Erreichbarkeit,
+Plattformlimits, Zuschauer-VOD-Verarbeitung und End-to-End-Audio. Dafür ist ein
+privater bzw. nicht gelisteter Teststream mit einem kurzlebigen oder anschließend
+rotierten Key erforderlich.
+
+## Vor dem ersten öffentlichen Stream
+
+Einen nicht gelisteten oder privaten Teststream mindestens fünf Minuten laufen
+lassen und Bild, Ton, Bitrate, Latenz sowie Reconnect-Verhalten prüfen. Die
+vollständige Plattform-Checkliste steht in
+[`docs/first-stream-checklist.md`](first-stream-checklist.md).
