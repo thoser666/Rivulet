@@ -18,6 +18,24 @@ This work must not weaken streaming reliability or expose credentials.
 - **P6 – Quality gate:** compatibility, migration, accessibility, UX, performance,
   security, and example-plugin checks.
 
+## M10 completion gate
+
+M10 is complete only after the common checks in
+[`milestone-quality-gates.md`](milestone-quality-gates.md) and all M10-specific
+checks pass. The final report must include:
+
+- layout persistence round-trip and migrations from every supported schema;
+- registry ordering, duplicate-ID handling, localization, keyboard focus, and labels;
+- malformed/incompatible manifest rejection and explicit capability prompts;
+- proof that secrets and runtime handles are excluded from persisted state;
+- timeout, cancellation, crash-isolation, and disabled-plugin recovery tests;
+- CPU, memory, startup, frame-time, and idle-repaint measurements;
+- Windows, Linux, and macOS results, or a documented `BLOCKED`/`N/A` reason.
+
+No Blocker or Critical finding may remain. High findings must be fixed or assigned
+to a named follow-up issue and milestone. The result is recorded in
+`docs/m10-quality-report.md` as `PASS`, `CONDITIONAL`, or `FAIL`.
+
 ## Guardrails
 
 - `eframe::Storage` may contain layout and non-sensitive preferences only.

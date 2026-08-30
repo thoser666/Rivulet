@@ -360,7 +360,7 @@ must not be implied by beta parity.
 
 ### 🧩 M10 – Extensible UI & Plugin Platform
 
-Details and guardrails: [`docs/extensible-ui-roadmap.md`](docs/extensible-ui-roadmap.md).
+Details, guardrails, and the completion gate: [`docs/extensible-ui-roadmap.md`](docs/extensible-ui-roadmap.md) and [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md).
 
 The UI extensibility work is intentionally isolated from the streaming and capture
 milestones. It starts with a versioned, persistable layout and view registry,
