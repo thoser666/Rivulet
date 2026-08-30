@@ -7,6 +7,109 @@
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
+/// OS-backed storage for a stream key. The secret is never serialized with UI
+/// preferences or included in diagnostics.
+pub struct StreamKeyStore {
+    service: String,
+}
+
+impl Default for StreamKeyStore {
+    fn default() -> Self {
+        Self::new("Rivulet")
+    }
+}
+
+impl StreamKeyStore {
+    pub fn new(service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+        }
+    }
+
+    pub fn save(&self, account: &str, key: &str) -> Result<(), String> {
+        keyring::Entry::new(&self.service, account)
+            .map_err(|error| error.to_string())?
+            .set_password(key)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn load(&self, account: &str) -> Result<Option<String>, String> {
+        match keyring::Entry::new(&self.service, account)
+            .map_err(|error| error.to_string())?
+            .get_password()
+        {
+            Ok(key) => Ok(Some(key)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    pub fn delete(&self, account: &str) -> Result<(), String> {
+        match keyring::Entry::new(&self.service, account)
+            .map_err(|error| error.to_string())?
+            .delete_credential()
+        {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+}
+
+/// Deterministic state machine for a bounded private test stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrivateTestStreamState {
+    Idle,
+    Countdown,
+    Running,
+    Completed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrivateTestStream {
+    state: PrivateTestStreamState,
+    countdown_secs: u32,
+    max_duration: Duration,
+    elapsed: Duration,
+}
+
+impl PrivateTestStream {
+    pub fn new(countdown_secs: u32, max_duration: Duration) -> Self {
+        Self {
+            state: PrivateTestStreamState::Idle,
+            countdown_secs,
+            max_duration: max_duration.max(Duration::from_secs(1)),
+            elapsed: Duration::ZERO,
+        }
+    }
+    pub fn start(&mut self) {
+        self.state = PrivateTestStreamState::Countdown;
+    }
+    pub fn state(&self) -> PrivateTestStreamState {
+        self.state
+    }
+    pub fn tick(&mut self, elapsed: Duration) {
+        if matches!(
+            self.state,
+            PrivateTestStreamState::Idle | PrivateTestStreamState::Completed
+        ) {
+            return;
+        }
+        self.elapsed = self.elapsed.saturating_add(elapsed);
+        if self.state == PrivateTestStreamState::Countdown
+            && self.elapsed >= Duration::from_secs(self.countdown_secs as u64)
+        {
+            self.state = PrivateTestStreamState::Running;
+            self.elapsed = Duration::ZERO;
+        } else if self.state == PrivateTestStreamState::Running && self.elapsed >= self.max_duration
+        {
+            self.state = PrivateTestStreamState::Completed;
+        }
+    }
+    pub fn stop(&mut self) {
+        self.state = PrivateTestStreamState::Completed;
+    }
+}
+
 /// Result of a safe, short platform connection probe.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamProbeResult {
@@ -927,6 +1030,28 @@ impl StreamSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_test_stream_counts_down_and_auto_stops() {
+        let mut test = PrivateTestStream::new(3, Duration::from_secs(10));
+        assert_eq!(test.state(), PrivateTestStreamState::Idle);
+        test.start();
+        test.tick(Duration::from_secs(2));
+        assert_eq!(test.state(), PrivateTestStreamState::Countdown);
+        test.tick(Duration::from_secs(1));
+        assert_eq!(test.state(), PrivateTestStreamState::Running);
+        test.tick(Duration::from_secs(10));
+        assert_eq!(test.state(), PrivateTestStreamState::Completed);
+    }
+
+    #[test]
+    fn private_test_stream_manual_stop_is_idempotent() {
+        let mut test = PrivateTestStream::new(0, Duration::from_secs(10));
+        test.start();
+        test.stop();
+        test.stop();
+        assert_eq!(test.state(), PrivateTestStreamState::Completed);
+    }
 
     #[test]
     fn ingest_endpoint_parser_uses_platform_ports_without_exposing_key() {

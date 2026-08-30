@@ -31,10 +31,22 @@ für Custom-Ziele vorgesehen.
 - Der Key wird im GUI als Passwortfeld eingegeben.
 - Der vollständige Key wird nie angezeigt oder in Presence-/Statusmeldungen
   übertragen.
+- Wenn „Key speichern“ aktiviert ist, verwendet Rivulet den nativen
+  Betriebssystem-Schlüsselbund (Windows Credential Manager, macOS Keychain
+  bzw. Linux Secret Service über `keyring`). Der Key wird nicht in
+  `eframe::Storage` gespeichert.
 - Keys gehören nicht in Git, Logs, Screenshots, Issues oder Chatnachrichten.
 - Bei Verdacht auf Offenlegung den Key sofort im jeweiligen Creator Dashboard
   rotieren.
 - Die Validierung blockiert Start, wenn Endpoint oder Key ungültig sind.
+
+## Privater Teststream
+
+Der Assistent unterstützt einen ausdrücklich gestarteten, zeitlich begrenzten
+privaten Testlauf. Nach dem Countdown läuft die konfigurierte Pipeline bis zur
+Maximaldauer und wechselt anschließend automatisch in den Status „beendet“.
+Der Test veröffentlicht nur dann Daten, wenn der Nutzer zuvor selbst einen
+privaten oder nicht gelisteten Stream im Plattform-Dashboard angelegt hat.
 
 ## Start und Stop
 

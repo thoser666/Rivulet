@@ -713,6 +713,8 @@ pub struct RivuletApp {
     stream_probe_running: bool,
     #[serde(skip)]
     stream_probe_result: Option<StreamProbeResult>,
+    #[serde(skip)]
+    private_test_stream: rivulet_core::PrivateTestStream,
 
     // Auto-update
     #[serde(skip)]
@@ -951,6 +953,10 @@ impl Default for RivuletApp {
             stream_status_message: None,
             stream_probe_running: false,
             stream_probe_result: None,
+            private_test_stream: rivulet_core::PrivateTestStream::new(
+                3,
+                std::time::Duration::from_secs(30),
+            ),
 
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
@@ -3476,11 +3482,19 @@ impl RivuletApp {
                     ui.label(self.tr("stream_setup_test_stream"));
                     if ui.button(self.tr("stream_setup_run_test")).clicked() {
                         self.setup_test_requested = true;
+                        self.private_test_stream.start();
                         self.stream_status_message =
                             Some(self.tr("stream_setup_test_prepared").to_owned());
                     }
                     if self.setup_test_requested {
                         ui.label(self.tr("stream_setup_test_private_only"));
+                        ui.label(format!(
+                            "Test status: {:?}",
+                            self.private_test_stream.state()
+                        ));
+                        if ui.button(self.tr("stream_stop")).clicked() {
+                            self.private_test_stream.stop();
+                        }
                     }
                 }
                 _ => {
