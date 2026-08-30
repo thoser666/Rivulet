@@ -205,8 +205,8 @@ pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
 /// when `None` it is resolved next to the running executable.
 pub fn install_asset_with_watch(
     path: &Path,
-    watchdog: Option<&Path>,
-    wait_pids: &[u32],
+    #[cfg_attr(not(target_os = "windows"), allow(unused_variables))] watchdog: Option<&Path>,
+    #[cfg_attr(not(target_os = "windows"), allow(unused_variables))] wait_pids: &[u32],
 ) -> anyhow::Result<bool> {
     if !path.exists() {
         anyhow::bail!("installer file does not exist: {}", path.display());
@@ -302,6 +302,7 @@ fn resolve_watchdog() -> Option<std::path::PathBuf> {
 }
 
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 fn resolve_watchdog() -> Option<std::path::PathBuf> {
     None
 }
