@@ -499,15 +499,23 @@ fn resource_efficiency_gate_is_wired_up() {
 }
 
 #[test]
-fn release_workflow_reuses_existing_release_branches() {
+fn release_workflow_publishes_current_source_onto_release_branch() {
     let workflow = read(".github/workflows/release.yml");
     assert!(
-        workflow.contains("git fetch origin \"$RELEASE_BRANCH\"")
-            && workflow.contains("git show-ref --verify")
-            && workflow.contains("git push --set-upstream origin \"HEAD:$RELEASE_BRANCH\"")
-            && workflow.contains("git diff --cached --quiet")
-            && workflow.contains("git reset --hard \"$REMOTE_TIP\""),
-        "release workflow must handle retries on an existing release branch idempotently"
+        workflow.contains("bash scripts/release-branch.sh \"$RELEASE_BRANCH\""),
+        "release workflow must reconcile the release branch via scripts/release-branch.sh"
+    );
+
+    let script = read("scripts/release-branch.sh");
+    assert!(
+        script.contains("git fetch origin \"$BRANCH\"")
+            && script.contains("git show-ref --verify --quiet \"refs/remotes/origin/$BRANCH\"")
+            && script.contains("git merge-base --is-ancestor \"$REMOTE_TIP\" HEAD")
+            && script.contains("git push origin \"HEAD:$BRANCH\"")
+            && script.contains("git push --force-with-lease origin \"HEAD:$BRANCH\""),
+        "release-branch.sh must publish current HEAD onto the release branch, \
+         fast-forwarding when the remote is at/behind HEAD and force-with-lease \
+         overwriting a divergent/stale tip so a release always builds current source"
     );
 }
 

@@ -3831,7 +3831,7 @@ dependencies = [
 
 [[package]]
 name = "rivulet-audio"
-version = "0.64.0-alpha.1"
+version = "0.65.0-alpha.55"
 dependencies = [
  "anyhow",
  "gstreamer",
@@ -3844,7 +3844,7 @@ dependencies = [
 
 [[package]]
 name = "rivulet-capture"
-version = "0.64.0-alpha.1"
+version = "0.65.0-alpha.55"
 dependencies = [
  "anyhow",
  "ashpd",
@@ -3860,7 +3860,7 @@ dependencies = [
 
 [[package]]
 name = "rivulet-core"
-version = "0.64.0-alpha.1"
+version = "0.65.0-alpha.55"
 dependencies = [
  "anyhow",
  "ash",
@@ -3889,7 +3889,7 @@ dependencies = [
 
 [[package]]
 name = "rivulet-gui"
-version = "0.64.0-alpha.1"
+version = "0.65.0-alpha.55"
 dependencies = [
  "anyhow",
  "ashpd",
@@ -3921,11 +3921,11 @@ dependencies = [
 
 [[package]]
 name = "rivulet-launcher"
-version = "0.64.0-alpha.1"
+version = "0.65.0-alpha.55"
 
 [[package]]
 name = "rivulet-obs-compat"
-version = "0.64.0-alpha.1"
+version = "0.65.0-alpha.55"
 dependencies = [
  "anyhow",
  "cc",
@@ -3940,14 +3940,14 @@ dependencies = [
 
 [[package]]
 name = "rivulet-opengl-hook-dll"
-version = "0.64.0-alpha.1"
+version = "0.65.0-alpha.55"
 dependencies = [
  "winapi",
 ]
 
 [[package]]
 name = "rivulet-plugins"
-version = "0.64.0-alpha.1"
+version = "0.65.0-alpha.55"
 dependencies = [
  "anyhow",
  "rivulet-core",
@@ -3955,7 +3955,7 @@ dependencies = [
 
 [[package]]
 name = "rivulet-streaming"
-version = "0.64.0-alpha.1"
+version = "0.65.0-alpha.55"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -3964,7 +3964,7 @@ dependencies = [
 
 [[package]]
 name = "rivulet-updater"
-version = "0.64.0-alpha.1"
+version = "0.65.0-alpha.55"
 dependencies = [
  "anyhow",
  "semver",
@@ -3975,7 +3975,7 @@ dependencies = [
 
 [[package]]
 name = "rivulet-vulkan-layer"
-version = "0.64.0-alpha.1"
+version = "0.65.0-alpha.55"
 dependencies = [
  "anyhow",
  "ash",
