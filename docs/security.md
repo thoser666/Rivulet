@@ -121,6 +121,44 @@ request write access to repository contents. Review the first score regularly;
 Scorecard findings are improvement signals, not a substitute for threat
 modeling or maintainer review.
 
+## GitHub App & External Check Enablement
+
+Rivulet uses a mix of GitHub-native automations and repository-owned workflows.
+This section records which GitHub Apps / external checks are active and which
+are recommended but not yet enabled, so the decision is traceable.
+
+### Active
+
+| Automation | Status | Notes |
+| --- | --- | --- |
+| Dependabot | Enabled | GitHub Actions SHA pins (see the ownership split above). |
+| Renovate | Enabled | Grouped Cargo updates + dependency dashboard. |
+| CodeQL | Enabled | Run by `security.yml` (workflow, not the GitHub App); SARIF uploaded to Code Scanning. |
+| OpenSSF Scorecard | Enabled | Run by `security.yml`; result published to the OpenSSF API. |
+| Secret Scanning + Push Protection | Enabled | Repository settings, not a workflow. |
+
+### Recommended but not yet enabled
+
+These are considered for future enablement. Enable each only after reviewing its
+permissions and data handling; GitHub Apps can request broad repository scopes.
+
+| App | Purpose | Decision / risk |
+| --- | --- | --- |
+| [github/accessibility-scanner](https://github.com/github/accessibility-scanner) (or **AccessLint**) | Post automated accessibility findings on pull requests, complementing the in-process `ui_accessibility` report. | Recommended. Needs a deployed/reachable app URL for full function; the in-process contract in `rivulet-gui/tests/ui_accessibility.rs` already covers the deterministic baseline while the app is not installed. Tracked as finding `ui-001` in `docs/ui-audit.md`. |
+| **rust-doctor** | Review Rust change risk and suggest targeted fixes on PRs. | Optional; Clippy + the workspace lints already run in CI (`-D warnings`), so value is advisory feedback, not a gate. |
+| **Conventional Commits** checkout bot | Enforce the Conventional Commits format used by `release.yml` versioning. | Nice-to-have; the release workflow already skips non-`feat`/`fix` commits, so a breaking/malformed commit only delays a release rather than corrupting it. Prefer tightening the release check before adding a bot. |
+| **Clippy Review** bot | Surface clippy suggestions inline on PRs. | Redundant with the CI `Lints (Fmt & Clippy)` job; only adds ergonomics for reviewers. |
+
+### Enablement policy
+
+- An app must request the minimum permission scope and be documented here before
+  installation.
+- Any app that posts on pull requests must remain advisory and must never become
+  a blocking required check until its false-positive rate is reviewed across
+  several PRs.
+- Apps that require a deployed service (AccessLint/accessibility-scanner) are
+  deferred until there is an always-available deployment to point them at.
+
 ## Required Repository Settings
 
 The active `develop` branch ruleset requires pull requests and these exact status

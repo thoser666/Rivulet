@@ -130,6 +130,8 @@ werden.
 > egui conventions in [`docs/ui-design.md`](docs/ui-design.md). Every milestone
 > also uses the reusable [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md)
 > for UI, usability, accessibility, reliability, platform, and resource-efficiency review.
+> The ongoing UI audit, its CI-gated accessibility/screenshot contracts, and the
+> accessibility-scanning backlog are tracked in [`docs/ui-audit.md`](docs/ui-audit.md).
 > The cross-cutting resource goal and measurement method are documented in
 > [`docs/resource-efficiency-goal.md`](docs/resource-efficiency-goal.md).
 

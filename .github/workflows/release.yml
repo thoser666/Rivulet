@@ -133,8 +133,10 @@ jobs:
 
           RELEASE_BRANCH="release/$TAG"
           # Multiple workflow runs can target the same release branch. Never
-          # derive a new commit from a stale remote tip: fetch first, then
-          # create a temporary commit and publish it with an atomic retry.
+          # derive a new commit from a stale remote tip: the release branch must
+          # always carry the CURRENT source (see scripts/release-branch.sh), so
+          # it publishes the freshly-committed version bump on top of the
+          # latest develop HEAD and overwrites any divergent/stale tip.
           git add Cargo.toml rivulet-*/Cargo.toml CHANGELOG.md
           if git diff --cached --quiet; then
             echo "No version changes to publish."
@@ -142,21 +144,7 @@ jobs:
             git commit -m "chore(release): prepare $TAG"
           fi
 
-          git fetch origin "$RELEASE_BRANCH" 2>/dev/null || true
-          if git show-ref --verify --quiet "refs/remotes/origin/$RELEASE_BRANCH"; then
-            REMOTE_TIP="$(git rev-parse "origin/$RELEASE_BRANCH")"
-            if git merge-base --is-ancestor "$REMOTE_TIP" HEAD; then
-              git push --set-upstream origin "HEAD:$RELEASE_BRANCH"
-            elif git merge-base --is-ancestor HEAD "$REMOTE_TIP"; then
-              git reset --hard "$REMOTE_TIP"
-              echo "Release branch already contains a newer version bump."
-            else
-              echo "Release branch has diverged; using its tip to avoid a non-fast-forward push."
-              git reset --hard "$REMOTE_TIP"
-            fi
-          else
-            git push --set-upstream origin "HEAD:$RELEASE_BRANCH"
-          fi
+          bash scripts/release-branch.sh "$RELEASE_BRANCH"
 
           echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
 

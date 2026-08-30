@@ -76,7 +76,10 @@ jobs:
       - name: ShellCheck macOS packaging scripts
         run: |
           sudo apt-get install -y shellcheck
-          shellcheck packaging/macos/*.sh
+          shellcheck packaging/macos/*.sh scripts/release-branch.sh scripts/test-release-branch.sh
+
+      - name: Test release-branch reconciliation
+        run: bash scripts/test-release-branch.sh
 
       - name: Check action pin table is up to date
         run: python3 scripts/generate-action-pins.py --check
