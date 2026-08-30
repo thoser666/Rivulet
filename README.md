@@ -12,7 +12,7 @@
 
 *A Rust recording and streaming engine — built for performance, safety, reliability, and embeddability*
 
-[Features](#-features) • [Installation](#-installation) • [Bedienungsanleitung](docs/user-guide.md) • [Roadmap](#-roadmap) • [Contributing](#-contributing)
+[Features](#-features) • [Installation](#-installation) • [Bedienungsanleitung](docs/user-guide.md) • [Erster Stream](docs/first-stream-checklist.md) • [Roadmap](#-roadmap) • [Contributing](#-contributing)
 
 ![Rivulet](docs/thumbnail.png)
 
@@ -101,6 +101,9 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 
 Der zentrale [Rivulet User Guide](docs/user-guide.md) erklärt Installation, Navigation,
 Aufnahme, Quellen, Live-Vorschau, Szenen, Streaming, Updates und Fehlerdiagnose.
+
+Für den praktischen Einstieg gibt es die [Checkliste für den ersten Twitch-, YouTube-
+oder Kick-Stream](docs/first-stream-checklist.md).
 
 Für Einsteiger-How-tos, Plattformtipps, FAQ und Community-Workarounds ist das
 [GitHub Wiki](https://github.com/thoser666/Rivulet/wiki) vorgesehen. Das Wiki ist
