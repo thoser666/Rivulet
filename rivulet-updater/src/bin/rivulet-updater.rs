@@ -49,8 +49,11 @@ mod imp {
 
     #[link(name = "kernel32")]
     extern "system" {
-        fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32)
-            -> *mut c_void;
+        fn OpenProcess(
+            dw_desired_access: u32,
+            b_inherit_handle: i32,
+            dw_process_id: u32,
+        ) -> *mut c_void;
         fn WaitForSingleObject(h_handle: *mut c_void, dw_milliseconds: u32) -> u32;
         fn CloseHandle(h_object: *mut c_void) -> i32;
     }
@@ -91,6 +94,7 @@ mod imp {
 
 #[cfg(not(windows))]
 mod imp {
+    use std::thread::sleep;
     use std::time::Duration;
 
     /// Placeholder for non-Windows builds; the watchdog itself is only ever
@@ -176,11 +180,7 @@ fn main() {
             .open(log)
             .map(|mut f| {
                 use std::io::Write;
-                let _ = writeln!(
-                    f,
-                    "install {} -> exit code {code}",
-                    install.display()
-                );
+                let _ = writeln!(f, "install {} -> exit code {code}", install.display());
             });
     }
     std::process::exit(code);
@@ -215,7 +215,13 @@ fn relaunch_from_temp() -> Option<PathBuf> {
 fn run_msi(path: &std::path::Path) -> i32 {
     let path_str = path.to_string_lossy().to_string();
     let mut child = match Command::new("msiexec.exe")
-        .args(["/i", &path_str, "/passive", "/norestart", "REBOOT=ReallySuppress"])
+        .args([
+            "/i",
+            &path_str,
+            "/passive",
+            "/norestart",
+            "REBOOT=ReallySuppress",
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -279,15 +285,9 @@ mod tests {
             "C:\\tmp\\update.log".into(),
         ];
         let args = parse_argv(&argv);
-        assert_eq!(
-            args.install,
-            Some(PathBuf::from("C:\\tmp\\rivulet.msi"))
-        );
+        assert_eq!(args.install, Some(PathBuf::from("C:\\tmp\\rivulet.msi")));
         assert_eq!(args.wait_pids, vec![1234, 5678]);
-        assert_eq!(
-            args.log,
-            Some(PathBuf::from("C:\\tmp\\update.log"))
-        );
+        assert_eq!(args.log, Some(PathBuf::from("C:\\tmp\\update.log")));
     }
 
     #[test]

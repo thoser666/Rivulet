@@ -3315,8 +3315,7 @@ impl RivuletApp {
         // starting the installer earlier would leave the old files in place.
         let our_pid = std::process::id();
         std::thread::spawn(move || {
-            let result =
-                rivulet_updater::install_asset_with_watch(&path, None, &[our_pid]);
+            let result = rivulet_updater::install_asset_with_watch(&path, None, &[our_pid]);
             let quit_after = result.as_ref().map(|quit| *quit).unwrap_or(false);
             let state = match result {
                 Ok(_) => {

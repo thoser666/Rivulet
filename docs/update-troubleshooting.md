@@ -1,5 +1,13 @@
 # Updater troubleshooting
 
+## macOS/Linux build regression
+
+The updater watchdog is Windows-specific, but the updater package still has to
+compile on every supported platform. The non-Windows wait implementation must
+import `std::thread::sleep` locally; platform-specific Vulkan shared-memory
+constants are likewise only imported on platforms that create shared memory.
+Warnings from those conditional imports are treated as errors in CI.
+
 ## Windows
 
 The updater downloads the matching `.msi` asset to the user temp directory and

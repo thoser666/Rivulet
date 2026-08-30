@@ -221,14 +221,18 @@ pub fn install_asset_with_watch(
         // The caller (GUI) must quit AFTER this returns, so the watchdog takes
         // over the install. If no watchdog binary is available we fall back to
         // starting msiexec detached (the previous, fragile behaviour).
-        let watchdog_path = watchdog
-            .map(ToOwned::to_owned)
-            .or_else(resolve_watchdog);
+        let watchdog_path = watchdog.map(ToOwned::to_owned).or_else(resolve_watchdog);
         let Some(watchdog_path) = watchdog_path else {
             // Fallback: launch msiexec directly, detached. Not ideal (see above)
             // but keeps the flow functional if the watchdog is missing.
             std::process::Command::new("msiexec.exe")
-                .args(["/i", &path_str, "/passive", "/norestart", "REBOOT=ReallySuppress"])
+                .args([
+                    "/i",
+                    &path_str,
+                    "/passive",
+                    "/norestart",
+                    "REBOOT=ReallySuppress",
+                ])
                 .creation_flags(0x08000000)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
@@ -525,7 +529,10 @@ mod tests {
             "/src/bin/rivulet-updater.rs"
         ));
         assert!(bin.contains("msiexec.exe"));
-        assert!(bin.contains("child.wait()"), "watchdog must block until msiexec exits");
+        assert!(
+            bin.contains("child.wait()"),
+            "watchdog must block until msiexec exits"
+        );
         assert!(bin.contains("std::process::exit(code)"));
     }
 
