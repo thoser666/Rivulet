@@ -6,6 +6,20 @@
 
 use std::time::Duration;
 
+/// Result of a safe, short platform connection probe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamConnectionResult {
+    Connected,
+    Rejected(String),
+    Failed(String),
+}
+
+impl StreamConnectionResult {
+    pub fn is_success(&self) -> bool {
+        matches!(self, Self::Connected)
+    }
+}
+
 use gstreamer::prelude::{Cast, ElementExt};
 
 /// Configuration and pipeline contract for a WHIP/WebRTC publisher.
@@ -804,6 +818,24 @@ impl StreamSettings {
     pub fn is_rtmps(&self) -> bool {
         self.ingest_url.starts_with("rtmps://")
     }
+
+    /// Classify a short, non-publishing connection probe.
+    ///
+    /// The actual socket/TLS probe is owned by the streaming backend. Keeping
+    /// this result type in the core lets the GUI present deterministic outcomes
+    /// without ever treating configuration validation as a successful platform
+    /// connection.
+    pub fn connection_result(&self, transport_error: Option<&str>) -> StreamConnectionResult {
+        if let Err(error) = self.validate() {
+            return StreamConnectionResult::Rejected(error.to_owned());
+        }
+        match transport_error {
+            Some(error) if !error.trim().is_empty() => {
+                StreamConnectionResult::Failed(error.to_owned())
+            }
+            _ => StreamConnectionResult::Connected,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -835,6 +867,21 @@ mod tests {
         let s = StreamSettings::twitch("secret-key-123");
         assert!(!s.masked_key().contains("secret-key-123"));
     }
+    #[test]
+    fn connection_result_distinguishes_validation_and_transport_failures() {
+        assert!(matches!(
+            StreamSettings::twitch("").connection_result(None),
+            StreamConnectionResult::Rejected(_)
+        ));
+        assert!(matches!(
+            StreamSettings::twitch("key").connection_result(Some("timeout")),
+            StreamConnectionResult::Failed(message) if message == "timeout"
+        ));
+        assert!(StreamSettings::twitch("key")
+            .connection_result(None)
+            .is_success());
+    }
+
     #[test]
     fn validation_rejects_empty_or_insecure_preset() {
         assert!(StreamSettings::twitch("").validate().is_err());

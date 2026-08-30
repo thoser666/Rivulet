@@ -3,6 +3,12 @@
 Der Stream-Tab unterstützt Plattform-Presets für Twitch, YouTube und Kick sowie
 benutzerdefinierte RTMP/RTMPS-Ziele.
 
+## First-time-Assistent und Verbindungstest
+
+Der Stream-Tab enthält einen manuell startbaren Einrichtungsassistenten. Er führt durch Plattformwahl, maskierte Key-Eingabe, Vorbereitung eines kurzen privaten Teststreams und Zusammenfassung. Der Assistent startet niemals automatisch einen öffentlichen Stream; dafür ist ausdrücklich **Stream starten** zu betätigen.
+
+Die Verbindungsauswertung unterscheidet lokale Validierungsfehler (`Rejected`) von Transportfehlern (`Failed`) und erfolgreicher Vorprüfung (`Connected`). Ein echter Plattformtest benötigt weiterhin einen eigenen privaten oder nicht gelisteten Stream sowie einen vom Nutzer eingegebenen Key. Unit- und CI-Tests kontaktieren keine Streaming-Plattform.
+
 ## Plattform und Preset
 
 - **Twitch:** `rtmps://live.twitch.tv/app`

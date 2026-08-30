@@ -4,7 +4,8 @@ use crate::theme;
 use eframe::egui;
 use rivulet_core::{
     CaptureRegion, Locale, PresenceActivity, PresenceStatus, RivuletEngine, SkippedFilter,
-    StreamHealthStatus, StreamStats,
+    StreamConnectionResult, StreamHealthStatus, StreamPlatform, StreamPreset, StreamSettings,
+    StreamStats,
 };
 use std::sync::mpsc::Receiver;
 use std::sync::{
@@ -687,6 +688,25 @@ pub struct RivuletApp {
     #[serde(skip)]
     projector_open: bool,
 
+    // Streaming configuration (keys are persisted only in memory for now;
+    // never rendered unmasked).
+    #[serde(skip)]
+    setup_wizard_open: bool,
+    #[serde(skip)]
+    setup_wizard_step: u8,
+    #[serde(skip)]
+    setup_test_requested: bool,
+    #[serde(skip)]
+    stream_platform: StreamPlatform,
+    #[serde(skip)]
+    stream_ingest_url: String,
+    #[serde(skip)]
+    stream_key: String,
+    #[serde(skip)]
+    stream_preset: StreamPreset,
+    #[serde(skip)]
+    stream_status_message: Option<String>,
+
     // Auto-update
     #[serde(skip)]
     update_ui: std::sync::Arc<std::sync::Mutex<UpdateUi>>,
@@ -910,6 +930,18 @@ impl Default for RivuletApp {
             scene_overlay_enabled: false,
             multi_view_enabled: false,
             projector_open: false,
+
+            setup_wizard_open: false,
+            setup_wizard_step: 0,
+            setup_test_requested: false,
+            stream_platform: StreamPlatform::Twitch,
+            stream_ingest_url: StreamPlatform::Twitch
+                .default_ingest_url()
+                .unwrap_or_default()
+                .into(),
+            stream_key: String::new(),
+            stream_preset: StreamPreset::Standard,
+            stream_status_message: None,
 
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
@@ -3377,6 +3409,78 @@ impl RivuletApp {
         }
     }
 
+    fn draw_stream_setup_wizard(&mut self, ui: &mut egui::Ui) {
+        if !self.setup_wizard_open {
+            return;
+        }
+        ui.group(|ui| {
+            ui.label(egui::RichText::new(self.tr("stream_setup_assistant_title")).strong());
+            ui.label(self.tr_fmt(
+                "stream_setup_step",
+                &[format!("{}", self.setup_wizard_step + 1)],
+            ));
+            match self.setup_wizard_step {
+                0 => {
+                    ui.label(self.tr("stream_setup_choose_platform"));
+                    for platform in [
+                        StreamPlatform::Twitch,
+                        StreamPlatform::YouTube,
+                        StreamPlatform::Kick,
+                        StreamPlatform::Custom,
+                    ] {
+                        if ui
+                            .selectable_label(self.stream_platform == platform, platform.label())
+                            .clicked()
+                        {
+                            self.stream_platform = platform;
+                            if let Some(url) = platform.default_ingest_url() {
+                                self.stream_ingest_url = url.to_owned();
+                            }
+                        }
+                    }
+                }
+                1 => {
+                    ui.label(self.tr("stream_setup_credentials"));
+                    ui.add(egui::TextEdit::singleline(&mut self.stream_key).password(true));
+                    ui.label(self.tr("stream_setup_key_never_logged"));
+                }
+                2 => {
+                    ui.label(self.tr("stream_setup_test_stream"));
+                    if ui.button(self.tr("stream_setup_run_test")).clicked() {
+                        self.setup_test_requested = true;
+                        self.stream_status_message =
+                            Some(self.tr("stream_setup_test_prepared").to_owned());
+                    }
+                    if self.setup_test_requested {
+                        ui.label(self.tr("stream_setup_test_private_only"));
+                    }
+                }
+                _ => {
+                    ui.label(self.tr("stream_setup_summary"));
+                    ui.label(format!(
+                        "{} · {}",
+                        self.stream_platform.label(),
+                        self.stream_ingest_url
+                    ));
+                }
+            }
+            ui.horizontal(|ui| {
+                if self.setup_wizard_step > 0 && ui.button(self.tr("back")).clicked() {
+                    self.setup_wizard_step -= 1;
+                }
+                if self.setup_wizard_step < 3 && ui.button(self.tr("next")).clicked() {
+                    self.setup_wizard_step += 1;
+                }
+                if self.setup_wizard_step == 3 && ui.button(self.tr("done")).clicked() {
+                    self.setup_wizard_open = false;
+                }
+                if ui.button(self.tr("cancel")).clicked() {
+                    self.setup_wizard_open = false;
+                }
+            });
+        });
+    }
+
     /// Render the implemented M3 streaming view.
     fn current_presence_status(&self) -> PresenceStatus {
         let activity = if self.is_recording_active() && self.engine.is_streaming() {
@@ -3409,14 +3513,107 @@ impl RivuletApp {
         ui.add_space(8.0);
         ui.label(egui::RichText::new(self.tr("streaming")).strong());
         ui.separator();
-        ui.label(self.tr("stream_status"));
-        if self.engine.is_streaming() {
-            ui.colored_label(colors.success, self.tr("running"));
-        } else {
-            ui.label(self.tr("stopped"));
+
+        let mut platform = self.stream_platform;
+        egui::ComboBox::from_id_salt("stream_platform")
+            .selected_text(platform.label())
+            .show_ui(ui, |ui| {
+                for candidate in [
+                    StreamPlatform::Twitch,
+                    StreamPlatform::YouTube,
+                    StreamPlatform::Kick,
+                    StreamPlatform::Custom,
+                ] {
+                    if ui
+                        .selectable_value(&mut platform, candidate, candidate.label())
+                        .clicked()
+                    {
+                        self.stream_platform = candidate;
+                        if let Some(url) = candidate.default_ingest_url() {
+                            self.stream_ingest_url = url.to_owned();
+                        }
+                    }
+                }
+            });
+        ui.horizontal(|ui| {
+            ui.label(self.tr("stream_ingest"));
+            ui.add_enabled(
+                self.stream_platform == StreamPlatform::Custom,
+                egui::TextEdit::singleline(&mut self.stream_ingest_url),
+            );
+        });
+        ui.horizontal(|ui| {
+            ui.label(self.tr("stream_key"));
+            ui.add(egui::TextEdit::singleline(&mut self.stream_key).password(true));
+            if !self.stream_key.is_empty() {
+                ui.label(format!("••••{}", self.stream_key.chars().count().min(4)));
+            }
+        });
+        egui::ComboBox::from_id_salt("stream_preset")
+            .selected_text(self.stream_preset.label())
+            .show_ui(ui, |ui| {
+                for preset in StreamPreset::all() {
+                    ui.selectable_value(&mut self.stream_preset, *preset, preset.label());
+                }
+            });
+
+        let configured = !self.stream_key.trim().is_empty()
+            && StreamSettings::new(
+                self.stream_platform,
+                self.stream_ingest_url.clone(),
+                self.stream_key.clone(),
+            )
+            .with_preset(self.stream_preset)
+            .validate()
+            .is_ok();
+        ui.horizontal(|ui| {
+            let label = if self.engine.is_streaming() {
+                self.tr("stream_stop")
+            } else {
+                self.tr("stream_start")
+            };
+            if ui
+                .add_enabled(
+                    configured || self.engine.is_streaming(),
+                    egui::Button::new(label),
+                )
+                .clicked()
+            {
+                if self.engine.is_streaming() {
+                    self.engine.set_stream_settings(None);
+                    self.stream_status_message = Some(self.tr("stopped").to_owned());
+                } else {
+                    let settings = StreamSettings::new(
+                        self.stream_platform,
+                        self.stream_ingest_url.clone(),
+                        self.stream_key.clone(),
+                    )
+                    .with_preset(self.stream_preset);
+                    self.engine.set_stream_settings(Some(settings));
+                    self.engine.start_streaming();
+                    self.stream_status_message =
+                        Some(self.tr("stream_status_connecting").to_owned());
+                }
+            }
+            if !configured && !self.engine.is_streaming() {
+                ui.colored_label(colors.warning, self.tr("stream_configure_first"));
+            }
+        });
+        if let Some(message) = &self.stream_status_message {
+            ui.label(message);
         }
+        ui.horizontal(|ui| {
+            if ui.button(self.tr("stream_setup_assistant")).clicked() {
+                self.setup_wizard_open = true;
+                self.setup_wizard_step = 0;
+            }
+            if self.setup_wizard_open {
+                ui.label(self.tr("stream_setup_assistant_active"));
+            }
+        });
         ui.label(self.tr("stream_m3_note"));
         self.draw_presence_status(ui);
+        self.draw_stream_setup_wizard(ui);
         for (name, state, fill, underflows, overflows) in self.engine.stream_target_telemetry() {
             ui.horizontal(|ui| {
                 ui.label(name);
