@@ -13,9 +13,6 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
 /// Repository the updates are fetched from.
 #[derive(Debug, Clone)]
 pub struct UpdateSource {
@@ -189,32 +186,67 @@ pub fn windows_installer_exit_success(code: i32) -> bool {
 /// Returns `Ok(true)` when the application should quit right afterwards (the
 /// installer replaces the running files) and `Ok(false)` when it can stay open
 /// (the macOS DMG is only opened).
+///
+/// On Windows this launches the [`rivulet-updater`] watchdog binary detached.
+/// The watchdog waits for the watched process ids (the running GUI and its
+/// launcher) to fully terminate, then runs `msiexec` to completion. Because
+/// the executing files are locked by Windows while they run, installation must
+/// not start until every Rivulet process has exited — launching msiexec
+/// directly from the still-running GUI leaves the old files in place (only the
+/// registry/shortcuts are updated), which is the exact bug this design fixes.
 pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
+    install_asset_with_watch(path, None, &[])
+}
+
+/// Install the downloaded asset, delegating to a watchdog binary that waits for
+/// the given process ids to exit before starting the platform installer.
+///
+/// `watchdog` overrides the path to the watchdog executable (used in tests);
+/// when `None` it is resolved next to the running executable.
+pub fn install_asset_with_watch(
+    path: &Path,
+    watchdog: Option<&Path>,
+    wait_pids: &[u32],
+) -> anyhow::Result<bool> {
     if !path.exists() {
         anyhow::bail!("installer file does not exist: {}", path.display());
     }
 
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+
         let path_str = path.to_string_lossy().to_string();
-        // Start the MSI through the Windows installer executable without
-        // inheriting the GUI's stdio handles. Waiting here can make the GUI
-        // appear frozen while msiexec waits for its own UI/session lifecycle.
-        // The installer owns the file after Process creation, so the caller may
-        // close the application immediately; cleanup is deliberately deferred.
-        std::process::Command::new("msiexec.exe")
-            .args([
-                "/i",
-                &path_str,
-                "/passive",
-                "/norestart",
-                "REBOOT=ReallySuppress",
-            ])
-            .creation_flags(0x08000000)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()?;
+
+        // The caller (GUI) must quit AFTER this returns, so the watchdog takes
+        // over the install. If no watchdog binary is available we fall back to
+        // starting msiexec detached (the previous, fragile behaviour).
+        let watchdog_path = watchdog
+            .map(ToOwned::to_owned)
+            .or_else(resolve_watchdog);
+        let Some(watchdog_path) = watchdog_path else {
+            // Fallback: launch msiexec directly, detached. Not ideal (see above)
+            // but keeps the flow functional if the watchdog is missing.
+            std::process::Command::new("msiexec.exe")
+                .args(["/i", &path_str, "/passive", "/norestart", "REBOOT=ReallySuppress"])
+                .creation_flags(0x08000000)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
+            return Ok(true);
+        };
+
+        let mut cmd = std::process::Command::new(&watchdog_path);
+        cmd.arg("--install").arg(&path_str);
+        for pid in wait_pids {
+            cmd.arg("--wait-pid").arg(pid.to_string());
+        }
+        cmd.creation_flags(0x08000000);
+        cmd.stdin(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+        cmd.spawn()?;
         Ok(true)
     }
 
@@ -246,6 +278,28 @@ pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
     {
         anyhow::bail!("automatic updates are not supported on this platform")
     }
+}
+
+/// Resolve the path to the `rivulet-updater` watchdog binary, preferring the
+/// directory of the running executable (the install folder / dev target dir).
+/// An explicit `RIVULET_UPDATER_PATH` environment variable takes precedence.
+#[cfg(target_os = "windows")]
+fn resolve_watchdog() -> Option<std::path::PathBuf> {
+    let exe_dir = std::env::current_exe()
+        .ok()?
+        .parent()
+        .map(ToOwned::to_owned)?;
+    std::env::var_os("RIVULET_UPDATER_PATH")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            let candidate = exe_dir.join("rivulet-updater.exe");
+            candidate.exists().then_some(candidate)
+        })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resolve_watchdog() -> Option<std::path::PathBuf> {
+    None
 }
 
 #[cfg(test)]
@@ -448,15 +502,31 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "windows")]
-    fn windows_installer_command_is_detached_and_non_blocking() {
-        // The Windows implementation must launch msiexec.exe and return
-        // immediately; waiting for the child caused the GUI update action to
-        // look hung and prevented a clean application close.
+    fn windows_install_delegates_to_watchdog() {
+        // The Windows implementation must launch the detached watchdog binary
+        // (not msiexec directly), pass the MSI path and the watched pids, and
+        // return immediately so the GUI can close cleanly.
         let source = include_str!("lib.rs");
-        assert!(source.contains("#[cfg(target_os = \"windows\")]"));
-        assert!(source.contains("msiexec.exe"));
+        assert!(source.contains("resolve_watchdog"));
+        assert!(source.contains("--install"));
+        assert!(source.contains("--wait-pid"));
+        assert!(source.contains("creation_flags(0x08000000)"));
         assert!(source.contains("Stdio::null()"));
-        assert!(!source.contains("let mut child = std::process::Command::new(\"msiexec\")"));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn watchdog_delegates_to_msiexec_instead_of_lib() {
+        // The watchdog binary itself (not the library) is what ultimately runs
+        // msiexec, and it does so with a blocking wait. Verify the watchdog's
+        // own sources by checking the bin file's contents.
+        let bin = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/bin/rivulet-updater.rs"
+        ));
+        assert!(bin.contains("msiexec.exe"));
+        assert!(bin.contains("child.wait()"), "watchdog must block until msiexec exits");
+        assert!(bin.contains("std::process::exit(code)"));
     }
 
     #[test]

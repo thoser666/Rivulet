@@ -32,6 +32,12 @@ if (Test-Path (Join-Path $Staging "rivulet-launcher.exe")) {
   Copy-Item (Join-Path $Staging "rivulet-launcher.exe") (Join-Path $bundle "rivulet-launcher.exe") -Force
 }
 Copy-Item (Join-Path $Staging "rivulet.exe") (Join-Path $bundle "rivulet.exe") -Force
+# The update watchdog runs detached during updates and waits for the GUI to
+# exit before installing. It must live next to the GUI so the updater can find
+# it via current_exe().parent().
+if (Test-Path (Join-Path $Staging "rivulet-updater.exe")) {
+  Copy-Item (Join-Path $Staging "rivulet-updater.exe") (Join-Path $bundle "rivulet-updater.exe") -Force
+}
 
 # 2. GStreamer runtime: all bin DLLs.
 Copy-Item (Join-Path $gstBin "*.*") $bundle -Force -ErrorAction SilentlyContinue

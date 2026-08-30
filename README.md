@@ -76,7 +76,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Recording Presets** - Resolution and FPS presets (Original, 1080p60, 1080p30, 720p60, 720p30, 480p30) with automatic videoscale/videorate insertion, per-preset bitrate defaults, and encoder-aware caps; engine API `set_preset(RecordingPreset)`, selectable in the GUI
 - **Recording Overlay** - Burn-in timer (HH:MM:SS) and live FPS counter onto the recorded video via GStreamer `textoverlay`; toggle in the GUI, engine API `set_overlay_enabled(bool)` + `update_overlay_text(&str)`
 - **Replay Buffer / Instant Replay** - Ring buffer of the last N seconds (H.264+AAC, keyframe-aligned) kept while recording; save the clip as a standalone MP4 via the F12 hotkey or the GUI button; engine API `set_replay_duration()` / `save_replay()`
-- **Auto-Update** - Checks the GitHub Releases API on startup and manually for newer versions, downloads the matching platform package (MSI / AppImage / DMG) with a live progress bar and launches the installer; Windows upgrades retain one Control Panel entry and update the launcher target; the alpha channel keeps up with every feature push
+- **Auto-Update** - Checks the GitHub Releases API on startup and manually for newer versions, downloads the matching platform package (MSI / AppImage / DMG) with a live progress bar and launches the installer; Windows upgrades retain one Control Panel entry and update the launcher target; the alpha channel keeps up with every feature push. On Windows a detached `rivulet-updater` watchdog takes over the install: it waits for the running GUI (and launcher) to fully terminate — so the executing files are no longer locked — and only then runs `msiexec` to completion. This prevents the classic "only the registry is updated but the old files stay" failure.
 - **Recording Live Preview** - The Record view shows a throttled thumbnail of the selected monitor or window before recording and continues with the actual encoder-bound frames while recording; the panel reports whether it is ready, waiting for the first frame, or active
 - **Sidebar Navigation** - Clean, DaVinci Resolve-style UI with a collapsible left sidebar (see [docs/ui-design.md](docs/ui-design.md))
   - Record - Main recording controls and preview
@@ -201,7 +201,7 @@ release channel only describes *how* the tag is built and published.
 - [x] Performance metrics (FPS, encode load, file size)
 
 **Updates**
-- [x] Auto-update (update check, download & install via GitHub Releases)
+- **Auto-update (update check, download & install via GitHub Releases)** — Windows installs run through a detached `rivulet-updater` watchdog that waits for the app to exit before invoking `msiexec`, so updated files replace the locked executables instead of leaving the old build behind.
 - [x] Code signing (signing automation present, secrets needed)
 
 **Quality of Life**
@@ -925,3 +925,5 @@ real certificates exist.
 ## Updater troubleshooting
 
 See [docs/updater-troubleshooting.md](docs/updater-troubleshooting.md) for Windows installer exit codes, update crash diagnostics, and recovery steps.
+
+During a Windows update, the app spawns the detached `rivulet-updater` watchdog (`rivulet-updater/src/bin/rivulet-updater.rs`), passing the running process IDs with `--wait-pid` and the downloaded MSI with `--install`. The watchdog copies itself to the temp directory (so the launcher's file lock never blocks it), waits up to 60s for each PID to exit, then runs `msiexec /i <msi>` and waits for it to finish. Because the old executables have fully exited before the WiX `MajorUpgrade` runs `RemoveExistingProducts`, the new files replace the old ones instead of the installer bailing on locked in-use files.

@@ -142,7 +142,7 @@ jobs:
           brew install gstreamer
 
       - name: Build release binary
-        run: cargo build --release --package rivulet-gui --package rivulet-launcher --target ${{ inputs.target }}
+        run: cargo build --release --package rivulet-gui --package rivulet-launcher --package rivulet-updater --target ${{ inputs.target }}
 
       # ------------------------------------------------------------------
       # PACKAGING (per platform)
@@ -170,6 +170,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path staging | Out-Null
           Copy-Item "target/${{ inputs.target }}/release/rivulet-gui.exe" staging/rivulet-gui.exe -Force
           Copy-Item "target/${{ inputs.target }}/release/rivulet-launcher.exe" staging/rivulet.exe -Force
+          Copy-Item "target/${{ inputs.target }}/release/rivulet-updater.exe" staging/rivulet-updater.exe -Force
 
       - name: Check code signing secrets
         id: signing
@@ -201,7 +202,7 @@ jobs:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          pwsh packaging/windows/sign.ps1 -Paths "$(pwd)/staging/rivulet-gui.exe", "$(pwd)/staging/rivulet.exe"
+          pwsh packaging/windows/sign.ps1 -Paths "$(pwd)/staging/rivulet-gui.exe", "$(pwd)/staging/rivulet.exe", "$(pwd)/staging/rivulet-updater.exe"
 
       - name: Build AppImage (Linux)
         if: runner.os == 'Linux'

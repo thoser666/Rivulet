@@ -3309,8 +3309,14 @@ impl RivuletApp {
     fn spawn_update_install(&self, ctx: egui::Context, path: std::path::PathBuf, version: String) {
         let shared = std::sync::Arc::clone(&self.update_ui);
         *shared.lock().unwrap_or_else(|e| e.into_inner()) = UpdateUi::Installing(version.clone());
+        // Pass our own process id to the watchdog so it waits for this process
+        // (and its launcher) to fully terminate before running msiexec. The
+        // executing files are locked by Windows while the process lives, so
+        // starting the installer earlier would leave the old files in place.
+        let our_pid = std::process::id();
         std::thread::spawn(move || {
-            let result = rivulet_updater::install_asset(&path);
+            let result =
+                rivulet_updater::install_asset_with_watch(&path, None, &[our_pid]);
             let quit_after = result.as_ref().map(|quit| *quit).unwrap_or(false);
             let state = match result {
                 Ok(_) => {
