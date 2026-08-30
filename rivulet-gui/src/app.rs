@@ -3527,7 +3527,10 @@ impl RivuletApp {
             ),
         ] {
             ui.horizontal(|ui| {
-                ui.label(label);
+                let link = egui::RichText::new(label).underline();
+                if ui.link(link).clicked() {
+                    open_help_document(path);
+                }
                 ui.monospace(path);
             });
         }
@@ -5494,6 +5497,18 @@ fn should_abort_for_stalled_frames(
 }
 
 /// Keep a scene name safe for use as a suggested snapshot file name.
+fn open_help_document(path: &str) {
+    let result = if let Some(root) = std::env::var_os("RIVULET_DOCS_ROOT") {
+        let candidate = std::path::PathBuf::from(root).join(path);
+        open::that(candidate)
+    } else {
+        open::that(path)
+    };
+    if let Err(error) = result {
+        tracing::warn!(document = path, %error, "Could not open help document");
+    }
+}
+
 fn sanitize_file_name(name: &str) -> String {
     let sanitized: String = name
         .chars()
@@ -5569,6 +5584,23 @@ mod tests {
     #[test]
     fn app_view_defaults_to_record() {
         assert_eq!(AppView::default(), AppView::Record);
+    }
+
+    #[test]
+    #[test]
+    fn help_documents_have_clickable_repository_targets() {
+        let documents = [
+            "docs/user-guide.md",
+            "docs/stream-setup.md",
+            "docs/first-stream-checklist.md",
+            "docs/updater-troubleshooting.md",
+        ];
+        for document in documents {
+            assert!(
+                std::path::Path::new(document).is_file(),
+                "missing help document: {document}"
+            );
+        }
     }
 
     #[test]
