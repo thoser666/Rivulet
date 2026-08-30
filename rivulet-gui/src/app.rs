@@ -2909,8 +2909,22 @@ impl RivuletApp {
 
     /// Update the shared thumbnail and drain a throttled preflight source.
     fn update_recording_preview(&mut self, ctx: &egui::Context) {
-        // Keep the live thumbnail moving even when the rest of the UI is idle.
-        ctx.request_repaint_after(RECORDING_PREVIEW_INTERVAL);
+        // Only schedule the next tick while a live preview is feeding frames;
+        // otherwise we stop requesting repaints and fall into egui's reactive
+        // idle mode (no CPU/GPU while nothing changes). `drain_source_preview`
+        // below consumes frames the preflight thread produces and the encoder
+        // path fills `pending_preview_frame`, so both must keep the periodic
+        // repaint alive while active. When neither is feeding, there is nothing
+        // to animate and egui sleeps until real input arrives.
+        let has_pending_frame = self.pending_preview_frame.is_some();
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        let has_source_preview = self.source_preview_rx.is_some();
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        let has_source_preview = false;
+        if should_repaint_recording_preview(has_source_preview, has_pending_frame) {
+            // Keep the live thumbnail moving even when the rest of the UI is idle.
+            ctx.request_repaint_after(RECORDING_PREVIEW_INTERVAL);
+        }
         if let Some(frame) = self.pending_preview_frame.take() {
             self.recording_preview
                 .update(ctx, &frame.data, frame.width, frame.height);
@@ -5297,6 +5311,20 @@ fn is_valid_rgba_frame(data: &[u8], width: u32, height: u32) -> bool {
             == Some(data.len())
 }
 
+/// Decide whether the recording-preview path must keep scheduling periodic
+/// repaints.
+///
+/// The preview is fed either by the preflight source thread (a `source_preview_rx`
+/// is present) or by the encoder path (a frame is waiting in `pending_preview_frame`).
+/// While either is active we must keep requesting a repaint every
+/// [`RECORDING_PREVIEW_INTERVAL`] so those frames are actually drawn. When both
+/// are absent there is nothing to animate, so we stop requesting repaints and
+/// let egui fall back to its reactive idle mode (no CPU/GPU burn while the UI
+/// is static).
+fn should_repaint_recording_preview(has_source_preview: bool, has_pending_frame: bool) -> bool {
+    has_source_preview || has_pending_frame
+}
+
 /// Decide whether a new frame may be uploaded to the recording thumbnail.
 ///
 /// Capture continues at its configured rate, but texture uploads are limited
@@ -6181,6 +6209,22 @@ mod tests {
         let now = std::time::Instant::now();
         let stale = now - (RECORDING_PREVIEW_INTERVAL + std::time::Duration::from_millis(1));
         assert!(should_update_recording_preview(Some(stale), now));
+    }
+
+    #[test]
+    fn idle_preview_does_not_schedule_periodic_repaints() {
+        assert!(!should_repaint_recording_preview(false, false));
+    }
+
+    #[test]
+    fn source_preview_keeps_periodic_repaints_alive() {
+        assert!(should_repaint_recording_preview(true, false));
+        assert!(should_repaint_recording_preview(true, true));
+    }
+
+    #[test]
+    fn pending_frame_keeps_periodic_repaints_alive() {
+        assert!(should_repaint_recording_preview(false, true));
     }
 
     // ── Game-window live preview refresh ─────────────────────────
