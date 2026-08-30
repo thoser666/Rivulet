@@ -4,11 +4,12 @@
 
 Die Sidebar enthält den Menüpunkt **Hilfe**. Dort sind die wichtigsten
 Markdown-Dokumente gebündelt: diese Bedienungsanleitung, die Stream-Einrichtung,
-die Checkliste für den ersten Stream und die Update-Fehlerbehebung. Jeder Eintrag ist ein klickbarer Link und öffnet die zugehörige Markdown-Seite
-im Standardprogramm des Betriebssystems. In einer Paketinstallation wird der
-Dokumentationsordner automatisch verwendet; für portable Builds kann der Pfad
-über `RIVULET_DOCS_ROOT` gesetzt werden. Externe Netzwerkzugriffe werden nicht
-automatisch geöffnet.
+die Checkliste für den ersten Stream und die Update-Fehlerbehebung. Jeder Eintrag zeigt eine vollständige GitHub-URL auf die entsprechende
+Markdown-Seite und ist direkt anklickbar. Zusätzlich öffnet der Link die lokale
+Datei im Standardprogramm des Betriebssystems. In einer Paketinstallation wird
+der Dokumentationsordner automatisch verwendet; für portable Builds kann der
+Pfad über `RIVULET_DOCS_ROOT` gesetzt werden. Externe Netzwerkzugriffe werden
+nur durch einen ausdrücklichen Klick geöffnet.
 
 Diese Anleitung beschreibt die wichtigsten Arbeitsabläufe der aktuellen Alpha-Version. Rivulet entwickelt sich weiter; einzelne Funktionen können je nach Betriebssystem und installierten GStreamer-Komponenten unterschiedlich verfügbar sein.
 

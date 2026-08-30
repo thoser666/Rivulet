@@ -12,7 +12,7 @@
 
 *A Rust recording and streaming engine — built for performance, safety, reliability, and embeddability*
 
-[Features](#-features) • [Installation](#-installation) • [Bedienungsanleitung](docs/user-guide.md) • [Hilfe](docs/user-guide.md#hilfe-menü) • [Erster Stream](docs/first-stream-checklist.md) • [Roadmap](#-roadmap) • [Contributing](#-contributing)
+[Features](#-features) • [Installation](#-installation) • [Bedienungsanleitung](https://github.com/thoser666/Rivulet/blob/develop/docs/user-guide.md) • [Hilfe](https://github.com/thoser666/Rivulet/blob/develop/docs/user-guide.md#hilfe-menü) • [Erster Stream](docs/first-stream-checklist.md) • [Roadmap](#-roadmap) • [Contributing](#-contributing)
 
 ![Rivulet](docs/thumbnail.png)
 

@@ -3514,24 +3514,13 @@ impl RivuletApp {
         ui.label(egui::RichText::new(self.tr("nav_help")).strong());
         ui.separator();
         ui.label(self.tr("help_intro"));
-        for (label, path) in [
-            (self.tr("help_user_guide"), "docs/user-guide.md"),
-            (self.tr("help_stream_setup"), "docs/stream-setup.md"),
-            (
-                self.tr("help_first_stream"),
-                "docs/first-stream-checklist.md",
-            ),
-            (
-                self.tr("help_troubleshooting"),
-                "docs/updater-troubleshooting.md",
-            ),
-        ] {
+        for (label, path) in help_documents() {
             ui.horizontal(|ui| {
                 let link = egui::RichText::new(label).underline();
                 if ui.link(link).clicked() {
                     open_help_document(path);
                 }
-                ui.monospace(path);
+                ui.hyperlink_to(path, help_document_url(path));
             });
         }
         ui.small(self.tr("help_open_from_repository"));
@@ -5497,6 +5486,19 @@ fn should_abort_for_stalled_frames(
 }
 
 /// Keep a scene name safe for use as a suggested snapshot file name.
+fn help_documents() -> [(&'static str, &'static str); 4] {
+    [
+        ("User guide", "docs/user-guide.md"),
+        ("Stream setup", "docs/stream-setup.md"),
+        ("First-stream checklist", "docs/first-stream-checklist.md"),
+        ("Troubleshooting", "docs/updater-troubleshooting.md"),
+    ]
+}
+
+fn help_document_url(path: &str) -> String {
+    format!("https://github.com/thoser666/Rivulet/blob/develop/{path}")
+}
+
 fn open_help_document(path: &str) {
     let result = if let Some(root) = std::env::var_os("RIVULET_DOCS_ROOT") {
         let candidate = std::path::PathBuf::from(root).join(path);
@@ -5587,8 +5589,11 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn help_documents_have_clickable_repository_targets() {
+        let documents = help_documents();
+        for (_, document) in documents {
+            assert!(help_document_url(document).starts_with("https://github.com/"));
+        }
         let documents = [
             "docs/user-guide.md",
             "docs/stream-setup.md",
