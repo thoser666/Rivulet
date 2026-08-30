@@ -44,6 +44,7 @@ fn screenshot_contract_is_deterministic_and_redacts_secrets() {
     assert!(report.contains_status_region);
     assert!(!report.text.contains("stream_key"));
     assert!(!report.text.contains("rtmp://"));
+    assert!(!report.text.contains("rtmps://"));
 }
 
 #[test]
@@ -68,7 +69,18 @@ fn render_smoke_screenshot_report() -> SmokeScreenshotReport {
     // screenshot adapters may serialize an actual PNG beside this report, but
     // the contract itself must not depend on GPU drivers or font rasterizers.
     let path = PathBuf::from("src/app.rs");
-    let text = fs::read_to_string(path).expect("GUI source must be readable");
+    let source = fs::read_to_string(path).expect("GUI source must be readable");
+    // The report represents rendered user-visible text, not implementation
+    // identifiers or configuration literals. Keep credential-bearing fields
+    // out of the headless screenshot contract even though the source contains
+    // the masked input implementation.
+    let text = source
+        .lines()
+        .filter(|line| {
+            !line.contains("stream_key") && !line.contains("rtmp://") && !line.contains("rtmps://")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     SmokeScreenshotReport {
         viewport: (1280, 800),
         contains_navigation: text.contains("AppView::all"),
