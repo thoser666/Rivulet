@@ -4,8 +4,8 @@ use crate::theme;
 use eframe::egui;
 use rivulet_core::{
     CaptureRegion, Locale, PresenceActivity, PresenceStatus, RivuletEngine, SkippedFilter,
-    StreamConnectionResult, StreamHealthStatus, StreamPlatform, StreamPreset, StreamSettings,
-    StreamStats,
+    StreamConnectionResult, StreamHealthStatus, StreamPlatform, StreamPreset, StreamProbeResult,
+    StreamSettings, StreamStats,
 };
 use std::sync::mpsc::Receiver;
 use std::sync::{
@@ -706,6 +706,10 @@ pub struct RivuletApp {
     stream_preset: StreamPreset,
     #[serde(skip)]
     stream_status_message: Option<String>,
+    #[serde(skip)]
+    stream_probe_running: bool,
+    #[serde(skip)]
+    stream_probe_result: Option<StreamProbeResult>,
 
     // Auto-update
     #[serde(skip)]
@@ -942,6 +946,8 @@ impl Default for RivuletApp {
             stream_key: String::new(),
             stream_preset: StreamPreset::Standard,
             stream_status_message: None,
+            stream_probe_running: false,
+            stream_probe_result: None,
 
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
@@ -3586,6 +3592,30 @@ impl RivuletApp {
             .validate()
             .is_ok();
         ui.horizontal(|ui| {
+            let probe_enabled =
+                configured && !self.stream_probe_running && !self.engine.is_streaming();
+            if ui
+                .add_enabled(
+                    probe_enabled,
+                    egui::Button::new(self.tr("stream_test_connection")),
+                )
+                .clicked()
+            {
+                let url = self.stream_ingest_url.clone();
+                self.stream_probe_running = true;
+                self.stream_probe_result = None;
+                self.stream_status_message = Some(self.tr("stream_probe_running").to_owned());
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let result = rivulet_core::stream::probe_ingest_reachability(
+                        &url,
+                        std::time::Duration::from_secs(5),
+                    );
+                    let _ = tx.send(result);
+                });
+                self.stream_probe_result =
+                    rx.recv_timeout(std::time::Duration::from_millis(1)).ok();
+            }
             let label = if self.engine.is_streaming() {
                 self.tr("stream_stop")
             } else {
@@ -3620,6 +3650,13 @@ impl RivuletApp {
         });
         if let Some(message) = &self.stream_status_message {
             ui.label(message);
+        }
+        if let Some(result) = &self.stream_probe_result {
+            ui.label(match result {
+                StreamProbeResult::Reachable => self.tr("stream_probe_reachable"),
+                StreamProbeResult::Rejected(_) => self.tr("stream_probe_rejected"),
+                StreamProbeResult::Unavailable(_) => self.tr("stream_probe_unavailable"),
+            });
         }
         ui.horizontal(|ui| {
             if ui.button(self.tr("stream_setup_assistant")).clicked() {

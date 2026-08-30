@@ -62,9 +62,9 @@ pub mod stream;
 pub use srt::{ContributionProtocol, ContributionSettings};
 pub use stream::{
     parse_whip_response, AdaptiveBitrate, MultistreamSettings, MultitrackVideo,
-    StreamConnectionResult, StreamDelay, StreamPlatform, StreamPreset, StreamSettings,
-    StreamTarget, StreamTargetState, TargetPluginStatus, VodTrack, WhipMediaSession,
-    WhipMediaState, WhipSession, WhipSettings,
+    StreamConnectionResult, StreamDelay, StreamPlatform, StreamPreset, StreamProbeResult,
+    StreamSettings, StreamTarget, StreamTargetState, TargetPluginStatus, VodTrack,
+    WhipMediaSession, WhipMediaState, WhipSession, WhipSettings,
 };
 
 pub mod i18n;

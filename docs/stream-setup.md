@@ -43,13 +43,20 @@ für Custom-Ziele vorgesehen.
    URL aus dem Creator Dashboard verwenden; Twitch und YouTube sind vorbefüllt.
 3. Stream-Key eingeben.
 4. Qualitäts-Preset auswählen.
-5. **Stream starten** klicken.
+5. Optional **Verbindung testen** klicken. Dieser Test prüft DNS/TCP-Erreichbarkeit im Hintergrund, veröffentlicht nichts und prüft den Stream-Key nicht.
+6. **Stream starten** klicken.
 6. Im Stream-Tab den Verbindungsstatus und die Queue-/Fehlerzähler beobachten.
 7. Zum Beenden **Stream stoppen** klicken.
 
 Start/Stop ist idempotent auf Engine-Ebene: Ein Stream wird nur mit gültiger
 Konfiguration gestartet; beim Stop werden Streaming-Zustand und aktive
 Transportüberwachung beendet.
+
+Der Verbindungstest ist ein begrenzter Preflight: Er verwendet die konfigurierte
+Host-/Port-Kombination, führt keinen RTMPS-Publish und keinen Authentifizierungs-
+Handshake mit Stream-Key aus. Ein positives Ergebnis bedeutet daher nur, dass
+der Ingest-Endpunkt erreichbar ist; ein privater Teststream bleibt für die
+vollständige Verifikation erforderlich.
 
 ## Lokaler RTMPS-Smoke-Test
 

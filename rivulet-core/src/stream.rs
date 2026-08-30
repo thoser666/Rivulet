@@ -4,9 +4,75 @@
 //! single [`StreamSettings`] with an `rtmps://` ingest URL works for all three
 //! platforms - only the ingest endpoint and stream key differ.
 
+use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
 /// Result of a safe, short platform connection probe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamProbeResult {
+    Reachable,
+    Rejected(String),
+    Unavailable(String),
+}
+
+impl StreamProbeResult {
+    pub fn is_reachable(&self) -> bool {
+        matches!(self, Self::Reachable)
+    }
+}
+
+/// Parse an RTMP(S) ingest URL into host, port and whether TLS is expected.
+/// No stream key is returned or logged.
+pub fn parse_ingest_endpoint(url: &str) -> Result<(String, u16, bool), &'static str> {
+    let (secure, rest) = if let Some(rest) = url.strip_prefix("rtmps://") {
+        (true, rest)
+    } else if let Some(rest) = url.strip_prefix("rtmp://") {
+        (false, rest)
+    } else {
+        return Err("ingest URL must use rtmp:// or rtmps://");
+    };
+    let authority = rest.split('/').next().unwrap_or_default();
+    if authority.is_empty() {
+        return Err("ingest URL host is empty");
+    }
+    let (host, port) = authority.rsplit_once(':').map_or_else(
+        || (authority.to_owned(), if secure { 443 } else { 1935 }),
+        |(host, port)| {
+            let port = port.parse::<u16>().unwrap_or(0);
+            (host.trim_matches(['[', ']']).to_owned(), port)
+        },
+    );
+    if host.is_empty() || port == 0 {
+        return Err("ingest URL host or port is invalid");
+    }
+    Ok((host, port, secure))
+}
+
+/// Perform a bounded TCP reachability probe. This verifies DNS/TCP (and the
+/// selected TLS port), but deliberately does not publish media or validate a
+/// stream key. Run it off the UI thread.
+pub fn probe_ingest_reachability(url: &str, timeout: Duration) -> StreamProbeResult {
+    let (host, port, _) = match parse_ingest_endpoint(url) {
+        Ok(value) => value,
+        Err(error) => return StreamProbeResult::Rejected(error.to_owned()),
+    };
+    let timeout = timeout.clamp(Duration::from_secs(1), Duration::from_secs(30));
+    let address = match (host.as_str(), port).to_socket_addrs() {
+        Ok(mut addresses) => addresses.next(),
+        Err(error) => return StreamProbeResult::Unavailable(format!("DNS lookup failed: {error}")),
+    };
+    let Some(address) = address else {
+        return StreamProbeResult::Unavailable("DNS lookup returned no addresses".into());
+    };
+    match TcpStream::connect_timeout(&address, timeout) {
+        Ok(stream) => {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            StreamProbeResult::Reachable
+        }
+        Err(error) => StreamProbeResult::Unavailable(format!("connection failed: {error}")),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamConnectionResult {
     Connected,
@@ -838,6 +904,13 @@ impl StreamSettings {
     /// this result type in the core lets the GUI present deterministic outcomes
     /// without ever treating configuration validation as a successful platform
     /// connection.
+    pub fn probe_reachability(&self, timeout: Duration) -> StreamProbeResult {
+        if let Err(error) = self.validate() {
+            return StreamProbeResult::Rejected(error.to_owned());
+        }
+        probe_ingest_reachability(&self.ingest_url, timeout)
+    }
+
     pub fn connection_result(&self, transport_error: Option<&str>) -> StreamConnectionResult {
         if let Err(error) = self.validate() {
             return StreamConnectionResult::Rejected(error.to_owned());
@@ -854,6 +927,33 @@ impl StreamSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ingest_endpoint_parser_uses_platform_ports_without_exposing_key() {
+        assert_eq!(
+            parse_ingest_endpoint("rtmps://live.example/app/key"),
+            Ok(("live.example".into(), 443, true))
+        );
+        assert_eq!(
+            parse_ingest_endpoint("rtmp://localhost:1935/live/key"),
+            Ok(("localhost".into(), 1935, false))
+        );
+        assert!(parse_ingest_endpoint("https://example/live").is_err());
+        assert!(parse_ingest_endpoint("rtmps:///key").is_err());
+    }
+
+    #[test]
+    fn reachability_probe_rejects_invalid_url_without_network_access() {
+        assert!(matches!(
+            probe_ingest_reachability("https://invalid", Duration::from_secs(1)),
+            StreamProbeResult::Rejected(_)
+        ));
+        assert!(matches!(
+            StreamSettings::twitch("key").probe_reachability(Duration::from_secs(1)),
+            StreamProbeResult::Unavailable(_) | StreamProbeResult::Reachable
+        ));
+    }
+
     #[test]
     fn delay_is_bounded_and_disabled_for_zero() {
         assert_eq!(StreamDelay::new(Duration::ZERO).latency_ms(), 0);
