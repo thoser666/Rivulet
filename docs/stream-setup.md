@@ -13,8 +13,13 @@ Die Verbindungsauswertung unterscheidet lokale Validierungsfehler (`Rejected`) v
 
 - **Twitch:** `rtmps://live.twitch.tv/app`
 - **YouTube:** `rtmps://a.rtmp.youtube.com/live2`
-- **Kick:** eigene Stream-URL aus dem Creator Dashboard eintragen
+- **Kick:** keine globale Standard-URL; die konto-/regionsabhängige Stream-URL aus dem Creator Dashboard eintragen
 - **Custom:** beliebiger eigener `rtmp://`- oder `rtmps://`-Endpoint
+
+Für Teststreams verwendet Rivulet Twitch und YouTube automatisch diese Defaults.
+Bei Kick bleibt das URL-Feld absichtlich leer und der Start wird bis zur Eingabe
+der Dashboard-URL blockiert. So wird kein veralteter oder falscher Kick-Ingest
+als scheinbar gültiger Testwert verwendet.
 
 Die Qualitäts-Presets Low, Standard, High und Custom werden an die
 `StreamSettings` des Engines übergeben. Plattform-Presets akzeptieren nur
@@ -34,7 +39,8 @@ für Custom-Ziele vorgesehen.
 ## Start und Stop
 
 1. Plattform auswählen.
-2. Bei Kick oder Custom den Ingest-Endpunkt eintragen.
+2. Bei Kick oder Custom den Ingest-Endpunkt eintragen. Für Kick die aktuelle
+   URL aus dem Creator Dashboard verwenden; Twitch und YouTube sind vorbefüllt.
 3. Stream-Key eingeben.
 4. Qualitäts-Preset auswählen.
 5. **Stream starten** klicken.

@@ -353,12 +353,19 @@ impl StreamPlatform {
             Self::Custom => "Custom",
         }
     }
+    /// Stable platform default for a test stream. Kick intentionally has no
+    /// global default: its Creator Dashboard supplies the account/region
+    /// specific server URL.
     pub fn default_ingest_url(self) -> Option<&'static str> {
         match self {
             Self::Twitch => Some("rtmps://live.twitch.tv/app"),
             Self::YouTube => Some("rtmps://a.rtmp.youtube.com/live2"),
             Self::Kick | Self::Custom => None,
         }
+    }
+
+    pub fn requires_manual_ingest_url(self) -> bool {
+        matches!(self, Self::Kick | Self::Custom)
     }
 }
 
@@ -756,8 +763,14 @@ impl StreamSettings {
             key,
         )
     }
+    /// Kick's ingest URL must come from the Creator Dashboard.
     pub fn kick(url: impl Into<String>, key: impl Into<String>) -> Self {
         Self::new(StreamPlatform::Kick, url, key)
+    }
+
+    pub fn for_test_stream(platform: StreamPlatform, key: impl Into<String>) -> Self {
+        let url = platform.default_ingest_url().unwrap_or_default();
+        Self::new(platform, url, key)
     }
     pub fn custom(url: impl Into<String>, key: impl Into<String>) -> Self {
         Self::new(StreamPlatform::Custom, url, key)
@@ -880,6 +893,29 @@ mod tests {
         assert!(StreamSettings::twitch("key")
             .connection_result(None)
             .is_success());
+    }
+
+    #[test]
+    fn platform_test_defaults_are_explicit_and_kick_requires_dashboard_url() {
+        assert_eq!(
+            StreamPlatform::Twitch.default_ingest_url(),
+            Some("rtmps://live.twitch.tv/app")
+        );
+        assert_eq!(
+            StreamPlatform::YouTube.default_ingest_url(),
+            Some("rtmps://a.rtmp.youtube.com/live2")
+        );
+        assert!(StreamPlatform::Kick.default_ingest_url().is_none());
+        assert!(StreamPlatform::Kick.requires_manual_ingest_url());
+        assert!(!StreamPlatform::Twitch.requires_manual_ingest_url());
+        assert!(
+            StreamSettings::for_test_stream(StreamPlatform::Twitch, "key")
+                .validate()
+                .is_ok()
+        );
+        assert!(StreamSettings::for_test_stream(StreamPlatform::Kick, "key")
+            .validate()
+            .is_err());
     }
 
     #[test]

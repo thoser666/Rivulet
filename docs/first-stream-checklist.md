@@ -18,8 +18,13 @@ Plattform leicht abweichen.
 
 ## 2. Plattformdaten eintragen
 
+Für den privaten Teststream gelten dieselben Plattform-Defaults wie in Rivulet:
+Twitch und YouTube werden automatisch mit ihrem RTMPS-Ingest vorbefüllt. Kick
+benötigt immer die aktuell im Creator Dashboard angezeigte Server-URL.
+
 ### Twitch
 
+- [ ] Prüfen, dass Rivulet `rtmps://live.twitch.tv/app` als Ingest verwendet.
 - [ ] Im Creator Dashboard den Stream-Key bzw. die bevorzugte sichere
       Authentifizierung einrichten.
 - [ ] Server automatisch wählen lassen oder einen nahegelegenen Ingest-Server
@@ -28,6 +33,7 @@ Plattform leicht abweichen.
 
 ### YouTube
 
+- [ ] Prüfen, dass Rivulet `rtmps://a.rtmp.youtube.com/live2` als Ingest verwendet.
 - [ ] In YouTube Studio einen Livestream anlegen.
 - [ ] Stream-URL und Stream-Key aus den Live-Control-Room-Einstellungen übernehmen.
 - [ ] Sichtbarkeit zunächst auf **Nicht gelistet** oder **Privat** setzen, wenn
@@ -37,7 +43,8 @@ Plattform leicht abweichen.
 
 ### Kick
 
-- [ ] Im Creator Dashboard Stream-URL und Stream-Key abrufen.
+- [ ] Im Creator Dashboard die aktuelle Stream-URL und den Stream-Key abrufen.
+- [ ] Die Kick-URL manuell in Rivulet eintragen; es gibt bewusst keinen globalen Kick-Default.
 - [ ] Kategorie, Titel und Sichtbarkeit prüfen.
 - [ ] Den Stream-Key wie ein Passwort behandeln und bei Verdacht sofort rotieren.
 
