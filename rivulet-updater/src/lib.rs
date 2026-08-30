@@ -256,6 +256,8 @@ pub fn install_asset_with_watch(
 
     #[cfg(target_os = "linux")]
     {
+        let _ = watchdog;
+        let _ = wait_pids;
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
         let mut child = std::process::Command::new(path).spawn()?;
@@ -270,6 +272,8 @@ pub fn install_asset_with_watch(
 
     #[cfg(target_os = "macos")]
     {
+        let _ = watchdog;
+        let _ = wait_pids;
         let mut child = std::process::Command::new("open").arg(path).spawn()?;
         let status = child.wait()?;
         if !status.success() {
@@ -280,6 +284,8 @@ pub fn install_asset_with_watch(
 
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
+        let _ = watchdog;
+        let _ = wait_pids;
         anyhow::bail!("automatic updates are not supported on this platform")
     }
 }
