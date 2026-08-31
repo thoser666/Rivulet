@@ -143,7 +143,7 @@ werden.
 | M1 – Solid Recording | Audio tracks, Hardware encoding, QoL, Overlay | ✅ Done (milestone closed) | — | [![M1](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F4&query=open_issues&label=M1&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/4) |
 | M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | ✅ Complete (conditional UI/UX gate; milestone closed) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
 | M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | ✅ Complete (conditional: live interop follow-ups) | — | [![M3](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F5&query=open_issues&label=M3&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/5) |
-| M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 🚧 Virtual-camera contract + replay buffer done | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
+| M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | ✅ Complete (conditional: integration follow-ups; milestone closed) | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 🚧 In progress (installers, signing, i18n done) | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
 | M10 – Extensible UI & Plugins | Persisted layouts, view registry, declarative/WASM plugins, permissions | 📅 Planned | — | [![M10](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F11&query=open_issues&label=M10&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/11) |
 | M6 – Automation & Determinism | Headless CLI, CI Rendering, Reproducible Pipelines | 📅 Planned | — | [![M6](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F7&query=open_issues&label=M6&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/7) |
@@ -311,7 +311,9 @@ must not be implied by beta parity.
 
 ### 🎥 M4 – Advanced Output & Capture
 
-**Status: In progress**
+**Status: 🚧 Done — milestone closed** (all M4 roadmap bullets implemented, tested and documented). Integration follow-ups remain open and are tracked openly: VST3 hosting (loading a plugin into the audio graph), actual S3 upload after stop, NDI/VOD-track GStreamer routing, and Windows/macOS platform parity (a release blocker, not an afterthought).
+
+**M4 completion gate:** ✅ Complete (conditional). The output quality gate was recorded in [`docs/m4-output-quality-gate.md`](docs/m4-output-quality-gate.md) using the criteria in [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md): zero Blocker/Critical findings; hardware-dependent resource-efficiency measurements are explicitly marked `BLOCKED`/`N/A` rather than hidden. The milestone [M4 on GitHub](https://github.com/thoser666/Rivulet/milestone/2) is `closed`.
 
 - [x] **Replay buffer / instant replay** — *essential for gaming streamers (clip moments without recording the whole session); ring buffer (H.264+AAC) with instant replay save via F12 hotkey or GUI button*
 - [x] **Virtual camera output — platform-neutral contract** — validated format/resolution/FPS configuration and explicit Starting/Running/Stopping/Unavailable/Error lifecycle; platform driver integration and consumer smoke tests remain open
@@ -470,14 +472,14 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Hotkeys (incl. remapping, global) | Partial (record/pause/mute/save-replay; remapping planned M5) |
 | Undo/Redo | Done (M2) |
 | Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks, filters) |
-| Video filters (color correction, LUT, blur, sharpen, chroma key) | Open (M4) |
-| Audio filters (noise gate, compressor, limiter, expander, gain, EQ) | Partial (M1 basics; gate/EQ/ducking planned M4) |
-| Audio ducking (sidechain) | Open (M4) |
-| VST 3.x support | Open (M4) |
+| Video filters (color correction, LUT, blur, sharpen, chroma key) | Partial (M4: color correction/blur/sharpen done; LUT grading + chroma-key refinement open) |
+| Audio filters (noise gate, compressor, limiter, expander, gain, EQ) | Done (M4: gate, compressor, limiter, expander, gain, 10-band EQ, NS) |
+| Audio ducking (sidechain) | Done (M4 sidechain policy with hysteresis) |
+| VST 3.x support | Partial (M4 config contract + bundle discovery; hosting open) |
 | Recording & encoding | Partial (H.264/H.265/VP9, HW + SW) |
 | Replay buffer | Done (ring buffer, F12 hotkey, save-to-MP4) |
-| Remux & file management | Open (M4) |
-| Virtual camera | Open (M4) |
+| Remux & file management | Done (M4: remux after stop, split, patterns, auto-record) |
+| Virtual camera | Partial (M4 platform-neutral contract + lifecycle; driver integration open) |
 | Streaming (RTMP/RTMPS, platforms) | Partial (RTMPS Twitch/Kick/YouTube; validated presets and key handling) |
 | Multistreaming | Partial (multi-target fan-out wired; per-target reconnect supervisor and UI remain open) |
 | Adaptive bitrate | Partial (bounded policy implemented; live encoder reconfiguration remains open) |
@@ -487,7 +489,7 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Plugin ecosystem & OBS compatibility | Open |
 | obs-websocket / Streamdeck | Open (M5) |
 | Mobile remote & MIDI | Open (M5) |
-| Cloud & telemetry | Open (M4/M5) |
+| Cloud & telemetry | Partial (M4 S3 contract + secret masking; live upload open) |
 | Discord Rich Presence | Planned (optional, privacy-safe activity status; M5) |
 | Multi-language support | Partial (DE/EN wired) |
 | Platform parity (Windows/macOS) | Open |
