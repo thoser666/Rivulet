@@ -975,11 +975,13 @@ mod tests {
                 noise_suppression: true,
                 compressor: true,
                 limiter: true,
+                ..Default::default()
             },
             mic_filters: AudioFilters {
                 noise_suppression: true,
                 compressor: true,
                 limiter: true,
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -1041,11 +1043,13 @@ mod tests {
                 noise_suppression: true,
                 compressor: true,
                 limiter: true,
+                ..Default::default()
             },
             mic_filters: AudioFilters {
                 noise_suppression: true,
                 compressor: true,
                 limiter: true,
+                ..Default::default()
             },
             system_monitor: true,
             mic_monitor: true,
