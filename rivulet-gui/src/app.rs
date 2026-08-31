@@ -5651,15 +5651,14 @@ mod tests {
         for (_, document) in documents {
             assert!(help_document_url(document).starts_with("https://github.com/"));
         }
-        let documents = [
-            "docs/user-guide.md",
-            "docs/stream-setup.md",
-            "docs/first-stream-checklist.md",
-            "docs/updater-troubleshooting.md",
-        ];
-        for document in documents {
+        // The test binary runs from target/{debug,release}; resolve paths from
+        // the workspace manifest rather than relying on the process cwd.
+        let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace manifest parent");
+        for (_, document) in documents {
             assert!(
-                std::path::Path::new(document).is_file(),
+                workspace.join(document).is_file(),
                 "missing help document: {document}"
             );
         }
