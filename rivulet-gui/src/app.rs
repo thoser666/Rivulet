@@ -5356,10 +5356,10 @@ impl eframe::App for RivuletApp {
                                 }
                             });
                         });
-                    if self.system_filters != before || self.mic_filters != before_mic {
-                        if self.audio_preview {
-                            self.start_audio_capture();
-                        }
+                    if (self.system_filters != before || self.mic_filters != before_mic)
+                        && self.audio_preview
+                    {
+                        self.start_audio_capture();
                     }
 
                     ui.separator();

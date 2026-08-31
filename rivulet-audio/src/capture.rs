@@ -954,9 +954,9 @@ mod tests {
         );
         assert!(
             log.contains(
-                "compressor/limiter skipped: GStreamer element `audiodynamic` is not installed"
+                "compressor/limiter/expander/gate skipped: GStreamer element `audiodynamic` is not installed"
             ),
-            "expected the compressor/limiter warning in the captured log, got: {log}"
+            "expected the compressor/limiter/expander/gate warning in the captured log, got: {log}"
         );
         assert_eq!(
             log.matches("webrtcdsp").count(),
