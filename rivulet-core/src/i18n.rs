@@ -340,6 +340,9 @@ impl Locale {
                 ("monitoring_system", "Monitor system audio"),
                 ("monitoring_microphone", "Monitor microphone"),
                 ("monitoring_volume", "Monitoring volume"),
+                ("master_volume", "Master volume"),
+                ("master_output", "Master output"),
+                ("output_vu", "Output VU: {0} dB"),
                 ("powered_by", "Powered by"),
                 ("screen_recording_unavailable", "Screen recording is currently only available on Linux and Windows."),
                 // Activity presence
@@ -725,6 +728,9 @@ impl Locale {
                 ("monitoring_system", "Systemaudio abhören"),
                 ("monitoring_microphone", "Mikrofon abhören"),
                 ("monitoring_volume", "Monitoring-Lautstärke"),
+                ("master_volume", "Master-Lautstärke"),
+                ("master_output", "Master-Ausgabe"),
+                ("output_vu", "Ausgangs-VU: {0} dB"),
                 ("powered_by", "Unterstützt von"),
                 ("screen_recording_unavailable", "Bildschirmaufnahme ist derzeit nur unter Linux und Windows verfügbar."),
                 // Activity presence
@@ -1318,6 +1324,22 @@ mod tests {
         assert_eq!(
             Locale::De.tr("mixer_unavailable"),
             "Der Audio-Mixer ist derzeit nur unter Linux verfügbar."
+        );
+    }
+
+    #[test]
+    fn master_mix_keys_translate_in_both_locales() {
+        assert_eq!(Locale::En.tr("master_volume"), "Master volume");
+        assert_eq!(Locale::En.tr("master_output"), "Master output");
+        assert_eq!(
+            Locale::En.tr_fmt("output_vu", &["-6.0".to_string()]),
+            "Output VU: -6.0 dB"
+        );
+        assert_eq!(Locale::De.tr("master_volume"), "Master-Lautstärke");
+        assert_eq!(Locale::De.tr("master_output"), "Master-Ausgabe");
+        assert_eq!(
+            Locale::De.tr_fmt("output_vu", &["-6.0".to_string()]),
+            "Ausgangs-VU: -6.0 dB"
         );
     }
 }

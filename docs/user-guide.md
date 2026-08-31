@@ -61,7 +61,7 @@ Wenn keine Frames eintreffen, beendet Rivulet die Aufnahme nach dem konfiguriert
 
 ## 4. Audio
 
-Öffne **Mixer**, wähle Systemaudio und/oder Mikrofon und prüfe den Live-Pegel. Die Lautstärke kann je Quelle angepasst werden. Fehlende GStreamer-Audiofilter werden übersprungen und in der GUI sowie im Log gemeldet; die Aufnahme soll dadurch nicht stillschweigend abbrechen.
+Öffne **Mixer**, wähle Systemaudio und/oder Mikrofon und prüfe den Live-Pegel. Die Lautstärke kann je Quelle angepasst werden. Unter **Master-Ausgabe** lässt sich die Gesamtlautstärke des Mixes (System + Mikrofon zusammen) einstellen; das **Ausgangs-VU-Meter** darunter zeigt den Pegel des gesamten Mixes in dB nach Anwendung der Master-Lautstärke. Zusätzlich kann das Monitoring einzelner Quellen aktiviert und dessen Lautstärke getrennt geregelt werden. Fehlende GStreamer-Audiofilter werden übersprungen und in der GUI sowie im Log gemeldet; die Aufnahme soll dadurch nicht stillschweigend abbrechen.
 
 ## 5. Szenen und Quellen
 

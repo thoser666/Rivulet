@@ -536,6 +536,8 @@ pub struct RivuletApp {
     mic_monitor: bool,
     #[cfg(target_os = "linux")]
     monitor_volume: f32,
+    #[cfg(target_os = "linux")]
+    master_volume: f32,
 
     // Linux screen recording
     #[cfg(target_os = "linux")]
@@ -866,6 +868,8 @@ impl Default for RivuletApp {
             mic_monitor: false,
             #[cfg(target_os = "linux")]
             monitor_volume: 1.0,
+            #[cfg(target_os = "linux")]
+            master_volume: 1.0,
 
             #[cfg(target_os = "linux")]
             audio_rx: None,
@@ -1484,6 +1488,7 @@ impl RivuletApp {
             system_monitor: self.system_monitor,
             mic_monitor: self.mic_monitor,
             monitor_volume: self.monitor_volume,
+            master_volume: self.master_volume,
             separate_tracks: self.separate_tracks,
             ..Default::default()
         };
@@ -5224,6 +5229,24 @@ impl eframe::App for RivuletApp {
                         }
                     }
 
+                    ui.separator();
+                    ui.label(egui::RichText::new(self.tr("master_output")).strong());
+                    let mut master_vol = self.master_volume;
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut master_vol, 0.0..=1.0)
+                                .text(self.tr("master_volume")),
+                        )
+                        .changed()
+                    {
+                        self.master_volume = master_vol;
+                        if let Some(audio) = &self.audio {
+                            audio.set_master_volume(master_vol);
+                        }
+                    }
+
+                    // Master output VU meter (level of the whole mix after the
+                    // master volume is applied).
                     let peak =
                         f32::from_bits(self.audio_peak.load(Ordering::SeqCst)).clamp(0.0, 1.0);
                     let db = if peak > 0.0 {
@@ -5234,7 +5257,7 @@ impl eframe::App for RivuletApp {
                     ui.add(
                         egui::ProgressBar::new(peak)
                             .desired_width(f32::INFINITY)
-                            .text(self.tr_fmt("peak", &[format!("{db:.1}")])),
+                            .text(self.tr_fmt("output_vu", &[format!("{db:.1}")])),
                     );
 
                     if let Some(status) = &self.audio_status {

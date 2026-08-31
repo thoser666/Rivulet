@@ -43,6 +43,11 @@ pub struct AudioConfig {
     pub mic_monitor: bool,
     /// Master volume of the monitoring output in `[0.0, 1.0]`.
     pub monitor_volume: f32,
+    /// Master volume applied to the whole mix in `[0.0, 1.0]`. Scales the
+    /// combined system + microphone output after they are summed by the
+    /// `adder`, i.e. a single output level that sits on top of the per-source
+    /// volumes.
+    pub master_volume: f32,
     /// Output sample rate in Hz.
     pub sample_rate: u32,
     /// Output channel count.
@@ -64,6 +69,7 @@ impl Default for AudioConfig {
             system_monitor: false,
             mic_monitor: false,
             monitor_volume: 1.0,
+            master_volume: 1.0,
             sample_rate: 48_000,
             channels: 2,
             separate_tracks: false,
@@ -139,6 +145,11 @@ impl AudioCapture {
     pub fn set_monitor_volume(&self, volume: f32) {
         self.inner.set_monitor_volume(volume);
     }
+
+    /// Change the master volume of the whole mix.
+    pub fn set_master_volume(&self, volume: f32) {
+        self.inner.set_master_volume(volume);
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -161,6 +172,7 @@ mod sys_impl {
         mic_vol: Option<gst::Element>,
         sys_mon_vol: Option<gst::Element>,
         mic_mon_vol: Option<gst::Element>,
+        master_vol: Option<gst::Element>,
         running: Arc<AtomicBool>,
         thread: Option<JoinHandle<()>>,
         skipped: Vec<SkippedFilter>,
@@ -264,7 +276,8 @@ mod sys_impl {
                     pipeline_str.push_str(&branch);
                 }
                 pipeline_str.push_str(
-                    "adder name=adder ! appsink name=out_sink emit-signals=false sync=false",
+                    "adder name=adder ! volume name=master_vol ! \
+                     appsink name=out_sink emit-signals=false sync=false",
                 );
             }
 
@@ -289,6 +302,10 @@ mod sys_impl {
             }
             if let Some(v) = &mic_mon_vol {
                 v.set_property("volume", config.monitor_volume as f64);
+            }
+            let master_vol = pipeline.by_name("master_vol");
+            if let Some(v) = &master_vol {
+                v.set_property("volume", config.master_volume as f64);
             }
 
             let (appsink, appsink_sys, appsink_mic) = if config.separate_tracks {
@@ -319,6 +336,7 @@ mod sys_impl {
                 mic_vol,
                 sys_mon_vol,
                 mic_mon_vol,
+                master_vol,
                 running: Arc::new(AtomicBool::new(false)),
                 thread: None,
                 skipped,
@@ -441,6 +459,12 @@ mod sys_impl {
             }
             if let Some(el) = &self.mic_mon_vol {
                 el.set_property("volume", v);
+            }
+        }
+
+        pub fn set_master_volume(&self, volume: f32) {
+            if let Some(el) = &self.master_vol {
+                el.set_property("volume", f64::from(volume.clamp(0.0, 1.0)));
             }
         }
     }
@@ -649,6 +673,8 @@ mod sys_impl {
         pub fn set_mic_volume(&self, _volume: f32) {}
 
         pub fn set_monitor_volume(&self, _volume: f32) {}
+
+        pub fn set_master_volume(&self, _volume: f32) {}
     }
 }
 
@@ -665,6 +691,7 @@ mod tests {
         assert_eq!(config.channels, 2);
         assert_eq!(config.system_volume.to_bits(), 1.0f32.to_bits());
         assert_eq!(config.mic_volume.to_bits(), 1.0f32.to_bits());
+        assert_eq!(config.master_volume.to_bits(), 1.0f32.to_bits());
     }
 
     #[test]
@@ -679,6 +706,7 @@ mod tests {
         assert!(!config.system_monitor);
         assert!(!config.mic_monitor);
         assert_eq!(config.monitor_volume.to_bits(), 1.0f32.to_bits());
+        assert_eq!(config.master_volume.to_bits(), 1.0f32.to_bits());
     }
 
     #[test]
@@ -946,6 +974,22 @@ mod tests {
             ..Default::default()
         };
         assert!(AudioCapture::new(config).is_ok());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mixed_config_builds_pipeline_with_master_volume() {
+        // The default (non-separated) path sums both sources in an adder and
+        // applies a master volume element on the combined output. Building the
+        // pipeline validates that the `master_vol` fragment parses.
+        let config = AudioConfig {
+            capture_system: true,
+            capture_mic: true,
+            master_volume: 0.5,
+            ..Default::default()
+        };
+        let capture = AudioCapture::new(config).expect("mixed pipeline builds");
+        capture.set_master_volume(0.25); // no panic, element exists on Linux
     }
 
     #[cfg(target_os = "linux")]
