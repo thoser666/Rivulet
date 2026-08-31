@@ -72,7 +72,11 @@ Wenn keine Frames eintreffen, beendet Rivulet die Aufnahme nach dem konfiguriert
 
 ## 4. Audio
 
-Öffne **Mixer**, wähle Systemaudio und/oder Mikrofon und prüfe den Live-Pegel. Die Lautstärke kann je Quelle angepasst werden. Unter **Master-Ausgabe** lässt sich die Gesamtlautstärke des Mixes (System + Mikrofon zusammen) einstellen; das **Ausgangs-VU-Meter** darunter zeigt den Pegel des gesamten Mixes in dB nach Anwendung der Master-Lautstärke. Zusätzlich kann das Monitoring einzelner Quellen aktiviert und dessen Lautstärke getrennt geregelt werden. Fehlende GStreamer-Audiofilter werden übersprungen und in der GUI sowie im Log gemeldet; die Aufnahme soll dadurch nicht stillschweigend abbrechen.
+Öffne **Mixer**, wähle Systemaudio und/oder Mikrofon und prüfe den Live-Pegel. Die Lautstärke kann je Quelle angepasst werden.
+
+### Multi-Track-Audiotexport
+
+Aktiviere **Getrennte Tracks**, um Systemaudio und Mikrofon nicht zu mischen, sondern je auf einen **eigenen Track** der Aufnahmedatei zu legen (jede Quelle wird durch einen eigenen AAC-Encoder geführt und an denselben Muxer angebunden). Das Export-Routing ist damit unabhängig vom Live-Mix: Über die Schalter **„Exportiere Systemaudio auf eigenem Track“** und **„Exportiere Mikrofon auf eigenem Track“** lässt sich pro Quelle entscheiden, ob sie in der Datei eine eigene Spur erhält. Ein Track wird nur exportiert, solange die Quelle auch erfasst wird. Beim Streamen (RTMP/FLV) werden die Quellen weiterhin zu einem einzigen Audio-Track gemischt, da FLV nur einen unterstützt. Unter **Master-Ausgabe** lässt sich die Gesamtlautstärke des Mixes (System + Mikrofon zusammen) einstellen; das **Ausgangs-VU-Meter** darunter zeigt den Pegel des gesamten Mixes in dB nach Anwendung der Master-Lautstärke. Zusätzlich kann das Monitoring einzelner Quellen aktiviert und dessen Lautstärke getrennt geregelt werden. Fehlende GStreamer-Audiofilter werden übersprungen und in der GUI sowie im Log gemeldet; die Aufnahme soll dadurch nicht stillschweigend abbrechen.
 
 ## 5. Szenen und Quellen
 

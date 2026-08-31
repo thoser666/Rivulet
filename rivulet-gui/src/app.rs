@@ -520,6 +520,8 @@ pub struct RivuletApp {
     capture_mic: bool,
     #[cfg(target_os = "linux")]
     separate_tracks: bool,
+    export_system_track: bool,
+    export_mic_track: bool,
     #[cfg(target_os = "linux")]
     system_volume: f32,
     #[cfg(target_os = "linux")]
@@ -858,6 +860,8 @@ impl Default for RivuletApp {
             capture_mic: true,
             #[cfg(target_os = "linux")]
             separate_tracks: false,
+            export_system_track: true,
+            export_mic_track: true,
             #[cfg(target_os = "linux")]
             system_volume: 0.8,
             #[cfg(target_os = "linux")]
@@ -1699,10 +1703,14 @@ impl RivuletApp {
         self.engine
             .set_separate_audio_tracks(self.separate_tracks && self.audio_preview);
         if self.engine.separate_audio_tracks() {
-            self.engine
-                .set_audio_track_enabled(rivulet_core::AudioTrack::System, self.capture_system);
-            self.engine
-                .set_audio_track_enabled(rivulet_core::AudioTrack::Microphone, self.capture_mic);
+            self.engine.set_audio_track_enabled(
+                rivulet_core::AudioTrack::System,
+                self.capture_system && self.export_system_track,
+            );
+            self.engine.set_audio_track_enabled(
+                rivulet_core::AudioTrack::Microphone,
+                self.capture_mic && self.export_mic_track,
+            );
         }
         self.engine.start_local_recording(path);
 
@@ -1835,10 +1843,14 @@ impl RivuletApp {
         self.engine
             .set_separate_audio_tracks(self.separate_tracks && self.audio_preview);
         if self.engine.separate_audio_tracks() {
-            self.engine
-                .set_audio_track_enabled(rivulet_core::AudioTrack::System, self.capture_system);
-            self.engine
-                .set_audio_track_enabled(rivulet_core::AudioTrack::Microphone, self.capture_mic);
+            self.engine.set_audio_track_enabled(
+                rivulet_core::AudioTrack::System,
+                self.capture_system && self.export_system_track,
+            );
+            self.engine.set_audio_track_enabled(
+                rivulet_core::AudioTrack::Microphone,
+                self.capture_mic && self.export_mic_track,
+            );
         }
         self.engine.start_local_recording(path);
 
@@ -5213,6 +5225,38 @@ impl eframe::App for RivuletApp {
                         if self.audio_preview {
                             self.start_audio_capture();
                         }
+                    }
+
+                    if self.separate_tracks {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    "{} · {}",
+                                    self.tr("separate_tracks"),
+                                    rivulet_core::AudioTrack::System.label(),
+                                ))
+                                .weak(),
+                            );
+                            ui.checkbox(
+                                &mut self.export_system_track,
+                                self.tr("export_track_system"),
+                            );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(rivulet_core::AudioTrack::Microphone.label())
+                                    .weak(),
+                            );
+                            ui.checkbox(
+                                &mut self.export_mic_track,
+                                self.tr("export_track_microphone"),
+                            );
+                        });
+                        ui.label(
+                            egui::RichText::new(self.tr("multi_track_mapping"))
+                                .small()
+                                .weak(),
+                        );
                     }
 
                     let mut sys_vol = self.system_volume;

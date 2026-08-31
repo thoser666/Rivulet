@@ -2109,6 +2109,54 @@ mod tests {
         assert!(pipeline_str.contains("mp4mux name=mux"));
     }
 
+    /// A disabled audio track is dropped from the multi-track recording
+    /// pipeline, while the enabled one still feeds the shared muxer.
+    #[test]
+    fn recording_pipeline_drops_disabled_track_branch() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+        engine.set_audio_track_enabled(AudioTrack::Microphone, false);
+
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out_sys_only.mp4");
+        assert!(pipeline_str.contains("name=audio_src_sys"));
+        assert!(
+            !pipeline_str.contains("name=audio_src_mic"),
+            "disabled track must not be built: {pipeline_str}"
+        );
+        assert!(pipeline_str.contains("mp4mux name=mux"), "{pipeline_str}");
+
+        // Re-enable both: both branches come back.
+        engine.set_audio_track_enabled(AudioTrack::Microphone, true);
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out_both.mp4");
+        assert!(pipeline_str.contains("name=audio_src_sys"));
+        assert!(pipeline_str.contains("name=audio_src_mic"));
+    }
+
+    /// With separate tracks enabled, both audio branches are built into the
+    /// shared muxer so the output file carries system audio and microphone on
+    /// distinct tracks.
+    #[test]
+    fn multi_track_branches_feed_the_shared_muxer() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out_both.mp4");
+        // Both encoder branches must end at the same named muxer.
+        let sys_idx = pipeline_str.find("appsrc name=audio_src_sys").unwrap();
+        let mic_idx = pipeline_str.find("appsrc name=audio_src_mic").unwrap();
+        assert!(sys_idx < mic_idx, "sys branch precedes mic branch");
+        // avenc_aac encodes system and microphone into distinct tracks.
+        assert_eq!(
+            pipeline_str.matches("! avenc_aac").count(),
+            2,
+            "{pipeline_str}"
+        );
+        assert!(pipeline_str.contains("name=mux"), "{pipeline_str}");
+    }
+
     /// Without stream settings the engine is not configured for streaming.
     #[test]
     fn engine_is_not_streaming_by_default() {

@@ -306,6 +306,9 @@ impl Locale {
                 ("system_audio", "System audio"),
                 ("microphone", "Microphone"),
                 ("separate_tracks", "Separate tracks"),
+                ("export_track_system", "Export system audio on its own track"),
+                ("export_track_microphone", "Export microphone on its own track"),
+                ("multi_track_mapping", "Each source is stored on its own track in the output file (decoupled from the live mix); a track is exported only while the source is captured."),
                 (
                     "audio_capture_unavailable",
                     "Audio capture unavailable: {0}",
@@ -699,6 +702,9 @@ impl Locale {
                 ("system_audio", "Systemaudio"),
                 ("microphone", "Mikrofon"),
                 ("separate_tracks", "Getrennte Tracks"),
+                ("export_track_system", "Systemaudio auf eigenem Track exportieren"),
+                ("export_track_microphone", "Mikrofon auf eigenem Track exportieren"),
+                ("multi_track_mapping", "Jede Quelle wird auf einem eigenen Track in der Ausgabedatei gespeichert (getrennt vom Live-Mix); ein Track wird nur exportiert, solange die Quelle erfasst wird."),
                 (
                     "audio_capture_unavailable",
                     "Audio-Capture nicht verfügbar: {0}",

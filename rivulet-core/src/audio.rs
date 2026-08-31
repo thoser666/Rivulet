@@ -13,6 +13,27 @@ pub enum AudioTrack {
     Microphone,
 }
 
+impl AudioTrack {
+    /// Human-readable, language-neutral label for this track.
+    ///
+    /// Used for displaying which output track an input is routed to when
+    /// recording separate tracks. Localized labels live in the GUI/i18n layer.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::System => "System audio",
+            Self::Microphone => "Microphone",
+        }
+    }
+
+    /// Stable i18n key used by the GUI to render a localized track name.
+    pub fn i18n_key(self) -> &'static str {
+        match self {
+            Self::System => "system_audio",
+            Self::Microphone => "microphone",
+        }
+    }
+}
+
 /// Interleaved PCM audio data produced by an audio capture source.
 ///
 /// Samples are `f32` in the range `[-1.0, 1.0]` and interleaved by channel
@@ -200,5 +221,16 @@ mod tests {
             };
             assert_eq!(filter.log_message(), expected);
         }
+    }
+
+    #[test]
+    fn audio_track_labels_and_keys_are_stable() {
+        assert_eq!(AudioTrack::System.label(), "System audio");
+        assert_eq!(AudioTrack::Microphone.label(), "Microphone");
+        assert_eq!(AudioTrack::System.i18n_key(), "system_audio");
+        assert_eq!(AudioTrack::Microphone.i18n_key(), "microphone");
+        // The i18n key resolves to a localized name in the GUI layer.
+        assert_eq!(Locale::De.tr(AudioTrack::Microphone.i18n_key()), "Mikrofon");
+        assert_eq!(Locale::En.tr(AudioTrack::System.i18n_key()), "System audio");
     }
 }
