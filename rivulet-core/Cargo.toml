@@ -51,14 +51,15 @@ libc = "0.2"
 [target.'cfg(target_os = "windows")'.dependencies]
 # winapi modules are enabled per consumer to keep the attack surface minimal:
 #  - memoryapi / winbase / handleapi: shared-memory capture channel + OpenGL
-#    hook (capture_channel.rs, opengl_hook.rs) and the adapter's CloseHandle.
-#  - fileapi / namedpipeapi / winnt: Discord Rich Presence named-pipe client
+#    hook (capture_channel.rs, opengl_hook.rs) and the adapter's CloseHandle.# -  fileapi / namedpipeapi / winnt: Discord Rich Presence named-pipe client
 #    (discord.rs — CreateFileW/WriteFile and WaitNamedPipeW). winapi features
 #    are module-granular; only modules whose functions are actually called are
 #    enabled. winapi (MIT/Apache-2.0) is already allowed by deny.toml and pinned
 #    as winapi 0.3.9 in Cargo.lock (adding these features does not change the
 #    locked version or the Cargo.lock checksum).
-winapi = { version = "0.3", features = ["memoryapi", "winbase", "winnt", "handleapi", "fileapi", "namedpipeapi"] }
+# -  winuser: global hotkeys (global_hotkey.rs — RegisterHotKey/UnregisterHotKey
+#    behind a message pump).
+winapi = { version = "0.3", features = ["memoryapi", "winbase", "winnt", "handleapi", "fileapi", "namedpipeapi", "winuser"] }
 
 [dev-dependencies]
 tempfile = "3"

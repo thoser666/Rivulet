@@ -16,6 +16,8 @@ pub mod presence;
 pub use presence::{PresenceActivity, PresenceStatus};
 pub mod discord;
 pub use discord::{DiscordPresence, DiscordPresenceConfig};
+pub mod global_hotkey;
+pub use global_hotkey::{GlobalBinding, GlobalHotkey, KeyCode, ModMask};
 pub mod virtual_camera;
 pub use virtual_camera::{
     VirtualCamera, VirtualCameraConfig, VirtualCameraError, VirtualCameraFormat, VirtualCameraState,

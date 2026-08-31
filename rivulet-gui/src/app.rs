@@ -3,9 +3,10 @@
 use crate::theme;
 use eframe::egui;
 use rivulet_core::{
-    CaptureRegion, DiscordPresence, DiscordPresenceConfig, Locale, PresenceActivity,
-    PresenceStatus, RivuletEngine, SkippedFilter, StreamConnectionResult, StreamHealthStatus,
-    StreamPlatform, StreamPreset, StreamProbeResult, StreamSettings, StreamStats,
+    CaptureRegion, DiscordPresence, DiscordPresenceConfig, GlobalBinding, GlobalHotkey, KeyCode,
+    Locale, ModMask, PresenceActivity, PresenceStatus, RivuletEngine, SkippedFilter,
+    StreamConnectionResult, StreamHealthStatus, StreamPlatform, StreamPreset, StreamProbeResult,
+    StreamSettings, StreamStats,
 };
 use std::sync::mpsc::Receiver;
 use std::sync::{
@@ -288,83 +289,207 @@ fn scene_history_shortcut(
 }
 
 // --- Hotkey configuration ---
+
+/// A key plus an optional set of modifiers (Ctrl/Alt/Shift/Super). This is the
+/// unit used both by the in-app (focused) handling and by the OS-level global
+/// hotkey registration on Windows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct HotkeyBinding {
+    key: egui::Key,
+    #[serde(default)]
+    ctrl: bool,
+    #[serde(default)]
+    alt: bool,
+    #[serde(default)]
+    shift: bool,
+    #[serde(default)]
+    #[serde(rename = "super")]
+    super_mod: bool,
+}
+
+impl HotkeyBinding {
+    fn plain(key: egui::Key) -> Self {
+        Self {
+            key,
+            ctrl: false,
+            alt: false,
+            shift: false,
+            super_mod: false,
+        }
+    }
+
+    /// True when `input` reports this whole combo as freshly pressed.
+    fn pressed_in(&self, input: &egui::InputState) -> bool {
+        input.modifiers.command == self.super_mod
+            && input.modifiers.ctrl == self.ctrl
+            && input.modifiers.alt == self.alt
+            && input.modifiers.shift == self.shift
+            && input.key_pressed(self.key)
+    }
+
+    /// True when every modifier of this binding is currently held AND the key
+    /// was freshly pressed (used by the capture dialog, which ignores modifiers
+    /// the user has not selected).
+    fn key_pressed_withheld_modifiers(&self, input: &egui::InputState) -> bool {
+        // exact-match path used for dispatch below
+        input.key_pressed(self.key)
+    }
+
+    /// Human-readable, localized-safe label ("Ctrl+F9", "F12").
+    fn label(&self) -> String {
+        let mut parts = Vec::new();
+        if self.super_mod {
+            parts.push("Ctrl");
+        }
+        if self.ctrl {
+            parts.push("Ctrl");
+        }
+        if self.alt {
+            parts.push("Alt");
+        }
+        if self.shift {
+            parts.push("Shift");
+        }
+        parts.push(key_name(self.key));
+        parts.join("+")
+    }
+}
+
+impl Default for HotkeyBinding {
+    fn default() -> Self {
+        Self::plain(egui::Key::Num0)
+    }
+}
+
+/// Keyboard shortcut sequence definition (serde-friendly; each enum is matched
+/// by name in tests).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct HotkeyConfig {
-    record: egui::Key,
-    pause: egui::Key,
-    mute: egui::Key,
-    save_replay: egui::Key,
+    record: HotkeyBinding,
+    pause: HotkeyBinding,
+    mute: HotkeyBinding,
+    save_replay: HotkeyBinding,
     #[serde(default)]
-    scene_hotkeys: std::collections::BTreeMap<uuid::Uuid, egui::Key>,
+    scene_hotkeys: std::collections::BTreeMap<uuid::Uuid, HotkeyBinding>,
 }
 
 impl Default for HotkeyConfig {
     fn default() -> Self {
         Self {
-            record: egui::Key::F9,
-            pause: egui::Key::F10,
-            mute: egui::Key::F11,
-            save_replay: egui::Key::F12,
+            record: HotkeyBinding::plain(egui::Key::F9),
+            pause: HotkeyBinding::plain(egui::Key::F10),
+            mute: HotkeyBinding::plain(egui::Key::F11),
+            save_replay: HotkeyBinding::plain(egui::Key::F12),
             scene_hotkeys: std::collections::BTreeMap::new(),
         }
     }
 }
 
+/// Human-readable name for a key (covers the common set used by the app).
+fn key_name(key: egui::Key) -> &'static str {
+    match key {
+        egui::Key::F1 => "F1",
+        egui::Key::F2 => "F2",
+        egui::Key::F3 => "F3",
+        egui::Key::F4 => "F4",
+        egui::Key::F5 => "F5",
+        egui::Key::F6 => "F6",
+        egui::Key::F7 => "F7",
+        egui::Key::F8 => "F8",
+        egui::Key::F9 => "F9",
+        egui::Key::F10 => "F10",
+        egui::Key::F11 => "F11",
+        egui::Key::F12 => "F12",
+        egui::Key::Space => "Space",
+        egui::Key::Enter => "Enter",
+        egui::Key::Escape => "Esc",
+        egui::Key::Tab => "Tab",
+        egui::Key::ArrowUp => "↑",
+        egui::Key::ArrowDown => "↓",
+        egui::Key::ArrowLeft => "←",
+        egui::Key::ArrowRight => "→",
+        egui::Key::Num0 => "0",
+        egui::Key::Num1 => "1",
+        egui::Key::Num2 => "2",
+        egui::Key::Num3 => "3",
+        egui::Key::Num4 => "4",
+        egui::Key::Num5 => "5",
+        egui::Key::Num6 => "6",
+        egui::Key::Num7 => "7",
+        egui::Key::Num8 => "8",
+        egui::Key::Num9 => "9",
+        _ => "?",
+    }
+}
+
+/// Translate an egui key to a Windows virtual-key code where an equivalent
+/// exists. Returns `None` for keys without a stable VK mapping or for modifier
+/// keys (which can never stand alone as a global hotkey).
+fn vk_code(key: egui::Key) -> Option<u32> {
+    use egui::Key::*;
+    let vk = match key {
+        F1 => 0x70,
+        F2 => 0x71,
+        F3 => 0x72,
+        F4 => 0x73,
+        F5 => 0x74,
+        F6 => 0x75,
+        F7 => 0x76,
+        F8 => 0x77,
+        F9 => 0x78,
+        F10 => 0x79,
+        F11 => 0x7A,
+        F12 => 0x7B,
+        Num0 => 0x30,
+        Num1 => 0x31,
+        Num2 => 0x32,
+        Num3 => 0x33,
+        Num4 => 0x34,
+        Num5 => 0x35,
+        Num6 => 0x36,
+        Num7 => 0x37,
+        Num8 => 0x38,
+        Num9 => 0x39,
+        Space => 0x20,
+        Enter => 0x0D,
+        Tab => 0x09,
+        ArrowUp => 0x26,
+        ArrowDown => 0x28,
+        ArrowLeft => 0x25,
+        ArrowRight => 0x27,
+        // Modifier / virtual keys cannot be a standalone global hotkey.
+        _ => return None,
+    };
+    Some(vk)
+}
+
 impl HotkeyConfig {
-    fn label_for(&self, action: &str) -> &str {
+    /// `None` means "not remappable / unknown action".
+    fn binding_for_action(&self, action: &str) -> Option<HotkeyBinding> {
         match action {
-            "record" => match self.record {
-                egui::Key::F1 => "F1",
-                egui::Key::F2 => "F2",
-                egui::Key::F3 => "F3",
-                egui::Key::F4 => "F4",
-                egui::Key::F5 => "F5",
-                egui::Key::F6 => "F6",
-                egui::Key::F7 => "F7",
-                egui::Key::F8 => "F8",
-                egui::Key::F9 => "F9",
-                egui::Key::F10 => "F10",
-                egui::Key::F11 => "F11",
-                egui::Key::F12 => "F12",
-                _ => "?",
-            },
-            "pause" => match self.pause {
-                egui::Key::F1 => "F1",
-                egui::Key::F2 => "F2",
-                egui::Key::F3 => "F3",
-                egui::Key::F4 => "F4",
-                egui::Key::F5 => "F5",
-                egui::Key::F6 => "F6",
-                egui::Key::F7 => "F7",
-                egui::Key::F8 => "F8",
-                egui::Key::F9 => "F9",
-                egui::Key::F10 => "F10",
-                egui::Key::F11 => "F11",
-                egui::Key::F12 => "F12",
-                _ => "?",
-            },
-            "mute" => Self::key_label(self.mute),
-            "save_replay" => Self::key_label(self.save_replay),
-            _ => "?",
+            "record" => Some(self.record),
+            "pause" => Some(self.pause),
+            "mute" => Some(self.mute),
+            "save_replay" => Some(self.save_replay),
+            _ => None,
         }
     }
 
-    /// Human-readable label for a function key (F1..F12).
-    fn key_label(key: egui::Key) -> &'static str {
-        match key {
-            egui::Key::F1 => "F1",
-            egui::Key::F2 => "F2",
-            egui::Key::F3 => "F3",
-            egui::Key::F4 => "F4",
-            egui::Key::F5 => "F5",
-            egui::Key::F6 => "F6",
-            egui::Key::F7 => "F7",
-            egui::Key::F8 => "F8",
-            egui::Key::F9 => "F9",
-            egui::Key::F10 => "F10",
-            egui::Key::F11 => "F11",
-            egui::Key::F12 => "F12",
-            _ => "?",
+    fn set_binding_for_action(&mut self, action: &str, binding: HotkeyBinding) -> bool {
+        match action {
+            "record" => self.record = binding,
+            "pause" => self.pause = binding,
+            "mute" => self.mute = binding,
+            "save_replay" => self.save_replay = binding,
+            _ => return false,
+        }
+        true
+    }
+
+    fn label_for(&self, action: &str) -> String {
+        match self.binding_for_action(action) {
+            Some(binding) => binding.label(),
+            None => String::from("?"),
         }
     }
 }
@@ -491,6 +616,17 @@ pub struct RivuletApp {
     /// transitions (per the adapter contract).
     #[serde(skip)]
     discord_presence_last: Option<PresenceStatus>,
+
+    /// Set when any hotkey binding changes through the Settings UI (or scene
+    /// hotkey assignment), so the OS-level global hotkeys are re-registered
+    /// exactly once per change. Not persisted.
+    #[serde(skip)]
+    global_hotkeys_dirty: bool,
+    /// OS-level global hotkey handle (Windows registers real RegisterHotKey
+    /// bindings; Linux/macOS is a documented no-op). Rebuilt lazily on first
+    /// use. Not persisted, not Clone.
+    #[serde(skip)]
+    global_hotkeys: Option<GlobalHotkey>,
 
     // Linux Fields
     #[cfg(target_os = "linux")]
@@ -854,6 +990,8 @@ impl Default for RivuletApp {
             discord_presence_active_client_id: None,
             discord_client_id_dirty: false,
             discord_presence_last: None,
+            global_hotkeys_dirty: false,
+            global_hotkeys: None,
 
             #[cfg(target_os = "linux")]
             is_previewing: false,
@@ -2358,10 +2496,16 @@ impl RivuletApp {
         ));
 
         if let Some(active_id) = self.scenes.active() {
+            let current = self
+                .hotkeys
+                .scene_hotkeys
+                .get(&active_id)
+                .copied()
+                .unwrap_or_else(|| HotkeyBinding::plain(self.scene_hotkey_key));
             ui.horizontal(|ui| {
                 ui.label(self.tr("scenes_hotkey"));
                 egui::ComboBox::from_id_salt("scene_hotkey_key")
-                    .selected_text(HotkeyConfig::key_label(self.scene_hotkey_key))
+                    .selected_text(key_name(current.key))
                     .show_ui(ui, |ui| {
                         for key in [
                             egui::Key::F1,
@@ -2373,17 +2517,13 @@ impl RivuletApp {
                             egui::Key::F7,
                             egui::Key::F8,
                         ] {
-                            ui.selectable_value(
-                                &mut self.scene_hotkey_key,
-                                key,
-                                HotkeyConfig::key_label(key),
-                            );
+                            ui.selectable_value(&mut self.scene_hotkey_key, key, key_name(key));
                         }
                     });
                 if theme::accent_button(ui, self.tr("scenes_assign_hotkey")).clicked() {
                     self.hotkeys
                         .scene_hotkeys
-                        .insert(active_id, self.scene_hotkey_key);
+                        .insert(active_id, HotkeyBinding::plain(self.scene_hotkey_key));
                     self.scene_status = Some(self.tr("scenes_hotkey_assigned").to_owned());
                 }
             });
@@ -3593,6 +3733,64 @@ impl RivuletApp {
         }
     }
 
+    /// Render one remappable hotkey row: a key ComboBox + three modifier
+    /// toggles. Any change is written straight back into `self.hotkeys` and
+    /// flagged for global re-registration.
+    fn draw_hotkey_rebind_row(&mut self, ui: &mut egui::Ui, action: &str) {
+        let keys = [
+            egui::Key::F1,
+            egui::Key::F2,
+            egui::Key::F3,
+            egui::Key::F4,
+            egui::Key::F5,
+            egui::Key::F6,
+            egui::Key::F7,
+            egui::Key::F8,
+            egui::Key::F9,
+            egui::Key::F10,
+            egui::Key::F11,
+            egui::Key::F12,
+            egui::Key::Num0,
+            egui::Key::Num1,
+            egui::Key::Space,
+        ];
+        let mut binding = self.hotkeys.binding_for_action(action).unwrap_or_default();
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.label(self.tr(&format!("hotkey_{action}")));
+            egui::ComboBox::from_id_salt(format!("hotkey_key_{action}"))
+                .selected_text(key_name(binding.key))
+                .show_ui(ui, |ui| {
+                    for key in keys {
+                        if ui
+                            .selectable_label(binding.key == key, key_name(key))
+                            .clicked()
+                        {
+                            binding.key = key;
+                            changed = true;
+                        }
+                    }
+                });
+            if ui.selectable_label(binding.ctrl, "Ctrl").clicked() {
+                binding.ctrl = !binding.ctrl;
+                changed = true;
+            }
+            if ui.selectable_label(binding.alt, "Alt").clicked() {
+                binding.alt = !binding.alt;
+                changed = true;
+            }
+            if ui.selectable_label(binding.shift, "Shift").clicked() {
+                binding.shift = !binding.shift;
+                changed = true;
+            }
+            ui.label(egui::RichText::new(binding.label()).weak());
+        });
+        if changed {
+            self.hotkeys.set_binding_for_action(action, binding);
+            self.global_hotkeys_dirty = true;
+        }
+    }
+
     fn draw_stream_setup_wizard(&mut self, ui: &mut egui::Ui) {
         if !self.setup_wizard_open {
             return;
@@ -3788,6 +3986,143 @@ impl RivuletApp {
         if let Some(presence) = &self.discord_presence {
             presence.set_activity(&status);
         }
+    }
+
+    /// Build the current OS-level bindings from the hotkey config, translating
+    /// egui keys to Windows virtual-key codes where they exist. Bindings whose
+    /// key has no VK equivalent (or is modifier-only) are skipped so the OS is
+    /// never asked to register something invalid.
+    fn current_global_bindings(&self) -> Vec<GlobalBinding> {
+        let mut out = Vec::new();
+        for (action, binding) in [
+            ("record", self.hotkeys.record),
+            ("pause", self.hotkeys.pause),
+            ("mute", self.hotkeys.mute),
+            ("save_replay", self.hotkeys.save_replay),
+        ] {
+            if let Some(vk) = vk_code(binding.key) {
+                out.push(GlobalBinding {
+                    action: action.to_string(),
+                    key: KeyCode(vk),
+                    mods: ModMask(
+                        (u8::from(binding.ctrl))
+                            | (u8::from(binding.alt) << 1)
+                            | (u8::from(binding.shift) << 2)
+                            | (u8::from(binding.super_mod) << 3),
+                    ),
+                });
+            }
+        }
+        // Scene hotkeys are registered too so they keep working unfocused.
+        for (scene_id, binding) in &self.hotkeys.scene_hotkeys {
+            if let Some(vk) = vk_code(binding.key) {
+                out.push(GlobalBinding {
+                    action: format!("scene:{scene_id}"),
+                    key: KeyCode(vk),
+                    mods: ModMask(
+                        (u8::from(binding.ctrl))
+                            | (u8::from(binding.alt) << 1)
+                            | (u8::from(binding.shift) << 2)
+                            | (u8::from(binding.super_mod) << 3),
+                    ),
+                });
+            }
+        }
+        out
+    }
+
+    /// Ensure the OS-level hotkey handle exists and matches the current
+    /// bindings, and drain any fired global hotkey events into the same action
+    /// dispatch used by the in-app path.
+    fn reconcile_global_hotkeys(&mut self) {
+        if self.global_hotkeys_dirty {
+            self.global_hotkeys_dirty = false;
+            let bindings = self.current_global_bindings();
+            match &mut self.global_hotkeys {
+                Some(handle) => handle.set_bindings(bindings),
+                None => {
+                    let handle = GlobalHotkey::new(bindings);
+                    self.global_hotkeys = Some(handle);
+                }
+            }
+        }
+
+        // Drain fired actions. Actions are handled on the next UI frame.
+        let mut fired: Vec<String> = Vec::new();
+        if let Some(handle) = &self.global_hotkeys {
+            while let Some(action) = handle.try_recv() {
+                fired.push(action);
+            }
+        }
+        for action in fired {
+            if let Some(stripped) = action.strip_prefix("scene:") {
+                if let Ok(id) = stripped.parse::<uuid::Uuid>() {
+                    self.scenes.switch_to(id);
+                }
+            } else {
+                self.dispatch_hotkey_action(&action);
+            }
+        }
+    }
+
+    /// Shared action dispatch used by both the in-app (focused) key handling
+    /// and OS-level global hotkey events (Windows).
+    fn dispatch_hotkey_action(&mut self, action: &str) {
+        let any_recording = self.any_recording_active();
+        match action {
+            "record" => {
+                if any_recording {
+                    self.stop_active_recording();
+                } else {
+                    self.start_active_recording();
+                }
+            }
+            "pause" => {
+                if any_recording {
+                    self.is_paused = !self.is_paused;
+                }
+            }
+            "mute" => {
+                if any_recording {
+                    self.is_muted = !self.is_muted;
+                }
+            }
+            "save_replay" if any_recording => {
+                self.save_replay_now();
+            }
+            _ => {}
+        }
+    }
+
+    fn any_recording_active(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            self.is_recording || self.is_aux_recording
+        }
+        #[cfg(target_os = "windows")]
+        {
+            self.is_windows_recording || self.is_aux_recording
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+        {
+            self.is_aux_recording
+        }
+    }
+
+    fn start_active_recording(&mut self) {
+        #[cfg(target_os = "windows")]
+        self.start_windows_recording();
+        #[cfg(target_os = "linux")]
+        self.start_linux_recording();
+    }
+
+    fn stop_active_recording(&mut self) {
+        #[cfg(target_os = "windows")]
+        self.stop_windows_recording();
+        #[cfg(target_os = "linux")]
+        self.stop_linux_recording();
+        self.is_paused = false;
+        self.is_muted = false;
     }
 
     fn draw_presence_status(&mut self, ui: &mut egui::Ui) {
@@ -4221,6 +4556,10 @@ impl eframe::App for RivuletApp {
         // ── Hotkey handling ────────────────────────────────────────
         let ctx = ui.ctx();
 
+        // Reconcile OS-level global hotkeys (create/rebind on change) and
+        // dispatch any global hotkey events fired while the app was unfocused.
+        self.reconcile_global_hotkeys();
+
         // Apply the color scheme (fonts + palette + preference) on startup
         // and whenever the user changes it in Settings.
         if self.theme_applied != Some(self.theme) {
@@ -4243,8 +4582,8 @@ impl eframe::App for RivuletApp {
             #[cfg(not(any(target_os = "linux", target_os = "windows")))]
             let any_recording = self.is_aux_recording;
 
-            // F9: Toggle recording
-            if i.key_pressed(self.hotkeys.record) {
+            // Record: toggle recording
+            if self.hotkeys.record.pressed_in(i) {
                 if any_recording {
                     if self.is_aux_recording {
                         self.stop_aux_recording();
@@ -4264,26 +4603,26 @@ impl eframe::App for RivuletApp {
                 }
             }
 
-            // F10: Toggle pause (only while recording)
-            if i.key_pressed(self.hotkeys.pause) && any_recording {
+            // Pause (only while recording)
+            if self.hotkeys.pause.pressed_in(i) && any_recording {
                 self.is_paused = !self.is_paused;
             }
 
-            // F11: Toggle mute (only while recording)
-            if i.key_pressed(self.hotkeys.mute) && any_recording {
+            // Mute (only while recording)
+            if self.hotkeys.mute.pressed_in(i) && any_recording {
                 self.is_muted = !self.is_muted;
             }
 
-            // F12: Save the replay buffer as a clip (only while recording)
-            if i.key_pressed(self.hotkeys.save_replay) && any_recording {
+            // Save the replay buffer as a clip (only while recording)
+            if self.hotkeys.save_replay.pressed_in(i) && any_recording {
                 self.save_replay_now();
             }
 
             // Scene history shortcuts are handled globally, but only when a
             // text field is not focused so normal editing remains unaffected.
             if !wants_keyboard_input {
-                for (scene_id, key) in &self.hotkeys.scene_hotkeys {
-                    if i.key_pressed(*key) {
+                for (scene_id, binding) in &self.hotkeys.scene_hotkeys {
+                    if binding.pressed_in(i) {
                         self.scenes.switch_to(*scene_id);
                     }
                 }
@@ -5645,6 +5984,24 @@ impl eframe::App for RivuletApp {
                     self.discord_client_id_dirty = true;
                 }
                 ui.small(discord_client_id_note);
+
+                // Settings: hotkeys (per-action rebinding). In-app bindings
+                // apply while the app is focused on every platform; on Windows
+                // the bindings are additionally registered at the OS level so
+                // they keep working while the app is unfocused (see
+                // `reconcile_global_hotkeys`). See docs/hotkeys.md for the
+                // exact platform matrix.
+                let hotkeys_section = self.tr("hotkeys_section");
+                let hotkeys_hint = self.tr("hotkeys_hint");
+                let modifier_ctrl = self.tr("modifier_ctrl");
+                let modifier_alt = self.tr("modifier_alt");
+                let modifier_shift = self.tr("modifier_shift");
+                ui.separator();
+                ui.label(egui::RichText::new(hotkeys_section).strong());
+                for action in ["record", "pause", "mute", "save_replay"] {
+                    self.draw_hotkey_rebind_row(ui, action);
+                }
+                ui.small(hotkeys_hint);
             }
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -6848,10 +7205,20 @@ mod tests {
         let mut hotkeys = HotkeyConfig::default();
         let first = uuid::Uuid::new_v4();
         let second = uuid::Uuid::new_v4();
-        hotkeys.scene_hotkeys.insert(first, egui::Key::F1);
-        hotkeys.scene_hotkeys.insert(second, egui::Key::F2);
-        assert_eq!(hotkeys.scene_hotkeys.get(&first), Some(&egui::Key::F1));
-        assert_eq!(hotkeys.scene_hotkeys.get(&second), Some(&egui::Key::F2));
+        hotkeys
+            .scene_hotkeys
+            .insert(first, HotkeyBinding::plain(egui::Key::F1));
+        hotkeys
+            .scene_hotkeys
+            .insert(second, HotkeyBinding::plain(egui::Key::F2));
+        assert_eq!(
+            hotkeys.scene_hotkeys.get(&first),
+            Some(&HotkeyBinding::plain(egui::Key::F1))
+        );
+        assert_eq!(
+            hotkeys.scene_hotkeys.get(&second),
+            Some(&HotkeyBinding::plain(egui::Key::F2))
+        );
     }
 
     #[test]
@@ -6873,8 +7240,59 @@ mod tests {
     #[test]
     fn replay_hotkey_defaults_to_f12_and_labels_it() {
         let hotkeys = HotkeyConfig::default();
-        assert_eq!(hotkeys.save_replay, egui::Key::F12);
+        assert_eq!(hotkeys.save_replay, HotkeyBinding::plain(egui::Key::F12));
         assert_eq!(hotkeys.label_for("save_replay"), "F12");
+    }
+
+    #[test]
+    fn hotkey_binding_labels_with_modifiers() {
+        let binding = HotkeyBinding {
+            key: egui::Key::F9,
+            ctrl: true,
+            alt: false,
+            shift: true,
+            super_mod: false,
+        };
+        assert_eq!(binding.label(), "Ctrl+Shift+F9");
+        let plain = HotkeyBinding::plain(egui::Key::F10);
+        assert_eq!(plain.label(), "F10");
+    }
+
+    #[test]
+    fn hotkey_set_binding_roundtrip() {
+        let mut hotkeys = HotkeyConfig::default();
+        let binding = HotkeyBinding {
+            key: egui::Key::F5,
+            ctrl: false,
+            alt: true,
+            shift: false,
+            super_mod: true,
+        };
+        assert!(hotkeys.set_binding_for_action("record", binding));
+        assert_eq!(hotkeys.binding_for_action("record"), Some(binding));
+        assert_eq!(hotkeys.label_for("record"), "Ctrl+Alt+F5");
+        assert!(!hotkeys.set_binding_for_action("unknown", binding));
+        assert!(hotkeys.binding_for_action("unknown").is_none());
+    }
+
+    #[test]
+    fn vk_code_maps_function_and_number_keys() {
+        assert_eq!(vk_code(egui::Key::F9), Some(0x78));
+        assert_eq!(vk_code(egui::Key::F12), Some(0x7B));
+        assert_eq!(vk_code(egui::Key::Num0), Some(0x30));
+        assert_eq!(vk_code(egui::Key::Space), Some(0x20));
+        assert_eq!(vk_code(egui::Key::Enter), Some(0x0D));
+        assert_eq!(vk_code(egui::Key::ArrowRight), Some(0x27));
+    }
+
+    #[test]
+    fn default_hotkeys_produce_global_bindings() {
+        let app = RivuletApp::default();
+        let bindings = app.current_global_bindings();
+        let record = bindings.iter().find(|b| b.action == "record").unwrap();
+        assert_eq!(record.key, KeyCode(0x78)); // F9
+        assert_eq!(record.mods, ModMask(0)); // no modifiers by default
+        assert_eq!(bindings.len(), 4); // record, pause, mute, save_replay
     }
 
     // ── Source (monitor) dropdown label ───────────────────────────

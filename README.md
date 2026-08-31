@@ -349,7 +349,7 @@ must not be implied by beta parity.
 - [x] **Discord Rich Presence adapter** — non-blocking activity updates using the Rivulet status model; explicit opt-out (persisted Settings toggle), no stream keys/URLs/paths/window titles, and graceful operation when Discord is unavailable (see [`docs/activity-status.md`](docs/activity-status.md)).
 - [ ] Multi-language support (locale files fully wired)
 - [ ] **MIDI device support** (map controllers like Korg NanoKontrol to scene switches, volume faders, filter toggles) — *frequently requested for live production and music streams*
-- [ ] **Global hotkeys & remapping UI** — OBS-style hotkey settings: per-action rebinding, global hotkeys that work while the app is unfocused
+- [x] **Global hotkeys & remapping UI** — OBS-style hotkey settings: per-action rebinding (Settings → Hotkeys), OS-level registration that keeps working while the app is unfocused on Windows, with an honest platform matrix (see [`docs/hotkeys.md`](docs/hotkeys.md)) *[#80](https://github.com/thoser666/Rivulet/issues/80)*
 - [ ] **Multi-channel distribution rollout** — tracked in [`docs/release-platforms.md`](docs/release-platforms.md):
   - [x] **Stage 1 – GitHub Releases:** canonical artifacts, checksums, changelog, and updater source (already active; signing is enabled when release secrets are configured).
   - [ ] **Stage 2 – WinGet + Flathub:** first external channels after stable package identity, signing, Flatpak metadata, and review are complete.

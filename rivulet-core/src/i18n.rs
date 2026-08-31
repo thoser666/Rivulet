@@ -263,6 +263,11 @@ impl Locale {
                 ("hotkey_pause", "Pause/Resume recording"),
                 ("hotkey_mute", "Mute/Unmute audio"),
                 ("hotkey_save_replay", "Save replay"),
+                ("hotkeys_section", "Hotkeys"),
+                ("hotkeys_hint", "Rebind in-app hotkeys. On Windows these also work while the app is unfocused."),
+                ("modifier_ctrl", "Ctrl"),
+                ("modifier_alt", "Alt"),
+                ("modifier_shift", "Shift"),
                 ("paused", "Paused"),
                 ("muted", "Muted"),
                 // Codec selection
@@ -679,6 +684,11 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("hotkey_pause", "Aufnahme pausieren/fortsetzen"),
                 ("hotkey_mute", "Audio stummschalten"),
                 ("hotkey_save_replay", "Replay speichern"),
+                ("hotkeys_section", "Tastenkürzel"),
+                ("hotkeys_hint", "In-App-Tastenkürzel umbelegen. Unter Windows funktionieren sie auch, wenn die App nicht fokussiert ist."),
+                ("modifier_ctrl", "Strg"),
+                ("modifier_alt", "Alt"),
+                ("modifier_shift", "Umschalt"),
                 ("paused", "Pausiert"),
                 ("muted", "Stumm"),
                 // Codec selection
