@@ -269,6 +269,11 @@ impl Locale {
                 ("video_codec", "Video codec"),
                 ("recording_container", "Container"),
                 ("auto_remux", "Remux to MP4 after stop"),
+                ("rate_control", "Rate control"),
+                ("rate_mode", "Mode"),
+                ("rate_quality", "Quality (0-51, lower is better)"),
+                ("rate_max_bitrate", "Max bitrate (kbit/s)"),
+                ("rate_custom_options", "Extra encoder options"),
                 ("split_after", "Split after (s):"),
                 ("seconds", "s"),
                 ("auto_record_with_stream", "Record automatically with stream"),
@@ -657,6 +662,11 @@ impl Locale {
                 ("video_codec", "Video-Codec"),
                 ("recording_container", "Container"),
                 ("auto_remux", "Nach Stopp zu MP4 remuxen"),
+                ("rate_control", "Rate-Control"),
+                ("rate_mode", "Modus"),
+                ("rate_quality", "Qualität (0-51, niedriger ist besser)"),
+                ("rate_max_bitrate", "Max. Bitrate (kbit/s)"),
+                ("rate_custom_options", "Zusätzliche Encoder-Optionen"),
                 ("split_after", "Aufteilen nach (s):"),
                 ("seconds", "s"),
                 ("auto_record_with_stream", "Automatisch mit Stream aufnehmen"),
@@ -1340,6 +1350,32 @@ mod tests {
         assert_eq!(
             Locale::De.tr_fmt("output_vu", &["-6.0".to_string()]),
             "Ausgangs-VU: -6.0 dB"
+        );
+    }
+
+    #[test]
+    fn rate_control_keys_translate_in_both_locales() {
+        assert_eq!(Locale::En.tr("rate_control"), "Rate control");
+        assert_eq!(Locale::En.tr("rate_mode"), "Mode");
+        assert_eq!(
+            Locale::En.tr("rate_quality"),
+            "Quality (0-51, lower is better)"
+        );
+        assert_eq!(Locale::En.tr("rate_max_bitrate"), "Max bitrate (kbit/s)");
+        assert_eq!(
+            Locale::En.tr("rate_custom_options"),
+            "Extra encoder options"
+        );
+        assert_eq!(Locale::De.tr("rate_control"), "Rate-Control");
+        assert_eq!(Locale::De.tr("rate_mode"), "Modus");
+        assert_eq!(
+            Locale::De.tr("rate_quality"),
+            "Qualität (0-51, niedriger ist besser)"
+        );
+        assert_eq!(Locale::De.tr("rate_max_bitrate"), "Max. Bitrate (kbit/s)");
+        assert_eq!(
+            Locale::De.tr("rate_custom_options"),
+            "Zusätzliche Encoder-Optionen"
         );
     }
 }

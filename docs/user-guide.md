@@ -57,6 +57,17 @@ Bei schmalen Fenstern kann die Sidebar eingeklappt werden. Alle wichtigen Aktion
 - **Region:** rechteckiger Ausschnitt mit Drag-Auswahl oder X/Y/Breite/Höhe
 - **Game Capture:** Windows Graphics Capture/DXGI/Vulkan/OpenGL-Hook, sofern der jeweilige Pfad verfügbar ist; bei fehlender Unterstützung zeigt Rivulet den Fallback-Status an
 
+### Erweiterte Rate-Control (VBR/CQ/CQ-VBR)
+
+Standardmäßig encodiert Rivulet mit fester Bitrate (**CBR**) — der einzig zuverlässige Modus für Live-Streaming. Für lokale Aufnahmen kann in den Aufnahme-Einstellungen zwischen folgenden Modis gewählt werden:
+
+- **CBR** (constante Bitrate): vorhersagbare Dateigröße; Standard und für Streaming vorgesehen.
+- **VBR** (variable Bitrate): bessere Qualität pro Dateigröße, ideal für lokale Aufnahmen (x264 via Zwei-Pass-Stil).
+- **CQ** (konstante Qualität): feste Qualität unabhängig von der Größe (x264 `quantizer`, NVENC `constqp`).
+- **CQ-VBR** (Qualität + Cap): Qualitätstreiber mit Obergrenze für die Bitrate.
+
+Der Schalter **Qualität** (0–51, niedriger = besser) und ggf. die maximale Bitrate werden nur bei den passenden Modis angezeigt. Das Freitextfeld **Zusätzliche Encoder-Optionen** hängt eigene Properties (z. B. `key-int-max=250 bframes=3`) direkt an das Encoder-Element an. Bei Backends ohne saubere Rate-Control-Properties (QuickSync, AMF, VP9, Software-H.265) fällt Rivulet auf eine durchschnittliche Bitrate zurück, damit kein Zielwert verloren geht.
+
 Wenn keine Frames eintreffen, beendet Rivulet die Aufnahme nach dem konfigurierten No-Frame-Timeout mit einer sichtbaren Fehlermeldung.
 
 ## 4. Audio

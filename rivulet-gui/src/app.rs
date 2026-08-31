@@ -757,6 +757,10 @@ pub struct RivuletApp {
     // Codec selection
     #[serde(skip)]
     selected_codec: rivulet_core::VideoCodec,
+    rate_mode: rivulet_core::RateControlMode,
+    rate_quality: i32,
+    rate_max_kbps: u32,
+    encoder_extra_options: String,
     selected_container: rivulet_core::RecordingContainer,
     auto_remux: bool,
     split_seconds: u64,
@@ -988,6 +992,10 @@ impl Default for RivuletApp {
             replay_duration_secs: Some(30),
             replay_status: None,
             selected_codec: rivulet_core::VideoCodec::default(),
+            rate_mode: rivulet_core::RateControlMode::default(),
+            rate_quality: 23,
+            rate_max_kbps: 0,
+            encoder_extra_options: String::new(),
             selected_container: rivulet_core::RecordingContainer::default(),
             auto_remux: true,
             split_seconds: 0,
@@ -1188,6 +1196,8 @@ impl RivuletApp {
             self.engine.set_auto_remux(self.auto_remux);
             self.apply_recording_file_settings();
             self.engine.set_preset(self.selected_preset);
+            self.apply_rate_control();
+            self.apply_rate_control();
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
@@ -1247,6 +1257,8 @@ impl RivuletApp {
             self.engine.set_auto_remux(self.auto_remux);
             self.apply_recording_file_settings();
             self.engine.set_preset(self.selected_preset);
+            self.apply_rate_control();
+            self.apply_rate_control();
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
@@ -1308,6 +1320,8 @@ impl RivuletApp {
             self.engine.set_auto_remux(self.auto_remux);
             self.apply_recording_file_settings();
             self.engine.set_preset(self.selected_preset);
+            self.apply_rate_control();
+            self.apply_rate_control();
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
@@ -1394,6 +1408,8 @@ impl RivuletApp {
             self.engine.set_auto_remux(self.auto_remux);
             self.apply_recording_file_settings();
             self.engine.set_preset(self.selected_preset);
+            self.apply_rate_control();
+            self.apply_rate_control();
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
@@ -1676,6 +1692,7 @@ impl RivuletApp {
         self.engine.set_auto_remux(self.auto_remux);
         self.apply_recording_file_settings();
         self.engine.set_preset(self.selected_preset);
+        self.apply_rate_control();
         self.engine.set_overlay_enabled(self.show_overlay);
         self.apply_replay_setting();
         self.engine.set_audio_enabled(self.audio_preview);
@@ -1811,6 +1828,7 @@ impl RivuletApp {
         self.engine.set_auto_remux(self.auto_remux);
         self.apply_recording_file_settings();
         self.engine.set_preset(self.selected_preset);
+        self.apply_rate_control();
         self.engine.set_overlay_enabled(self.show_overlay);
         self.apply_replay_setting();
         self.engine.set_audio_enabled(self.audio_preview);
@@ -2048,6 +2066,18 @@ impl RivuletApp {
             split,
             auto_record_with_stream: self.auto_record_with_stream,
             auto_record_dir: "recordings".to_string(),
+        });
+    }
+
+    /// Applies the advanced rate-control strategy (mode, quality, cap and any
+    /// free-form extra encoder options) to the engine before a recording or a
+    /// record+stream session starts.
+    fn apply_rate_control(&mut self) {
+        self.engine.set_rate_control(rivulet_core::RateControl {
+            mode: self.rate_mode,
+            max_bitrate_kbps: self.rate_max_kbps,
+            quality: self.rate_quality,
+            custom_options: self.encoder_extra_options.clone(),
         });
     }
 
@@ -4656,6 +4686,51 @@ impl eframe::App for RivuletApp {
                         ui.label(self.tr("split_after"));
                         ui.add(egui::DragValue::new(&mut self.split_seconds).range(0..=3600));
                         ui.label(self.tr("seconds"));
+                    });
+                    ui.separator();
+                    let rate_mode_label = self.tr("rate_mode");
+                    ui.horizontal(|ui| {
+                        ui.label(rate_mode_label);
+                        egui::ComboBox::from_id_salt("windows_rate_mode_select")
+                            .selected_text(self.rate_mode.label())
+                            .show_ui(ui, |ui| {
+                                for mode in [
+                                    rivulet_core::RateControlMode::Cbr,
+                                    rivulet_core::RateControlMode::Vbr,
+                                    rivulet_core::RateControlMode::Cq,
+                                    rivulet_core::RateControlMode::CqVbr,
+                                ] {
+                                    ui.selectable_value(&mut self.rate_mode, mode, mode.label())
+                                        .on_hover_text(mode.hint());
+                                }
+                            });
+                    });
+                    if matches!(
+                        self.rate_mode,
+                        rivulet_core::RateControlMode::Cq | rivulet_core::RateControlMode::CqVbr
+                    ) {
+                        ui.horizontal(|ui| {
+                            ui.label(self.tr("rate_quality"));
+                            ui.add(egui::Slider::new(&mut self.rate_quality, 0..=51));
+                        });
+                    }
+                    if matches!(
+                        self.rate_mode,
+                        rivulet_core::RateControlMode::Vbr | rivulet_core::RateControlMode::CqVbr
+                    ) {
+                        ui.horizontal(|ui| {
+                            ui.label(self.tr("rate_max_bitrate"));
+                            ui.add(
+                                egui::DragValue::new(&mut self.rate_max_kbps).range(0..=100_000),
+                            );
+                        });
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("rate_custom_options"));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.encoder_extra_options)
+                                .hint_text("key-int-max=250"),
+                        );
                     });
                     let auto_record_label = self.tr("auto_record_with_stream");
                     ui.horizontal(|ui| {

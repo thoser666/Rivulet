@@ -42,7 +42,7 @@ pub use stream_runtime::{AdaptiveBitrateController, BitrateChange, DelaySupervis
 pub mod encoder;
 pub use encoder::{
     best_encoder, best_encoder_for_codec, detect_available_encoders,
-    detect_available_encoders_for_codec, VideoCodec, VideoEncoder,
+    detect_available_encoders_for_codec, RateControl, RateControlMode, VideoCodec, VideoEncoder,
 };
 
 pub mod health;
@@ -178,6 +178,9 @@ pub struct RivuletEngine {
     preset: RecordingPreset,
     /// Target video bitrate in kbit/s applied to the selected encoder.
     encoder_bitrate_kbps: u32,
+    /// Advanced rate-control strategy (CBR/VBR/CQ/CQ-VBR plus custom encoder
+    /// options) layered on top of the target bitrate.
+    rate_control: RateControl,
     /// Tracks stream health while a streaming pipeline is active. Always
     /// `None` for plain local recordings.
     stream_health: Option<StreamHealthMonitor>,
@@ -230,6 +233,7 @@ impl Default for RivuletEngine {
             recording_file: RecordingFileSettings::default(),
             preset: RecordingPreset::default(),
             encoder_bitrate_kbps: 5_000,
+            rate_control: RateControl::default(),
             stream_health: None,
             recording_metrics: None,
             last_error: None,
@@ -716,6 +720,19 @@ impl RivuletEngine {
         self.encoder_bitrate_kbps = kbps;
     }
 
+    /// Apply advanced rate control (VBR/CQ/CQ-VBR and custom encoder options).
+    ///
+    /// Call before recording or streaming starts; the settings are folded into
+    /// the encoder `parse_launch` fragment whenever the pipeline is rebuilt.
+    pub fn set_rate_control(&mut self, rc: RateControl) {
+        self.rate_control = rc;
+    }
+
+    /// The currently configured rate-control strategy.
+    pub fn rate_control(&self) -> &RateControl {
+        &self.rate_control
+    }
+
     /// The configured target video bitrate in kbit/s.
     /// Update the active encoder bitrate. Returns whether the encoder property
     /// was changed; callers can invoke this from their health polling loop.
@@ -822,9 +839,11 @@ impl RivuletEngine {
         let caps = self
             .video_encoder
             .input_caps_fragment_for_codec(self.video_codec);
-        let encoder = self
-            .video_encoder
-            .branch_fragment_for_codec(self.video_codec, self.encoder_bitrate_kbps);
+        let encoder = self.video_encoder.branch_fragment_for_codec_rc(
+            self.video_codec,
+            self.encoder_bitrate_kbps,
+            self.rate_control.clone(),
+        );
         let overlay = if self.show_overlay {
             " ! textoverlay name=overlay text=\"\" valignment=top halignment=right \
              font-desc=\"Sans, 24\" background-color=0x000000AA "
@@ -1025,9 +1044,11 @@ impl RivuletEngine {
         let caps = self
             .video_encoder
             .input_caps_fragment_for_codec(self.video_codec);
-        let encoder = self
-            .video_encoder
-            .branch_fragment_for_codec(self.video_codec, self.encoder_bitrate_kbps);
+        let encoder = self.video_encoder.branch_fragment_for_codec_rc(
+            self.video_codec,
+            self.encoder_bitrate_kbps,
+            self.rate_control.clone(),
+        );
         let overlay = if self.show_overlay {
             " ! textoverlay name=overlay text=\"\" valignment=top halignment=right \
              font-desc=\"Sans, 24\" background-color=0x000000AA "
