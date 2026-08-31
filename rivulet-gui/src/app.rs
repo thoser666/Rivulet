@@ -706,6 +706,12 @@ pub struct RivuletApp {
     #[serde(skip)]
     stream_key: String,
     #[serde(skip)]
+    stream_key_save_requested: bool,
+    #[serde(skip)]
+    stream_key_delete_requested: bool,
+    #[serde(skip)]
+    stream_key_store_status: Option<String>,
+    #[serde(skip)]
     stream_preset: StreamPreset,
     #[serde(skip)]
     stream_status_message: Option<String>,
@@ -949,6 +955,9 @@ impl Default for RivuletApp {
                 .unwrap_or_default()
                 .into(),
             stream_key: String::new(),
+            stream_key_save_requested: false,
+            stream_key_delete_requested: false,
+            stream_key_store_status: None,
             stream_preset: StreamPreset::Standard,
             stream_status_message: None,
             stream_probe_running: false,
@@ -3568,7 +3577,27 @@ impl RivuletApp {
         });
     }
 
+    fn handle_stream_key_actions(&mut self) {
+        let account = self.stream_platform.label();
+        let store = rivulet_core::StreamKeyStore::default();
+        if self.stream_key_save_requested {
+            self.stream_key_save_requested = false;
+            self.stream_key_store_status = Some(match store.save(account, &self.stream_key) {
+                Ok(()) => self.tr("stream_key_saved").to_owned(),
+                Err(_) => self.tr("stream_key_store_unavailable").to_owned(),
+            });
+        }
+        if self.stream_key_delete_requested {
+            self.stream_key_delete_requested = false;
+            self.stream_key_store_status = Some(match store.delete(account) {
+                Ok(()) => self.tr("stream_key_deleted").to_owned(),
+                Err(_) => self.tr("stream_key_store_unavailable").to_owned(),
+            });
+        }
+    }
+
     fn draw_stream_view(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
+        self.handle_stream_key_actions();
         ui.add_space(8.0);
         ui.label(egui::RichText::new(self.tr("streaming")).strong());
         ui.separator();
@@ -3606,6 +3635,17 @@ impl RivuletApp {
             ui.add(egui::TextEdit::singleline(&mut self.stream_key).password(true));
             if !self.stream_key.is_empty() {
                 ui.label(format!("••••{}", self.stream_key.chars().count().min(4)));
+            }
+        });
+        ui.horizontal(|ui| {
+            if theme::accent_button(ui, self.tr("stream_key_save")).clicked() {
+                self.stream_key_save_requested = true;
+            }
+            if ui.button(self.tr("stream_key_delete")).clicked() {
+                self.stream_key_delete_requested = true;
+            }
+            if let Some(status) = &self.stream_key_store_status {
+                ui.small(status);
             }
         });
         egui::ComboBox::from_id_salt("stream_preset")
@@ -3649,6 +3689,9 @@ impl RivuletApp {
                 });
                 self.stream_probe_result =
                     rx.recv_timeout(std::time::Duration::from_millis(1)).ok();
+                if self.stream_probe_result.is_some() {
+                    self.stream_probe_running = false;
+                }
             }
             let label = if self.engine.is_streaming() {
                 self.tr("stream_stop")

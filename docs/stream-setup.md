@@ -31,20 +31,25 @@ für Custom-Ziele vorgesehen.
 - Der Key wird im GUI als Passwortfeld eingegeben.
 - Der vollständige Key wird nie angezeigt oder in Presence-/Statusmeldungen
   übertragen.
-- Wenn „Key speichern“ aktiviert ist, verwendet Rivulet den nativen
-  Betriebssystem-Schlüsselbund (Windows Credential Manager, macOS Keychain
-  bzw. Linux Secret Service über `keyring`). Der Key wird nicht in
-  `eframe::Storage` gespeichert.
+- Über **Key sicher speichern** wird der Key ausdrücklich im nativen
+  Betriebssystem-Schlüsselbund gespeichert (Windows Credential Manager, macOS
+  Keychain bzw. Linux Secret Service über `keyring`). **Gespeicherten Key
+  löschen** entfernt ihn wieder. Der Key wird nicht in `eframe::Storage`
+  gespeichert. Ist der Schlüsselbund nicht verfügbar, bleibt der Start möglich,
+  aber die GUI meldet den Fehler und speichert den Key nicht.
 - Keys gehören nicht in Git, Logs, Screenshots, Issues oder Chatnachrichten.
 - Bei Verdacht auf Offenlegung den Key sofort im jeweiligen Creator Dashboard
   rotieren.
 - Die Validierung blockiert Start, wenn Endpoint oder Key ungültig sind.
 
-## Privater Teststream
+## Keyring und privater Teststream
 
 Der Assistent unterstützt einen ausdrücklich gestarteten, zeitlich begrenzten
 privaten Testlauf. Nach dem Countdown läuft die konfigurierte Pipeline bis zur
 Maximaldauer und wechselt anschließend automatisch in den Status „beendet“.
+Die GUI bietet außerdem das explizite Speichern und Löschen des Keys im
+Betriebssystem-Schlüsselbund; diese Aktionen sind nicht Teil der eframe-
+Layoutpersistenz.
 Der Test veröffentlicht nur dann Daten, wenn der Nutzer zuvor selbst einen
 privaten oder nicht gelisteten Stream im Plattform-Dashboard angelegt hat.
 
@@ -68,7 +73,8 @@ Der Verbindungstest ist ein begrenzter Preflight: Er verwendet die konfigurierte
 Host-/Port-Kombination, führt keinen RTMPS-Publish und keinen Authentifizierungs-
 Handshake mit Stream-Key aus. Ein positives Ergebnis bedeutet daher nur, dass
 der Ingest-Endpunkt erreichbar ist; ein privater Teststream bleibt für die
-vollständige Verifikation erforderlich.
+vollständige Verifikation erforderlich. Der Test läuft asynchron und darf die
+GUI nicht blockieren; Timeout und Abbruch müssen als Fehlerzustand sichtbar sein.
 
 ## Lokaler RTMPS-Smoke-Test
 
