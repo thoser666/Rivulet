@@ -109,6 +109,8 @@ pub use media_source::{MediaSource, MediaType, PlaybackMode};
 pub mod audio_source;
 pub use audio_source::{AudioSource, AudioSourceKind};
 
+pub mod ducking;
+
 pub mod browser_source;
 pub use browser_source::{
     BrowserFrame, BrowserInput, BrowserMouseButton, BrowserSource, BrowserSourceBackend,
