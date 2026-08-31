@@ -179,6 +179,9 @@ pub struct RivuletEngine {
     /// Remux settings: whether to auto-remux the finished recording to MP4
     /// after stop (issue #71).
     remux_settings: RemuxSettings,
+    /// Optional S3-compatible cloud destination; finished recordings are
+    /// uploaded after stop when `enabled` (M4 follow-up).
+    cloud_recording: CloudRecording,
     /// Recording file-management policy: filename pattern, split rules, and
     /// whether a recording auto-starts alongside the stream (M4).
     recording_file: RecordingFileSettings,
@@ -241,6 +244,7 @@ impl Default for RivuletEngine {
             video_codec: VideoCodec::default(),
             recording_container: RecordingContainer::default(),
             remux_settings: RemuxSettings::default(),
+            cloud_recording: CloudRecording::default(),
             recording_file: RecordingFileSettings::default(),
             preset: RecordingPreset::default(),
             encoder_bitrate_kbps: 5_000,
@@ -652,6 +656,17 @@ impl RivuletEngine {
     /// Whether auto-remux after stop is enabled.
     pub fn auto_remux(&self) -> bool {
         self.remux_settings.auto_remux_after_stop
+    }
+
+    /// Configure the S3-compatible cloud destination. Finished recordings are
+    /// uploaded after stop only when the destination has `enabled` set.
+    pub fn set_cloud_recording(&mut self, cloud: CloudRecording) {
+        self.cloud_recording = cloud;
+    }
+
+    /// The currently configured cloud destination (default: disabled).
+    pub fn cloud_recording(&self) -> &CloudRecording {
+        &self.cloud_recording
     }
 
     /// Configure the recording file-management policy (M4).
@@ -1637,6 +1652,32 @@ impl RivuletEngine {
 
         // Auto-remux the finished crash-safe recording to MP4 (issue #71).
         self.remux_finished_recording(finished_path.as_deref(), finished_container);
+
+        // Upload the finished recording to the configured cloud destination
+        // (M4 follow-up: S3-compatible PUT after stop).
+        if let Some(path) = finished_path.as_deref() {
+            self.upload_finished_recording(path);
+        }
+    }
+
+    /// Uploads a finished recording to the configured S3-compatible cloud
+    /// destination when enabled and valid. The upload runs synchronously on
+    /// the caller thread and is best-effort: failures are logged, never fatal.
+    fn upload_finished_recording(&self, path: &std::path::Path) {
+        if !self.cloud_recording.enabled {
+            return;
+        }
+        match self
+            .cloud_recording
+            .upload_recording(path, &cloud::UreqPut, chrono::Utc::now())
+        {
+            Ok(bytes) => {
+                tracing::info!(path = %path.display(), bytes, "Recording uploaded to cloud");
+            }
+            Err(e) => {
+                tracing::error!(path = %path.display(), error = %e, "Cloud upload failed");
+            }
+        }
     }
 
     /// Remuxes a finished recording to MP4 when auto-remux is enabled and the
@@ -3107,6 +3148,34 @@ mod tests {
             pipeline_str
         );
         engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn cloud_recording_setter_roundtrips_and_upload_is_off_by_default() {
+        let mut engine = RivuletEngine::default();
+        // Default: disabled, no destination.
+        assert!(!engine.cloud_recording().enabled);
+
+        let cloud = crate::CloudRecording::new("https://s3.example.com", "bucket")
+            .with_credentials("keyid", "secret")
+            .with_prefix("clips")
+            .enabled(true);
+        engine.set_cloud_recording(cloud.clone());
+        assert_eq!(engine.cloud_recording(), &cloud);
+        assert!(engine.cloud_recording().enabled);
+    }
+
+    #[test]
+    fn stop_recording_with_disabled_cloud_does_not_upload() {
+        // Regression: with the default (disabled) cloud config, stop_recording
+        // must not attempt any network call — the upload helper short-circuits
+        // on `enabled == false`. Recording itself still stops cleanly.
+        let mut engine = RivuletEngine::default();
+        let path = std::env::temp_dir().join("rivulet_no_cloud_upload.mp4");
+        engine.start_local_recording(path.clone());
+        engine.stop_recording();
+        assert!(!engine.is_recording);
         let _ = std::fs::remove_file(&path);
     }
 

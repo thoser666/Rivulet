@@ -22,6 +22,7 @@ testbar.
 
 - **Hosting**: ein VST3-Modul tatsächlich laden (Plugin-Binary, Processor
   instanziieren, Audio durchschleifen) — erfordert eine VST3-Host-Runtime
-  (z. B. `vst3-sys`/`baseplug`) und einen Host-Thread; das ist ein separates
-  Integration-Follow-up.
+  (z. B. `vst3-sys`/`baseplug`) und einen Host-Thread. Als eigenes
+  Arbeitspaket getrackt in
+  [issue #96](https://github.com/thoser666/Rivulet/issues/96) (M5).
 - GUI: Plugin-Auswahl/Reihenfolge pro Spur (basiert dann auf der Discovery).

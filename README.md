@@ -311,7 +311,7 @@ must not be implied by beta parity.
 
 ### 🎥 M4 – Advanced Output & Capture
 
-**Status: 🚧 Done — milestone closed** (all M4 roadmap bullets implemented, tested and documented). Integration follow-ups remain open and are tracked openly: VST3 hosting (loading a plugin into the audio graph), actual S3 upload after stop, NDI/VOD-track GStreamer routing, and Windows/macOS platform parity (a release blocker, not an afterthought).
+**Status: 🚧 Done — milestone closed** (all M4 roadmap bullets implemented, tested and documented). Integration follow-ups remain open and are tracked openly: VST3 hosting (loading a plugin into the audio graph — [issue #96](https://github.com/thoser666/Rivulet/issues/96)), multipart cloud upload + cloud GUI settings, NDI/VOD-track GStreamer routing, and Windows/macOS platform parity (a release blocker, not an afterthought).
 
 **M4 completion gate:** ✅ Complete (conditional). The output quality gate was recorded in [`docs/m4-output-quality-gate.md`](docs/m4-output-quality-gate.md) using the criteria in [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md): zero Blocker/Critical findings; hardware-dependent resource-efficiency measurements are explicitly marked `BLOCKED`/`N/A` rather than hidden. The milestone [M4 on GitHub](https://github.com/thoser666/Rivulet/milestone/2) is `closed`.
 
@@ -327,7 +327,7 @@ must not be implied by beta parity.
 - [x] **Recording file management** (split by time/size, filename patterns, auto-record alongside stream) — *`FileNamePattern` with validated `{name}/{date}/{time}/{seq}/{stream}` tokens, `SplitBy` time/size rules with `RecordingSession` part sequencing and `auto_record_with_stream`; GUI split/auto-record toggles and pattern-driven default filenames. Live splitting maps `SplitBy` onto `splitmuxsink` (`max-size-time`/`max-size-bytes`, `%02d` part numbering, crash-safe containers only). See [docs/recording-files.md](docs/recording-files.md).*
 - [x] **Advanced rate control** (VBR, CQ, CQVBR, custom encoder options) — *`RateControl`/`RateControlMode` (CBR default, VBR, constant-quality CQ, CQ-VBR with a bitrate cap) plus free-form extra encoder options folded into the encoder `parse_launch` fragment; full property mapping for software x264 (`pass`/`quantizer`/`vbv-buf-capacity`) and NVENC (`rc-mode`/`max-bitrate`/`qp-const`/`const-quality`), graceful fallback to average bitrate for QSV/AMF/VP9/software x265; `engine.set_rate_control()` and a GUI section in the recording settings*
 - [x] **Multi-track audio export** (system + microphone stored on separate tracks) — *`engine.set_separate_audio_tracks`/`set_audio_track_enabled` build one `avenc_aac` branch per enabled source into the shared muxer; per-track export toggles in the Mixer view that are decoupled from the live mix and gated on capture; `AudioTrack::label`/`i18n_key` for display*
-- [x] **Cloud integration (cloud recordings)** — *S3-compatible `CloudRecording` contract (endpoint/bucket/region/prefix + credentials) with validation, deterministic object-key builder, secret masking (custom `Debug` never prints the access key) and off-by-default upload. Actual S3 `PUT` upload is a documented integration follow-up*
+- [x] **Cloud integration (cloud recordings)** — *S3-compatible `CloudRecording` contract (endpoint/bucket/region/prefix + credentials) with validation, deterministic object-key builder, secret masking (custom `Debug` never prints the access key) and a working S3 `PUT` uploader (AWS Signature V4 via `ureq`) that uploads the finished recording after `stop_recording` when enabled. SigV4 verified against AWS test vectors; multipart + GUI settings remain follow-ups*
 
 **Goal:** The advanced output and production features of OBS.
 
@@ -489,7 +489,7 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Plugin ecosystem & OBS compatibility | Open |
 | obs-websocket / Streamdeck | Open (M5) |
 | Mobile remote & MIDI | Open (M5) |
-| Cloud & telemetry | Partial (M4 S3 contract + secret masking; live upload open) |
+| Cloud & telemetry | Partial (M4 S3 SigV4 PUT upload after stop; multipart + GUI settings open) |
 | Discord Rich Presence | Planned (optional, privacy-safe activity status; M5) |
 | Multi-language support | Partial (DE/EN wired) |
 | Platform parity (Windows/macOS) | Open |
