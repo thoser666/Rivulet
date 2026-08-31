@@ -55,24 +55,24 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v3.0.3",
     ),
     (
-        "github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d",
-        "v3.37.9",
+        "github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938",
+        "v4.37.9",
     ),
     (
-        "github/codeql-action/autobuild@6f5948dfacef28e207b48d0905cf90c03365536d",
-        "v3.37.9",
+        "github/codeql-action/autobuild@cdf488f595d80d6e07e03d4674febd5ab45fa938",
+        "v4.37.9",
     ),
     (
-        "github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d",
-        "v3.37.9",
+        "github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938",
+        "v4.37.9",
     ),
     (
-        "github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d",
-        "v3.37.9",
+        "github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938",
+        "v4.37.9",
     ),
     (
-        "actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48",
-        "v4.9.0",
+        "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
+        "v5.0.0",
     ),
     (
         "actions-rust-lang/audit@72c09e02f132669d52284a3323acdb503cfc1a24",
