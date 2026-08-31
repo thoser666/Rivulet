@@ -5263,35 +5263,26 @@ impl eframe::App for RivuletApp {
                     }
 
                     if self.separate_tracks {
+                        let et_system = self.tr("export_track_system");
+                        let et_mic = self.tr("export_track_microphone");
+                        let mt_mapping = self.tr("multi_track_mapping");
+                        let mt_label = format!(
+                            "{} · {}",
+                            self.tr("separate_tracks"),
+                            rivulet_core::AudioTrack::System.label()
+                        );
                         ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(format!(
-                                    "{} · {}",
-                                    self.tr("separate_tracks"),
-                                    rivulet_core::AudioTrack::System.label(),
-                                ))
-                                .weak(),
-                            );
-                            ui.checkbox(
-                                &mut self.export_system_track,
-                                self.tr("export_track_system"),
-                            );
+                            ui.label(egui::RichText::new(mt_label).weak());
+                            ui.checkbox(&mut self.export_system_track, et_system);
                         });
                         ui.horizontal(|ui| {
                             ui.label(
                                 egui::RichText::new(rivulet_core::AudioTrack::Microphone.label())
                                     .weak(),
                             );
-                            ui.checkbox(
-                                &mut self.export_mic_track,
-                                self.tr("export_track_microphone"),
-                            );
+                            ui.checkbox(&mut self.export_mic_track, et_mic);
                         });
-                        ui.label(
-                            egui::RichText::new(self.tr("multi_track_mapping"))
-                                .small()
-                                .weak(),
-                        );
+                        ui.label(egui::RichText::new(mt_mapping).small().weak());
                     }
 
                     let mut sys_vol = self.system_volume;
@@ -5322,18 +5313,14 @@ impl eframe::App for RivuletApp {
                     ui.label(egui::RichText::new(self.tr("audio_filters")).strong());
                     let before = self.system_filters.clone();
                     let before_mic = self.mic_filters.clone();
+                    let gate_label = self.tr("filter_noise_gate");
+                    let expander_label = self.tr("filter_expander");
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut self.system_filters.noise_suppression, "NS·Sys");
-                        ui.checkbox(
-                            &mut self.system_filters.noise_gate,
-                            self.tr("filter_noise_gate"),
-                        );
+                        ui.checkbox(&mut self.system_filters.noise_gate, gate_label);
                         ui.checkbox(&mut self.system_filters.compressor, "Cmp·Sys");
                         ui.checkbox(&mut self.system_filters.limiter, "Lim·Sys");
-                        ui.checkbox(
-                            &mut self.system_filters.expander,
-                            self.tr("filter_expander"),
-                        );
+                        ui.checkbox(&mut self.system_filters.expander, expander_label);
                     });
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut self.mic_filters.noise_suppression, "NS·Mic");
@@ -6380,12 +6367,12 @@ mod tests {
             },
             SkippedFilter {
                 element: "audiodynamic",
-                feature: "compressor/limiter",
+                feature: SkippedFilter::feature_name("audiodynamic"),
             },
         ];
         assert_eq!(
             format_skipped_filters(Locale::En, &skipped),
-            "Audio filters skipped (missing GStreamer elements): noise suppression (webrtcdsp), compressor/limiter (audiodynamic)"
+            "Audio filters skipped (missing GStreamer elements): noise suppression (webrtcdsp), compressor/limiter/expander/gate (audiodynamic)"
         );
     }
 
