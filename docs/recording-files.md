@@ -3,10 +3,10 @@
 Documents the M4 "Recording file management" point: filename patterns, split
 by time/size, and auto-record alongside the stream.
 
-This is a **policy model** on `rivulet-core` (`file_management.rs`) plus GUI
-wiring for the settings. It is deterministic and fully unit-tested; live
-mid-recording GStreamer re-split of an open pipeline is a separate integration
-follow-up (like remux execution was).
+The policy model lives on `rivulet-core` (`file_management.rs`) with GUI
+wiring for the settings. Splitting is realized in the live recording pipeline
+via GStreamer's `splitmuxsink`, which rolls over to a new `%02d`-numbered file
+automatically when a time or size boundary is crossed — no re-encoding.
 
 ## Filename patterns
 
@@ -32,8 +32,22 @@ dialogs use it instead of the hard-coded `rivulet-recording-<timestamp>` name.
 
 `SplitBy` selects no split, split by duration, or split by file size.
 `RecordingSession` tracks the current part, bytes written and seconds elapsed
-per part, and exposes `should_split`/`next_part` so the engine can roll to the
-next `{seq}` file when a boundary is crossed.
+per part, and exposes `should_split`/`next_part`.
+
+The engine maps `SplitBy` onto the live recording pipeline
+(`recording_muxer_fragment`):
+
+| `SplitBy`             | Pipeline effect                          |
+|-----------------------|------------------------------------------|
+| `Duration { seconds }`| `splitmuxsink name=mux ... max-size-time=<nanos>` |
+| `Size { megabytes }`  | `splitmuxsink name=mux ... max-size-bytes=<bytes>` |
+| `None`                | plain muxer + `filesink`                 |
+
+Splitting is only enabled on **crash-safe** containers (MKV/MOV/TS); an
+interrupted MP4 numbered part would be unreadable, so `SplitBy` is ignored
+while the selected container is MP4. `splitmuxsink` produces files named
+`<base>_01.ext`, `<base>_02.ext`, ... from the `%02d` in the location
+(equivalent to the `{seq}` token of the filename pattern).
 
 The GUI exposes "Split after (s)" (0 = off) and "Record automatically with
 stream" toggles next to the container/remux controls, and pushes them into the
@@ -51,4 +65,6 @@ recordings get distinct, pattern-named files.
 - [x] Split-by-time/size model + part sequencing
 - [x] Auto-record flag + engine settings + GUI toggles
 - [x] `default_recording_path` used by GUI dialogs
-- [ ] Live GStreamer re-split of an open pipeline (integration follow-up)
+- [x] Live GStreamer re-split of the recording pipeline (`splitmuxsink` with
+      `max-size-time`/`max-size-bytes` and `%02d` part numbering, crash-safe
+      containers only)

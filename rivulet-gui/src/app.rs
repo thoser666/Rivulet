@@ -5031,19 +5031,18 @@ impl eframe::App for RivuletApp {
                                     }
                                 });
                         });
+                        let auto_remux_label = self.tr("auto_remux");
                         ui.horizontal(|ui| {
-                            ui.checkbox(&mut self.auto_remux, self.tr("auto_remux"));
+                            ui.checkbox(&mut self.auto_remux, auto_remux_label);
                         });
                         ui.horizontal(|ui| {
                             ui.label(self.tr("split_after"));
                             ui.add(egui::DragValue::new(&mut self.split_seconds).range(0..=3600));
                             ui.label(self.tr("seconds"));
                         });
+                        let auto_record_label = self.tr("auto_record_with_stream");
                         ui.horizontal(|ui| {
-                            ui.checkbox(
-                                &mut self.auto_record_with_stream,
-                                self.tr("auto_record_with_stream"),
-                            );
+                            ui.checkbox(&mut self.auto_record_with_stream, auto_record_label);
                         });
                         ui.horizontal(|ui| {
                             ui.label(self.tr("recording_preset"));

@@ -899,15 +899,52 @@ impl RivuletEngine {
         s
     }
 
+    /// The GStreamer fragment feeding the recording muxer, given the branches
+    /// already target a sink named `mux`. When a split rule is configured on a
+    /// crash-safe container, emits a `splitmuxsink` (which rolls over to a new
+    /// `%02d`-numbered file automatically); otherwise a plain muxer + filesink.
+    fn recording_muxer_fragment(&self, location: &str) -> String {
+        // Splitting into numbered parts is only safe on crash-safe containers;
+        // an interrupted MP4 part would be unreadable.
+        if self.recording_file.split.is_enabled() && self.recording_container.is_crash_safe() {
+            let split_loc = Self::split_location(location, "%02d");
+            let mut frag = format!("splitmuxsink name=mux location={split_loc}");
+            match self.recording_file.split {
+                crate::SplitBy::Duration { seconds } => {
+                    let nanos = seconds * 1_000_000_000;
+                    frag.push_str(&format!(" max-size-time={nanos}"));
+                }
+                crate::SplitBy::Size { megabytes } => {
+                    let bytes = megabytes * 1024 * 1024;
+                    frag.push_str(&format!(" max-size-bytes={bytes}"));
+                }
+                crate::SplitBy::None => {}
+            }
+            frag
+        } else {
+            let escaped = Self::escape_location(location);
+            let muxer = self.container_muxer();
+            format!(
+                "{} name=mux ! filesink name=file_sink location=\"{}\"",
+                muxer, escaped
+            )
+        }
+    }
+
+    /// Derive a `splitmuxsink` location by inserting `suffix` before the file
+    /// extension (e.g. `/tmp/clip.mkv` + `%02d` -> `/tmp/clip_%02d.mkv`).
+    fn split_location(location: &str, suffix: &str) -> String {
+        let path = std::path::Path::new(location);
+        let base = path.with_extension("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
+        let loc = format!("{}_{}.{}", base.display(), suffix, ext);
+        Self::escape_location(&loc)
+    }
+
     fn build_recording_pipeline_str(&self, location: &str) -> String {
         let mut s = self.video_branch_str();
         s.push_str(&self.audio_branch_str(false));
-        let escaped = Self::escape_location(location);
-        let muxer = self.container_muxer();
-        s.push_str(&format!(
-            "{} name=mux ! filesink name=file_sink location=\"{}\"",
-            muxer, escaped
-        ));
+        s.push_str(&self.recording_muxer_fragment(location));
         s
     }
 
@@ -2445,6 +2482,89 @@ mod tests {
             pipeline_str
         );
         gst::parse::launch(&pipeline_str).expect("pipeline with x264 should parse");
+    }
+
+    /// The recording pipeline keeps a single muxer + filesink when no split
+    /// rule is configured.
+    #[test]
+    fn recording_pipeline_keeps_single_muxer_without_split() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_recording_container(crate::RecordingContainer::Mkv);
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out.mkv");
+        assert!(
+            pipeline_str.contains("matroskamux name=mux"),
+            "{pipeline_str}"
+        );
+        assert!(!pipeline_str.contains("splitmuxsink"), "{pipeline_str}");
+    }
+
+    /// Split-by-duration maps to a `splitmuxsink` with `max-size-time` and a
+    /// `%02d`-numbered location, on a crash-safe container.
+    #[test]
+    fn recording_pipeline_splits_by_duration_on_crash_safe_container() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_recording_container(crate::RecordingContainer::Mkv);
+        engine.set_recording_file(crate::RecordingFileSettings {
+            filename_pattern: crate::FileNamePattern::default(),
+            split: crate::SplitBy::Duration { seconds: 120 },
+            auto_record_with_stream: false,
+            auto_record_dir: "records".to_string(),
+        });
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out.mkv");
+        assert!(
+            pipeline_str.contains("splitmuxsink name=mux"),
+            "{pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("max-size-time=120000000000"),
+            "{pipeline_str}"
+        );
+        assert!(pipeline_str.contains("/tmp/out_%02d.mkv"), "{pipeline_str}");
+        // The video/audio branches still target the same `mux.` any-pad.
+        assert!(pipeline_str.contains("! queue ! mux."), "{pipeline_str}");
+    }
+
+    /// Splitting is disabled on MP4 because it is not crash-safe: a partial
+    /// numbered part would be unreadable.
+    #[test]
+    fn recording_pipeline_ignores_split_on_mp4() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_recording_file(crate::RecordingFileSettings {
+            filename_pattern: crate::FileNamePattern::default(),
+            split: crate::SplitBy::Duration { seconds: 60 },
+            auto_record_with_stream: false,
+            auto_record_dir: "records".to_string(),
+        });
+        // container defaults to MP4 (not crash-safe).
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out.mp4");
+        assert!(pipeline_str.contains("mp4mux name=mux"), "{pipeline_str}");
+        assert!(!pipeline_str.contains("splitmuxsink"), "{pipeline_str}");
+    }
+
+    /// Split-by-size maps to `max-size-bytes` on `splitmuxsink`.
+    #[test]
+    fn recording_pipeline_splits_by_size() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_recording_container(crate::RecordingContainer::Mkv);
+        engine.set_recording_file(crate::RecordingFileSettings {
+            filename_pattern: crate::FileNamePattern::default(),
+            split: crate::SplitBy::Size { megabytes: 250 },
+            auto_record_with_stream: false,
+            auto_record_dir: "records".to_string(),
+        });
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out.mkv");
+        assert!(
+            pipeline_str.contains("splitmuxsink name=mux"),
+            "{pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("max-size-bytes=262144000"),
+            "{pipeline_str}"
+        );
     }
 
     /// The streaming pipeline uses the selected encoder as well.
