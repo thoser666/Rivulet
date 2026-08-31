@@ -348,6 +348,10 @@ fn stale_pin_checker_is_wired_up() {
         nightly.contains("GITHUB_STEP_SUMMARY"),
         "the nightly workflow must publish the comment to the step summary"
     );
+    assert!(
+        nightly.contains("--fail-on-major"),
+        "the nightly workflow must treat newer-major gaps as fatal (--fail-on-major)"
+    );
 }
 
 #[test]

@@ -86,7 +86,9 @@ repository is not configured yet.
   table drifts from those pins.
 - `scripts/check-action-pins.py` — compares every pinned SHA against upstream
   (run daily by the nightly workflow): fails on same-major updates we have not
-  taken, and reports newer majors (use `--fail-on-major` to make those fatal).
+  taken. The nightly workflow invokes it with `--fail-on-major`, so **newer
+  major versions also fail the job** instead of only being reported — a major
+  gap therefore surfaces as a red Nightly run rather than a warning.
   `--json` emits a machine-readable result; `--comment` emits a compact Markdown
   notification that the nightly workflow publishes to the run's step summary.
   Compound actions (`owner/repo/path/to/action`) are resolved against the
