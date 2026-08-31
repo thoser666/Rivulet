@@ -51,24 +51,24 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "stable",
     ),
     (
-        "softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228",
-        "v3.0.2",
+        "softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64",
+        "v3.0.3",
     ),
     (
-        "github/codeql-action/init@42947a340483f03ba47bb1a039b2c519aab3df85",
-        "v3.37.8",
+        "github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d",
+        "v3.37.9",
     ),
     (
-        "github/codeql-action/autobuild@42947a340483f03ba47bb1a039b2c519aab3df85",
-        "v3.37.8",
+        "github/codeql-action/autobuild@6f5948dfacef28e207b48d0905cf90c03365536d",
+        "v3.37.9",
     ),
     (
-        "github/codeql-action/analyze@42947a340483f03ba47bb1a039b2c519aab3df85",
-        "v3.37.8",
+        "github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d",
+        "v3.37.9",
     ),
     (
-        "github/codeql-action/upload-sarif@42947a340483f03ba47bb1a039b2c519aab3df85",
-        "v3.37.8",
+        "github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d",
+        "v3.37.9",
     ),
     (
         "actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48",

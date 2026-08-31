@@ -104,6 +104,16 @@ def stable_tags(repo):
     return result
 
 
+def action_repo(action):
+    """Return the GitHub ``owner/repo`` for a (possibly compound) action ref.
+
+    Compound actions are referenced as ``owner/repo/path/to/action`` while the
+    upstream tags/branches live on the ``owner/repo`` repository itself, so the
+    sub-path must be stripped before resolving refs.
+    """
+    return "/".join(action.split("/")[:2])
+
+
 def check_action(action, sha, version):
     """Return a JSON-serializable dict describing the pin's status.
 
@@ -117,15 +127,16 @@ def check_action(action, sha, version):
         "pinned_sha": sha,
     }
 
+    repo = action_repo(action)
     ref_kind = None
     try:
-        resolve_ref(action, f"refs/tags/{version}")
+        resolve_ref(repo, f"refs/tags/{version}")
         ref_kind = "tag"
     except RuntimeError:
         pass
     if ref_kind is None:
         try:
-            resolve_ref(action, f"refs/heads/{version}")
+            resolve_ref(repo, f"refs/heads/{version}")
             ref_kind = "branch"
         except RuntimeError:
             pass
@@ -138,7 +149,7 @@ def check_action(action, sha, version):
         return result
 
     if ref_kind == "branch":
-        tip = resolve_ref(action, f"refs/heads/{version}")
+        tip = resolve_ref(repo, f"refs/heads/{version}")
         result.update(kind="branch", branch_tip=tip)
         if tip == sha:
             result.update(
@@ -152,7 +163,7 @@ def check_action(action, sha, version):
             )
         return result
 
-    tags = stable_tags(action)
+    tags = stable_tags(repo)
     if not tags:
         result.update(kind="tag", statuses=["error"], message=f"{action}: no stable semver tags found")
         return result

@@ -493,6 +493,23 @@ mod sys_impl {
     /// Record skipped filter elements into `skipped` (deduplicated), logging a
     /// warning the first time each feature is reported.
     pub(crate) fn record_skipped(skipped: &mut Vec<SkippedFilter>, names: &[&'static str]) {
+        record_skipped_with(skipped, names, &mut |filter| {
+            tracing::warn!("{}", filter.log_message());
+        });
+    }
+
+    /// Core dedup/record logic with an injectable log sink.
+    ///
+    /// Splitting the sink out of [`record_skipped`] keeps the dedup and
+    /// one-warning-per-feature behaviour testable without depending on the
+    /// global `tracing` dispatcher (whose per-callsite interest cache can be
+    /// poisoned by a concurrent test that logs without a subscriber, making
+    /// any `tracing`-capture test order-dependent and flaky).
+    pub(crate) fn record_skipped_with(
+        skipped: &mut Vec<SkippedFilter>,
+        names: &[&'static str],
+        log: &mut dyn FnMut(&SkippedFilter),
+    ) {
         for name in names {
             let filter = SkippedFilter {
                 element: name,
@@ -501,7 +518,7 @@ mod sys_impl {
             if skipped.contains(&filter) {
                 continue;
             }
-            tracing::warn!("{}", filter.log_message());
+            log(&filter);
             skipped.push(filter);
         }
     }
@@ -915,54 +932,24 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn record_skipped_emits_the_warning_via_tracing() {
-        use std::sync::{Arc, Mutex};
-
-        #[derive(Clone, Default)]
-        struct LogBuffer(Arc<Mutex<String>>);
-
-        impl std::io::Write for LogBuffer {
-            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                let text = std::str::from_utf8(buf).unwrap_or("<non-utf8>");
-                self.0.lock().unwrap().push_str(text);
-                Ok(buf.len())
-            }
-
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-
-        let buffer = LogBuffer::default();
-        let writer = buffer.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .with_writer(move || writer.clone())
-            .with_ansi(false)
-            .finish();
-
-        tracing::subscriber::with_default(subscriber, || {
-            let mut skipped = Vec::new();
-            sys_impl::record_skipped(&mut skipped, &["webrtcdsp", "audiodynamic", "webrtcdsp"]);
-        });
-
-        let log = buffer.0.lock().unwrap();
-        assert!(
-            log.contains(
-                "noise suppression skipped: GStreamer element `webrtcdsp` is not installed"
-            ),
-            "expected the noise-suppression warning in the captured log, got: {log}"
+    fn record_skipped_logs_each_new_feature_exactly_once() {
+        let mut skipped = Vec::new();
+        let mut logged = Vec::new();
+        sys_impl::record_skipped_with(
+            &mut skipped,
+            &["webrtcdsp", "audiodynamic", "webrtcdsp"],
+            &mut |filter| logged.push(filter.log_message()),
         );
-        assert!(
-            log.contains(
-                "compressor/limiter/expander/gate skipped: GStreamer element `audiodynamic` is not installed"
-            ),
-            "expected the compressor/limiter/expander/gate warning in the captured log, got: {log}"
-        );
+
         assert_eq!(
-            log.matches("webrtcdsp").count(),
-            1,
-            "the duplicate webrtcdsp entry must not be logged twice, got: {log}"
+            logged,
+            vec![
+                "noise suppression skipped: GStreamer element `webrtcdsp` is not installed",
+                "compressor/limiter/expander/gate skipped: GStreamer element `audiodynamic` is not installed",
+            ],
+            "each new feature must be logged exactly once, in first-seen order"
         );
+        assert_eq!(skipped.len(), 2, "the duplicate entry must be deduplicated");
     }
 
     #[cfg(target_os = "linux")]
