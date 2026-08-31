@@ -48,6 +48,9 @@ pub use encoder::{
 pub mod health;
 pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 
+pub mod container;
+pub use container::{RecordingContainer, RemuxPlan, RemuxSettings};
+
 pub mod metrics;
 pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 
@@ -109,9 +112,8 @@ pub use media_source::{MediaSource, MediaType, PlaybackMode};
 pub mod audio_source;
 pub use audio_source::{AudioSource, AudioSourceKind};
 
-pub mod ducking;
-
 pub mod browser_source;
+pub mod ducking;
 pub use browser_source::{
     BrowserFrame, BrowserInput, BrowserMouseButton, BrowserSource, BrowserSourceBackend,
     BrowserSourceError,
@@ -158,6 +160,9 @@ pub struct RivuletEngine {
     video_encoder: VideoEncoder,
     /// Video codec selected for recording (H.264, H.265, or VP9).
     video_codec: VideoCodec,
+    /// Container format selected for recording (MP4 default, or crash-safe
+    /// MKV/MOV/TS as remux intermediates).
+    recording_container: RecordingContainer,
     /// Recording preset controlling resolution, FPS, and bitrate.
     preset: RecordingPreset,
     /// Target video bitrate in kbit/s applied to the selected encoder.
@@ -209,6 +214,7 @@ impl Default for RivuletEngine {
             delay_supervisors: Vec::new(),
             video_encoder: best_encoder(),
             video_codec: VideoCodec::default(),
+            recording_container: RecordingContainer::default(),
             preset: RecordingPreset::default(),
             encoder_bitrate_kbps: 5_000,
             stream_health: None,
@@ -594,6 +600,45 @@ impl RivuletEngine {
         self.video_codec
     }
 
+    /// Select the recording container format.
+    ///
+    /// Defaults to MP4. Choose a crash-safe intermediate (MKV/MOV/TS) to enable
+    /// post-stop remux to MP4 (see [`RecordingContainer`] and [`RemuxPlan`]).
+    /// Must be called before recording starts.
+    pub fn set_recording_container(&mut self, container: RecordingContainer) {
+        self.recording_container = container;
+    }
+
+    /// The currently selected recording container.
+    pub fn recording_container(&self) -> RecordingContainer {
+        self.recording_container
+    }
+
+    /// The recording muxer element, honoring the container selection.
+    ///
+    /// The default MP4 choice maps to the codec-native muxer (so VP9 keeps
+    /// `webmmux` and H.264/H.265 keep `mp4mux`, preserving prior behavior); a
+    /// crash-safe intermediate container (MKV/MOV/TS) opts into that container's
+    /// muxer so the file can be remuxed to MP4 afterwards.
+    pub fn container_muxer(&self) -> &'static str {
+        match self.recording_container {
+            RecordingContainer::Mp4 => self.video_codec.muxer_element(),
+            other => other.muxer_element(),
+        }
+    }
+
+    /// The recording file extension, honoring the container selection.
+    ///
+    /// Mirrors [`Self::container_muxer`]: the default MP4 container uses the
+    /// codec-native extension (H.264/H.265 => `mp4`, VP9 => `webm`), while a
+    /// crash-safe intermediate uses that container's extension.
+    pub fn container_extension(&self) -> &'static str {
+        match self.recording_container {
+            RecordingContainer::Mp4 => self.video_codec.file_extension(),
+            other => other.file_extension(),
+        }
+    }
+
     /// Select a recording preset that controls resolution, FPS, and bitrate.
     ///
     /// Must be called before recording starts. Defaults to
@@ -806,7 +851,7 @@ impl RivuletEngine {
         let mut s = self.video_branch_str();
         s.push_str(&self.audio_branch_str(false));
         let escaped = Self::escape_location(location);
-        let muxer = self.video_codec.muxer_element();
+        let muxer = self.container_muxer();
         s.push_str(&format!(
             "{} name=mux ! filesink name=file_sink location=\"{}\"",
             muxer, escaped
@@ -886,7 +931,7 @@ impl RivuletEngine {
         let location = path.to_str().expect("Invalid file path.");
         tracing::info!(stream_location = %stream_location, "Initializing dual-output pipeline");
 
-        let muxer = self.video_codec.muxer_element();
+        let muxer = self.container_muxer();
         let transform = self.preset.transform_fragment();
         let caps = self
             .video_encoder

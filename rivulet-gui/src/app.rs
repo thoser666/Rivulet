@@ -755,6 +755,7 @@ pub struct RivuletApp {
     // Codec selection
     #[serde(skip)]
     selected_codec: rivulet_core::VideoCodec,
+    selected_container: rivulet_core::RecordingContainer,
     // Preset selection
     #[serde(skip)]
     selected_preset: rivulet_core::RecordingPreset,
@@ -980,6 +981,7 @@ impl Default for RivuletApp {
             replay_duration_secs: Some(30),
             replay_status: None,
             selected_codec: rivulet_core::VideoCodec::default(),
+            selected_container: rivulet_core::RecordingContainer::default(),
             selected_preset: rivulet_core::RecordingPreset::default(),
             show_overlay: false,
 
@@ -1153,9 +1155,9 @@ impl RivuletApp {
 
     #[cfg(target_os = "windows")]
     fn start_windows_recording(&mut self) {
-        let ext = self.selected_codec.file_extension();
+        let ext = self.selected_container_extension();
         let file_path = rfd::FileDialog::new()
-            .add_filter("Video", &[ext, "mov"])
+            .add_filter("Video", &[ext])
             .set_file_name(format!(
                 "rivulet-recording-{}.{}",
                 chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S"),
@@ -1176,6 +1178,8 @@ impl RivuletApp {
             };
 
             self.engine.set_video_codec(self.selected_codec);
+            self.engine.set_recording_container(self.selected_container);
+            self.engine.set_recording_container(self.selected_container);
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
@@ -1232,6 +1236,8 @@ impl RivuletApp {
             };
 
             self.engine.set_video_codec(self.selected_codec);
+            self.engine.set_recording_container(self.selected_container);
+            self.engine.set_recording_container(self.selected_container);
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
@@ -1290,6 +1296,8 @@ impl RivuletApp {
             };
 
             self.engine.set_video_codec(self.selected_codec);
+            self.engine.set_recording_container(self.selected_container);
+            self.engine.set_recording_container(self.selected_container);
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
@@ -1373,6 +1381,8 @@ impl RivuletApp {
             };
 
             self.engine.set_video_codec(self.selected_codec);
+            self.engine.set_recording_container(self.selected_container);
+            self.engine.set_recording_container(self.selected_container);
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
@@ -1637,7 +1647,7 @@ impl RivuletApp {
         };
 
         // File dialog
-        let ext = self.selected_codec.file_extension();
+        let ext = self.selected_container_extension();
         let Some(path) = rfd::FileDialog::new()
             .add_filter("Video", &[ext])
             .set_file_name(format!(
@@ -1655,6 +1665,7 @@ impl RivuletApp {
             self.start_audio_capture();
         }
         self.engine.set_video_codec(self.selected_codec);
+        self.engine.set_recording_container(self.selected_container);
         self.engine.set_preset(self.selected_preset);
         self.engine.set_overlay_enabled(self.show_overlay);
         self.apply_replay_setting();
@@ -1773,7 +1784,7 @@ impl RivuletApp {
             return;
         };
 
-        let ext = self.selected_codec.file_extension();
+        let ext = self.selected_container_extension();
         let Some(path) = rfd::FileDialog::new()
             .add_filter("Video", &[ext])
             .set_file_name(format!(
@@ -1791,6 +1802,7 @@ impl RivuletApp {
             self.start_audio_capture();
         }
         self.engine.set_video_codec(self.selected_codec);
+        self.engine.set_recording_container(self.selected_container);
         self.engine.set_preset(self.selected_preset);
         self.engine.set_overlay_enabled(self.show_overlay);
         self.apply_replay_setting();
@@ -2000,6 +2012,17 @@ impl RivuletApp {
     /// Translate a UI string and substitute positional placeholders.
     fn tr_fmt(&self, key: &str, args: &[String]) -> String {
         self.locale.tr_fmt(key, args)
+    }
+
+    /// File extension for the current recording container, mirroring the
+    /// engine's container-aware selection: the default MP4 container keeps the
+    /// codec-native extension (H.264/H.265 => mp4, VP9 => webm), while a
+    /// crash-safe intermediate container (MKV/MOV/TS) uses its own extension.
+    fn selected_container_extension(&self) -> &'static str {
+        match self.selected_container {
+            rivulet_core::RecordingContainer::Mp4 => self.selected_codec.file_extension(),
+            other => other.file_extension(),
+        }
     }
 
     /// Resolve the label for the recording view's Source (monitor) dropdown.
@@ -4568,6 +4591,29 @@ impl eframe::App for RivuletApp {
                             });
                     });
                     ui.horizontal(|ui| {
+                        ui.label(self.tr("recording_container"));
+                        egui::ComboBox::from_id_salt("windows_container_select")
+                            .selected_text(self.selected_container.label())
+                            .show_ui(ui, |ui| {
+                                for container in [
+                                    rivulet_core::RecordingContainer::Mp4,
+                                    rivulet_core::RecordingContainer::Mkv,
+                                    rivulet_core::RecordingContainer::Mov,
+                                    rivulet_core::RecordingContainer::MpegTs,
+                                ] {
+                                    if ui
+                                        .selectable_label(
+                                            self.selected_container == container,
+                                            container.label(),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.selected_container = container;
+                                    }
+                                }
+                            });
+                    });
+                    ui.horizontal(|ui| {
                         ui.label(self.tr("recording_preset"));
                         egui::ComboBox::from_id_salt("windows_preset_select")
                             .selected_text(self.selected_preset.label)
@@ -4915,6 +4961,29 @@ impl eframe::App for RivuletApp {
                                             .clicked()
                                         {
                                             self.selected_codec = codec;
+                                        }
+                                    }
+                                });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(self.tr("recording_container"));
+                            egui::ComboBox::from_id_salt("linux_container_select")
+                                .selected_text(self.selected_container.label())
+                                .show_ui(ui, |ui| {
+                                    for container in [
+                                        rivulet_core::RecordingContainer::Mp4,
+                                        rivulet_core::RecordingContainer::Mkv,
+                                        rivulet_core::RecordingContainer::Mov,
+                                        rivulet_core::RecordingContainer::MpegTs,
+                                    ] {
+                                        if ui
+                                            .selectable_label(
+                                                self.selected_container == container,
+                                                container.label(),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.selected_container = container;
                                         }
                                     }
                                 });

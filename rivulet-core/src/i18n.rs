@@ -267,6 +267,7 @@ impl Locale {
                 ("muted", "Muted"),
                 // Codec selection
                 ("video_codec", "Video codec"),
+                ("recording_container", "Container"),
                 ("recording_preset", "Preset"),
                 // Overlay
                 ("overlay_toggle", "Overlay (timer + FPS)"),
@@ -647,6 +648,7 @@ impl Locale {
                 ("muted", "Stumm"),
                 // Codec selection
                 ("video_codec", "Video-Codec"),
+                ("recording_container", "Container"),
                 ("recording_preset", "Preset"),
                 // Overlay
                 ("overlay_toggle", "Overlay (Timer + FPS)"),
