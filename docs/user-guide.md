@@ -170,6 +170,8 @@ Wenn die GUI startet, aber nicht reagiert:
 - WHIP benötigt noch den vollständigen ICE/DTLS/SRTP- und SFU-End-to-End-Nachweis.
 - Der VOD-Track (Twitch-Workflow) ist als deterministische Konfiguration vorhanden; die eigentliche pro-Track-GStreamer-Routing- und UI-Integration folgt noch.
 - NDI-Output ist als Konfigurationsvertrag vorhanden; eine echte LAN-Interoperabilität über den NewTek-NDI-Runtime ist noch nicht verifiziert.
+- VST 3.x ist als Konfigurations-/Entdeckungs-Contract vorhanden; das eigentliche Laden (Hosting) von VST3-Modulen in den Audio-Graph folgt noch.
+- Cloud-Recordings sind als validierter S3-kompatibler Konfigurationsvertrag vorhanden; der tatsächliche Upload (S3 `PUT`) folgt noch.
 - RIST/SRT-Smoke-Tests prüfen die CI-Interoperabilität, ersetzen aber keinen Test gegen den produktiven Receiver.
 - macOS- und Linux-Funktionen können durch Berechtigungen, Wayland-Portale oder fehlende GStreamer-Plugins eingeschränkt sein.
 
@@ -181,3 +183,5 @@ Wenn die GUI startet, aber nicht reagiert:
 - [Logging und Crash-Diagnose](logging.md)
 - [M3 Streaming Quality Gate](m3-streaming-quality-gate.md)
 - [Security- und CI-Hinweise](security.md)
+- [Cloud-Recordings (S3-kompatibel)](cloud-recordings.md)
+- [VST 3.x-Support](vst3.md)

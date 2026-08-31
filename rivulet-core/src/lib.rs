@@ -64,6 +64,12 @@ pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 pub mod ndi;
 pub use ndi::NdiOutput;
 
+pub mod cloud;
+pub use cloud::{mask_secret, CloudRecording};
+
+pub mod vst3;
+pub use vst3::{discover_in, discover_vst3_plugins, vst3_search_dirs, VstChain, VstPlugin};
+
 pub mod sdp;
 pub use sdp::SdpOffer;
 
