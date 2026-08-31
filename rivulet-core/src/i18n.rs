@@ -269,6 +269,9 @@ impl Locale {
                 ("video_codec", "Video codec"),
                 ("recording_container", "Container"),
                 ("auto_remux", "Remux to MP4 after stop"),
+                ("split_after", "Split after (s):"),
+                ("seconds", "s"),
+                ("auto_record_with_stream", "Record automatically with stream"),
                 ("recording_preset", "Preset"),
                 // Overlay
                 ("overlay_toggle", "Overlay (timer + FPS)"),
@@ -651,6 +654,9 @@ impl Locale {
                 ("video_codec", "Video-Codec"),
                 ("recording_container", "Container"),
                 ("auto_remux", "Nach Stopp zu MP4 remuxen"),
+                ("split_after", "Aufteilen nach (s):"),
+                ("seconds", "s"),
+                ("auto_record_with_stream", "Automatisch mit Stream aufnehmen"),
                 ("recording_preset", "Preset"),
                 // Overlay
                 ("overlay_toggle", "Overlay (Timer + FPS)"),

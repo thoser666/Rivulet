@@ -3904,6 +3904,7 @@ dependencies = [
  "anyhow",
  "ash",
  "async-trait",
+ "chrono",
  "crossbeam-channel",
  "dirs",
  "glib",

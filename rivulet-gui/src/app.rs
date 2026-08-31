@@ -757,6 +757,8 @@ pub struct RivuletApp {
     selected_codec: rivulet_core::VideoCodec,
     selected_container: rivulet_core::RecordingContainer,
     auto_remux: bool,
+    split_seconds: u64,
+    auto_record_with_stream: bool,
     // Preset selection
     #[serde(skip)]
     selected_preset: rivulet_core::RecordingPreset,
@@ -984,6 +986,8 @@ impl Default for RivuletApp {
             selected_codec: rivulet_core::VideoCodec::default(),
             selected_container: rivulet_core::RecordingContainer::default(),
             auto_remux: true,
+            split_seconds: 0,
+            auto_record_with_stream: false,
             selected_preset: rivulet_core::RecordingPreset::default(),
             show_overlay: false,
 
@@ -1160,11 +1164,7 @@ impl RivuletApp {
         let ext = self.selected_container_extension();
         let file_path = rfd::FileDialog::new()
             .add_filter("Video", &[ext])
-            .set_file_name(format!(
-                "rivulet-recording-{}.{}",
-                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S"),
-                ext
-            ))
+            .set_file_name(self.default_recording_filename())
             .save_file();
 
         let Some(path) = file_path else {
@@ -1182,6 +1182,7 @@ impl RivuletApp {
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_recording_container(self.selected_container);
             self.engine.set_auto_remux(self.auto_remux);
+            self.apply_recording_file_settings();
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
@@ -1240,6 +1241,7 @@ impl RivuletApp {
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_recording_container(self.selected_container);
             self.engine.set_auto_remux(self.auto_remux);
+            self.apply_recording_file_settings();
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
@@ -1300,6 +1302,7 @@ impl RivuletApp {
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_recording_container(self.selected_container);
             self.engine.set_auto_remux(self.auto_remux);
+            self.apply_recording_file_settings();
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
@@ -1385,6 +1388,7 @@ impl RivuletApp {
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_recording_container(self.selected_container);
             self.engine.set_auto_remux(self.auto_remux);
+            self.apply_recording_file_settings();
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
@@ -1652,11 +1656,7 @@ impl RivuletApp {
         let ext = self.selected_container_extension();
         let Some(path) = rfd::FileDialog::new()
             .add_filter("Video", &[ext])
-            .set_file_name(format!(
-                "rivulet-recording-{}.{}",
-                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S"),
-                ext
-            ))
+            .set_file_name(self.default_recording_filename())
             .save_file()
         else {
             tracing::debug!("File selection cancelled");
@@ -1669,6 +1669,7 @@ impl RivuletApp {
         self.engine.set_video_codec(self.selected_codec);
         self.engine.set_recording_container(self.selected_container);
         self.engine.set_auto_remux(self.auto_remux);
+        self.apply_recording_file_settings();
         self.engine.set_preset(self.selected_preset);
         self.engine.set_overlay_enabled(self.show_overlay);
         self.apply_replay_setting();
@@ -1790,11 +1791,7 @@ impl RivuletApp {
         let ext = self.selected_container_extension();
         let Some(path) = rfd::FileDialog::new()
             .add_filter("Video", &[ext])
-            .set_file_name(format!(
-                "rivulet-recording-{}.{}",
-                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S"),
-                ext
-            ))
+            .set_file_name(self.default_recording_filename())
             .save_file()
         else {
             tracing::debug!("File selection cancelled");
@@ -1807,6 +1804,7 @@ impl RivuletApp {
         self.engine.set_video_codec(self.selected_codec);
         self.engine.set_recording_container(self.selected_container);
         self.engine.set_auto_remux(self.auto_remux);
+        self.apply_recording_file_settings();
         self.engine.set_preset(self.selected_preset);
         self.engine.set_overlay_enabled(self.show_overlay);
         self.apply_replay_setting();
@@ -2027,6 +2025,34 @@ impl RivuletApp {
             rivulet_core::RecordingContainer::Mp4 => self.selected_codec.file_extension(),
             other => other.file_extension(),
         }
+    }
+
+    /// Applies the current recording file-management policy (split + auto-
+    /// record flags) to the engine before a recording starts.
+    fn apply_recording_file_settings(&mut self) {
+        use rivulet_core::{RecordingFileSettings, SplitBy};
+        let split = if self.split_seconds > 0 {
+            SplitBy::Duration {
+                seconds: self.split_seconds,
+            }
+        } else {
+            SplitBy::None
+        };
+        self.engine.set_recording_file(RecordingFileSettings {
+            filename_pattern: rivulet_core::FileNamePattern::default(),
+            split,
+            auto_record_with_stream: self.auto_record_with_stream,
+            auto_record_dir: "recordings".to_string(),
+        });
+    }
+
+    /// Default base filename for a new recording, derived from the engine's
+    /// filename pattern and the current container extension.
+    fn default_recording_filename(&self) -> String {
+        let path = self.engine.default_recording_path("", "");
+        path.file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "rivulet-recording.mp4".to_string())
     }
 
     /// Resolve the label for the recording view's Source (monitor) dropdown.
@@ -4622,6 +4648,15 @@ impl eframe::App for RivuletApp {
                         ui.checkbox(&mut self.auto_remux, auto_remux_label);
                     });
                     ui.horizontal(|ui| {
+                        ui.label(self.tr("split_after"));
+                        ui.add(egui::DragValue::new(&mut self.split_seconds).range(0..=3600));
+                        ui.label(self.tr("seconds"));
+                    });
+                    let auto_record_label = self.tr("auto_record_with_stream");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.auto_record_with_stream, auto_record_label);
+                    });
+                    ui.horizontal(|ui| {
                         ui.label(self.tr("recording_preset"));
                         egui::ComboBox::from_id_salt("windows_preset_select")
                             .selected_text(self.selected_preset.label)
@@ -4998,6 +5033,17 @@ impl eframe::App for RivuletApp {
                         });
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut self.auto_remux, self.tr("auto_remux"));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(self.tr("split_after"));
+                            ui.add(egui::DragValue::new(&mut self.split_seconds).range(0..=3600));
+                            ui.label(self.tr("seconds"));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.checkbox(
+                                &mut self.auto_record_with_stream,
+                                self.tr("auto_record_with_stream"),
+                            );
                         });
                         ui.horizontal(|ui| {
                             ui.label(self.tr("recording_preset"));

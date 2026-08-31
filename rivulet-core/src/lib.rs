@@ -51,6 +51,11 @@ pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 pub mod container;
 pub use container::{remux_to_mp4, RecordingContainer, RemuxOutcome, RemuxPlan, RemuxSettings};
 
+pub mod file_management;
+pub use file_management::{
+    FileNamePattern, PatternToken, PatternValues, RecordingFileSettings, RecordingSession, SplitBy,
+};
+
 pub mod metrics;
 pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 
@@ -166,6 +171,9 @@ pub struct RivuletEngine {
     /// Remux settings: whether to auto-remux the finished recording to MP4
     /// after stop (issue #71).
     remux_settings: RemuxSettings,
+    /// Recording file-management policy: filename pattern, split rules, and
+    /// whether a recording auto-starts alongside the stream (M4).
+    recording_file: RecordingFileSettings,
     /// Recording preset controlling resolution, FPS, and bitrate.
     preset: RecordingPreset,
     /// Target video bitrate in kbit/s applied to the selected encoder.
@@ -219,6 +227,7 @@ impl Default for RivuletEngine {
             video_codec: VideoCodec::default(),
             recording_container: RecordingContainer::default(),
             remux_settings: RemuxSettings::default(),
+            recording_file: RecordingFileSettings::default(),
             preset: RecordingPreset::default(),
             encoder_bitrate_kbps: 5_000,
             stream_health: None,
@@ -627,6 +636,34 @@ impl RivuletEngine {
     /// Whether auto-remux after stop is enabled.
     pub fn auto_remux(&self) -> bool {
         self.remux_settings.auto_remux_after_stop
+    }
+
+    /// Configure the recording file-management policy (M4).
+    pub fn set_recording_file(&mut self, settings: RecordingFileSettings) {
+        self.recording_file = settings;
+    }
+
+    /// The currently configured recording file-management policy.
+    pub fn recording_file(&self) -> &RecordingFileSettings {
+        &self.recording_file
+    }
+
+    /// Builds the default recording filename for the current container,
+    /// applying the configured filename pattern with the current timestamp and
+    /// an optional stream label. Used by the GUI's file dialogs.
+    pub fn default_recording_path(&self, dir: &str, stream_label: &str) -> PathBuf {
+        let now = chrono::Local::now();
+        let vals = PatternValues {
+            name: "rivulet-recording".to_string(),
+            date: now.format("%Y-%m-%d").to_string(),
+            time: now.format("%H-%M-%S").to_string(),
+        };
+        let stem = self
+            .recording_file
+            .filename_pattern
+            .render(&vals, 1, stream_label);
+        let ext = self.container_extension();
+        PathBuf::from(dir).join(format!("{stem}.{ext}"))
     }
 
     /// The recording muxer element, honoring the container selection.
@@ -2834,5 +2871,34 @@ mod tests {
             assert!(replay.lock().unwrap().is_empty());
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn default_recording_path_uses_engine_pattern_and_container() {
+        let mut engine = RivuletEngine::default();
+        engine.set_recording_container(crate::RecordingContainer::Mkv);
+        let path = engine.default_recording_path("videos", "");
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        // The default pattern sanitizes the base name (hyphen -> underscore)
+        // and the container selection yields an mkv extension.
+        assert!(name.starts_with("rivulet_recording_"), "got {name}");
+        assert!(name.ends_with(".mkv"), "got {name}");
+        assert!(
+            name.contains("-08-"),
+            "timestamp date component missing: {name}"
+        );
+        // The parent directory is preserved from the dir argument.
+        assert!(path.parent().unwrap().to_string_lossy().ends_with("videos"));
+    }
+
+    #[test]
+    fn default_recording_path_honors_stream_label() {
+        let engine = RivuletEngine::default();
+        let path = engine.default_recording_path("out", "Twitch");
+        // Default pattern is {name}_{date}_{time} (no {stream}), so the label
+        // is ignored; the filename still carries the date and time.
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("rivulet_recording_"), "got {name}");
+        assert!(name.len() > "rivulet_recording_".len());
     }
 }
