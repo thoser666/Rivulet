@@ -40,10 +40,12 @@ pub use reconnect::{
 pub use stream_runtime::{AdaptiveBitrateController, BitrateChange, DelaySupervisor};
 
 pub mod encoder;
+pub mod video_effects;
 pub use encoder::{
     best_encoder, best_encoder_for_codec, detect_available_encoders,
     detect_available_encoders_for_codec, RateControl, RateControlMode, VideoCodec, VideoEncoder,
 };
+pub use video_effects::VideoEffects;
 
 pub mod health;
 pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
@@ -181,6 +183,9 @@ pub struct RivuletEngine {
     /// Advanced rate-control strategy (CBR/VBR/CQ/CQ-VBR plus custom encoder
     /// options) layered on top of the target bitrate.
     rate_control: RateControl,
+    /// Video filters/effects (colour correction, blur, sharpen) applied to the
+    /// capture before encoding.
+    video_effects: VideoEffects,
     /// Tracks stream health while a streaming pipeline is active. Always
     /// `None` for plain local recordings.
     stream_health: Option<StreamHealthMonitor>,
@@ -234,6 +239,7 @@ impl Default for RivuletEngine {
             preset: RecordingPreset::default(),
             encoder_bitrate_kbps: 5_000,
             rate_control: RateControl::default(),
+            video_effects: VideoEffects::default(),
             stream_health: None,
             recording_metrics: None,
             last_error: None,
@@ -728,6 +734,31 @@ impl RivuletEngine {
         self.rate_control = rc;
     }
 
+    /// Apply video filters/effects (colour correction, blur, sharpen) to the
+    /// capture before encoding.
+    ///
+    /// Call before recording or streaming starts. Effects are inserted after
+    /// `videoconvert` and before the encoder-input caps filter.
+    pub fn set_video_effects(&mut self, effects: VideoEffects) {
+        self.video_effects = effects;
+    }
+
+    /// The currently configured video effects.
+    pub fn video_effects(&self) -> &VideoEffects {
+        &self.video_effects
+    }
+
+    /// The ` ! <effects>` pipeline segment to insert right after `videoconvert`,
+    /// or an empty string when no effect is active.
+    fn video_effects_fragment(&self) -> String {
+        let frag = self.video_effects.fragment();
+        if frag.is_empty() {
+            String::new()
+        } else {
+            format!(" ! {frag}")
+        }
+    }
+
     /// The currently configured rate-control strategy.
     pub fn rate_control(&self) -> &RateControl {
         &self.rate_control
@@ -850,10 +881,11 @@ impl RivuletEngine {
         } else {
             ""
         };
+        let effects = self.video_effects_fragment();
         if transform.is_empty() {
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert ! {}{} ! {}{} ",
+                 ! videoconvert{effects} ! {}{} ! {}{} ",
                 caps,
                 overlay,
                 encoder,
@@ -866,7 +898,7 @@ impl RivuletEngine {
             let transform_caps = format!("{}!{}", transform.trim_end(), caps.trim_start());
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert ! {}{} ! {}{} ",
+                 ! videoconvert{effects} ! {}{} ! {}{} ",
                 transform_caps,
                 overlay,
                 encoder,
@@ -1055,10 +1087,11 @@ impl RivuletEngine {
         } else {
             ""
         };
+        let effects = self.video_effects_fragment();
         let video_part = if transform.is_empty() {
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert ! {}{} ! {} ",
+                 ! videoconvert{effects} ! {}{} ! {} ",
                 caps, overlay, encoder
             )
         } else {
@@ -2551,6 +2584,38 @@ mod tests {
             pipeline_str
         );
         gst::parse::launch(&pipeline_str).expect("pipeline with x264 should parse");
+    }
+
+    /// Video effects are inserted between `videoconvert` and the encoder-input
+    /// caps, and disappear again once the effects are reset.
+    #[test]
+    fn recording_pipeline_applies_video_effects() {
+        let mut engine = RivuletEngine::default();
+        engine.set_video_effects(VideoEffects {
+            brightness: 0.1,
+            saturation: -0.2,
+            blur: true,
+            ..Default::default()
+        });
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/vf.mp4");
+        assert!(
+            pipeline_str.contains("videoconvert ! videobalance"),
+            "{pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("videoconvert ! videobalance brightness=0.100 "),
+            "{pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("brightness=0.100 saturation=-0.200 ! gaussianblur"),
+            "{pipeline_str}"
+        );
+
+        // Reset to defaults -> no effects in the pipeline.
+        engine.set_video_effects(VideoEffects::default());
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/vf.mp4");
+        assert!(!pipeline_str.contains("videobalance"), "{pipeline_str}");
+        assert!(!pipeline_str.contains("gaussianblur"), "{pipeline_str}");
     }
 
     /// The recording pipeline keeps a single muxer + filesink when no split

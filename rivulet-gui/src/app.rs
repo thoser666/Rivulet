@@ -773,6 +773,7 @@ pub struct RivuletApp {
     // Overlay (timer + FPS counter)
     #[serde(skip)]
     show_overlay: bool,
+    video_effects: rivulet_core::VideoEffects,
 
     // Camera (webcam) source
     #[serde(skip)]
@@ -1006,6 +1007,7 @@ impl Default for RivuletApp {
             auto_record_with_stream: false,
             selected_preset: rivulet_core::RecordingPreset::default(),
             show_overlay: false,
+            video_effects: rivulet_core::VideoEffects::default(),
 
             // Camera
             camera_devices: Vec::new(),
@@ -1203,6 +1205,8 @@ impl RivuletApp {
             self.apply_rate_control();
             self.apply_rate_control();
             self.engine.set_overlay_enabled(self.show_overlay);
+            self.engine.set_video_effects(self.video_effects);
+            self.engine.set_video_effects(self.video_effects);
             self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
 
@@ -1264,6 +1268,8 @@ impl RivuletApp {
             self.apply_rate_control();
             self.apply_rate_control();
             self.engine.set_overlay_enabled(self.show_overlay);
+            self.engine.set_video_effects(self.video_effects);
+            self.engine.set_video_effects(self.video_effects);
             self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
 
@@ -1327,6 +1333,8 @@ impl RivuletApp {
             self.apply_rate_control();
             self.apply_rate_control();
             self.engine.set_overlay_enabled(self.show_overlay);
+            self.engine.set_video_effects(self.video_effects);
+            self.engine.set_video_effects(self.video_effects);
             self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
 
@@ -1415,6 +1423,8 @@ impl RivuletApp {
             self.apply_rate_control();
             self.apply_rate_control();
             self.engine.set_overlay_enabled(self.show_overlay);
+            self.engine.set_video_effects(self.video_effects);
+            self.engine.set_video_effects(self.video_effects);
             self.apply_replay_setting();
             self.engine.start_local_recording(path.clone());
 
@@ -1698,6 +1708,7 @@ impl RivuletApp {
         self.engine.set_preset(self.selected_preset);
         self.apply_rate_control();
         self.engine.set_overlay_enabled(self.show_overlay);
+        self.engine.set_video_effects(self.video_effects);
         self.apply_replay_setting();
         self.engine.set_audio_enabled(self.audio_preview);
         self.engine
@@ -1838,6 +1849,7 @@ impl RivuletApp {
         self.engine.set_preset(self.selected_preset);
         self.apply_rate_control();
         self.engine.set_overlay_enabled(self.show_overlay);
+        self.engine.set_video_effects(self.video_effects);
         self.apply_replay_setting();
         self.engine.set_audio_enabled(self.audio_preview);
         self.engine
@@ -4744,6 +4756,29 @@ impl eframe::App for RivuletApp {
                                 .hint_text("key-int-max=250"),
                         );
                     });
+                    ui.separator();
+                    let ve_title = self.tr("video_effects");
+                    let (vb, vc, vs, vh, vf_blur, vf_sharpen) = (
+                        self.tr("vf_brightness"),
+                        self.tr("vf_contrast"),
+                        self.tr("vf_saturation"),
+                        self.tr("vf_hue"),
+                        self.tr("vf_blur"),
+                        self.tr("vf_sharpen"),
+                    );
+                    ui.label(egui::RichText::new(ve_title).strong());
+                    let mut eff = self.video_effects;
+                    ui.horizontal_wrapped(|ui| {
+                        ui.add(egui::Slider::new(&mut eff.brightness, -1.0..=1.0).text(vb));
+                        ui.add(egui::Slider::new(&mut eff.contrast, -1.0..=1.0).text(vc));
+                        ui.add(egui::Slider::new(&mut eff.saturation, -1.0..=1.0).text(vs));
+                        ui.add(egui::Slider::new(&mut eff.hue, -1.0..=1.0).text(vh));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut eff.blur, vf_blur);
+                        ui.checkbox(&mut eff.sharpen, vf_sharpen);
+                    });
+                    self.video_effects = eff;
                     let auto_record_label = self.tr("auto_record_with_stream");
                     ui.horizontal(|ui| {
                         ui.checkbox(&mut self.auto_record_with_stream, auto_record_label);
@@ -5285,35 +5320,56 @@ impl eframe::App for RivuletApp {
 
                     ui.separator();
                     ui.label(egui::RichText::new(self.tr("audio_filters")).strong());
-                    let mut sys_ns = self.system_filters.noise_suppression;
-                    let mut sys_cmp = self.system_filters.compressor;
-                    let mut sys_lim = self.system_filters.limiter;
-                    let mut mic_ns = self.mic_filters.noise_suppression;
-                    let mut mic_cmp = self.mic_filters.compressor;
-                    let mut mic_lim = self.mic_filters.limiter;
+                    let before = self.system_filters.clone();
+                    let before_mic = self.mic_filters.clone();
                     ui.horizontal(|ui| {
-                        ui.checkbox(&mut sys_ns, "NS (System)");
-                        ui.checkbox(&mut sys_cmp, "Cmp (System)");
-                        ui.checkbox(&mut sys_lim, "Lim (System)");
+                        ui.checkbox(&mut self.system_filters.noise_suppression, "NS·Sys");
+                        ui.checkbox(
+                            &mut self.system_filters.noise_gate,
+                            self.tr("filter_noise_gate"),
+                        );
+                        ui.checkbox(&mut self.system_filters.compressor, "Cmp·Sys");
+                        ui.checkbox(&mut self.system_filters.limiter, "Lim·Sys");
+                        ui.checkbox(
+                            &mut self.system_filters.expander,
+                            self.tr("filter_expander"),
+                        );
                     });
                     ui.horizontal(|ui| {
-                        ui.checkbox(&mut mic_ns, "NS (Mikro)");
-                        ui.checkbox(&mut mic_cmp, "Cmp (Mikro)");
-                        ui.checkbox(&mut mic_lim, "Lim (Mikro)");
+                        ui.checkbox(&mut self.mic_filters.noise_suppression, "NS·Mic");
+                        ui.checkbox(&mut self.mic_filters.noise_gate, "Gate·Mic");
+                        ui.checkbox(&mut self.mic_filters.compressor, "Cmp·Mic");
+                        ui.checkbox(&mut self.mic_filters.limiter, "Lim·Mic");
+                        ui.checkbox(&mut self.mic_filters.expander, "Exp·Mic");
                     });
-                    let filters_changed = sys_ns != self.system_filters.noise_suppression
-                        || sys_cmp != self.system_filters.compressor
-                        || sys_lim != self.system_filters.limiter
-                        || mic_ns != self.mic_filters.noise_suppression
-                        || mic_cmp != self.mic_filters.compressor
-                        || mic_lim != self.mic_filters.limiter;
-                    if filters_changed {
-                        self.system_filters.noise_suppression = sys_ns;
-                        self.system_filters.compressor = sys_cmp;
-                        self.system_filters.limiter = sys_lim;
-                        self.mic_filters.noise_suppression = mic_ns;
-                        self.mic_filters.compressor = mic_cmp;
-                        self.mic_filters.limiter = mic_lim;
+                    ui.horizontal(|ui| {
+                        ui.label(self.tr("filter_gain"));
+                        ui.add(
+                            egui::Slider::new(&mut self.system_filters.gain_db, -30.0..=30.0)
+                                .text("Sys"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut self.mic_filters.gain_db, -30.0..=30.0)
+                                .text("Mic"),
+                        );
+                    });
+                    egui::CollapsingHeader::new(self.tr("filter_eq"))
+                        .default_open(false)
+                        .show(ui, |ui| {
+                            ui.label("System");
+                            ui.horizontal_wrapped(|ui| {
+                                for band in self.system_filters.eq_bands.iter_mut() {
+                                    ui.add(egui::Slider::new(band, -12.0..=12.0));
+                                }
+                            });
+                            ui.label("Mikro");
+                            ui.horizontal_wrapped(|ui| {
+                                for band in self.mic_filters.eq_bands.iter_mut() {
+                                    ui.add(egui::Slider::new(band, -12.0..=12.0));
+                                }
+                            });
+                        });
+                    if self.system_filters != before || self.mic_filters != before_mic {
                         if self.audio_preview {
                             self.start_audio_capture();
                         }

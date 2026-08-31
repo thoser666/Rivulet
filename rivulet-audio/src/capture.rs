@@ -7,12 +7,13 @@ use crate::messages;
 ///
 /// The filters are inserted into the GStreamer pipeline between the volume
 /// element and the caps filter. They are realised with the `webrtcdsp`
-/// (noise suppression) and `audiodynamic` (compressor/limiter) elements.
+/// (noise suppression), `audiodynamic` (compressor/limiter/expander/gate),
+/// `audioamplify` (gain) and `equalizer-10bands` elements.
 ///
 /// Elements whose GStreamer factory is not installed (e.g. `webrtcdsp` on
 /// distros that do not ship it) are skipped with a warning when the pipeline
 /// is built, so a missing optional filter never fails the capture.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct AudioFilters {
     /// Noise suppression (WebRTC audio processing library).
     pub noise_suppression: bool,
@@ -20,6 +21,16 @@ pub struct AudioFilters {
     pub compressor: bool,
     /// Hard limiter (prevents clipping, ratio ~20:1).
     pub limiter: bool,
+    /// Noise gate (downward expansion below a low threshold, ratio ~10:1).
+    pub noise_gate: bool,
+    /// Expander (downward expansion below a mid threshold, gentle ratio).
+    pub expander: bool,
+    /// Makeup gain in decibels (`-30..=+30`); `0.0` disables the gain stage.
+    /// Realised with `audioamplify` (linear factor `10^(dB/20)`).
+    pub gain_db: f32,
+    /// 10-band equalizer gains in dB (`-24..=+12`, element nominal range).
+    /// An all-zero array disables the equalizer stage.
+    pub eq_bands: [f32; 10],
 }
 
 /// Configuration for audio capture.
@@ -503,10 +514,10 @@ mod sys_impl {
         filters: &AudioFilters,
         available: impl Fn(&str) -> bool,
     ) -> (String, Vec<&'static str>) {
-        let mut elements: Vec<&'static str> = Vec::new();
+        let mut elements: Vec<String> = Vec::new();
         let mut skipped: Vec<&'static str> = Vec::new();
 
-        let mut push = |factory: &'static str, fragment: &'static str| {
+        let mut push = |factory: &'static str, fragment: String| {
             if available(factory) {
                 elements.push(fragment);
             } else if !skipped.contains(&factory) {
@@ -518,22 +529,56 @@ mod sys_impl {
             push(
                 "webrtcdsp",
                 "webrtcdsp noise-suppression=true echo-cancel=false \
-                 gain-control=false high-pass-filter=false",
+                 gain-control=false high-pass-filter=false"
+                    .to_string(),
+            );
+        }
+        if filters.noise_gate {
+            // A gate is a strong expander that closes fully below the threshold.
+            push(
+                "audiodynamic",
+                "audiodynamic mode=expander characteristics=hard-knee \
+                 threshold=0.03 ratio=10.0"
+                    .to_string(),
+            );
+        }
+        if filters.expander {
+            push(
+                "audiodynamic",
+                "audiodynamic mode=expander characteristics=soft-knee \
+                 threshold=0.3 ratio=1.5"
+                    .to_string(),
             );
         }
         if filters.compressor {
             push(
                 "audiodynamic",
                 "audiodynamic mode=compressor characteristics=soft-knee \
-                 threshold=0.5 ratio=4.0",
+                 threshold=0.5 ratio=4.0"
+                    .to_string(),
             );
         }
         if filters.limiter {
             push(
                 "audiodynamic",
                 "audiodynamic mode=compressor characteristics=hard-knee \
-                 threshold=0.95 ratio=20.0",
+                 threshold=0.95 ratio=20.0"
+                    .to_string(),
             );
+        }
+        if filters.gain_db.abs() >= 0.1 {
+            let factor = 10f32.powf(filters.gain_db / 20.0);
+            push(
+                "audioamplify",
+                format!("audioamplify amplification={factor:.4}"),
+            );
+        }
+        if filters.eq_bands.iter().any(|db| db.abs() >= 0.5) {
+            let mut frag = String::from("equalizer-10bands ");
+            for (i, db) in filters.eq_bands.iter().enumerate() {
+                frag.push_str(&format!("band{i}={db:.1} "));
+            }
+            push("equalizer-10bands", frag.trim_end().to_string());
         }
 
         (elements.join(" ! "), skipped)
@@ -700,9 +745,15 @@ mod tests {
         assert!(!config.system_filters.noise_suppression);
         assert!(!config.system_filters.compressor);
         assert!(!config.system_filters.limiter);
+        assert!(!config.system_filters.noise_gate);
+        assert!(!config.system_filters.expander);
+        assert_eq!(config.system_filters.gain_db, 0.0);
+        assert!(config.system_filters.eq_bands.iter().all(|db| *db == 0.0));
         assert!(!config.mic_filters.noise_suppression);
         assert!(!config.mic_filters.compressor);
         assert!(!config.mic_filters.limiter);
+        assert!(!config.mic_filters.noise_gate);
+        assert!(!config.mic_filters.expander);
         assert!(!config.system_monitor);
         assert!(!config.mic_monitor);
         assert_eq!(config.monitor_volume.to_bits(), 1.0f32.to_bits());
@@ -729,6 +780,7 @@ mod tests {
             noise_suppression: true,
             compressor: true,
             limiter: true,
+            ..Default::default()
         };
         // All elements available -> full chain, nothing skipped.
         let (chain, skipped) = sys_impl::filter_chain_str_with(&filters, |_| true);
@@ -745,6 +797,7 @@ mod tests {
             noise_suppression: true,
             compressor: true,
             limiter: true,
+            ..Default::default()
         };
         // Simulate a distro whose gst-plugins-bad does not ship webrtcdsp
         // (e.g. Ubuntu): the filter is dropped, the rest of the chain stays.
@@ -758,11 +811,57 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn filter_chain_emits_gate_expander_gain_and_eq() {
+        let filters = AudioFilters {
+            noise_gate: true,
+            expander: true,
+            gain_db: 20.0,
+            eq_bands: [3.0, -6.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ..Default::default()
+        };
+        let (chain, skipped) = sys_impl::filter_chain_str_with(&filters, |_| true);
+        assert!(
+            chain.contains("mode=expander characteristics=hard-knee"),
+            "gate: {chain}"
+        );
+        assert!(
+            chain.contains("mode=expander characteristics=soft-knee"),
+            "expander: {chain}"
+        );
+        // Gain is emitted as a linear amplitude factor (10^(20/20) == 10.0).
+        assert!(
+            chain.contains("audioamplify amplification=10.0000"),
+            "gain: {chain}"
+        );
+        assert!(chain.contains("equalizer-10bands"), "eq: {chain}");
+        assert!(chain.contains("band0=3.0"), "band0: {chain}");
+        assert!(chain.contains("band1=-6.0"), "band1: {chain}");
+        assert!(skipped.is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn filter_chain_emits_no_gain_or_eq_when_neutral() {
+        // A 0 dB gain and an all-zero EQ are no-ops and must not emit elements.
+        let filters = AudioFilters {
+            noise_gate: true,
+            ..Default::default()
+        };
+        let (chain, skipped) = sys_impl::filter_chain_str_with(&filters, |_| true);
+        assert!(!chain.contains("audioamplify"), "{chain}");
+        assert!(!chain.contains("equalizer-10bands"), "{chain}");
+        assert!(chain.contains("audiodynamic"), "{chain}");
+        assert!(skipped.is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn filter_chain_str_skips_all_unavailable_elements() {
         let filters = AudioFilters {
             noise_suppression: true,
             compressor: true,
             limiter: true,
+            ..Default::default()
         };
         // Nothing available -> empty chain, each factory reported once.
         let (chain, skipped) = sys_impl::filter_chain_str_with(&filters, |_| false);
@@ -798,7 +897,7 @@ mod tests {
                 },
                 SkippedFilter {
                     element: "audiodynamic",
-                    feature: "compressor/limiter",
+                    feature: "compressor/limiter/expander/gate",
                 },
             ]
         );
@@ -810,7 +909,7 @@ mod tests {
         );
         assert_eq!(
             skipped[1].log_message(),
-            "compressor/limiter skipped: GStreamer element `audiodynamic` is not installed"
+            "compressor/limiter/expander/gate skipped: GStreamer element `audiodynamic` is not installed"
         );
     }
 

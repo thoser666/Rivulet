@@ -68,6 +68,15 @@ Standardmäßig encodiert Rivulet mit fester Bitrate (**CBR**) — der einzig zu
 
 Der Schalter **Qualität** (0–51, niedriger = besser) und ggf. die maximale Bitrate werden nur bei den passenden Modis angezeigt. Das Freitextfeld **Zusätzliche Encoder-Optionen** hängt eigene Properties (z. B. `key-int-max=250 bframes=3`) direkt an das Encoder-Element an. Bei Backends ohne saubere Rate-Control-Properties (QuickSync, AMF, VP9, Software-H.265) fällt Rivulet auf eine durchschnittliche Bitrate zurück, damit kein Zielwert verloren geht.
 
+### Video-Effekte (Farbkorrektur, Weichzeichnen, Schärfen)
+
+Unter **Video effects** in den Aufnahme-Einstellungen stehen einfache Bildfilter bereit, die vor der Codierung angewendet werden:
+
+- **Helligkeit, Kontrast, Sättigung, Farbton** — Farbkorrektur über `videobalance` (jeweils −1…+1, 0 ist neutral).
+- **Weichzeichnen** (`gaussianblur`) und **Schärfen** (`cas`).
+
+Optional installierte Elemente (z. B. `cas` für Schärfen) werden automatisch übersprungen, wenn sie auf dem System fehlen — die Aufnahme bricht dadurch nie ab. LUT-Farbgrading (`.cube`) und eine Verfeinerung des Chroma-Keys sind noch nicht über diesen Pfad abgedeckt; der Chroma-Key steht weiterhin pro Quelle zur Verfügung.
+
 Wenn keine Frames eintreffen, beendet Rivulet die Aufnahme nach dem konfigurierten No-Frame-Timeout mit einer sichtbaren Fehlermeldung.
 
 ## 4. Audio
@@ -76,7 +85,11 @@ Wenn keine Frames eintreffen, beendet Rivulet die Aufnahme nach dem konfiguriert
 
 ### Multi-Track-Audiotexport
 
-Aktiviere **Getrennte Tracks**, um Systemaudio und Mikrofon nicht zu mischen, sondern je auf einen **eigenen Track** der Aufnahmedatei zu legen (jede Quelle wird durch einen eigenen AAC-Encoder geführt und an denselben Muxer angebunden). Das Export-Routing ist damit unabhängig vom Live-Mix: Über die Schalter **„Exportiere Systemaudio auf eigenem Track“** und **„Exportiere Mikrofon auf eigenem Track“** lässt sich pro Quelle entscheiden, ob sie in der Datei eine eigene Spur erhält. Ein Track wird nur exportiert, solange die Quelle auch erfasst wird. Beim Streamen (RTMP/FLV) werden die Quellen weiterhin zu einem einzigen Audio-Track gemischt, da FLV nur einen unterstützt. Unter **Master-Ausgabe** lässt sich die Gesamtlautstärke des Mixes (System + Mikrofon zusammen) einstellen; das **Ausgangs-VU-Meter** darunter zeigt den Pegel des gesamten Mixes in dB nach Anwendung der Master-Lautstärke. Zusätzlich kann das Monitoring einzelner Quellen aktiviert und dessen Lautstärke getrennt geregelt werden. Fehlende GStreamer-Audiofilter werden übersprungen und in der GUI sowie im Log gemeldet; die Aufnahme soll dadurch nicht stillschweigend abbrechen.
+Aktiviere **Getrennte Tracks**, um Systemaudio und Mikrofon nicht zu mischen, sondern je auf einen **eigenen Track** der Aufnahmedatei zu legen (jede Quelle wird durch einen eigenen AAC-Encoder geführt und an denselben Muxer angebunden). Das Export-Routing ist damit unabhängig vom Live-Mix: Über die Schalter **„Exportiere Systemaudio auf eigenem Track“** und **„Exportiere Mikrofon auf eigenem Track“** lässt sich pro Quelle entscheiden, ob sie in der Datei eine eigene Spur erhält. Ein Track wird nur exportiert, solange die Quelle auch erfasst wird. Beim Streamen (RTMP/FLV) werden die Quellen weiterhin zu einem einzigen Audio-Track gemischt, da FLV nur einen unterstützt. Unter **Master-Ausgabe** lässt sich die Gesamtlautstärke des Mixes (System + Mikrofon zusammen) einstellen; das **Ausgangs-VU-Meter** darunter zeigt den Pegel des gesamten Mixes in dB nach Anwendung der Master-Lautstärke. Zusätzlich kann das Monitoring einzelner Quellen aktiviert und dessen Lautstärke getrennt geregelt werden.
+
+### Audio-Filter
+
+Unter **Filters** im Mixer kannst du je Quelle (System/Mikrofon) folgende Filter in der Gruppe hintereinander schalten: **Rauschunterdrückung** (`webrtcdsp`, sofern installiert), **Noise Gate** (schließt unterhalb einer niedrigen Schwelle), **Kompressor**, **Limiter** und **Expander** (alle über `audiodynamic`). Zusätzlich kann je Quelle eine **Verstärkung** in dB (`audioamplify`) und ein **10-Band-EQ** (`equalizer-10bands`, Bänder −12…+12 dB) eingestellt werden. Fehlende GStreamer-Elemente werden übersprungen und in der GUI sowie im Log gemeldet; die Aufnahme soll dadurch nicht stillschweigend abbrechen.
 
 ## 5. Szenen und Quellen
 

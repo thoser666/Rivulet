@@ -85,7 +85,9 @@ impl SkippedFilter {
     pub fn feature_name(element: &str) -> &'static str {
         match element {
             "webrtcdsp" => "noise suppression",
-            "audiodynamic" => "compressor/limiter",
+            "audiodynamic" => "compressor/limiter/expander/gate",
+            "audioamplify" => "gain",
+            "equalizer-10bands" => "10-band equalizer",
             _ => "audio filter",
         }
     }
@@ -100,7 +102,9 @@ impl SkippedFilter {
     pub fn feature_name_in(element: &str, locale: Locale) -> &'static str {
         match (element, locale) {
             ("webrtcdsp", Locale::De) => "Rauschunterdrückung",
-            ("audiodynamic", Locale::De) => "Kompressor/Limiter",
+            ("audiodynamic", Locale::De) => "Kompressor/Limiter/Expander/Gate",
+            ("audioamplify", Locale::De) => "Verstärkung",
+            ("equalizer-10bands", Locale::De) => "10-Band-Equalizer",
             (_, Locale::De) => "Audiofilter",
             _ => Self::feature_name(element),
         }
@@ -165,7 +169,12 @@ mod tests {
         );
         assert_eq!(
             SkippedFilter::feature_name("audiodynamic"),
-            "compressor/limiter"
+            "compressor/limiter/expander/gate"
+        );
+        assert_eq!(SkippedFilter::feature_name("audioamplify"), "gain");
+        assert_eq!(
+            SkippedFilter::feature_name("equalizer-10bands"),
+            "10-band equalizer"
         );
         assert_eq!(
             SkippedFilter::feature_name("future-element"),
@@ -176,7 +185,13 @@ mod tests {
     #[test]
     fn feature_name_in_localizes_from_the_shared_mapping() {
         // English must always match the log's canonical name.
-        for element in ["webrtcdsp", "audiodynamic", "future-element"] {
+        for element in [
+            "webrtcdsp",
+            "audiodynamic",
+            "audioamplify",
+            "equalizer-10bands",
+            "future-element",
+        ] {
             assert_eq!(
                 SkippedFilter::feature_name_in(element, Locale::En),
                 SkippedFilter::feature_name(element),
@@ -190,7 +205,15 @@ mod tests {
         );
         assert_eq!(
             SkippedFilter::feature_name_in("audiodynamic", Locale::De),
-            "Kompressor/Limiter"
+            "Kompressor/Limiter/Expander/Gate"
+        );
+        assert_eq!(
+            SkippedFilter::feature_name_in("audioamplify", Locale::De),
+            "Verstärkung"
+        );
+        assert_eq!(
+            SkippedFilter::feature_name_in("equalizer-10bands", Locale::De),
+            "10-Band-Equalizer"
         );
         assert_eq!(
             SkippedFilter::feature_name_in("future-element", Locale::De),
@@ -207,7 +230,7 @@ mod tests {
             ),
             (
                 "audiodynamic",
-                "compressor/limiter skipped: GStreamer element `audiodynamic` is not installed",
+                "compressor/limiter/expander/gate skipped: GStreamer element `audiodynamic` is not installed",
             ),
             (
                 "future-element",

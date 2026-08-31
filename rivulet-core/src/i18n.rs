@@ -271,6 +271,13 @@ impl Locale {
                 ("auto_remux", "Remux to MP4 after stop"),
                 ("rate_control", "Rate control"),
                 ("rate_mode", "Mode"),
+                ("video_effects", "Video effects"),
+                ("vf_brightness", "Brightness"),
+                ("vf_contrast", "Contrast"),
+                ("vf_saturation", "Saturation"),
+                ("vf_hue", "Hue"),
+                ("vf_blur", "Blur"),
+                ("vf_sharpen", "Sharpen"),
                 ("rate_quality", "Quality (0-51, lower is better)"),
                 ("rate_max_bitrate", "Max bitrate (kbit/s)"),
                 ("rate_custom_options", "Extra encoder options"),
@@ -344,6 +351,10 @@ impl Locale {
                 ("file_menu", "File"),
                 ("quit", "Quit"),
                 ("audio_filters", "Filters"),
+                ("filter_noise_gate", "Gate (System)"),
+                ("filter_expander", "Exp (System)"),
+                ("filter_gain", "Gain (dB)"),
+                ("filter_eq", "10-band EQ"),
                 ("audio_monitoring", "Monitoring"),
                 ("monitoring_system", "Monitor system audio"),
                 ("monitoring_microphone", "Monitor microphone"),
@@ -667,6 +678,13 @@ impl Locale {
                 ("auto_remux", "Nach Stopp zu MP4 remuxen"),
                 ("rate_control", "Rate-Control"),
                 ("rate_mode", "Modus"),
+                ("video_effects", "Video-Effekte"),
+                ("vf_brightness", "Helligkeit"),
+                ("vf_contrast", "Kontrast"),
+                ("vf_saturation", "Sättigung"),
+                ("vf_hue", "Farbton"),
+                ("vf_blur", "Weichzeichnen"),
+                ("vf_sharpen", "Schärfen"),
                 ("rate_quality", "Qualität (0-51, niedriger ist besser)"),
                 ("rate_max_bitrate", "Max. Bitrate (kbit/s)"),
                 ("rate_custom_options", "Zusätzliche Encoder-Optionen"),
@@ -740,6 +758,10 @@ impl Locale {
                 ("file_menu", "Datei"),
                 ("quit", "Beenden"),
                 ("audio_filters", "Filter"),
+                ("filter_noise_gate", "Gate (System)"),
+                ("filter_expander", "Exp (System)"),
+                ("filter_gain", "Verstärkung (dB)"),
+                ("filter_eq", "10-Band-EQ"),
                 ("audio_monitoring", "Monitoring"),
                 ("monitoring_system", "Systemaudio abhören"),
                 ("monitoring_microphone", "Mikrofon abhören"),
@@ -1383,5 +1405,22 @@ mod tests {
             Locale::De.tr("rate_custom_options"),
             "Zusätzliche Encoder-Optionen"
         );
+    }
+
+    #[test]
+    fn filter_keys_translate_in_both_locales() {
+        assert_eq!(Locale::En.tr("video_effects"), "Video effects");
+        assert_eq!(Locale::En.tr("vf_brightness"), "Brightness");
+        assert_eq!(Locale::En.tr("vf_contrast"), "Contrast");
+        assert_eq!(Locale::En.tr("vf_saturation"), "Saturation");
+        assert_eq!(Locale::En.tr("vf_hue"), "Hue");
+        assert_eq!(Locale::En.tr("vf_blur"), "Blur");
+        assert_eq!(Locale::En.tr("vf_sharpen"), "Sharpen");
+        assert_eq!(Locale::De.tr("video_effects"), "Video-Effekte");
+        assert_eq!(Locale::De.tr("vf_brightness"), "Helligkeit");
+        assert_eq!(Locale::De.tr("vf_saturation"), "Sättigung");
+        assert_eq!(Locale::De.tr("filter_gain"), "Verstärkung (dB)");
+        assert_eq!(Locale::De.tr("filter_eq"), "10-Band-EQ");
+        assert_eq!(Locale::En.tr("filter_gain"), "Gain (dB)");
     }
 }
