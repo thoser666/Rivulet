@@ -93,7 +93,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Cross-Platform** - Windows, macOS, and Linux support (via xcap)
 - **Modern UI** - Clean interface built with egui
 - **Internationalized UI** - All visible strings are driven by locale files (English by default, German included)
-- **Activity status** - The UI exposes a privacy-safe “Rivulet nimmt auf / streamt” activity model, ready for an optional Discord Rich Presence adapter; stream keys, URLs, paths, and window titles are never included
+- **Activity status & Discord Rich Presence** - The UI exposes a privacy-safe “Rivulet nimmt auf / streamt” activity model and an opt-out, non-blocking Discord Rich Presence adapter (see [`docs/activity-status.md`](docs/activity-status.md)); stream keys, URLs, paths, and window titles are never included
 
 ---
 
@@ -346,7 +346,7 @@ must not be implied by beta parity.
 - [x] Installers (Windows MSI, macOS DMG, Linux AppImage) — automated in CI
 - [x] Code signing (signing automation present, secrets needed)
 - [ ] Telemetry (opt-in, privacy-friendly)
-- [ ] **Optional Discord Rich Presence adapter** — non-blocking activity updates using the Rivulet status model; explicit opt-out, no stream keys/URLs/paths/window titles, and graceful operation when Discord is unavailable. Planned after M5 ecosystem foundations.
+- [x] **Discord Rich Presence adapter** — non-blocking activity updates using the Rivulet status model; explicit opt-out (persisted Settings toggle), no stream keys/URLs/paths/window titles, and graceful operation when Discord is unavailable (see [`docs/activity-status.md`](docs/activity-status.md)).
 - [ ] Multi-language support (locale files fully wired)
 - [ ] **MIDI device support** (map controllers like Korg NanoKontrol to scene switches, volume faders, filter toggles) — *frequently requested for live production and music streams*
 - [ ] **Global hotkeys & remapping UI** — OBS-style hotkey settings: per-action rebinding, global hotkeys that work while the app is unfocused
@@ -490,7 +490,7 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | obs-websocket / Streamdeck | Open (M5) |
 | Mobile remote & MIDI | Open (M5) |
 | Cloud & telemetry | Partial (M4 S3 SigV4 PUT upload after stop; multipart + GUI settings open) |
-| Discord Rich Presence | Planned (optional, privacy-safe activity status; M5) |
+| Discord Rich Presence | Implemented (optional, privacy-safe activity status; M5, see docs/activity-status.md) |
 | Multi-language support | Partial (DE/EN wired) |
 | Platform parity (Windows/macOS) | Open |
 | AI chat assistant | Open (M9) |

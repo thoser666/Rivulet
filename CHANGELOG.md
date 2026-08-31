@@ -1,6 +1,8 @@
 # Changelog
 
 ## [0.65.0-alpha.55] - 2026-08-30
+- feat(presence): add opt-out, non-blocking Discord Rich Presence adapter (`rivulet-core::discord`) with IPC + graceful degradation
+- feat(presence): wire opt-out toggle into the Stream view and persist it
 - fix(update): wait for app exit before replacing files on Windows
 - fix(ui): redact secrets from smoke reports
 - feat(streaming): add platform setup assistant

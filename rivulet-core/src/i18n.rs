@@ -371,6 +371,10 @@ impl Locale {
                 ("presence_recording_streaming", "Recording + streaming"),
                 ("presence_paused", "Paused"),
                 ("presence_error", "Error"),
+                ("discord_presence_enable", "Show activity on Discord (Rich Presence)"),
+                ("discord_presence_hint", "Share your recording/streaming status as
+Discord Rich Presence. Never includes stream keys, URLs, paths or window titles."),
+                ("discord_presence_privacy", "Only Rivulet and a localized status are shown; no stream keys, URLs, paths or window titles are ever transmitted."),
                 // Navigation
                 ("nav_record", "Record"),
                 ("nav_mixer", "Mixer"),
@@ -778,6 +782,10 @@ impl Locale {
                 ("presence_recording_streaming", "Aufnahme + Stream"),
                 ("presence_paused", "Pausiert"),
                 ("presence_error", "Fehler"),
+                ("discord_presence_enable", "Aktivität auf Discord anzeigen (Rich Presence)"),
+                ("discord_presence_hint", "Teile deinen Aufnahme-/Stream-Status als
+Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."),
+                ("discord_presence_privacy", "Es werden nur Rivulet und ein lokalisierter Status angezeigt; Stream-Keys, URLs, Pfade oder Fenstertitel werden nie übertragen."),
                 // Navigation
                 ("nav_record", "Aufnehmen"),
                 ("nav_mixer", "Mixer"),

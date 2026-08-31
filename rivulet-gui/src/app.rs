@@ -3,9 +3,9 @@
 use crate::theme;
 use eframe::egui;
 use rivulet_core::{
-    CaptureRegion, Locale, PresenceActivity, PresenceStatus, RivuletEngine, SkippedFilter,
-    StreamConnectionResult, StreamHealthStatus, StreamPlatform, StreamPreset, StreamProbeResult,
-    StreamSettings, StreamStats,
+    CaptureRegion, DiscordPresence, DiscordPresenceConfig, Locale, PresenceActivity,
+    PresenceStatus, RivuletEngine, SkippedFilter, StreamConnectionResult, StreamHealthStatus,
+    StreamPlatform, StreamPreset, StreamProbeResult, StreamSettings, StreamStats,
 };
 use std::sync::mpsc::Receiver;
 use std::sync::{
@@ -469,6 +469,17 @@ pub struct RivuletApp {
     #[serde(skip)]
     theme_applied: Option<theme::ThemePreference>,
 
+    /// Discord Rich Presence opt-out. Persisted across sessions. Defaults to
+    /// on (matching the roadmap's explicit opt-out requirement).
+    discord_presence_enabled: bool,
+    /// Live adapter handle. Not persisted; rebuilt when the app starts.
+    #[serde(skip)]
+    discord_presence: Option<DiscordPresence>,
+    /// Last status pushed to the adapter, so updates only happen on activity
+    /// transitions (per the adapter contract).
+    #[serde(skip)]
+    discord_presence_last: Option<PresenceStatus>,
+
     // Linux Fields
     #[cfg(target_os = "linux")]
     #[serde(skip)]
@@ -825,6 +836,9 @@ impl Default for RivuletApp {
             locale: Locale::default(),
             theme: theme::ThemePreference::default(),
             theme_applied: None,
+            discord_presence_enabled: true,
+            discord_presence: None,
+            discord_presence_last: None,
 
             #[cfg(target_os = "linux")]
             is_previewing: false,
@@ -3676,16 +3690,51 @@ impl RivuletApp {
         } else {
             PresenceActivity::Idle
         };
-        PresenceStatus::for_activity(activity)
+        PresenceStatus::for_activity_localized(activity, self.locale, None)
     }
 
-    fn draw_presence_status(&self, ui: &mut egui::Ui) {
+    /// Reconcile the Discord adapter with the opt-out setting and push a status
+    /// update only on activity transitions. The adapter is non-blocking: this
+    /// never performs IPC on the UI thread.
+    fn sync_discord_presence(&mut self) {
+        if !self.discord_presence_enabled {
+            if let Some(mut presence) = self.discord_presence.take() {
+                presence.disconnect();
+            }
+            self.discord_presence_last = None;
+            return;
+        }
+
+        if self.discord_presence.is_none() {
+            self.discord_presence = Some(DiscordPresence::new(&DiscordPresenceConfig {
+                enabled: true,
+                client_id: rivulet_core::discord::DEFAULT_CLIENT_ID.to_owned(),
+            }));
+        }
+
+        // Push only on activity transitions, never every frame.
+        let status = self.current_presence_status();
+        if self.discord_presence_last.as_ref() == Some(&status) {
+            return;
+        }
+        self.discord_presence_last = Some(status.clone());
+        if let Some(presence) = &self.discord_presence {
+            presence.set_activity(&status);
+        }
+    }
+
+    fn draw_presence_status(&mut self, ui: &mut egui::Ui) {
+        self.sync_discord_presence();
         let status = self.current_presence_status();
         ui.group(|ui| {
             ui.label(egui::RichText::new("Rivulet-Status").strong());
             ui.label(status.details);
             ui.label(status.state);
-            ui.small("Für Discord Rich Presence vorbereitet; keine Stream-Keys, URLs oder Dateipfade werden übertragen.");
+            let enable_label = self.tr("discord_presence_enable");
+            let hint = self.tr("discord_presence_hint");
+            ui.checkbox(&mut self.discord_presence_enabled, enable_label)
+                .on_hover_text(hint);
+            ui.small(self.tr("discord_presence_privacy"));
         });
     }
 
@@ -5995,6 +6044,58 @@ mod tests {
         assert_eq!(AppView::Record.planned_milestone(), None);
         assert_eq!(AppView::Mixer.planned_milestone(), None);
         assert_eq!(AppView::Settings.planned_milestone(), None);
+    }
+
+    // ── Discord Rich Presence (M5) ────────────────────────────────
+
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn discord_presence_is_opt_out_and_respects_transitions() {
+        // Disabled: no adapter handle is created and status is never pushed.
+        let mut app = RivuletApp {
+            discord_presence_enabled: false,
+            ..Default::default()
+        };
+        app.discord_presence_last = None;
+        app.sync_discord_presence();
+        assert!(
+            app.discord_presence.is_none(),
+            "disabled adapter must not spawn"
+        );
+        assert!(app.discord_presence_last.is_none());
+
+        // Enabled: an active adapter is created and the current status is
+        // pushed, so the cached status reflects the first activity.
+        app.discord_presence_enabled = true;
+        app.sync_discord_presence();
+        let presence = app
+            .discord_presence
+            .as_ref()
+            .expect("adapter created when enabled");
+        assert!(presence.enabled());
+        let expected = app.current_presence_status();
+        assert_eq!(app.discord_presence_last.as_ref(), Some(&expected));
+
+        // Re-syncing without a state change must not re-push (transition only).
+        app.sync_discord_presence();
+        assert_eq!(app.discord_presence_last.as_ref(), Some(&expected));
+
+        // Opting out tears the adapter down cleanly.
+        app.discord_presence_enabled = false;
+        app.sync_discord_presence();
+        assert!(app.discord_presence.is_none());
+    }
+
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn discord_presence_status_is_localized_and_privacy_safe() {
+        let mut app = RivuletApp::default();
+        app.locale = Locale::De;
+        let status = app.current_presence_status();
+        assert!(status.details.starts_with("Rivulet"));
+        // German locale label, and never any sensitive token/path.
+        assert!(!status.state.to_lowercase().contains("rtmp"));
+        assert!(!status.state.contains('/') && !status.state.contains('\\'));
     }
 
     // ── Vulkan layer backend status (G3) ──────────────────────────

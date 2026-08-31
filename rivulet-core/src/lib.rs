@@ -14,6 +14,8 @@ use gst::prelude::*;
 pub mod output;
 pub mod presence;
 pub use presence::{PresenceActivity, PresenceStatus};
+pub mod discord;
+pub use discord::{DiscordPresence, DiscordPresenceConfig};
 pub mod virtual_camera;
 pub use virtual_camera::{
     VirtualCamera, VirtualCameraConfig, VirtualCameraError, VirtualCameraFormat, VirtualCameraState,
