@@ -466,6 +466,12 @@ jobs:
       - name: egui UI regression snapshots
         run: cargo test -p rivulet-gui --test ui_regression --verbose
 
+      # Runs the Discord Rich Presence adapter end-to-end against a local IPC
+      # listener: a Unix-domain socket on Linux/macOS and a named pipe on
+      # Windows, verifying the worker emits a real handshake + SET_ACTIVITY.
+      - name: Discord adapter IPC smoke test
+        run: cargo test -p rivulet-core discord -- --nocapture
+
       - name: Test
         run: cargo test --workspace --verbose
 

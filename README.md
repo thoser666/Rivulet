@@ -145,11 +145,11 @@ werden.
 | M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | ✅ Complete (conditional: live interop follow-ups) | — | [![M3](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F5&query=open_issues&label=M3&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/5) |
 | M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | ✅ Complete (conditional: integration follow-ups; milestone closed) | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 🚧 In progress (installers, signing, i18n done) | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
-| M10 – Extensible UI & Plugins | Persisted layouts, view registry, declarative/WASM plugins, permissions | 📅 Planned | — | [![M10](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F11&query=open_issues&label=M10&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/11) |
 | M6 – Automation & Determinism | Headless CLI, CI Rendering, Reproducible Pipelines | 📅 Planned | — | [![M6](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F7&query=open_issues&label=M6&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/7) |
 | M7 – Embeddable Engine | Stable `rivulet-core` API, Docs, Tooling | 📅 Planned | — | [![M7](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F8&query=open_issues&label=M7&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/8) |
 | M8 – Modern Architecture | WebGPU, Zero-copy, Compute Filters | 📅 Planned | — | [![M8](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F9&query=open_issues&label=M8&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/9) |
 | M9 – AI Chat Assistant | Local-first LLM Chat Bot for Streamers | 📅 Planned | — | [![M9](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F10&query=open_issues&label=M9&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/10) |
+| M10 – Extensible UI & Plugins | Persisted layouts, view registry, declarative/WASM plugins, permissions | 📅 Planned | — | [![M10](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F11&query=open_issues&label=M10&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/11) |
 
 ---
 
@@ -360,23 +360,6 @@ must not be implied by beta parity.
 
 ---
 
-### 🧩 M10 – Extensible UI & Plugin Platform
-
-Details, guardrails, and the completion gate: [`docs/extensible-ui-roadmap.md`](docs/extensible-ui-roadmap.md) and [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md).
-
-The UI extensibility work is intentionally isolated from the streaming and capture
-milestones. It starts with a versioned, persistable layout and view registry,
-then adds declarative plugins before considering sandboxed WASM execution.
-
-- [ ] **P1 – Persistable UI layout** — versioned workspace/layout state, safe defaults, migrations, and no secrets or runtime handles.
-- [ ] **P2 – View registry** — stable view IDs for built-in and optional views; navigation, Help, and accessibility derive from the registry.
-- [ ] **P3 – Declarative UI plugins** — manifest-defined panels, menu items, help pages, enable/disable state, and API compatibility.
-- [ ] **P4 – Permission model** — explicit UI/network/filesystem/capture/audio/secrets capabilities; sensitive permissions denied by default.
-- [ ] **P5 – Isolated plugin execution** — preferably WASM, with timeouts, resource limits, and crash isolation.
-- [ ] **P6 – Plugin quality gate** — compatibility, migration, accessibility, UX, performance, security, and example-plugin checks.
-
-**Definition of Done:** The versioned layout survives restart, built-in and plugin views use one stable registry, plugins cannot access secrets without explicit capability approval, and a failing plugin cannot terminate the GUI.
-
 ### 🤖 M6 – Automation & Determinism ("Render-First")
 
 **Status: Planned**
@@ -452,6 +435,23 @@ then adds declarative plugins before considering sandboxed WASM execution.
 **Goal:** A private, subscription-free, API-free AI chat assistant that runs fully locally — the counter-position to cloud chat bots like StreamChatAI.
 
 > ⚠️ **Coexistence with Vivid:** Rivulet (desktop) and Vivid (Android) can be used at the same time — e.g. Vivid streaming from the phone while Rivulet runs on the PC. The Rivulet bot must therefore never fight with the Vivid bot for the same chat: no duplicate replies, coordinated `!`-commands, and a per-channel configurable bot identity.
+
+### 🧩 M10 – Extensible UI & Plugin Platform
+
+Details, guardrails, and the completion gate: [`docs/extensible-ui-roadmap.md`](docs/extensible-ui-roadmap.md) and [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md).
+
+The UI extensibility work is intentionally isolated from the streaming and capture
+milestones. It starts with a versioned, persistable layout and view registry,
+then adds declarative plugins before considering sandboxed WASM execution.
+
+- [ ] **P1 – Persistable UI layout** — versioned workspace/layout state, safe defaults, migrations, and no secrets or runtime handles.
+- [ ] **P2 – View registry** — stable view IDs for built-in and optional views; navigation, Help, and accessibility derive from the registry.
+- [ ] **P3 – Declarative UI plugins** — manifest-defined panels, menu items, help pages, enable/disable state, and API compatibility.
+- [ ] **P4 – Permission model** — explicit UI/network/filesystem/capture/audio/secrets capabilities; sensitive permissions denied by default.
+- [ ] **P5 – Isolated plugin execution** — preferably WASM, with timeouts, resource limits, and crash isolation.
+- [ ] **P6 – Plugin quality gate** — compatibility, migration, accessibility, UX, performance, security, and example-plugin checks.
+
+**Definition of Done:** The versioned layout survives restart, built-in and plugin views use one stable registry, plugins cannot access secrets without explicit capability approval, and a failing plugin cannot terminate the GUI.
 
 ---
 

@@ -375,6 +375,11 @@ impl Locale {
                 ("discord_presence_hint", "Share your recording/streaming status as
 Discord Rich Presence. Never includes stream keys, URLs, paths or window titles."),
                 ("discord_presence_privacy", "Only Rivulet and a localized status are shown; no stream keys, URLs, paths or window titles are ever transmitted."),
+                ("discord_section", "Discord Rich Presence"),
+                ("discord_client_id", "Application client ID"),
+                ("discord_client_id_hint", "e.g. 1234567890123456789"),
+                ("discord_client_id_apply", "Apply"),
+                ("discord_client_id_note", "Create a Discord application at discord.com/developers/applications, enable Rich Presence, and enter its client ID here. Empty keeps the adapter off."),
                 // Navigation
                 ("nav_record", "Record"),
                 ("nav_mixer", "Mixer"),
@@ -786,6 +791,11 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("discord_presence_hint", "Teile deinen Aufnahme-/Stream-Status als
 Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."),
                 ("discord_presence_privacy", "Es werden nur Rivulet und ein lokalisierter Status angezeigt; Stream-Keys, URLs, Pfade oder Fenstertitel werden nie übertragen."),
+                ("discord_section", "Discord Rich Presence"),
+                ("discord_client_id", "Anwendungs-Client-ID"),
+                ("discord_client_id_hint", "z. B. 1234567890123456789"),
+                ("discord_client_id_apply", "Übernehmen"),
+                ("discord_client_id_note", "Erstelle eine Discord-App unter discord.com/developers/applications, aktiviere Rich Presence und trage hier ihre Client-ID ein. Leer hält den Adapter deaktiviert."),
                 // Navigation
                 ("nav_record", "Aufnehmen"),
                 ("nav_mixer", "Mixer"),

@@ -40,6 +40,12 @@ pub struct DiscordPresenceConfig {
     pub enabled: bool,
     /// Discord Developer Application client id.
     pub client_id: String,
+    /// Optional explicit IPC endpoint override — a filesystem path on Unix
+    /// (e.g. `/run/user/1000/discord-ipc-0`), or a named-pipe name on Windows
+    /// (e.g. `\\.\pipe\discord-ipc-0`). When `None`, the adapter derives the
+    /// default `discord-ipc-0` endpoint from the environment. Exposed so the
+    /// adapter can be run deterministically against a local listener in tests.
+    pub ipc_socket_path: Option<std::path::PathBuf>,
 }
 
 impl Default for DiscordPresenceConfig {
@@ -47,6 +53,7 @@ impl Default for DiscordPresenceConfig {
         Self {
             enabled: true,
             client_id: DEFAULT_CLIENT_ID.to_owned(),
+            ipc_socket_path: None,
         }
     }
 }
@@ -165,7 +172,7 @@ fn worker_loop(rx: Receiver<Msg>, cfg: DiscordPresenceConfig, stop: Arc<AtomicBo
 
         // Non-blocking for the caller: this I/O happens on the worker thread and
         // only when an activity transition is pending.
-        let result = ensure_connected(&mut stream, &cfg.client_id)
+        let result = ensure_connected(&mut stream, &cfg.client_id, cfg.ipc_socket_path.as_deref())
             .and_then(|_| send_set_activity(stream.as_mut().unwrap(), &status, pid, &mut seq));
         if result.is_err() {
             // Discord gone or the socket died: drop it and reconnect lazily on
@@ -175,11 +182,15 @@ fn worker_loop(rx: Receiver<Msg>, cfg: DiscordPresenceConfig, stop: Arc<AtomicBo
     }
 }
 
-fn ensure_connected(stream: &mut Option<Box<dyn IpcStream>>, client_id: &str) -> io::Result<()> {
+fn ensure_connected(
+    stream: &mut Option<Box<dyn IpcStream>>,
+    client_id: &str,
+    ipc_path: Option<&std::path::Path>,
+) -> io::Result<()> {
     if stream.is_some() {
         return Ok(());
     }
-    let mut s = match open_platform_stream() {
+    let mut s = match open_platform_stream(ipc_path) {
         Ok(s) => s,
         Err(e) => {
             // Discord is unavailable; back off on the worker thread so we do
@@ -202,14 +213,20 @@ fn ensure_connected(stream: &mut Option<Box<dyn IpcStream>>, client_id: &str) ->
 pub(crate) trait IpcStream: Read + Write + Send {}
 impl<T: Read + Write + Send> IpcStream for T {}
 
-/// Connect to the Discord IPC endpoint for this platform.
-fn open_platform_stream() -> io::Result<Box<dyn IpcStream>> {
+/// Connect to the Discord IPC endpoint for this platform. When `path` is
+/// supplied (test override) it is used instead of the environment-derived
+/// default `discord-ipc-0` endpoint.
+fn open_platform_stream(path: Option<&std::path::Path>) -> io::Result<Box<dyn IpcStream>> {
     #[cfg(unix)]
     {
         use std::os::unix::net::UnixStream;
+        let candidates = match path {
+            Some(p) => vec![p.to_owned()],
+            None => ipc_socket_paths(),
+        };
         let mut last_err = None;
-        for path in ipc_socket_paths() {
-            match UnixStream::connect(path) {
+        for candidate in candidates {
+            match UnixStream::connect(&candidate) {
                 Ok(s) => {
                     let _ = s.set_write_timeout(Some(Duration::from_secs(3)));
                     return Ok(Box::new(s));
@@ -222,7 +239,11 @@ fn open_platform_stream() -> io::Result<Box<dyn IpcStream>> {
     }
     #[cfg(windows)]
     {
-        winipc::connect().map(|s| -> Box<dyn IpcStream> { Box::new(s) })
+        let name = match path {
+            Some(p) => p.to_string_lossy().into_owned(),
+            None => winipc::DEFAULT_PIPE_NAME.to_owned(),
+        };
+        winipc::connect(&name).map(|s| -> Box<dyn IpcStream> { Box::new(s) })
     }
 }
 
@@ -343,7 +364,8 @@ mod winipc {
     use winapi::um::namedpipeapi::WaitNamedPipeW;
     use winapi::um::winnt::{FILE_ATTRIBUTE_NORMAL, GENERIC_READ, GENERIC_WRITE, HANDLE};
 
-    const PIPE_NAME: &str = r"\\.\pipe\discord-ipc-0";
+    /// Discord's default Rich Presence named-pipe endpoint.
+    pub(crate) const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\discord-ipc-0";
 
     pub struct NamedPipe {
         handle: HANDLE,
@@ -362,8 +384,8 @@ mod winipc {
         }
     }
 
-    pub fn connect() -> io::Result<NamedPipe> {
-        let wide: Vec<u16> = PIPE_NAME.encode_utf16().chain(Some(0)).collect();
+    pub fn connect(name: &str) -> io::Result<NamedPipe> {
+        let wide: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
         let first = unsafe {
             CreateFileW(
                 wide.as_ptr(),
@@ -455,6 +477,7 @@ mod tests {
         let cfg = DiscordPresenceConfig {
             enabled: false,
             client_id: "abc".to_owned(),
+            ..Default::default()
         };
         let presence = DiscordPresence::new(&cfg);
         assert!(!presence.enabled());
@@ -466,6 +489,7 @@ mod tests {
         let cfg = DiscordPresenceConfig {
             enabled: true,
             client_id: String::new(),
+            ..Default::default()
         };
         let presence = DiscordPresence::new(&cfg);
         assert!(!presence.enabled());
@@ -476,6 +500,7 @@ mod tests {
         let cfg = DiscordPresenceConfig::default();
         assert!(cfg.enabled);
         assert_eq!(cfg.client_id, DEFAULT_CLIENT_ID);
+        assert!(cfg.ipc_socket_path.is_none());
     }
 
     #[test]
@@ -483,6 +508,7 @@ mod tests {
         let cfg = DiscordPresenceConfig {
             enabled: true,
             client_id: "dummy-client".to_owned(),
+            ..Default::default()
         };
         let mut presence = DiscordPresence::new(&cfg);
         assert!(presence.enabled());
@@ -500,6 +526,7 @@ mod tests {
         let cfg = DiscordPresenceConfig {
             enabled: true,
             client_id: "dummy-client".to_owned(),
+            ..Default::default()
         };
         let mut presence = DiscordPresence::new(&cfg);
         presence.disconnect();
@@ -598,5 +625,172 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&frame).unwrap();
         assert_eq!(value["cmd"], "SET_ACTIVITY");
         assert_eq!(value["args"]["pid"], 42);
+    }
+
+    /// End-to-end smoke test: run the real worker (via `DiscordPresence`) against
+    /// a local Unix-socket listener on the actual `discord-ipc-0` endpoint and
+    /// verify it emits a handshake followed by a `SET_ACTIVITY` frame.
+    #[cfg(unix)]
+    #[test]
+    fn worker_sends_handshake_then_set_activity_to_local_unix_socket_listener() {
+        use std::os::unix::net::UnixListener;
+        let dir = tempfile::tempdir().expect("temp dir");
+        let sock_path = dir.path().join("discord-ipc-0");
+        let listener = UnixListener::bind(&sock_path).expect("bind listener");
+
+        let cfg = DiscordPresenceConfig {
+            enabled: true,
+            client_id: "smoke-client-unix".to_owned(),
+            ipc_socket_path: Some(sock_path),
+        };
+        let mut presence = DiscordPresence::new(&cfg);
+        assert!(presence.enabled());
+        let st = PresenceStatus::for_activity(PresenceActivity::Recording);
+        assert!(presence.set_activity(&st));
+
+        // accept() blocks until the worker connects through the explicit path.
+        let (mut conn, _) = listener.accept().expect("accept worker connection");
+        conn.set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+
+        // Frame 1: handshake.
+        let hs = read_frame(&mut conn).expect("handshake frame");
+        let hs: serde_json::Value = serde_json::from_slice(&hs).expect("json");
+        assert_eq!(hs["v"], 1);
+        assert_eq!(hs["client_id"], "smoke-client-unix");
+
+        // Frame 2: SET_ACTIVITY for the pushed status.
+        let set = read_frame(&mut conn).expect("set_activity frame");
+        let set: serde_json::Value = serde_json::from_slice(&set).expect("json");
+        assert_eq!(set["cmd"], "SET_ACTIVITY");
+        assert_eq!(set["args"]["pid"], std::process::id());
+        assert_eq!(set["args"]["activity"]["type"], 0);
+        assert_eq!(set["args"]["activity"]["state"], "Recording");
+
+        presence.disconnect();
+    }
+
+    /// End-to-end smoke test for the Windows transport: run the real worker
+    /// against a local named-pipe listener and verify the handshake +
+    /// `SET_ACTIVITY` frames arrive over the actual pipe.
+    #[cfg(windows)]
+    mod named_pipe_smoke {
+        use super::*;
+        use std::io;
+        use winapi::um::fileapi::ReadFile;
+        use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
+        use winapi::um::namedpipeapi::{ConnectNamedPipe, CreateNamedPipeW};
+        use winapi::um::winbase::{
+            PIPE_ACCESS_DUPLEX, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
+            PIPE_WAIT,
+        };
+        use winapi::um::winnt::HANDLE;
+
+        /// ERROR_PIPE_CONNECTED (0x21B): returned by ConnectNamedPipe when the
+        /// client connected before the server issued the wait.
+        const ERROR_PIPE_CONNECTED: i32 = 535;
+
+        struct ServerPipe {
+            handle: HANDLE,
+        }
+
+        impl Drop for ServerPipe {
+            fn drop(&mut self) {
+                unsafe {
+                    CloseHandle(self.handle);
+                }
+            }
+        }
+
+        impl ServerPipe {
+            fn new(name: &str) -> io::Result<Self> {
+                let wide: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+                let handle = unsafe {
+                    CreateNamedPipeW(
+                        wide.as_ptr(),
+                        PIPE_ACCESS_DUPLEX,
+                        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                        PIPE_UNLIMITED_INSTANCES,
+                        4096,
+                        4096,
+                        0,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if std::ptr::addr_eq(handle, INVALID_HANDLE_VALUE) {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(Self { handle })
+                }
+            }
+
+            /// Signal readiness for a client. If the worker already connected,
+            /// ConnectNamedPipe returns ERROR_PIPE_CONNECTED, which we accept.
+            fn connect(&mut self) -> io::Result<()> {
+                let ok = unsafe { ConnectNamedPipe(self.handle, std::ptr::null_mut()) };
+                if ok == 0 {
+                    let err = io::Error::last_os_error();
+                    if err.raw_os_error() != Some(ERROR_PIPE_CONNECTED) {
+                        return Err(err);
+                    }
+                }
+                Ok(())
+            }
+        }
+
+        impl Read for ServerPipe {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                let mut read: u32 = 0;
+                let ok = unsafe {
+                    ReadFile(
+                        self.handle,
+                        buf.as_mut_ptr() as *mut _,
+                        buf.len() as u32,
+                        &mut read,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if ok == 0 {
+                    Err(io::Error::last_os_error())
+                } else {
+                    Ok(read as usize)
+                }
+            }
+        }
+
+        #[test]
+        fn worker_sends_handshake_then_set_activity_to_local_named_pipe() {
+            let pipe_name = format!(r"\\.\pipe\rivulet-discord-smoke-{}", std::process::id());
+            let cfg = DiscordPresenceConfig {
+                enabled: true,
+                client_id: "smoke-client-windows".to_owned(),
+                ipc_socket_path: Some(std::path::PathBuf::from(&pipe_name)),
+            };
+            let mut presence = DiscordPresence::new(&cfg);
+            assert!(presence.enabled());
+
+            // Create the server pipe instance first so the worker's CreateFileW
+            // finds an existing instance. Connect only after pushing the activity
+            // (otherwise ConnectNamedPipe blocks with no client waiting yet).
+            let mut server = ServerPipe::new(&pipe_name).expect("create server pipe");
+
+            let st = PresenceStatus::for_activity(PresenceActivity::Streaming);
+            assert!(presence.set_activity(&st));
+
+            server.connect().expect("connect pipe");
+
+            let hs = read_frame(&mut server).expect("handshake frame");
+            let hs: serde_json::Value = serde_json::from_slice(&hs).expect("json");
+            assert_eq!(hs["v"], 1);
+            assert_eq!(hs["client_id"], "smoke-client-windows");
+
+            let set = read_frame(&mut server).expect("set_activity frame");
+            let set: serde_json::Value = serde_json::from_slice(&set).expect("json");
+            assert_eq!(set["cmd"], "SET_ACTIVITY");
+            assert_eq!(set["args"]["pid"], std::process::id());
+            assert_eq!(set["args"]["activity"]["state"], "Streaming");
+
+            presence.disconnect();
+        }
     }
 }

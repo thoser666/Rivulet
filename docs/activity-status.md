@@ -10,8 +10,11 @@ the explicitly selected game name, for example:
 - `Rivulet · Aufnahme + Stream` / `Aufnahme + Stream · Elden Ring`
 - `Rivulet · Pausiert` / `Pausiert · Elden Ring`
 
-Game names must be supplied from the user's game selection, not inferred from
-window titles or captured content.
+Game names must be supplied from the user's explicit source selection (the
+selected game-capture window or the selected window-capture title), not inferred
+from window titles or captured content. When a game-capture window is selected
+its title is used as the game name; otherwise a selected window-capture title is
+used, and a plain monitor source sends no game name.
 
 The contract lives in `rivulet-core::presence` and is deliberately separate from
 any Discord SDK or network client. The optional non-blocking adapter in
@@ -49,3 +52,20 @@ The adapter (`rivulet-core::discord`) implements the recommended contract:
 
 The opt-out toggle is persisted. When disabled, no worker thread is spawned at
 all and `PresenceStatus::set_activity` is a no-op.
+
+The **Discord Developer Application client id is configurable** in Settings →
+Discord Rich Presence. Set it to the Client ID of a Discord application created
+at <https://discord.com/developers/applications> with "Rich Presence" enabled.
+Until a non-empty client id is entered and applied, the adapter stays off. The
+value is persisted across sessions; changing it (via the Apply button) rebuilds
+the adapter on the next frame.
+
+## CI smoke test
+
+CI runs the real adapter worker (`DiscordPresence`) end to end against a local
+IPC listener, verifying that a pushed status produces a **handshake frame
+followed by a `SET_ACTIVITY` frame** on the wire. On Linux/macOS the listener is
+an actual `discord-ipc-0`-style Unix-domain socket in a temp dir (the config
+`ipc_socket_path` override points the worker at it); on Windows the worker is
+run against a local **named pipe** server. The step is `Discord adapter IPC smoke
+Test` in `ci.yml` (job `Build & Test on <os>-latest`).

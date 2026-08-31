@@ -3,6 +3,8 @@
 ## [0.65.0-alpha.55] - 2026-08-30
 - feat(presence): add opt-out, non-blocking Discord Rich Presence adapter (`rivulet-core::discord`) with IPC + graceful degradation
 - feat(presence): wire opt-out toggle into the Stream view and persist it
+- feat(presence): include the user-selected game/source name in the presence state; make the Discord application client ID configurable in Settings
+- test(presence): add CI smoke test that runs the Discord adapter against a local IPC listener (Unix socket + named pipe) and verifies handshake + SET_ACTIVITY
 - fix(update): wait for app exit before replacing files on Windows
 - fix(ui): redact secrets from smoke reports
 - feat(streaming): add platform setup assistant

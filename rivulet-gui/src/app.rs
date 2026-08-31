@@ -472,9 +472,21 @@ pub struct RivuletApp {
     /// Discord Rich Presence opt-out. Persisted across sessions. Defaults to
     /// on (matching the roadmap's explicit opt-out requirement).
     discord_presence_enabled: bool,
+    /// Discord Developer Application client id used for Rich Presence.
+    /// Persisted across sessions. Empty disables the adapter until a real
+    /// application id is configured.
+    discord_presence_client_id: String,
     /// Live adapter handle. Not persisted; rebuilt when the app starts.
     #[serde(skip)]
     discord_presence: Option<DiscordPresence>,
+    /// Client id the currently running adapter was built with. Not persisted,
+    /// used to detect when the setting changes so the adapter is rebuilt.
+    #[serde(skip)]
+    discord_presence_active_client_id: Option<String>,
+    /// Set when the user edits the client id and clicks Apply, so the running
+    /// adapter is rebuilt exactly once (not per keypress). Not persisted.
+    #[serde(skip)]
+    discord_client_id_dirty: bool,
     /// Last status pushed to the adapter, so updates only happen on activity
     /// transitions (per the adapter contract).
     #[serde(skip)]
@@ -837,7 +849,10 @@ impl Default for RivuletApp {
             theme: theme::ThemePreference::default(),
             theme_applied: None,
             discord_presence_enabled: true,
+            discord_presence_client_id: String::new(),
             discord_presence: None,
+            discord_presence_active_client_id: None,
+            discord_client_id_dirty: false,
             discord_presence_last: None,
 
             #[cfg(target_os = "linux")]
@@ -3690,7 +3705,36 @@ impl RivuletApp {
         } else {
             PresenceActivity::Idle
         };
-        PresenceStatus::for_activity_localized(activity, self.locale, None)
+        PresenceStatus::for_activity_localized(
+            activity,
+            self.locale,
+            self.current_presence_game_name().as_deref(),
+        )
+    }
+
+    /// The explicitly user-selected source name to surface in the presence
+    /// state (e.g. the selected game-capture window title). Falls back to the
+    /// selected window-capture title; returns `None` for a plain monitor
+    /// source. Only explicitly selected windows are used, never inferred
+    /// from captured content.
+    fn current_presence_game_name(&self) -> Option<String> {
+        if self.use_game_capture {
+            return self
+                .selected_game_window_idx
+                .and_then(|idx| self.game_windows.get(idx))
+                .map(|w| w.title.clone())
+                .filter(|title| !title.trim().is_empty());
+        }
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        if let Some(idx) = self.selected_window_idx {
+            if let Some(window) = self.windows.get(idx) {
+                let title = window.title().unwrap_or_default();
+                if !title.trim().is_empty() {
+                    return Some(title);
+                }
+            }
+        }
+        None
     }
 
     /// Reconcile the Discord adapter with the opt-out setting and push a status
@@ -3701,15 +3745,38 @@ impl RivuletApp {
             if let Some(mut presence) = self.discord_presence.take() {
                 presence.disconnect();
             }
+            self.discord_presence_active_client_id = None;
             self.discord_presence_last = None;
             return;
         }
 
-        if self.discord_presence.is_none() {
-            self.discord_presence = Some(DiscordPresence::new(&DiscordPresenceConfig {
+        // Rebuild the adapter exactly once when the user applied a new client id.
+        if self.discord_client_id_dirty {
+            self.discord_client_id_dirty = false;
+            self.discord_presence_active_client_id = None;
+        }
+
+        let client_id = self.discord_presence_client_id.trim().to_owned();
+        let needs_create = self.discord_presence.is_none()
+            || self.discord_presence_active_client_id.as_deref() != Some(client_id.as_str());
+        if needs_create {
+            if let Some(mut presence) = self.discord_presence.take() {
+                presence.disconnect();
+            }
+            self.discord_presence_active_client_id = None;
+            if client_id.is_empty() {
+                // No real application id yet: keep the adapter off and skip the
+                // status cache so it activates cleanly once configured.
+                self.discord_presence_last = None;
+                return;
+            }
+            let cfg = DiscordPresenceConfig {
                 enabled: true,
-                client_id: rivulet_core::discord::DEFAULT_CLIENT_ID.to_owned(),
-            }));
+                client_id: client_id.clone(),
+                ..Default::default()
+            };
+            self.discord_presence = Some(DiscordPresence::new(&cfg));
+            self.discord_presence_active_client_id = Some(client_id);
         }
 
         // Push only on activity transitions, never every frame.
@@ -5548,6 +5615,36 @@ impl eframe::App for RivuletApp {
                         }
                     }
                 });
+
+                // Settings: Discord Rich Presence (client id + opt-out)
+                let discord_section = self.tr("discord_section");
+                let discord_enable = self.tr("discord_presence_enable");
+                let discord_client_id_label = self.tr("discord_client_id");
+                let discord_client_id_hint = self.tr("discord_client_id_hint");
+                let discord_client_id_apply = self.tr("discord_client_id_apply");
+                let discord_client_id_note = self.tr("discord_client_id_note");
+                ui.separator();
+                ui.label(egui::RichText::new(discord_section).strong());
+                ui.checkbox(&mut self.discord_presence_enabled, discord_enable);
+                let mut apply_client_id = false;
+                ui.horizontal(|ui| {
+                    ui.label(discord_client_id_label);
+                    apply_client_id = ui
+                        .add(
+                            egui::TextEdit::singleline(&mut self.discord_presence_client_id)
+                                .hint_text(discord_client_id_hint)
+                                .desired_width(220.0),
+                        )
+                        .lost_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                });
+                if ui.button(discord_client_id_apply).clicked() {
+                    apply_client_id = true;
+                }
+                if apply_client_id {
+                    self.discord_client_id_dirty = true;
+                }
+                ui.small(discord_client_id_note);
             }
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -6046,9 +6143,7 @@ mod tests {
         assert_eq!(AppView::Settings.planned_milestone(), None);
     }
 
-    // ── Discord Rich Presence (M5) ────────────────────────────────
-
-    #[allow(clippy::field_reassign_with_default)]
+    // ── Discord Rich Presence (M5) ────────────────────────────────    #[allow(clippy::field_reassign_with_default)]
     #[test]
     fn discord_presence_is_opt_out_and_respects_transitions() {
         // Disabled: no adapter handle is created and status is never pushed.
@@ -6064,15 +6159,31 @@ mod tests {
         );
         assert!(app.discord_presence_last.is_none());
 
-        // Enabled: an active adapter is created and the current status is
-        // pushed, so the cached status reflects the first activity.
+        // Enabled but no client id configured: still no adapter (opt-in until
+        // a real Discord application id is set).
         app.discord_presence_enabled = true;
+        app.discord_presence_client_id = String::new();
+        app.sync_discord_presence();
+        assert!(
+            app.discord_presence.is_none(),
+            "empty client id must not spawn"
+        );
+        assert!(app.discord_presence_last.is_none());
+
+        // Enabled with a client id: an active adapter is created and the
+        // current status is pushed, so the cached status reflects the first
+        // activity.
+        app.discord_presence_client_id = "test-client-123".to_owned();
         app.sync_discord_presence();
         let presence = app
             .discord_presence
             .as_ref()
-            .expect("adapter created when enabled");
+            .expect("adapter created when configured");
         assert!(presence.enabled());
+        assert_eq!(
+            app.discord_presence_active_client_id.as_deref(),
+            Some("test-client-123")
+        );
         let expected = app.current_presence_status();
         assert_eq!(app.discord_presence_last.as_ref(), Some(&expected));
 
@@ -6084,6 +6195,77 @@ mod tests {
         app.discord_presence_enabled = false;
         app.sync_discord_presence();
         assert!(app.discord_presence.is_none());
+    }
+
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn discord_presence_rebuilds_when_client_id_changes() {
+        let mut app = RivuletApp {
+            discord_presence_enabled: true,
+            discord_presence_client_id: "first-client".to_owned(),
+            ..Default::default()
+        };
+        app.sync_discord_presence();
+        assert_eq!(
+            app.discord_presence_active_client_id.as_deref(),
+            Some("first-client")
+        );
+
+        // Re-syncing with an unchanged id must not rebuild the adapter.
+        let old = app
+            .discord_presence
+            .as_ref()
+            .expect("adapter present")
+            .enabled();
+        app.sync_discord_presence();
+        assert!(app.discord_presence.is_some());
+        assert!(old);
+
+        // A dirty flag (Apply pressed after editing) rebuilds once for the new id.
+        app.discord_presence_client_id = "second-client".to_owned();
+        app.discord_client_id_dirty = true;
+        app.sync_discord_presence();
+        assert_eq!(
+            app.discord_presence_active_client_id.as_deref(),
+            Some("second-client")
+        );
+        assert!(!app.discord_client_id_dirty);
+    }
+
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn discord_presence_status_includes_selected_game_name() {
+        let mut app = RivuletApp {
+            discord_presence_enabled: true,
+            discord_presence_client_id: "test-client".to_owned(),
+            ..Default::default()
+        };
+        app.use_game_capture = true;
+        app.game_windows = vec![rivulet_core::GameWindow {
+            id: 7,
+            title: "Elden Ring".to_owned(),
+            width: 1920,
+            height: 1080,
+        }];
+        app.selected_game_window_idx = Some(0);
+        let status = app.current_presence_status();
+        // The user-selected game name appears in the state, and the details
+        // line stays free of it (so details stays short on Discord).
+        assert!(
+            status.state.contains("Elden Ring"),
+            "state was: {}",
+            status.state
+        );
+        assert!(status.details.starts_with("Rivulet · "));
+        assert!(!status.details.contains("Elden Ring"));
+
+        // No selection -> plain status without a game name.
+        let empty = RivuletApp {
+            discord_presence_enabled: true,
+            discord_presence_client_id: "test-client".to_owned(),
+            ..Default::default()
+        };
+        assert!(empty.current_presence_game_name().is_none());
     }
 
     #[allow(clippy::field_reassign_with_default)]
