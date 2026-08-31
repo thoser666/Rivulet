@@ -756,6 +756,7 @@ pub struct RivuletApp {
     #[serde(skip)]
     selected_codec: rivulet_core::VideoCodec,
     selected_container: rivulet_core::RecordingContainer,
+    auto_remux: bool,
     // Preset selection
     #[serde(skip)]
     selected_preset: rivulet_core::RecordingPreset,
@@ -982,6 +983,7 @@ impl Default for RivuletApp {
             replay_status: None,
             selected_codec: rivulet_core::VideoCodec::default(),
             selected_container: rivulet_core::RecordingContainer::default(),
+            auto_remux: true,
             selected_preset: rivulet_core::RecordingPreset::default(),
             show_overlay: false,
 
@@ -1179,7 +1181,7 @@ impl RivuletApp {
 
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_recording_container(self.selected_container);
-            self.engine.set_recording_container(self.selected_container);
+            self.engine.set_auto_remux(self.auto_remux);
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
@@ -1237,7 +1239,7 @@ impl RivuletApp {
 
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_recording_container(self.selected_container);
-            self.engine.set_recording_container(self.selected_container);
+            self.engine.set_auto_remux(self.auto_remux);
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
@@ -1297,7 +1299,7 @@ impl RivuletApp {
 
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_recording_container(self.selected_container);
-            self.engine.set_recording_container(self.selected_container);
+            self.engine.set_auto_remux(self.auto_remux);
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
@@ -1382,7 +1384,7 @@ impl RivuletApp {
 
             self.engine.set_video_codec(self.selected_codec);
             self.engine.set_recording_container(self.selected_container);
-            self.engine.set_recording_container(self.selected_container);
+            self.engine.set_auto_remux(self.auto_remux);
             self.engine.set_preset(self.selected_preset);
             self.engine.set_overlay_enabled(self.show_overlay);
             self.apply_replay_setting();
@@ -1666,6 +1668,7 @@ impl RivuletApp {
         }
         self.engine.set_video_codec(self.selected_codec);
         self.engine.set_recording_container(self.selected_container);
+        self.engine.set_auto_remux(self.auto_remux);
         self.engine.set_preset(self.selected_preset);
         self.engine.set_overlay_enabled(self.show_overlay);
         self.apply_replay_setting();
@@ -1803,6 +1806,7 @@ impl RivuletApp {
         }
         self.engine.set_video_codec(self.selected_codec);
         self.engine.set_recording_container(self.selected_container);
+        self.engine.set_auto_remux(self.auto_remux);
         self.engine.set_preset(self.selected_preset);
         self.engine.set_overlay_enabled(self.show_overlay);
         self.apply_replay_setting();
@@ -4613,6 +4617,10 @@ impl eframe::App for RivuletApp {
                                 }
                             });
                     });
+                    let auto_remux_label = self.tr("auto_remux");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.auto_remux, auto_remux_label);
+                    });
                     ui.horizontal(|ui| {
                         ui.label(self.tr("recording_preset"));
                         egui::ComboBox::from_id_salt("windows_preset_select")
@@ -4987,6 +4995,9 @@ impl eframe::App for RivuletApp {
                                         }
                                     }
                                 });
+                        });
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut self.auto_remux, self.tr("auto_remux"));
                         });
                         ui.horizontal(|ui| {
                             ui.label(self.tr("recording_preset"));

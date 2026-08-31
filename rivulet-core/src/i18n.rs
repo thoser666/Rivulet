@@ -268,6 +268,7 @@ impl Locale {
                 // Codec selection
                 ("video_codec", "Video codec"),
                 ("recording_container", "Container"),
+                ("auto_remux", "Remux to MP4 after stop"),
                 ("recording_preset", "Preset"),
                 // Overlay
                 ("overlay_toggle", "Overlay (timer + FPS)"),
@@ -649,6 +650,7 @@ impl Locale {
                 // Codec selection
                 ("video_codec", "Video-Codec"),
                 ("recording_container", "Container"),
+                ("auto_remux", "Nach Stopp zu MP4 remuxen"),
                 ("recording_preset", "Preset"),
                 // Overlay
                 ("overlay_toggle", "Overlay (Timer + FPS)"),

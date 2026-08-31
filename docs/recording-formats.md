@@ -41,11 +41,24 @@ filesrc location=in.mkv ! matroskademux name=demux demux. ! queue ! mp4mux name=
 `RemuxSettings` carries `auto_remux_after_stop` (default on, mirroring OBS) and
 the target container (MP4). The source extension is swapped for the output.
 
-## Status & follow-up
+## Remux execution (issue #71)
+
+`remux_to_mp4` actually runs the remux pipeline after recording stops when
+`auto_remux_after_stop` is enabled and the source is a crash-safe intermediate:
+
+- Builds a `filesrc -> demuxer -> mp4mux -> filesink` pipeline from the plan
+  fragment using GStreamer's any-pad (`demux.` / `mux.`) syntax, so every
+  encoded track is identity-copied into the MP4 container.
+- Waits for EOS/error (bounded 60s timeout), then returns a `RemuxOutcome`:
+  `Success { output_path }`, `Skipped(reason)` when a GStreamer element is
+  unavailable, or an error.
+- The engine runs this automatically at the end of `stop_recording` when
+  auto-remux is enabled; the GUI exposes the toggle alongside the container
+  picker.
+
+## Status
 
 - [x] Container model + validation + GUI picker
 - [x] Remux plan/settings + pipeline fragment
-- [ ] GStreamer remux *execution* (calling the fragment after stop)
-
-The GStreamer-side remux execution and recording file management (split
-by time/size) are separate integration follow-ups.
+- [x] GStreamer remux **execution** after stop (auto, configurable in GUI)
+- [ ] Recording file management (split by time/size) — separate M4 follow-up

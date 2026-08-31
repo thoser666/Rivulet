@@ -49,7 +49,7 @@ pub mod health;
 pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 
 pub mod container;
-pub use container::{RecordingContainer, RemuxPlan, RemuxSettings};
+pub use container::{remux_to_mp4, RecordingContainer, RemuxOutcome, RemuxPlan, RemuxSettings};
 
 pub mod metrics;
 pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
@@ -163,6 +163,9 @@ pub struct RivuletEngine {
     /// Container format selected for recording (MP4 default, or crash-safe
     /// MKV/MOV/TS as remux intermediates).
     recording_container: RecordingContainer,
+    /// Remux settings: whether to auto-remux the finished recording to MP4
+    /// after stop (issue #71).
+    remux_settings: RemuxSettings,
     /// Recording preset controlling resolution, FPS, and bitrate.
     preset: RecordingPreset,
     /// Target video bitrate in kbit/s applied to the selected encoder.
@@ -215,6 +218,7 @@ impl Default for RivuletEngine {
             video_encoder: best_encoder(),
             video_codec: VideoCodec::default(),
             recording_container: RecordingContainer::default(),
+            remux_settings: RemuxSettings::default(),
             preset: RecordingPreset::default(),
             encoder_bitrate_kbps: 5_000,
             stream_health: None,
@@ -612,6 +616,17 @@ impl RivuletEngine {
     /// The currently selected recording container.
     pub fn recording_container(&self) -> RecordingContainer {
         self.recording_container
+    }
+
+    /// Configure whether finished recordings are auto-remuxed to MP4 (issue
+    /// #71). Ignored for MP4 recordings (nothing to remux).
+    pub fn set_auto_remux(&mut self, enabled: bool) {
+        self.remux_settings.auto_remux_after_stop = enabled;
+    }
+
+    /// Whether auto-remux after stop is enabled.
+    pub fn auto_remux(&self) -> bool {
+        self.remux_settings.auto_remux_after_stop
     }
 
     /// The recording muxer element, honoring the container selection.
@@ -1431,6 +1446,11 @@ impl RivuletEngine {
         }
         tracing::info!("Stopping recording");
 
+        // Capture the output path and container before the recording state is
+        // torn down, so auto-remux can run on the finished file (issue #71).
+        let finished_path = self.output_path.clone();
+        let finished_container = self.recording_container;
+
         if let Some(appsrc) = self.appsrc.as_ref() {
             let _ = appsrc.end_of_stream();
         }
@@ -1480,6 +1500,46 @@ impl RivuletEngine {
             replay.lock().unwrap_or_else(|e| e.into_inner()).clear();
         }
         tracing::info!("Recording stopped and file saved");
+
+        // Auto-remux the finished crash-safe recording to MP4 (issue #71).
+        self.remux_finished_recording(finished_path.as_deref(), finished_container);
+    }
+
+    /// Remuxes a finished recording to MP4 when auto-remux is enabled and the
+    /// source is a crash-safe intermediate container (MKV/MOV/TS). No-op for
+    /// MP4 recordings and for recordings that did not produce an output file.
+    fn remux_finished_recording(
+        &self,
+        path: Option<&std::path::Path>,
+        container: RecordingContainer,
+    ) {
+        if !self.remux_settings.auto_remux_after_stop {
+            return;
+        }
+        let Some(path) = path else {
+            return;
+        };
+        if !RemuxPlan::is_supported(container, RemuxSettings::default().target) {
+            return;
+        }
+        let output = RemuxPlan::output_for(&path.display().to_string(), RecordingContainer::Mp4);
+        let plan = RemuxPlan {
+            source_path: path.display().to_string(),
+            output_path: output.clone(),
+            source: container,
+            target: RecordingContainer::Mp4,
+        };
+        match remux_to_mp4(&plan) {
+            Ok(RemuxOutcome::Success { output_path }) => {
+                tracing::info!(source = %path.display(), output = %output_path, "Recording remuxed to MP4");
+            }
+            Ok(RemuxOutcome::Skipped(reason)) => {
+                tracing::warn!(reason, "Auto-remux skipped");
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Auto-remux failed");
+            }
+        }
     }
 
     pub fn process_raw_frame(&mut self, frame_data: &[u8], width: u32, height: u32) {

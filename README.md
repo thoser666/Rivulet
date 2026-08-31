@@ -321,7 +321,7 @@ must not be implied by beta parity.
 - [ ] **VST 3.x support** — *231 votes on OBS Ideas, $3000 bounty; most modern plugins are VST3-only*
 - [ ] **Master audio mix** (output VU meter, master volume control, monitoring) — *highly requested, PR rejected in OBS due to complexity*
 - [x] **Additional recording formats (MKV, MOV, TS — crash-safe alternatives to MP4)** — *container selection on the recording pipeline (MP4 default preserves the codec-native muxer; MKV/MOV/TS opt into a crash-safe intermediate), GUI container picker, `RecordingContainer`/`RemuxPlan` on `rivulet-core`*
-- [x] **Remux recordings** (MKV/MOV → MP4 remux after stop, automatic or manual). *Tracked in [#71](https://github.com/thoser666/Rivulet/issues/71).* — *validated `RemuxPlan` for crash-safe intermediates without re-encoding, `RemuxSettings` with `auto_remux_after_stop`; GStreamer remux execution is a pipeline-integration follow-up. See [docs/recording-formats.md](docs/recording-formats.md).*
+- [x] **Remux recordings** (MKV/MOV → MP4 remux after stop, automatic or manual). *Tracked in [#71](https://github.com/thoser666/Rivulet/issues/71).* — *validated `RemuxPlan`, `RemuxSettings` with `auto_remux_after_stop`, and GStreamer remux execution via `remux_to_mp4` after stop (element-availability gating); GUI toggle next to the container picker. See [docs/recording-formats.md](docs/recording-formats.md).*
 - [ ] **Recording file management** (split by time/size, filename patterns, auto-record alongside stream)
 - [ ] Advanced rate control (VBR, CQ, CQVBR, custom encoder options)
 - [ ] Multi-track audio export
