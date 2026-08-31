@@ -27,6 +27,26 @@ Für den geplanten automatischen Push benötigt das Repository-Secret
 Wiki-Repository. Ist das Secret nicht gesetzt, bleibt der Prüfjob grün bzw.
 meldet fehlende Übersetzungen, veröffentlicht aber nichts.
 
+## Push-Verifikation
+
+Nach jedem Push (Schedule-Pfad mit gesetztem `WIKI_SYNC_TOKEN`) verifiziert der
+Workflow den Remote-Hash: `sync-wiki-translations.py --publish` committet und
+pusht Änderungen, holt danach den Remote (`git fetch`) und vergleicht dessen
+`HEAD` mit dem lokalen Commit.
+
+- Stimmen die Hashes überein, ist `ok: remote verified at <sha>` bestätigt.
+- Bei Diskrepanz (z.&nbsp;B. paralleler Push oder Force-Push, bevor der
+  eigene Commit am Remote ankam) wird ein Fehler mit `exit 1` gemeldet und der
+  Job schlägt sichtbar fehl. Die Verifikation läuft unabhängig davon, ob in
+diesem Lauf tatsächlich ein Commit entstand — sie deckt also auch ab, dass ein
+angekündigter Sync am Ende wirklich auf dem Remote liegt.
+
+Für einen reinen Push ohne Verifikation (z.&nbsp;B. in einem Lese-Kontext)
+existiert die Option `--skip-verify`; im geplanten Workflow bleibt die
+Verifikation immer aktiv. Auf dem Wegwerf-Arbeitsrepo (ohne gesetzte
+Upstream-Tracking-Referenz) wird auf `origin/master` zurückgegriffen statt auf
+`@{u}`.
+
 ## Lokaler Smoke-Test
 
 Bevor man sich auf den CI-Workflow verlässt, lässt sich der komplette
@@ -65,3 +85,5 @@ Skripts beim Ersteinrichten (`git clone https://github.com/thoser666/Rivulet.wik
 - Neue Seiten werden im Workflow erkannt.
 - Keine automatische Übersetzung wird ungeprüft veröffentlicht.
 - Wiki-Änderungen sind separat vom Hauptrepository versioniert.
+- Nach einem automatischen Push ist der Remote-Hash verifiziert; bei
+  Diskrepanz schlägt der Workflow sichtbar fehl.
