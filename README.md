@@ -575,6 +575,14 @@ prerequisites and activation checklists.
 
 ## 🛠 Development
 
+### Repository hygiene
+
+Which file types and directories are handled exclusively via `.gitattributes`
+and `.gitignore` (line endings, binary markers, tool caches, nested repos) is
+normative in [`docs/repo-hygiene.md`](docs/repo-hygiene.md). Keep the working
+tree clean before committing: never `git add -A`, stage only the files that
+belong to a work package, and mark new binary assets in `.gitattributes`.
+
 ### Diagnostics and crash logs
 
 Rivulet writes structured, ANSI-free logs to the per-user data directory under
