@@ -224,5 +224,13 @@ The crate contains two layers of tests:
   client inside the pipeline. The job is wired into the required `CI`
   aggregate check, and `rivulet-core/tests/ci_pinning.rs` fails if the wiring
   drifts (job name, real-loopback usage, aggregate dependency).
+
+  **Handshake robustness:** the accept loop runs a non-blocking listener so
+  shutdown stays responsive; on Windows the accepted socket *inherits* the
+  non-blocking mode, which intermittently broke tungstenite's handshake read
+  (`Protocol(HandshakeIncomplete)` under parallel test load). `run_session`
+  therefore restores blocking **before** the handshake (not after), and the
+  auth-rejection smoke uses the same retry loop as `TestClient::connect` so a
+  transient drop cannot flake the suite. Both are locked in by `ci_pinning.rs`.
 - **GUI integration**: settings toggle/port/password persistence is covered
   by the existing GUI test harness, and i18n keys exist in both locales.

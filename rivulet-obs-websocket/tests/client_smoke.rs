@@ -233,6 +233,29 @@ impl TestClient {
     }
 }
 
+/// Connect with a short retry loop, matching `TestClient::connect`: the
+/// server's non-blocking accept loop can transiently drop a handshake under
+/// parallel load (fixed in `run_session` by restoring blocking before the
+/// handshake), so a bare `connect().unwrap()` would flake the suite.
+fn connect_with_retry(url: &str) -> WebSocket<MaybeTlsStream<std::net::TcpStream>> {
+    let mut request = url.into_client_request().unwrap();
+    request.headers_mut().insert(
+        "Sec-WebSocket-Protocol",
+        protocol::JSON_SUBPROTOCOL.parse().unwrap(),
+    );
+    for attempt in 0..10 {
+        match connect(request.clone()) {
+            Ok((ws, _)) => return ws,
+            Err(e) if attempt < 9 => {
+                eprintln!("[client] connect attempt {attempt} failed: {e}; retrying");
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(e) => panic!("websocket connect: {e}"),
+        }
+    }
+    unreachable!("retry loop always returns or panics")
+}
+
 fn read_json(ws: &mut WebSocket<MaybeTlsStream<std::net::TcpStream>>) -> serde_json::Value {
     loop {
         match ws.read().expect("read message") {
@@ -437,7 +460,7 @@ fn auth_rejects_wrong_password_with_close_code_4009() {
     let (_handle, port, _backend) = start_server(Some("hunter2".into()));
 
     let url = format!("ws://127.0.0.1:{port}");
-    let (mut ws, _) = connect(url.as_str()).unwrap();
+    let mut ws = connect_with_retry(url.as_str());
 
     let hello = read_json(&mut ws);
     let salt = hello["d"]["authentication"]["salt"].as_str().unwrap();

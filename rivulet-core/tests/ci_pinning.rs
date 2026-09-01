@@ -501,6 +501,28 @@ fn obs_websocket_smoke_is_wired_up() {
     let smoke = read("rivulet-obs-websocket/tests/client_smoke.rs");
     assert!(smoke.contains("real (non-mock) WebSocket client"));
     assert!(smoke.contains("ws://127.0.0.1:{port}"));
+    // Regression: the accept loop runs a non-blocking listener and accepted
+    // sockets on Windows inherit that mode, which made tungstenite's handshake
+    // read fail intermittently (`Protocol(HandshakeIncomplete)`) under
+    // parallel test load. Blocking must be restored **before** the handshake.
+    let server = read("rivulet-obs-websocket/src/server.rs");
+    let accept = server
+        .split_once("fn run_session")
+        .map(|(_, rest)| rest)
+        .expect("run_session must exist");
+    let handshake = accept
+        .find("tungstenite::accept_hdr")
+        .expect("accept_hdr call");
+    let blocking = accept
+        .find("set_nonblocking(false)")
+        .expect("set_nonblocking call");
+    assert!(
+        blocking < handshake,
+        "set_nonblocking(false) must come before accept_hdr"
+    );
+    // The auth-close smoke must use the same retry as TestClient::connect so a
+    // transient handshake drop cannot flake it.
+    assert!(smoke.contains("fn connect_with_retry"));
 }
 
 #[test]

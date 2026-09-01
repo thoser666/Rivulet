@@ -182,6 +182,13 @@ fn accept_loop(listener: TcpListener, state: Arc<ServerState>) {
 /// Handle one WebSocket connection: Hello, Identify (auth + RPC), then loop
 /// reading requests until the client disconnects.
 fn run_session(stream: TcpStream, state: Arc<ServerState>) -> SessionResult<()> {
+    // The accept loop uses a non-blocking listener for clean shutdown; on
+    // some platforms (Windows in particular) the accepted socket *inherits*
+    // that mode. A non-blocking socket breaks tungstenite's handshake read
+    // with an intermittent WouldBlock, so the client saw
+    // `Protocol(HandshakeIncomplete)` under parallel test load. Restore
+    // blocking **before** the handshake — not after, which was too late.
+    let _ = stream.set_nonblocking(false);
     let mut ws = match tungstenite::accept_hdr(
         stream,
         #[allow(clippy::result_large_err)]
@@ -207,9 +214,9 @@ fn run_session(stream: TcpStream, state: Arc<ServerState>) -> SessionResult<()> 
         },
     ) {
         Ok(ws) => {
-            // The accept loop uses a non-blocking listener for clean shutdown;
-            // on some platforms accepted sockets inherit that mode, which would
-            // break the blocking read loop below. Restore blocking explicitly.
+            // Belt and braces: also restore blocking on the upgraded socket
+            // (already done pre-handshake above, but harmless to repeat for
+            // platforms where the WebSocket wrapper changed the handle).
             let _ = ws.get_ref().set_nonblocking(false);
             ws
         }
