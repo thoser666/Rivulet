@@ -40,9 +40,11 @@ Write-Output "HANDSHAKE_SENT (op 0)"
 
 # 2. SET_ACTIVITY (op 1) — OBS-style payload with the Rivulet artwork asset
 # (large_image key must match an uploaded Art Asset in the Developer Portal).
-$activity = '{"cmd":"SET_ACTIVITY","args":{"pid":' + $PID + ',"activity":{"type":0,"state":"Ready","details":"","assets":{"large_image":"rivulet_logo","large_text":"Rivulet"}}},"nonce":"rivulet-live-1"}'
+# The details field is omitted when empty: Discord rejects an empty string
+# with 4000 ("details" is not allowed to be empty).
+$activity = '{"cmd":"SET_ACTIVITY","args":{"pid":' + $PID + ',"activity":{"type":0,"state":"Ready","assets":{"large_image":"rivulet_logo","large_text":"Rivulet"}}},"nonce":"rivulet-live-1"}'
 Write-DiscordFrame $pipe 1 $activity
-Write-Output "SET_ACTIVITY_SENT (op 1, pid $PID, assets.large_image=rivulet_logo)"
+Write-Output "SET_ACTIVITY_SENT (op 1, pid $PID, assets.large_image=rivulet_logo, no empty details)"
 
 # Read as many reply frames as arrive (up to 3, 3s each).
 for ($frame = 1; $frame -le 3; $frame++) {

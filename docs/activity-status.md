@@ -291,6 +291,16 @@ configured in Rivulet. There are two complementary checks:
    application does not have Rich Presence enabled — so a clean exchange
    confirms the feature is active for the configured client id.
 
+   The handshake reply also reveals whether an art asset key is usable: the
+   echoed `assets` object contains only the keys Discord accepted. When the
+   `large_image` key is missing from the reply (only `large_text` echoes),
+   the asset has not been uploaded yet — Discord silently drops image keys
+   that do not exist in the application. The same can be checked without a
+   client by fetching the public CDN URL: `curl -I
+   https://cdn.discordapp.com/app-assets/<client-id>/<asset-name>.png`
+   returns `200` for an uploaded asset and `404` when it is missing (for the
+   Rivulet app: `.../1544027006847680532/rivulet_logo.png`).
+
 > **Why the public API is not the check:** `GET
 > https://discord.com/api/v10/applications/<id>` returns `401 Unauthorized`
 > without an OAuth2/bot token, and the Rich Presence flag is not part of the
