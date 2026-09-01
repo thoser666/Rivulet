@@ -561,8 +561,8 @@ fn discord_presence_error_state_is_wired_into_the_status_model() {
     let gui = read("rivulet-gui/src/app.rs");
     assert!(gui.contains("PresenceActivity::Error"));
     assert!(
-        gui.contains("let activity = if self.last_error.is_some() {"),
-        "error must have priority in current_presence_status"
+        gui.contains("fn current_presence_activity"),
+        "error must have priority in current_presence_activity"
     );
     assert!(
         gui.contains("// Clear a stale error so a new stream starts"),
@@ -574,6 +574,36 @@ fn discord_presence_error_state_is_wired_into_the_status_model() {
     assert!(presence.contains("Self::Error => \"presence_error\""));
     let i18n = read("rivulet-core/src/i18n.rs");
     assert!(i18n.matches("\"presence_error\"").count() >= 2);
+}
+
+#[test]
+fn presence_legend_lists_every_state_with_a_tooltip() {
+    // The Stream view renders a legend: one row per state with an explanatory
+    // tooltip, highlighting the active row. The i18n tables must translate
+    // every tooltip key in both locales (parity test enforces key agreement).
+    let presence = read("rivulet-core/src/presence.rs");
+    assert!(presence.contains("pub const fn all() -> [PresenceActivity; 6]"));
+    assert!(presence.contains("pub const fn tooltip_i18n_key"));
+    let gui = read("rivulet-gui/src/app.rs");
+    let draw = gui
+        .split_once("fn draw_presence_status")
+        .map(|(_, rest)| rest)
+        .expect("draw_presence_status must exist");
+    assert!(draw.contains("presence_legend"));
+    assert!(draw.contains("for activity in PresenceActivity::all()"));
+    assert!(draw.contains("activity.tooltip_i18n_key()"));
+    assert!(draw.contains("response.on_hover_text(tip)"));
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in [
+        "presence_tooltip_ready",
+        "presence_tooltip_recording",
+        "presence_tooltip_streaming",
+        "presence_tooltip_recording_streaming",
+        "presence_tooltip_paused",
+        "presence_tooltip_error",
+    ] {
+        assert!(i18n.matches(key).count() >= 2, "{key} must be localized");
+    }
 }
 
 #[test]

@@ -42,6 +42,33 @@ impl PresenceActivity {
     pub fn label(self) -> &'static str {
         self.fallback_label()
     }
+
+    /// All states in display (and priority) order, used by the status legend
+    /// in the Stream view.
+    pub const fn all() -> [PresenceActivity; 6] {
+        [
+            PresenceActivity::Error,
+            PresenceActivity::RecordingAndStreaming,
+            PresenceActivity::Paused,
+            PresenceActivity::Recording,
+            PresenceActivity::Streaming,
+            PresenceActivity::Idle,
+        ]
+    }
+
+    /// Stable i18n key for the tooltip that explains when this state appears
+    /// and what it means. Consumed by the status legend in the Stream view;
+    /// both locales must translate every key (covered by the i18n parity test).
+    pub const fn tooltip_i18n_key(self) -> &'static str {
+        match self {
+            Self::Idle => "presence_tooltip_ready",
+            Self::Recording => "presence_tooltip_recording",
+            Self::Streaming => "presence_tooltip_streaming",
+            Self::RecordingAndStreaming => "presence_tooltip_recording_streaming",
+            Self::Paused => "presence_tooltip_paused",
+            Self::Error => "presence_tooltip_error",
+        }
+    }
 }
 
 /// A privacy-safe activity payload suitable for Discord Rich Presence.
@@ -135,5 +162,47 @@ mod tests {
         assert!(!status.details.contains("rtmp"));
         assert!(!status.details.contains("key"));
         assert!(!status.details.contains("/") && !status.details.contains("\\"));
+    }
+
+    #[test]
+    fn all_states_have_distinct_tooltips_in_both_locales() {
+        // Every state in the legend needs a tooltip in both locales; the
+        // i18n parity test additionally guarantees both tables agree on keys.
+        let mut keys = Vec::new();
+        for activity in PresenceActivity::all() {
+            let key = activity.tooltip_i18n_key();
+            assert!(key.starts_with("presence_tooltip_"), "bad key: {key}");
+            assert!(
+                !crate::Locale::En.tr(key).is_empty() && crate::Locale::En.tr(key) != key,
+                "missing EN tooltip for {key}"
+            );
+            assert!(
+                !crate::Locale::De.tr(key).is_empty() && crate::Locale::De.tr(key) != key,
+                "missing DE tooltip for {key}"
+            );
+            keys.push(key);
+        }
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), 6, "legend must cover all six states exactly");
+    }
+
+    #[test]
+    fn all_states_cover_every_activity_variant() {
+        // The legend is the source of truth for display order; it must not
+        // silently drop a variant when a new activity is added.
+        for variant in [
+            PresenceActivity::Idle,
+            PresenceActivity::Recording,
+            PresenceActivity::Streaming,
+            PresenceActivity::RecordingAndStreaming,
+            PresenceActivity::Paused,
+            PresenceActivity::Error,
+        ] {
+            assert!(
+                PresenceActivity::all().contains(&variant),
+                "legend missing {variant:?}"
+            );
+        }
     }
 }

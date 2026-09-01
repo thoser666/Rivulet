@@ -80,6 +80,18 @@ immediately, without having to open the Stream tab. Only activity changes cross
 the IPC boundary; an unchanged status is a no-op even when the sync runs every
 frame.
 
+## Status legend in the Stream view
+
+The Stream view renders a **legend** below the current status: one row per
+state (Fehler/Error, Aufnahme+Stream, Pausiert, Aufnahme, Streamt, Bereit) with
+the currently active state highlighted. Hovering any row shows a tooltip that
+explains **when the state appears** and **what it means** — e.g. "Ready" is
+the default on startup and after stopping, "Paused" means frames are captured
+but not written. The legend is generated from `PresenceActivity::all()` (so it
+never drifts from the model) and every tooltip is localized through
+`tooltip_i18n_key()` in both DE/EN (enforced by the i18n parity test and the
+`presence_legend_lists_every_state_with_a_tooltip` ci_pinning guard).
+
 ## The "Error" state
 
 `PresenceActivity::Error` is produced whenever the engine or a capture thread

@@ -4016,14 +4016,12 @@ impl RivuletApp {
     }
 
     /// Render the implemented M3 streaming view.
-    fn current_presence_status(&self) -> PresenceStatus {
-        // A fresh engine/capture error has priority over every activity label:
-        // the user should see that something went wrong even mid-recording or
-        // mid-stream. The error is cleared again by the next start (recording
-        // starts already reset it; streaming starts do so below), so the
-        // status does not stick. The payload stays privacy-safe: only the
-        // localized "Error" label is sent, never the error text itself.
-        let activity = if self.last_error.is_some() {
+    /// The current activity, newest-priority first: a fresh error wins over
+    /// everything, then recording+streaming, paused, recording, streaming,
+    /// and finally idle (Ready). Used both for the payload and to highlight
+    /// the active row in the stream-view legend.
+    fn current_presence_activity(&self) -> PresenceActivity {
+        if self.last_error.is_some() {
             PresenceActivity::Error
         } else if self.is_recording_active() && self.engine.is_streaming() {
             PresenceActivity::RecordingAndStreaming
@@ -4037,9 +4035,14 @@ impl RivuletApp {
             PresenceActivity::Streaming
         } else {
             PresenceActivity::Idle
-        };
+        }
+    }
+
+    fn current_presence_status(&self) -> PresenceStatus {
+        // The payload stays privacy-safe: only the localized activity label is
+        // sent, never the raw error text (which may contain paths).
         PresenceStatus::for_activity_localized(
-            activity,
+            self.current_presence_activity(),
             self.locale,
             self.current_presence_game_name().as_deref(),
         )
@@ -4678,10 +4681,31 @@ impl RivuletApp {
     fn draw_presence_status(&mut self, ui: &mut egui::Ui) {
         self.sync_discord_presence();
         let status = self.current_presence_status();
+        let active_activity = self.current_presence_activity();
         ui.group(|ui| {
             ui.label(egui::RichText::new("Rivulet-Status").strong());
             ui.label(status.details);
             ui.label(status.state);
+            // Legend: one row per state with a hover tooltip that explains
+            // when the state appears and what it means. The active state is
+            // highlighted so the mapping from Discord text to meaning is
+            // always visible.
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(self.tr("presence_legend"))
+                    .small()
+                    .strong(),
+            );
+            for activity in PresenceActivity::all() {
+                let label = self.tr(activity.i18n_key());
+                let tip = self.tr(activity.tooltip_i18n_key());
+                let is_active = activity == active_activity;
+                let response = ui.selectable_label(is_active, label);
+                if is_active {
+                    theme::paint_interaction_stroke(ui, &response);
+                }
+                response.on_hover_text(tip);
+            }
             let enable_label = self.tr("discord_presence_enable");
             let hint = self.tr("discord_presence_hint");
             ui.checkbox(&mut self.discord_presence_enabled, enable_label)
@@ -7764,6 +7788,45 @@ mod tests {
                 >= 2,
             "every streaming start must clear last_error"
         );
+    }
+
+    #[test]
+    fn presence_legend_is_wired_into_the_stream_view_with_tooltips() {
+        // The Stream view must render the status legend: one row per state
+        // with an explanatory tooltip, highlighting the active state.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let draw = source
+            .split_once("fn draw_presence_status")
+            .map(|(_, rest)| rest)
+            .expect("draw_presence_status must exist");
+        assert!(draw.contains("presence_legend"));
+        assert!(draw.contains("for activity in PresenceActivity::all()"));
+        assert!(draw.contains("activity.tooltip_i18n_key()"));
+        assert!(draw.contains("response.on_hover_text(tip)"));
+        assert!(draw.contains("self.current_presence_activity()"));
+        // The active row is highlighted via the interaction stroke.
+        assert!(draw.contains("paint_interaction_stroke"));
+    }
+
+    #[test]
+    fn presence_activity_is_derived_independently_of_the_payload() {
+        // current_presence_activity() drives both the Discord payload and the
+        // legend highlight; it must expose the raw enum state (not the
+        // localized payload) so the drawer can highlight the right row.
+        let mut app = RivuletApp::default();
+        assert_eq!(app.current_presence_activity(), PresenceActivity::Idle);
+        app.is_aux_recording = true;
+        assert_eq!(app.current_presence_activity(), PresenceActivity::Recording);
+        app.is_paused = true;
+        assert_eq!(app.current_presence_activity(), PresenceActivity::Paused);
+        app.last_error = Some("boom".to_owned());
+        assert_eq!(app.current_presence_activity(), PresenceActivity::Error);
+        app.is_aux_recording = false;
+        app.is_paused = false;
+        app.last_error = None;
+        assert_eq!(app.current_presence_activity(), PresenceActivity::Idle);
+        // The legend covers every state in display order.
+        assert_eq!(PresenceActivity::all().len(), 6);
     }
 
     #[test]
