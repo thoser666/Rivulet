@@ -159,7 +159,24 @@ impl TestClient {
             "Sec-WebSocket-Protocol",
             protocol::JSON_SUBPROTOCOL.parse().unwrap(),
         );
-        let (mut ws, _) = connect(request).expect("websocket connect");
+        let mut ws = None;
+        // The non-blocking accept loop can momentarily drop a handshake when
+        // tests run in parallel on loaded CI runners; retry briefly instead
+        // of failing the whole suite on a transient "Connection reset".
+        for attempt in 0..10 {
+            match connect(request.clone()) {
+                Ok((w, _)) => {
+                    ws = Some(w);
+                    break;
+                }
+                Err(e) if attempt < 9 => {
+                    eprintln!("[client] connect attempt {attempt} failed: {e}; retrying");
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(e) => panic!("websocket connect: {e}"),
+            }
+        }
+        let mut ws = ws.expect("websocket connect");
         eprintln!("[client] connected, reading hello");
 
         // Read Hello.
