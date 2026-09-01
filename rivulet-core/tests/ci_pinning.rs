@@ -1282,6 +1282,28 @@ fn twitch_chat_dock_is_wired_and_covered() {
         docs.contains("# Twitch Chat Dock") && docs.contains("parse_irc_line"),
         "the chat dock must be documented with its architecture"
     );
+    // Sending replies: the worker must expose a non-blocking send that is
+    // covered by the local-listener smoke, and the GUI must gate the input on
+    // an authenticated connection (OAuth token) because Twitch rejects
+    // PRIVMSG from the anonymous nick.
+    let core = read("rivulet-core/src/twitch_chat.rs");
+    assert!(
+        core.contains("pub fn send_message") && core.contains("Msg::SendMessage"),
+        "the worker must expose a non-blocking send_message"
+    );
+    assert!(
+        core.contains("PRIVMSG {channel} :{text}"),
+        "sending must write a PRIVMSG to the joined channel"
+    );
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(
+        app.contains("fn send_chat_message") && app.contains("ChatAction::Send"),
+        "the GUI must wire a send path into the chat worker"
+    );
+    assert!(
+        app.contains("chat_send_locked"),
+        "the UI must show a lock hint when sending is unavailable"
+    );
 }
 
 #[test]

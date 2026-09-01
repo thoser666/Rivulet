@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- feat(m5): reply in Twitch chat — the Chat view gains a message input (Enter/Send) that writes PRIVMSG via the worker; sending is non-blocking, gated on a connected chat with an OAuth token (`chat:send`), and never logs the token; core send smoke (local listener) + GUI gate tests + ci_pinning guard + docs updated
 - fix(presence): omit the Discord activity `details` field when empty instead of sending an empty string — Discord rejects `SET_ACTIVITY` with `4000: "details" is not allowed to be empty` (verified live), which silently dropped every presence update whenever no game name was selected; regression test + ci_pinning guard + docs updated
 - docs(presence): ship a ready-to-upload Discord Rich Presence artwork (`docs/assets/rivulet-rich-presence-1024.png`, 1024×1024 PNG with padding) and document the exact upload path (Developer Portal → Rich Presence → Art Assets, asset name `rivulet_logo`) plus size/format/padding requirements in docs/activity-status.md
 - feat(m5): alert overlay import — Streamlabs/StreamElements widget URLs (and any custom https URL) can be imported into the browser source via a guided provider + token flow in the Scenes view; the token is cleared after import and never logged; core URL-shape/validation tests, GUI import tests, ci_pinning guard and docs/alerts.md added

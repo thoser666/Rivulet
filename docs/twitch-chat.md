@@ -15,6 +15,12 @@ browser source or overlay needed for monitoring chat while streaming.
 - **Anonymous by default**: read-only chat works without any token (Twitch
   allows anonymous IRC reads). With an OAuth token (`chat:read`) you get
   colors and badges for your own messages.
+- **Reply in chat**: with an OAuth token that has the **`chat:send`** scope,
+  a message input appears under the chat list — type a message and press
+  Enter (or click **Send**) and it is written to the joined channel via
+  `PRIVMSG`. Sending is **non-blocking** (enqueued to the worker thread) and
+  the input is only enabled while connected **and** a token is configured,
+  because Twitch rejects messages from the anonymous read-only nick.
 - **Privacy-safe**: tokens are never written to logs or the message model;
   the message serialization is covered by a dedicated test.
 
@@ -25,7 +31,10 @@ browser source or overlay needed for monitoring chat while streaming.
 3. Click **Connect**. The status line shows `Connected` / `Disconnected —
    retrying` / `Off`.
 4. Optional: paste an OAuth token (`oauth:...`) with the `chat:read` scope
-   into the token field **before** connecting.
+   into the token field **before** connecting. To **reply** in the chat, the
+   token needs the additional **`chat:send`** scope (generate one at
+   https://twitchtokengenerator.com or in your Twitch developer console);
+   without it the message input stays disabled with a hint.
 
 ## Configuration notes
 
@@ -45,9 +54,10 @@ rivulet-core::twitch_chat
   └─ worker_loop(rx, cfg, stop)                    # dedicated thread, I/O here
 
 rivulet-gui::app
-  ├─ chat_action_pending / ChatAction               # Connect/Disconnect intent
+  ├─ chat_action_pending / ChatAction               # Connect/Disconnect/Send
   ├─ reconcile_twitch_chat()                        # one action per frame
-  ├─ draw_chat_view()                               # inputs + message list
+  ├─ send_chat_message(text)                        # token + worker gate
+  ├─ draw_chat_view()                               # inputs + message list + reply
   └─ i18n keys: chat_* (DE/EN)
 ```
 
@@ -56,11 +66,16 @@ rivulet-gui::app
 - `rivulet-core`: parser unit tests (tags, colors, badges, `/me` actions,
   missing-tag fallback), privacy-safe serialization, disabled-state behavior
   and an end-to-end smoke test that runs the worker against a **local TCP
-  listener** (deterministic in CI, no real network).
+  listener** (deterministic in CI, no real network) — including sending:
+  the listener asserts the worker writes `PRIVMSG #channel :text` back on
+  the same socket after `send_message`.
 - `rivulet-gui`: navigation contract (`AppView::Chat`, `nav_chat`), view
-  coverage and i18n parity.
-- `ci_pinning.rs`: guard that the chat view stays wired into the sidebar and
-  the worker keeps its local-listener smoke test.
+  coverage and i18n parity, plus behavior tests for the send gate (no token
+  / no worker / whitespace are rejected) and a source-contract test that the
+  reply input only renders when connected and a token is configured.
+- `ci_pinning.rs`: guard that the chat view stays wired into the sidebar,
+  the worker keeps its local-listener smoke test, and the send path
+  (`send_message` / `ChatAction::Send` / `PRIVMSG`) stays covered.
 
 ## Roadmap
 

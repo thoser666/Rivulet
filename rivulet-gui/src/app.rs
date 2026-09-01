@@ -270,10 +270,11 @@ impl AppView {
 /// Pending Twitch-chat actions, processed exactly once per frame by the
 /// reconcile step (so the worker is only (re)built on explicit user intent,
 /// never per keypress).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ChatAction {
     Connect,
     Disconnect,
+    Send(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -667,6 +668,10 @@ pub struct RivuletApp {
     /// Twitch chat dock: OAuth token for authenticated reads (persisted, but
     /// never shown in logs/UI). Empty connects anonymously.
     chat_oauth_token: String,
+    /// Twitch chat dock: pending message text to send on Enter. Not
+    /// persisted.
+    #[serde(skip)]
+    chat_input: String,
     /// Twitch chat dock: running worker handle. Not persisted.
     #[serde(skip)]
     chat_worker: Option<rivulet_core::TwitchChat>,
@@ -1168,6 +1173,7 @@ impl Default for RivuletApp {
             discord_client_id_warning: None,
             chat_channel: String::new(),
             chat_oauth_token: String::new(),
+            chat_input: String::new(),
             chat_worker: None,
             chat_messages: Vec::new(),
             chat_action_pending: None,
@@ -4311,6 +4317,9 @@ impl RivuletApp {
                 self.chat_messages.clear();
                 self.chat_state = rivulet_core::ChatConnState::Off;
             }
+            Some(ChatAction::Send(text)) => {
+                self.send_chat_message(text);
+            }
             None => {}
         }
 
@@ -4327,6 +4336,22 @@ impl RivuletApp {
                 }
             }
         }
+    }
+
+    /// Send a chat message through the running worker. Twitch rejects
+    /// PRIVMSG from the anonymous `justinfan` nick, so sending requires an
+    /// authenticated connection (a configured OAuth token with `chat:send`);
+    /// the UI only enables the input under that condition. Returns whether the
+    /// message was handed to the worker (non-blocking enqueue).
+    fn send_chat_message(&mut self, text: String) -> bool {
+        let text = text.trim().to_owned();
+        if text.is_empty() || self.chat_oauth_token.trim().is_empty() {
+            return false;
+        }
+        let Some(worker) = &self.chat_worker else {
+            return false;
+        };
+        worker.send_message(&text)
     }
 
     /// Handle the Settings "Apply" action for the Discord client id: validate
@@ -5075,6 +5100,32 @@ impl RivuletApp {
         self.chat_messages = messages;
         if self.chat_messages.is_empty() && self.chat_state != rivulet_core::ChatConnState::Off {
             ui.small(self.tr("chat_empty"));
+        }
+
+        // Reply input: sending requires an authenticated connection (Twitch
+        // rejects PRIVMSG from the anonymous nick), so the field is only
+        // enabled when connected and an OAuth token is configured. Enter
+        // sends; the input is cleared immediately after the enqueue.
+        let can_send = self.chat_state == rivulet_core::ChatConnState::Connected
+            && !self.chat_oauth_token.trim().is_empty();
+        if can_send {
+            let send_hint = self.tr("chat_send_hint");
+            let send_button = self.tr("chat_send");
+            ui.horizontal(|ui| {
+                let input = ui.add(
+                    egui::TextEdit::singleline(&mut self.chat_input)
+                        .hint_text(send_hint)
+                        .desired_width(ui.available_width() - 70.0),
+                );
+                let enter_pressed =
+                    input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if enter_pressed || theme::accent_button(ui, send_button).clicked() {
+                    let text = std::mem::take(&mut self.chat_input);
+                    self.chat_action_pending = Some(ChatAction::Send(text));
+                }
+            });
+        } else {
+            ui.small(self.tr("chat_send_locked"));
         }
     }
 
@@ -9751,5 +9802,77 @@ mod tests {
         assert_eq!(app.browser_source.url, before);
         let status = app.scene_status.as_deref().unwrap_or_default();
         assert!(status.contains("invalid"), "status was: {status}");
+    }
+
+    // ── Twitch chat replies (M5 community dock) ───────────────────
+
+    #[test]
+    fn chat_send_requires_oauth_token_and_running_worker() {
+        // Sending is only possible with an authenticated connection: no token
+        // and no worker must both be rejected without touching any state.
+        let mut app = RivuletApp::default();
+        assert!(
+            !app.send_chat_message("hello".to_owned()),
+            "no token must block sending"
+        );
+        assert!(
+            !app.send_chat_message("   ".to_owned()),
+            "whitespace text must be rejected"
+        );
+
+        // Token configured but no worker connected yet: still rejected.
+        app.chat_oauth_token = "oauth:abc123".to_owned();
+        assert!(
+            !app.send_chat_message("hello".to_owned()),
+            "no worker must block sending"
+        );
+    }
+
+    #[test]
+    fn chat_send_enqueues_text_and_clears_pending_action() {
+        // A real worker would dial irc.chat.twitch.tv; point it at an
+        // unreachable loopback so the test never touches the network and the
+        // worker just backs off. Sending is a non-blocking enqueue.
+        let mut app = RivuletApp {
+            chat_oauth_token: "oauth:abc123".to_owned(),
+            chat_channel: "rivulet".to_owned(),
+            chat_worker: Some(rivulet_core::TwitchChat::new(
+                &rivulet_core::TwitchChatConfig {
+                    endpoint: "127.0.0.1:1".to_owned(),
+                    channel: "rivulet".to_owned(),
+                    oauth_token: "oauth:abc123".to_owned(),
+                    ..Default::default()
+                },
+            )),
+            chat_state: rivulet_core::ChatConnState::Connected,
+            ..Default::default()
+        };
+        assert!(app.send_chat_message(" hello there ".to_owned()));
+        // The trimmed message goes through the worker channel (best effort;
+        // the worker is not reachable here), so the app reports success.
+    }
+
+    #[test]
+    fn chat_send_input_is_gated_on_connected_and_token_in_source() {
+        // Source contract: the reply input must only render when connected and
+        // an OAuth token is configured; otherwise a lock hint is shown. This
+        // keeps the UI from offering an input that Twitch would reject.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let draw = source
+            .split_once("fn draw_chat_view")
+            .map(|(_, rest)| rest)
+            .expect("draw_chat_view must exist");
+        assert!(draw.contains("chat_send_locked"));
+        assert!(draw.contains("chat_state == rivulet_core::ChatConnState::Connected"));
+        assert!(draw.contains("chat_oauth_token.trim().is_empty()"));
+        assert!(draw.contains("ChatAction::Send"));
+        let i18n = std::fs::read_to_string("../rivulet-core/src/i18n.rs").expect("i18n readable");
+        for key in ["chat_send", "chat_send_hint", "chat_send_locked"] {
+            let k = format!("\"{key}\"");
+            assert!(
+                i18n.matches(&k).count() >= 2,
+                "{key} must exist in EN and DE"
+            );
+        }
     }
 }

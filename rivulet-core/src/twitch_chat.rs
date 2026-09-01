@@ -151,6 +151,27 @@ impl TwitchChat {
         self.messages.as_ref()
     }
 
+    /// Send a chat message. Returns `false` when the worker is disabled (no
+    /// channel configured) — e.g. there is no socket to write to. Never
+    /// blocks; the text is written to the IRC socket by the worker.
+    ///
+    /// Sending requires an authenticated connection: Twitch rejects PRIVMSG
+    /// from the anonymous `justinfan` nick. The GUI enables the input only
+    /// when an OAuth token is configured; the worker still drops empty text.
+    pub fn send_message(&self, text: &str) -> bool {
+        match &self.tx {
+            Some(tx) => {
+                let text = text.trim();
+                if text.is_empty() {
+                    return false;
+                }
+                let _ = tx.try_send(Msg::SendMessage(text.to_owned()));
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Stop the worker. Safe to call repeatedly.
     pub fn disconnect(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
@@ -172,10 +193,11 @@ impl Drop for TwitchChat {
 
 enum Msg {
     Disconnect,
+    SendMessage(String),
 }
 
 fn worker_loop(
-    _rx: Receiver<Msg>,
+    rx: Receiver<Msg>,
     cfg: TwitchChatConfig,
     stop: Arc<AtomicBool>,
     conn: Arc<std::sync::atomic::AtomicU8>,
@@ -184,7 +206,7 @@ fn worker_loop(
     let mut backoff = 1u64;
     while !stop.load(Ordering::SeqCst) {
         conn.store(1, Ordering::SeqCst);
-        match run_session(&cfg, &msg_tx) {
+        match run_session(&cfg, &msg_tx, &rx) {
             Ok(()) => {
                 if stop.load(Ordering::SeqCst) {
                     break;
@@ -204,10 +226,19 @@ fn worker_loop(
 }
 
 /// One connection session: connect, register, join, then read lines until the
-/// server closes the stream or the stop flag is set.
-fn run_session(cfg: &TwitchChatConfig, msg_tx: &Sender<ChatMessage>) -> anyhow::Result<()> {
+/// server closes the stream or the stop flag is set. Inbound `Msg` values
+/// (disconnect, outbound chat text) are drained before each socket read, so
+/// sending stays responsive even while the socket is idle.
+fn run_session(
+    cfg: &TwitchChatConfig,
+    msg_tx: &Sender<ChatMessage>,
+    rx: &Receiver<Msg>,
+) -> anyhow::Result<()> {
     let stream = TcpStream::connect(&cfg.endpoint)?;
-    stream.set_read_timeout(Some(Duration::from_secs(60)))?;
+    // Short timeout so outbound messages are handled promptly between reads;
+    // the loop below treats WouldBlock/TimedOut as "no input yet" and keeps
+    // draining the outbound queue.
+    stream.set_read_timeout(Some(Duration::from_millis(500)))?;
     let mut writer = stream.try_clone()?;
     let mut reader = BufReader::new(stream);
 
@@ -232,11 +263,37 @@ fn run_session(cfg: &TwitchChatConfig, msg_tx: &Sender<ChatMessage>) -> anyhow::
 
     let mut line = String::new();
     loop {
+        // Handle outbound requests first so a queued message is sent even
+        // when the server has not sent anything for a while.
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                Msg::Disconnect => return Ok(()),
+                Msg::SendMessage(text) => {
+                    let text = text.trim();
+                    if !text.is_empty() {
+                        writeln!(writer, "PRIVMSG {channel} :{text}")?;
+                        writer.flush()?;
+                    }
+                }
+            }
+        }
         line.clear();
-        let read = reader.read_line(&mut line)?;
-        if read == 0 {
-            // Server closed the connection.
-            return Ok(());
+        match reader.read_line(&mut line) {
+            Ok(0) => {
+                // Server closed the connection.
+                return Ok(());
+            }
+            Ok(_) => {}
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                // No input yet; loop back to drain outbound messages.
+                continue;
+            }
+            Err(e) => return Err(e.into()),
         }
         let trimmed = line.trim_end_matches(['\r', '\n']);
         if trimmed.is_empty() {
@@ -514,6 +571,46 @@ mod tests {
         assert_eq!(msg.color.as_deref(), Some("#FF0000"));
         assert!(msg.badges.contains(&"moderator".to_owned()));
 
+        // Sending: `send_message` must write a PRIVMSG to the same socket.
+        assert!(chat.send_message("hello from rivulet"));
+        line.clear();
+        let read = reader.read_line(&mut line).expect("read privmsg");
+        assert!(read > 0, "expected a PRIVMSG reply");
+        assert!(
+            line.starts_with("PRIVMSG #rivulet :hello from rivulet"),
+            "got: {line}"
+        );
+        assert!(!line.contains("oauth"), "PRIVMSG must not leak the token");
+
+        chat.disconnect();
+    }
+
+    #[test]
+    fn send_message_requires_an_enabled_worker_and_non_empty_text() {
+        let chat = TwitchChat::new(&TwitchChatConfig {
+            channel: String::new(),
+            ..Default::default()
+        });
+        assert!(!chat.enabled());
+        assert!(
+            !chat.send_message("hello"),
+            "disabled worker must reject sends"
+        );
+
+        let mut chat = TwitchChat::new(&TwitchChatConfig {
+            channel: "rivulet".to_owned(),
+            endpoint: "127.0.0.1:1".to_owned(), // unreachable, worker backs off
+            ..Default::default()
+        });
+        assert!(chat.enabled());
+        assert!(
+            !chat.send_message("   "),
+            "whitespace-only text must be rejected"
+        );
+        assert!(
+            chat.send_message("hello"),
+            "non-empty text must be enqueued"
+        );
         chat.disconnect();
     }
 }
