@@ -79,3 +79,20 @@ starting or stopping a recording from the Record view updates the Discord status
 immediately, without having to open the Stream tab. Only activity changes cross
 the IPC boundary; an unchanged status is a no-op even when the sync runs every
 frame.
+
+## The "Error" state
+
+`PresenceActivity::Error` is produced whenever the engine or a capture thread
+reported a failure (`last_error` is set — e.g. a pipeline build/start/push
+error or a capture that delivered no frames). It has **priority over the
+activity labels**: even while a recording or stream is nominally active, a
+fresh failure surfaces as "Error"/"Fehler" instead of the activity label.
+
+The order of evaluation is: Error → Recording + streaming → Paused → Recording
+→ Streaming → Ready.
+
+The error state stays **privacy-safe**: only the localized "Error"/"Fehler"
+label is sent, never the raw error text (which may contain paths or other
+implementation details). The state recovers automatically on the next start —
+recording starts and both streaming-start paths clear `last_error`, so the
+status moves back to the activity label rather than sticking on "Error".

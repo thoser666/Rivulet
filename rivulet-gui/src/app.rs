@@ -4017,7 +4017,15 @@ impl RivuletApp {
 
     /// Render the implemented M3 streaming view.
     fn current_presence_status(&self) -> PresenceStatus {
-        let activity = if self.is_recording_active() && self.engine.is_streaming() {
+        // A fresh engine/capture error has priority over every activity label:
+        // the user should see that something went wrong even mid-recording or
+        // mid-stream. The error is cleared again by the next start (recording
+        // starts already reset it; streaming starts do so below), so the
+        // status does not stick. The payload stays privacy-safe: only the
+        // localized "Error" label is sent, never the error text itself.
+        let activity = if self.last_error.is_some() {
+            PresenceActivity::Error
+        } else if self.is_recording_active() && self.engine.is_streaming() {
             PresenceActivity::RecordingAndStreaming
         } else if self.is_recording_active() {
             if self.is_paused {
@@ -4558,6 +4566,9 @@ impl RivuletApp {
                     )
                     .with_preset(self.stream_preset);
                     self.engine.set_stream_settings(Some(settings));
+                    // Clear a stale error so a new stream starts from the
+                    // Ready/Streaming label (mirrors the recording starts).
+                    self.last_error = None;
                     self.engine.start_streaming();
                     let active = self.engine.is_streaming();
                     self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
@@ -4818,6 +4829,9 @@ impl RivuletApp {
                     )
                     .with_preset(self.stream_preset);
                     self.engine.set_stream_settings(Some(settings));
+                    // Clear a stale error so a new stream starts from the
+                    // Ready/Streaming label (mirrors the recording starts).
+                    self.last_error = None;
                     self.engine.start_streaming();
                     self.stream_status_message =
                         Some(self.tr("stream_status_connecting").to_owned());
@@ -7669,6 +7683,87 @@ mod tests {
         let back = app.current_presence_status();
         assert_eq!(back, idle);
         assert_eq!(app.discord_presence_last.as_ref(), Some(&idle));
+    }
+
+    #[test]
+    fn discord_presence_reports_error_state_when_engine_fails() {
+        // Regression: the PresenceActivity::Error variant existed in the model
+        // but no code path ever produced it — engine/capture failures left the
+        // presence stuck on the activity label. A real failure must surface as
+        // the localized "Error" state with priority over any running activity.
+        let mut app = RivuletApp {
+            discord_presence_enabled: true,
+            discord_presence_client_id: "test-client".to_owned(),
+            ..Default::default()
+        };
+        // Simulate an engine failure (e.g. capture/encode error) that set
+        // last_error, while a recording is nominally still active.
+        app.is_aux_recording = true;
+        app.last_error = Some("pipeline failed".to_owned());
+        let status = app.current_presence_status();
+        assert_eq!(status.state, "Error");
+        assert_eq!(status.details, "Rivulet · Error");
+
+        // The error text itself is never sent (privacy-safe payload).
+        assert!(!status.state.contains("pipeline"));
+        assert!(!status.details.contains("pipeline"));
+
+        // Error has priority over pause and streaming too.
+        app.is_paused = true;
+        let status = app.current_presence_status();
+        assert_eq!(status.state, "Error");
+
+        // Clearing the error (next start) returns to the activity label.
+        app.last_error = None;
+        let status = app.current_presence_status();
+        assert_eq!(status.state, "Paused");
+
+        // Error label is localized.
+        app.locale = Locale::De;
+        app.is_paused = false;
+        app.last_error = Some("pipeline failed".to_owned());
+        let status = app.current_presence_status();
+        assert_eq!(status.state, "Fehler");
+    }
+
+    #[test]
+    fn discord_presence_starts_streaming_clear_stale_error() {
+        // A stream start must clear a stale error so the presence moves from
+        // "Error" back to the Streaming label (mirrors recording starts).
+        // Verify both the state model behavior and the source contract.
+        let mut app = RivuletApp {
+            discord_presence_enabled: true,
+            discord_presence_client_id: "test-client".to_owned(),
+            ..Default::default()
+        };
+        app.last_error = Some("old failure".to_owned());
+        let before = app.current_presence_status();
+        assert_eq!(before.state, "Error");
+
+        // The same reset the streaming start path applies.
+        app.last_error = None;
+        let status = app.current_presence_status();
+        assert_eq!(status.state, "Ready");
+
+        // Source contract: every streaming start path (OBS-WebSocket command
+        // and GUI stream button) clears last_error. Only inspect the part of
+        // the file before this test module so the assertions below (which use
+        // the same strings) cannot satisfy the counts.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let production = source
+            .split_once("#[cfg(test)]")
+            .map(|(head, _)| head)
+            .unwrap_or(&source);
+        let streaming_starts = production.matches("self.engine.start_streaming();").count();
+        assert!(streaming_starts >= 2, "streaming start paths must exist");
+        // The two production start paths begin with the stale-error reset.
+        assert!(
+            production
+                .matches("// Clear a stale error so a new stream starts")
+                .count()
+                >= 2,
+            "every streaming start must clear last_error"
+        );
     }
 
     #[test]

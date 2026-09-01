@@ -553,6 +553,30 @@ fn discord_presence_tracks_record_state_from_every_view() {
 }
 
 #[test]
+fn discord_presence_error_state_is_wired_into_the_status_model() {
+    // PresenceActivity::Error must be produced by the presence status logic
+    // when the engine reported a failure (last_error set), take priority over
+    // the activity labels, and never leak the raw error text. Streaming starts
+    // must clear a stale error so the status recovers.
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("PresenceActivity::Error"));
+    assert!(
+        gui.contains("let activity = if self.last_error.is_some() {"),
+        "error must have priority in current_presence_status"
+    );
+    assert!(
+        gui.contains("// Clear a stale error so a new stream starts"),
+        "streaming starts must clear last_error"
+    );
+    // The privacy guarantee lives in the presence payload builder.
+    let presence = read("rivulet-core/src/presence.rs");
+    assert!(presence.contains("PresenceActivity::Error"));
+    assert!(presence.contains("Self::Error => \"presence_error\""));
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(i18n.matches("\"presence_error\"").count() >= 2);
+}
+
+#[test]
 fn midi_mapping_is_wired_into_gui_and_ci() {
     // The hardware-free mapping/parse core lives in rivulet-core::midi.
     let midi_core = read("rivulet-core/src/midi.rs");

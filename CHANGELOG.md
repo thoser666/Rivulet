@@ -1,6 +1,7 @@
 # Changelog
 
 ## [0.65.0-alpha.55] - 2026-08-30
+- feat(presence): wire the previously unused PresenceActivity::Error state — engine/capture failures surface as a localized "Error"/"Fehler" status with priority over activity labels, streaming starts clear stale errors, and the payload never leaks the raw error text (tests + docs updated)
 - fix(presence): sync Discord Rich Presence from the global UI update every frame, not only while the Stream view is visible — starting/stopping a recording now updates the Discord status from any tab; regression + ci_pinning guards added, docs updated
 - fix(ui): make tabs responsive — the central view content and the navigation sidebar now live in scroll areas (controls stay reachable when the window is shrunk) and main.rs sets a minimum window size; responsive layout is covered by ui_smoke/ui_accessibility/ui_regression source-contract tests and a ci_pinning guard
 - feat(m5): MIDI learn mode (capture the next moved control into the add-binding row without dispatching it) and per-device mapping presets (save/apply/delete, keyed by stable port name) in Settings
