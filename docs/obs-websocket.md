@@ -55,6 +55,130 @@ The client does a normal v5 handshake: `Hello` (op 0) → `Identify` (op 1) →
 events by sending `eventSubscriptions` in `Identify` (bitmask; e.g. `1 + 4 +
 64` for General + Scenes + Outputs).
 
+## Stream Deck (OBS plugin)
+
+1. Install the **OBS Studio** plugin from the Stream Deck store (BarRaider's
+   or the official OBS plugin) — it speaks the OBS WebSocket v5 protocol
+   Rivulet implements.
+2. Start Rivulet and enable the server: **Settings → OBS WebSocket (Stream
+   Deck) → Enable remote control** (default port `4455`, password optional).
+3. Open Stream Deck → add the **OBS Studio** action you want (e.g. *Switch
+   Scene*, *Record*, *Stream*).
+4. In the action's settings, create a new **Connection**:
+   - **Host:** `127.0.0.1`
+   - **Port:** `4455`
+   - **Password:** the one you configured (leave empty if authentication is
+     off)
+   - **Version:** 5.x (the plugin asks for the WebSocket version — choose 5)
+5. The action's dropdowns (scenes, …) are populated from the live snapshot
+   via `GetSceneList`. If a dropdown is empty, press **Refresh** in the
+   action settings while Rivulet is running.
+
+Common actions and the requests they issue:
+
+| Action | Request | Payload |
+|---|---|---|
+| Switch Scene | `SetCurrentProgramScene` | `{"sceneName": "<name>"}` |
+| Record | `ToggleRecording` | `{}` |
+| Stream | `ToggleStreaming` | `{}` |
+| Record state (icon) | `GetRecordStatus` | `{}` |
+| Stream state (icon) | `GetStreamStatus` | `{}` |
+
+## TouchPortal
+
+1. Install the **OBS WebSocket** TouchPortal plugin (third-party, speaks
+   obs-websocket v5).
+2. Enable the server in Rivulet as above.
+3. In TouchPortal → OBS WebSocket settings, set the same host/port/password
+   (`127.0.0.1` / `4455`).
+4. Add buttons for *Scene Switch* (pick a scene), *Start/Stop Recording*,
+   *Start/Stop Streaming*, or a **Custom Request** button.
+
+For a **Custom Request** button, the request body is the v5 payload exactly
+as sent on the wire, e.g.:
+
+```json
+{"requestType": "ToggleRecording", "requestData": {}}
+```
+
+The plugin wraps this into the `{ "op": 6, "d": … }` envelope for you.
+
+## Example requests (raw WebSocket JSON)
+
+These are the exact messages the plugins send under the hood — useful for
+scripts, `websocat`, or `obs-websocket-js`. Each request is `op` 6 with a
+`requestId` of your choice; the response (`op` 7) echoes it.
+
+**GetVersion** — request:
+
+```json
+{"op": 6, "d": {"requestType": "GetVersion", "requestId": "v1", "requestData": {}}}
+```
+
+Response data (abridged):
+
+```json
+{"obsVersion": "0.65.0-alpha.55", "obsWebSocketVersion": "5.0.0", "rpcVersion": 1, "availableRequests": ["GetVersion", "GetSceneList", "StartRecording", "…"]}
+```
+
+**GetSceneList** — request:
+
+```json
+{"op": 6, "d": {"requestType": "GetSceneList", "requestId": "s1", "requestData": {}}}
+```
+
+Response data:
+
+```json
+{"currentProgramSceneName": "Game", "currentPreviewSceneName": null, "scenes": [{"sceneName": "Game", "sceneIndex": 0}, {"sceneName": "Cam", "sceneIndex": 1}]}
+```
+
+**Switch scene** — request:
+
+```json
+{"op": 6, "d": {"requestType": "SetCurrentProgramScene", "requestId": "sw1", "requestData": {"sceneName": "Cam"}}}
+```
+
+Success → `{"result": true, "code": 100}`. Subscribed clients also receive
+`CurrentProgramSceneChanged` (`op` 5, event intent `Scenes`):
+
+```json
+{"op": 5, "d": {"eventType": "CurrentProgramSceneChanged", "eventIntent": 4, "eventData": {"sceneName": "Cam"}}}
+```
+
+**Toggle recording** — request:
+
+```json
+{"op": 6, "d": {"requestType": "ToggleRecording", "requestId": "r1", "requestData": {}}}
+```
+
+If no capture source is selected, this fails honestly instead of silently
+doing nothing:
+
+```json
+{"requestStatus": {"result": false, "code": 501, "comment": "no source selected"}}
+```
+
+**GetRecordStatus** — request and response data:
+
+```json
+{"op": 6, "d": {"requestType": "GetRecordStatus", "requestId": "st1", "requestData": {}}}
+```
+
+```json
+{"outputActive": true, "outputPaused": false, "outputTimecode": "00:01:23.456", "outputDuration": 83456, "outputBytes": 12345678}
+```
+
+**Batch** (switch scene *and* start streaming atomically, stop on failure) —
+`op` 8 with `haltOnFailure`:
+
+```json
+{"op": 8, "d": {"requestId": "b1", "haltOnFailure": true, "executionType": 1, "requests": [{"requestType": "SetCurrentProgramScene", "requestData": {"sceneName": "Game"}}, {"requestType": "StartStreaming", "requestData": {}}]}}
+```
+
+Each entry answers with its own `requestStatus`; the batch response (`op` 9)
+contains one result per request in order.
+
 ## Behaviour notes (honesty section)
 
 - The server is **protocol-focused**. Application state (scene names, source
