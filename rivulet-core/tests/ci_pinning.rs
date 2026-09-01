@@ -508,6 +508,7 @@ fn midi_mapping_is_wired_into_gui_and_ci() {
     // The hardware-free mapping/parse core lives in rivulet-core::midi.
     let midi_core = read("rivulet-core/src/midi.rs");
     assert!(midi_core.contains("pub struct MidiMapping"));
+    assert!(midi_core.contains("pub struct MidiPresetLibrary"));
     assert!(midi_core.contains("pub fn parse_midi"));
     assert!(midi_core.contains("pub enum MidiAction"));
     // The GUI owns the midir device bridge.
@@ -520,15 +521,30 @@ fn midi_mapping_is_wired_into_gui_and_ci() {
         gui.contains("midi_section"),
         "Settings must expose the MIDI section"
     );
-    // Linux needs the ALSA dev headers to build midir; CI must install them.
+    // Learn mode + per-device presets are part of the MIDI configuration UI.
+    assert!(gui.contains("midi_learn"), "Learn mode must be wired up");
+    assert!(
+        gui.contains("midi_presets"),
+        "Device presets must be wired up"
+    );
+    // Linux needs the ALSA dev headers to build midir; CI must install them
+    // in both the test and the release package workflow.
     let workflow = read(".github/workflows/ci.yml");
     assert!(
         workflow.contains("libasound2-dev"),
         "CI must install libasound2-dev for the midir ALSA backend"
     );
-    // The i18n catalogs must cover the MIDI section in both locales.
+    let release = read(".github/workflows/build-package.yml");
+    assert!(
+        release.contains("libasound2-dev"),
+        "Release builds must install libasound2-dev for the midir ALSA backend"
+    );
+    // The i18n catalogs must cover the MIDI section (incl. learn/presets) in
+    // both locales.
     let i18n = read("rivulet-core/src/i18n.rs");
     assert!(i18n.matches("midi_section").count() >= 2);
+    assert!(i18n.matches("midi_learn").count() >= 2);
+    assert!(i18n.matches("midi_presets").count() >= 2);
 }
 
 #[test]

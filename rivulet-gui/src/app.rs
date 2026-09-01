@@ -698,6 +698,23 @@ pub struct RivuletApp {
     /// Applied to the Linux audio mixer when present; on other platforms it is
     /// stored for future audio backends (no OS-level volume control).
     midi_master_volume: f32,
+    /// Per-device named preset library (device → preset name → mapping).
+    /// Persisted so setups survive restarts and can be exchanged per device.
+    midi_presets: rivulet_core::MidiPresetLibrary,
+    /// The preset-name input field in Settings. Persisted so the label the
+    /// user typed survives restarts.
+    midi_preset_name: String,
+    /// Learn mode: while active, the next incoming MIDI message is captured
+    /// into the "add binding" row instead of being dispatched. Transient.
+    #[serde(skip)]
+    midi_learn: bool,
+    /// The message captured by learn mode, shown as feedback until the user
+    /// confirms the binding. Transient.
+    #[serde(skip)]
+    midi_learn_captured: Option<rivulet_core::MidiMessage>,
+    /// Currently selected preset in the per-device dropdown. Transient.
+    #[serde(skip)]
+    midi_selected_preset: Option<String>,
 
     // Linux Fields
     #[cfg(target_os = "linux")]
@@ -1091,6 +1108,11 @@ impl Default for RivuletApp {
             midi_new_action: "ToggleRecord".to_owned(),
             midi_new_scene: None,
             midi_master_volume: 1.0,
+            midi_presets: rivulet_core::MidiPresetLibrary::default(),
+            midi_preset_name: String::new(),
+            midi_learn: false,
+            midi_learn_captured: None,
+            midi_selected_preset: None,
             obs_ws_server: None,
             obs_ws_snapshot: None,
             obs_ws_commands_rx: None,
@@ -4186,7 +4208,8 @@ impl RivuletApp {
             }
         }
 
-        // Drain pending messages and apply the mapped actions.
+        // Drain pending messages and run each through the learn/dispatch path
+        // (shared with the unit-tested [`Self::reconcile_midi_with_message`]).
         let mut messages = Vec::new();
         if let Some(handle) = &mut self.midi_handle {
             while let Some(msg) = handle.try_recv() {
@@ -4194,15 +4217,34 @@ impl RivuletApp {
             }
         }
         for msg in messages {
-            let actions: Vec<rivulet_core::MidiAction> = self
-                .midi_mapping
-                .dispatch(&msg)
-                .into_iter()
-                .cloned()
-                .collect();
-            for action in actions {
-                self.apply_midi_action(&action, msg.value);
-            }
+            self.reconcile_midi_with_message(msg);
+        }
+    }
+
+    /// Handle one incoming MIDI message (hardware-free, unit-tested). In learn
+    /// mode the first message is captured into the pending "add binding" row
+    /// instead of being dispatched (the user is identifying which control they
+    /// want to map); after capture learn mode switches off so later messages
+    /// dispatch normally.
+    fn reconcile_midi_with_message(&mut self, msg: rivulet_core::MidiMessage) {
+        if self.midi_learn && self.midi_learn_captured.is_none() {
+            self.midi_learn_captured = Some(msg);
+            // Pre-fill the manual row so the user can confirm the action and
+            // press "Add binding".
+            self.midi_new_kind = msg.kind;
+            self.midi_new_channel = msg.channel;
+            self.midi_new_number = msg.number;
+            self.midi_learn = false;
+            return;
+        }
+        let actions: Vec<rivulet_core::MidiAction> = self
+            .midi_mapping
+            .dispatch(&msg)
+            .into_iter()
+            .cloned()
+            .collect();
+        for action in actions {
+            self.apply_midi_action(&action, msg.value);
         }
     }
 
@@ -6739,6 +6781,137 @@ impl eframe::App for RivuletApp {
                         self.midi_dirty = true;
                     }
                 });
+                // Learn mode: capture the next moved control into the row.
+                ui.horizontal(|ui| {
+                    let learn_label = if self.midi_learn {
+                        self.tr("midi_learn_waiting")
+                    } else {
+                        self.tr("midi_learn")
+                    };
+                    let mut learn = self.midi_learn;
+                    if ui.selectable_label(self.midi_learn, learn_label).clicked() {
+                        learn = !self.midi_learn;
+                        if learn {
+                            // Start fresh: clear any earlier capture.
+                            self.midi_learn_captured = None;
+                        }
+                    }
+                    self.midi_learn = learn;
+                    if let Some(captured) = &self.midi_learn_captured {
+                        ui.label(format!(
+                            "{}: {} {} · ch {}",
+                            self.tr("midi_learn_captured"),
+                            captured.kind.label(),
+                            captured.number,
+                            captured.channel + 1
+                        ));
+                        if ui.small_button(self.tr("midi_learn_clear")).clicked() {
+                            self.midi_learn_captured = None;
+                        }
+                    }
+                });
+                // Per-device presets: save the whole mapping under a name for
+                // the currently selected device, load it back, or delete it.
+                let midi_presets_label = self.tr("midi_presets");
+                let midi_preset_name_hint = self.tr("midi_preset_name_hint");
+                let midi_preset_save = self.tr("midi_preset_save");
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(midi_presets_label).strong());
+                    if ui
+                        .add_enabled(
+                            self.midi_devices.get(self.midi_device_index).is_some(),
+                            egui::TextEdit::singleline(&mut self.midi_preset_name)
+                                .hint_text(midi_preset_name_hint),
+                        )
+                        .changed()
+                    {
+                        // Keep the dropdown in sync with the typed name.
+                        self.midi_selected_preset = Some(self.midi_preset_name.clone());
+                    }
+                    if ui
+                        .add_enabled(
+                            !self.midi_preset_name.trim().is_empty()
+                                && self.midi_devices.get(self.midi_device_index).is_some(),
+                            egui::Button::new(midi_preset_save),
+                        )
+                        .clicked()
+                    {
+                        if let Some(device) = self.midi_devices.get(self.midi_device_index).cloned()
+                        {
+                            self.midi_presets.save(
+                                &device,
+                                self.midi_preset_name.trim(),
+                                self.midi_mapping.clone(),
+                            );
+                            self.midi_selected_preset = Some(self.midi_preset_name.clone());
+                        }
+                    }
+                });
+                let midi_preset_load = self.tr("midi_preset_load");
+                let midi_preset_apply = self.tr("midi_preset_apply");
+                let midi_preset_apply_hint = self.tr("midi_preset_apply_hint");
+                let midi_preset_delete = self.tr("midi_preset_delete");
+                let midi_preset_delete_hint = self.tr("midi_preset_delete_hint");
+                if let Some(device) = self.midi_devices.get(self.midi_device_index).cloned() {
+                    // Clone the names: they are only used to drive the dropdown
+                    // and the borrow would otherwise fight the mutable `self`
+                    // captures below.
+                    let names: Vec<String> = self
+                        .midi_presets
+                        .names_for(&device)
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect();
+                    if !names.is_empty() {
+                        ui.horizontal(|ui| {
+                            ui.label(midi_preset_load);
+                            egui::ComboBox::from_id_salt("midi_preset_pick")
+                                .selected_text(
+                                    self.midi_selected_preset
+                                        .as_deref()
+                                        .filter(|n| names.iter().any(|c| c == n))
+                                        .unwrap_or_default(),
+                                )
+                                .show_ui(ui, |ui| {
+                                    for name in &names {
+                                        ui.selectable_value(
+                                            &mut self.midi_selected_preset,
+                                            Some(name.clone()),
+                                            name,
+                                        );
+                                    }
+                                });
+                            if ui
+                                .add_enabled(
+                                    self.midi_selected_preset.is_some(),
+                                    egui::Button::new(midi_preset_apply),
+                                )
+                                .on_hover_text(midi_preset_apply_hint)
+                                .clicked()
+                            {
+                                if let Some(name) = self.midi_selected_preset.clone() {
+                                    if let Some(mapping) = self.midi_presets.load(&device, &name) {
+                                        self.midi_mapping = mapping.clone();
+                                        self.midi_dirty = true;
+                                    }
+                                }
+                            }
+                            if ui
+                                .add_enabled(
+                                    self.midi_selected_preset.is_some(),
+                                    egui::Button::new(midi_preset_delete),
+                                )
+                                .on_hover_text(midi_preset_delete_hint)
+                                .clicked()
+                            {
+                                if let Some(name) = self.midi_selected_preset.clone() {
+                                    self.midi_presets.delete(&device, &name);
+                                    self.midi_selected_preset = None;
+                                }
+                            }
+                        });
+                    }
+                }
                 ui.small(midi_hint);
             }
 
@@ -8443,5 +8616,133 @@ mod tests {
         // Unbound messages dispatch to nothing.
         let note = rivulet_core::parse_midi(&[0x90, 61, 100]).unwrap();
         assert!(app.midi_mapping.dispatch(&note).is_empty());
+    }
+
+    #[test]
+    fn midi_learn_captures_next_message_into_the_pending_row() {
+        let mut app = RivuletApp {
+            midi_learn: true,
+            ..Default::default()
+        };
+        // A mapped control message arrives while learning: it must be captured
+        // (not dispatched against the mapping, which is empty anyway) and the
+        // pending row must be pre-filled so "Add binding" confirms it.
+        let cc = rivulet_core::parse_midi(&[0xB3, 12, 64]).unwrap();
+        app.reconcile_midi_with_message(cc);
+        assert!(!app.midi_learn, "learn must stop after the first capture");
+        assert_eq!(app.midi_learn_captured, Some(cc));
+        assert_eq!(app.midi_new_kind, rivulet_core::MidiKind::ControlChange);
+        assert_eq!(app.midi_new_channel, 3);
+        assert_eq!(app.midi_new_number, 12);
+    }
+
+    #[test]
+    fn midi_learn_does_not_dispatch_while_capturing() {
+        // Bind a control and then learn on the same message: learning must win
+        // and no binding may fire while the user identifies the control.
+        let scene = uuid::Uuid::new_v4();
+        let mut app = RivuletApp {
+            midi_mapping: rivulet_core::MidiMapping {
+                bindings: vec![rivulet_core::MidiBinding::new(
+                    0,
+                    rivulet_core::MidiKind::NoteOn,
+                    60,
+                    rivulet_core::MidiAction::SwitchScene(scene),
+                )],
+            },
+            ..Default::default()
+        };
+        app.scenes.add(rivulet_core::Scene::new("Game".to_owned()));
+        let cam = app.scenes.add(rivulet_core::Scene::new("Cam".to_owned()));
+        app.scenes.switch_to(cam);
+        app.midi_learn = true;
+        let note = rivulet_core::parse_midi(&[0x90, 60, 100]).unwrap();
+        app.reconcile_midi_with_message(note);
+        // The scene did not switch because the message was captured, not run.
+        assert_eq!(app.scenes.active(), Some(cam));
+        assert_eq!(app.midi_learn_captured, Some(note));
+    }
+
+    #[test]
+    fn midi_presets_save_and_apply_per_device() {
+        let mut app = RivuletApp {
+            midi_devices: vec!["nanoKONTROL2".to_owned(), "AKAI MIDImix".to_owned()],
+            midi_device_index: 1, // AKAI MIDImix
+            ..Default::default()
+        };
+        let device = app.midi_devices[app.midi_device_index].clone();
+
+        app.midi_mapping = rivulet_core::MidiMapping {
+            bindings: vec![rivulet_core::MidiBinding::new(
+                0,
+                rivulet_core::MidiKind::ControlChange,
+                7,
+                rivulet_core::MidiAction::SetMasterVolume,
+            )],
+        };
+        app.midi_preset_name = "Live".to_owned();
+        app.midi_presets
+            .save(&device, "Live", app.midi_mapping.clone());
+        assert_eq!(app.midi_presets.names_for(&device), vec!["Live"]);
+
+        // Loading applies the preset mapping back.
+        app.midi_mapping = rivulet_core::MidiMapping::default();
+        let loaded = app
+            .midi_presets
+            .load(&device, "Live")
+            .cloned()
+            .expect("preset exists");
+        app.midi_mapping = loaded;
+        assert_eq!(app.midi_mapping.bindings.len(), 1);
+        assert_eq!(
+            app.midi_mapping.bindings[0].action,
+            rivulet_core::MidiAction::SetMasterVolume
+        );
+
+        // The other device keeps its own (empty) preset namespace.
+        assert!(app.midi_presets.names_for("nanoKONTROL2").is_empty());
+
+        // Deleting removes the preset.
+        assert!(app.midi_presets.delete(&device, "Live"));
+        assert!(app.midi_presets.names_for(&device).is_empty());
+    }
+
+    #[test]
+    fn midi_presets_persist_across_restarts() {
+        let mut app = RivuletApp {
+            // The device list is runtime-only, like the handle: it must not
+            // be carried through serde, but presets keyed by device name are.
+            midi_devices: vec!["nanoKONTROL2".to_owned()],
+            ..Default::default()
+        };
+        app.midi_devices.clear();
+        app.midi_presets.save(
+            "nanoKONTROL2",
+            "Streaming",
+            rivulet_core::MidiMapping {
+                bindings: vec![rivulet_core::MidiBinding::new(
+                    0,
+                    rivulet_core::MidiKind::NoteOn,
+                    44,
+                    rivulet_core::MidiAction::ToggleRecord,
+                )],
+            },
+        );
+        app.midi_preset_name = "Streaming".to_owned();
+
+        let json = serde_json::to_value(&app).expect("serialize app");
+        assert!(json["midi_presets"].is_object());
+        // Transient learn/preset UI state must not be persisted.
+        assert!(json.get("midi_learn").is_none());
+        assert!(json.get("midi_learn_captured").is_none());
+        assert!(json.get("midi_selected_preset").is_none());
+        assert!(json.get("midi_devices").is_none());
+
+        let restored: RivuletApp = serde_json::from_value(json).expect("deserialize app");
+        assert_eq!(
+            restored.midi_presets.names_for("nanoKONTROL2"),
+            vec!["Streaming"]
+        );
+        assert_eq!(restored.midi_preset_name, "Streaming");
     }
 }

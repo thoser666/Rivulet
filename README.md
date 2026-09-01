@@ -348,7 +348,7 @@ must not be implied by beta parity.
 - [ ] Telemetry (opt-in, privacy-friendly)
 - [x] **Discord Rich Presence adapter** — non-blocking activity updates using the Rivulet status model; explicit opt-out (persisted Settings toggle), no stream keys/URLs/paths/window titles, and graceful operation when Discord is unavailable (see [`docs/activity-status.md`](docs/activity-status.md)).
 - [ ] Multi-language support (locale files fully wired)
-- [x] **MIDI device support** — map controllers like the Korg NanoKontrol to scene switches, master-volume faders (CC 0-127), mute, and chroma-key toggles (see [`docs/midi.md`](docs/midi.md)); the mapping/parse core is hardware-free and unit-tested, the GUI owns the `midir` device bridge
+- [x] **MIDI device support** — map controllers like the Korg NanoKontrol to scene switches, master-volume faders (CC 0-127), mute, and chroma-key toggles, with **learn mode** (capture the next moved control) and **per-device presets** (see [`docs/midi.md`](docs/midi.md)); the mapping/parse core is hardware-free and unit-tested, the GUI owns the `midir` device bridge
 - [x] **Global hotkeys & remapping UI** — OBS-style hotkey settings: per-action rebinding (Settings → Hotkeys), OS-level registration that keeps working while the app is unfocused on Windows, with an honest platform matrix (see [`docs/hotkeys.md`](docs/hotkeys.md)) *[#80](https://github.com/thoser666/Rivulet/issues/80)*
 - [ ] **Multi-channel distribution rollout** — tracked in [`docs/release-platforms.md`](docs/release-platforms.md):
   - [x] **Stage 1 – GitHub Releases:** canonical artifacts, checksums, changelog, and updater source (already active; signing is enabled when release secrets are configured).

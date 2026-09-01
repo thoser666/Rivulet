@@ -170,6 +170,75 @@ impl MidiMapping {
     }
 }
 
+/// A named snapshot of a full [`MidiMapping`] that can be saved per device.
+/// Presets are keyed by the device name as enumerated by the OS (e.g.
+/// `nanoKONTROL2 1 SLIDER/KNOB`), not by index — indices shift when devices
+/// are hot-plugged, names are stable identifiers the user recognises.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MidiPreset {
+    /// The device name the preset belongs to.
+    pub device: String,
+    /// User-chosen preset name, unique per device.
+    pub name: String,
+    /// The complete binding set saved in this preset.
+    pub mapping: MidiMapping,
+}
+
+/// The per-device preset library. Stored as a plain list so serialization is
+/// deterministic (insertion order) and tests can compare round-trips exactly.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MidiPresetLibrary {
+    pub presets: Vec<MidiPreset>,
+}
+
+impl MidiPresetLibrary {
+    /// Save or replace the preset `name` for `device` with `mapping`.
+    /// Returns `true` when an existing preset was replaced.
+    pub fn save(&mut self, device: &str, name: &str, mapping: MidiMapping) -> bool {
+        if let Some(existing) = self
+            .presets
+            .iter_mut()
+            .find(|p| p.device == device && p.name == name)
+        {
+            existing.mapping = mapping;
+            true
+        } else {
+            self.presets.push(MidiPreset {
+                device: device.to_owned(),
+                name: name.to_owned(),
+                mapping,
+            });
+            false
+        }
+    }
+
+    /// Load the mapping of the preset `name` for `device`, if present.
+    pub fn load(&self, device: &str, name: &str) -> Option<&MidiMapping> {
+        self.presets
+            .iter()
+            .find(|p| p.device == device && p.name == name)
+            .map(|p| &p.mapping)
+    }
+
+    /// Remove the preset `name` for `device`. Returns `true` when removed.
+    pub fn delete(&mut self, device: &str, name: &str) -> bool {
+        let before = self.presets.len();
+        self.presets
+            .retain(|p| !(p.device == device && p.name == name));
+        self.presets.len() != before
+    }
+
+    /// The preset names for `device`, in insertion order (stable for the GUI
+    /// dropdown, unlike a HashMap iteration order).
+    pub fn names_for(&self, device: &str) -> Vec<&str> {
+        self.presets
+            .iter()
+            .filter(|p| p.device == device)
+            .map(|p| p.name.as_str())
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,5 +337,95 @@ mod tests {
         // Action names are stable identifiers for the mapping table.
         assert_eq!(MidiAction::ToggleStream.name(), "ToggleStream");
         assert_eq!(MidiKind::ControlChange.label(), "CC");
+    }
+
+    #[test]
+    fn preset_library_saves_loads_and_lists_per_device() {
+        let mut lib = MidiPresetLibrary::default();
+        let mapping = MidiMapping {
+            bindings: vec![MidiBinding::new(
+                0,
+                MidiKind::ControlChange,
+                7,
+                MidiAction::SetMasterVolume,
+            )],
+        };
+        assert!(!lib.save("nanoKONTROL2", "Streaming", mapping.clone()));
+        assert!(!lib.save("nanoKONTROL2", "Recording", mapping.clone()));
+        // Same preset name on another device is a separate entry.
+        assert!(!lib.save("AKAI MIDImix", "Streaming", mapping.clone()));
+
+        assert_eq!(
+            lib.names_for("nanoKONTROL2"),
+            vec!["Streaming", "Recording"]
+        );
+        assert_eq!(lib.names_for("AKAI MIDImix"), vec!["Streaming"]);
+        assert!(lib.names_for("missing").is_empty());
+
+        assert_eq!(lib.load("nanoKONTROL2", "Streaming"), Some(&mapping));
+        assert_eq!(lib.load("nanoKONTROL2", "nope"), None);
+    }
+
+    #[test]
+    fn preset_save_replaces_existing_entry_and_delete_removes_it() {
+        let mut lib = MidiPresetLibrary::default();
+        let first = MidiMapping {
+            bindings: vec![MidiBinding::new(
+                0,
+                MidiKind::ControlChange,
+                7,
+                MidiAction::SetMasterVolume,
+            )],
+        };
+        let second = MidiMapping {
+            bindings: vec![MidiBinding::new(
+                0,
+                MidiKind::NoteOn,
+                60,
+                MidiAction::ToggleRecord,
+            )],
+        };
+        assert!(!lib.save("dev", "Live", first.clone()));
+        assert!(lib.save("dev", "Live", second.clone())); // replaced
+        assert_eq!(lib.load("dev", "Live"), Some(&second));
+        assert_eq!(lib.presets.len(), 1, "replacement must not duplicate");
+
+        assert!(lib.delete("dev", "Live"));
+        assert!(lib.names_for("dev").is_empty());
+        assert!(!lib.delete("dev", "Live"), "second delete is a no-op");
+    }
+
+    #[test]
+    fn preset_library_survives_serde_round_trip() {
+        let mut lib = MidiPresetLibrary::default();
+        lib.save(
+            "nanoKONTROL2",
+            "Streaming",
+            MidiMapping {
+                bindings: vec![MidiBinding::new(
+                    0,
+                    MidiKind::ControlChange,
+                    7,
+                    MidiAction::SetMasterVolume,
+                )],
+            },
+        );
+        lib.save(
+            "AKAI MIDImix",
+            "Live",
+            MidiMapping {
+                bindings: vec![MidiBinding::new(
+                    2,
+                    MidiKind::NoteOn,
+                    60,
+                    MidiAction::SwitchScene(Uuid::new_v4()),
+                )],
+            },
+        );
+        let json = serde_json::to_string(&lib).unwrap();
+        let back: MidiPresetLibrary = serde_json::from_str(&json).unwrap();
+        assert_eq!(lib, back);
+        // Insertion order is preserved across serialization.
+        assert_eq!(back.names_for("nanoKONTROL2"), vec!["Streaming"]);
     }
 }

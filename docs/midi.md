@@ -38,8 +38,28 @@ device is touched until you pick one.
    - **Switch scene** — pick the target scene (bindings keep the scene id, so
      renaming a scene does not break them)
 
-Each binding row shows a **Remove** button. Bindings, the enabled toggle, and
-the selected device index are persisted across restarts.
+Each binding row shows a **Remove** button. Bindings, the enabled toggle, the
+selected device index, and the per-device preset library are persisted across
+restarts.
+
+### Learn mode
+
+Instead of typing channel/number by hand, click **Learn** and then move the
+fader/button you want to map: the next incoming MIDI message is captured into
+the "add binding" row (kind, channel, number are pre-filled) and **not**
+dispatched — so the control you are identifying never triggers an action by
+accident. Pick the action (or scene) and press **Add binding** to confirm;
+learn mode turns itself off after the first capture.
+
+### Per-device presets
+
+Once a setup works, save it as a **preset**: type a name (e.g. "Streaming") and
+press **Save as preset**. The whole binding set is stored under the currently
+selected device (by its stable port name — not by index, which shifts when
+devices are hot-plugged). Later you can **Apply** a saved preset to restore
+that device's bindings or **Delete** it. Because presets are keyed by device
+name, the same controller plugged into another machine can carry its profile
+along.
 
 ## Example: Korg NanoKontrol
 
@@ -62,17 +82,21 @@ A common setup for a NanoKontrol (channel 1):
   does not control the OS-level volume there (out of scope for M5).
 - **Note Off** (including Note On with velocity 0) and **CC** are the supported
   message kinds. Pitch bend, aftertouch, and SysEx are ignored.
-- Bindings match the exact (channel, kind, number); there is no wildcard or
-  per-device profile yet.
+- Bindings match the exact (channel, kind, number); there is no wildcard
+  matching. Per-device presets cover common setups, but a given device has one
+  active mapping at a time.
 
 ## Verification
 
 - **Unit tests** in `rivulet-core/src/midi.rs`: byte parsing (Note On/Off/CC,
   velocity-0 normalization, malformed/unknown frames), exact dispatch matching,
-  CC→volume scaling, serde round-trip.
+  CC→volume scaling, serde round-trip, and the preset library (per-device
+  save/load/list, replacement, deletion, deterministic serialization).
 - **GUI tests** in `rivulet-gui/src/app.rs`: opt-in defaults, scene-switch
   application, fader scaling, settings/mapping persistence across restarts,
-  and the raw-bytes → dispatch → action path.
+  the raw-bytes → dispatch → action path, learn-mode capture (including that
+  capture does not dispatch), and preset save/load/delete + persistence.
 - **CI wiring test** in `rivulet-core/tests/ci_pinning.rs`: the mapping core,
-  the `midir` GUI dependency, the Settings section, both i18n locales, and the
-  Linux `libasound2-dev` build dependency must stay in place.
+  preset library, the `midir` GUI dependency, learn mode + presets in the
+  Settings section, both i18n locales, and the Linux `libasound2-dev` build
+  dependency (test CI **and** release packaging) must stay in place.
