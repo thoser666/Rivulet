@@ -623,6 +623,12 @@ pub struct RivuletApp {
     /// transitions (per the adapter contract).
     #[serde(skip)]
     discord_presence_last: Option<PresenceStatus>,
+    /// Set when the user applied a client id that failed format validation in
+    /// Settings, so a warning is shown immediately instead of the id silently
+    /// keeping the adapter off. Not persisted; cleared when the field is
+    /// edited again.
+    #[serde(skip)]
+    discord_client_id_warning: Option<rivulet_core::discord::ClientIdError>,
 
     /// Set when any hotkey binding changes through the Settings UI (or scene
     /// hotkey assignment), so the OS-level global hotkeys are re-registered
@@ -1097,6 +1103,7 @@ impl Default for RivuletApp {
             discord_client_id_dirty: false,
             discord_reconnect_requested: false,
             discord_presence_last: None,
+            discord_client_id_warning: None,
             global_hotkeys_dirty: false,
             global_hotkeys: None,
             obs_ws_enabled: false,
@@ -4135,6 +4142,22 @@ impl RivuletApp {
         }
     }
 
+    /// Handle the Settings "Apply" action for the Discord client id: validate
+    /// the format immediately and only mark the adapter for rebuild when the
+    /// value is a plausible snowflake (or empty, which keeps the adapter off).
+    /// An invalid id shows a warning instead of silently misconfiguring.
+    fn apply_discord_client_id(&mut self) {
+        match rivulet_core::discord::validate_client_id(self.discord_presence_client_id.trim()) {
+            Ok(()) => {
+                self.discord_client_id_warning = None;
+                self.discord_client_id_dirty = true;
+            }
+            Err(error) => {
+                self.discord_client_id_warning = Some(error);
+            }
+        }
+    }
+
     /// Build the current OS-level bindings from the hotkey config, translating
     /// egui keys to Windows virtual-key codes where they exist. Bindings whose
     /// key has no VK equivalent (or is modifier-only) are skipped so the OS is
@@ -6731,7 +6754,18 @@ impl eframe::App for RivuletApp {
                             apply_client_id = true;
                         }
                         if apply_client_id {
-                            self.discord_client_id_dirty = true;
+                            self.apply_discord_client_id();
+                        }
+                        if let Some(warning) = self.discord_client_id_warning {
+                            let text = match warning {
+                                rivulet_core::discord::ClientIdError::NotNumeric => {
+                                    self.tr("discord_client_id_error_not_numeric")
+                                }
+                                rivulet_core::discord::ClientIdError::Length => {
+                                    self.tr("discord_client_id_error_length")
+                                }
+                            };
+                            ui.colored_label(theme::StatusColors::for_ui(ui).error, text);
                         }
                         ui.small(discord_client_id_note);
 
@@ -7750,6 +7784,60 @@ mod tests {
             Some("reconnect-client"),
             "client id must be unchanged by a reconnect"
         );
+    }
+
+    #[test]
+    fn discord_client_id_validation_blocks_invalid_apply_and_warns() {
+        // The Apply action must validate the client id format: an invalid id
+        // must set the warning and NOT mark the adapter dirty (no silent
+        // misconfiguration), while a valid id (or empty) applies normally.
+        let mut app = RivuletApp {
+            discord_presence_enabled: true,
+            discord_presence_client_id: "not-a-number".to_owned(),
+            ..Default::default()
+        };
+        app.apply_discord_client_id();
+        assert_eq!(
+            app.discord_client_id_warning,
+            Some(rivulet_core::discord::ClientIdError::NotNumeric)
+        );
+        assert!(
+            !app.discord_client_id_dirty,
+            "invalid id must not be applied"
+        );
+
+        // Too short: length error, still not applied.
+        app.discord_presence_client_id = "123".to_owned();
+        app.apply_discord_client_id();
+        assert_eq!(
+            app.discord_client_id_warning,
+            Some(rivulet_core::discord::ClientIdError::Length)
+        );
+        assert!(!app.discord_client_id_dirty);
+
+        // Valid id: warning cleared, adapter marked for rebuild.
+        app.discord_presence_client_id = "1544027006847680532".to_owned();
+        app.apply_discord_client_id();
+        assert!(app.discord_client_id_warning.is_none());
+        assert!(app.discord_client_id_dirty);
+
+        // Empty is valid (adapter stays off by design).
+        app.discord_presence_client_id = String::new();
+        app.apply_discord_client_id();
+        assert!(app.discord_client_id_warning.is_none());
+        assert!(app.discord_client_id_dirty);
+    }
+
+    #[test]
+    fn discord_client_id_validation_is_wired_into_settings() {
+        // Source contract: the Settings Apply path calls the core validator
+        // and renders the warning with the error palette.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        assert!(source.contains("rivulet_core::discord::validate_client_id"));
+        assert!(source.contains("discord_client_id_warning"));
+        assert!(source.contains("discord_client_id_error_not_numeric"));
+        assert!(source.contains("discord_client_id_error_length"));
+        assert!(source.contains("StatusColors::for_ui(ui).error"));
     }
 
     #[test]

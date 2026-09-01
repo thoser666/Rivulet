@@ -395,6 +395,8 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("discord_client_id", "Application client ID"),
                 ("discord_client_id_hint", "e.g. 1234567890123456789"),
                 ("discord_client_id_apply", "Apply"),
+                ("discord_client_id_error_not_numeric", "Invalid client ID: it must be a number. Paste only the numeric ID (not the application URL) without spaces."),
+                ("discord_client_id_error_length", "Invalid client ID: Discord IDs are 17-20 digits. Check that the whole ID was copied."),
                 ("discord_client_id_note", "Create a Discord application at discord.com/developers/applications, enable Rich Presence, and enter its client ID here. Empty keeps the adapter off."),
                 // OBS WebSocket remote control (Stream Deck / TouchPortal)
                 ("obs_ws_section", "OBS WebSocket (Stream Deck)"),
@@ -869,6 +871,8 @@ Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."
                 ("discord_client_id", "Anwendungs-Client-ID"),
                 ("discord_client_id_hint", "z. B. 1234567890123456789"),
                 ("discord_client_id_apply", "Übernehmen"),
+                ("discord_client_id_error_not_numeric", "Ungültige Client-ID: Sie muss eine Zahl sein. Füge nur die numerische ID ein (nicht die App-URL) und ohne Leerzeichen."),
+                ("discord_client_id_error_length", "Ungültige Client-ID: Discord-IDs haben 17-20 Ziffern. Prüfe, ob die gesamte ID kopiert wurde."),
                 ("discord_client_id_note", "Erstelle eine Discord-App unter discord.com/developers/applications, aktiviere Rich Presence und trage hier ihre Client-ID ein. Leer hält den Adapter deaktiviert."),
                 // OBS WebSocket Fernbedienung (Stream Deck / TouchPortal)
                 ("obs_ws_section", "OBS WebSocket (Stream Deck)"),

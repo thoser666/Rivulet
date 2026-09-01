@@ -58,6 +58,40 @@ impl Default for DiscordPresenceConfig {
     }
 }
 
+/// Why a configured Discord application client id looks invalid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientIdError {
+    /// The value contains characters other than ASCII digits (e.g. the app
+    /// URL was pasted instead of the numeric id, or spaces were included).
+    NotNumeric,
+    /// The value is not within the plausible Discord snowflake length range
+    /// (17-20 digits).
+    Length,
+}
+
+/// Validate a Discord application client id entered in Settings. Returns
+/// `Ok(())` for a syntactically plausible snowflake (all digits, 17-20 long)
+/// or for an empty value (empty deliberately keeps the adapter off). A
+/// non-empty value that fails the checks is reported so the UI can warn
+/// immediately instead of silently accepting a mistyped id.
+///
+/// Note: this is a *format* check — the id still has to belong to a real
+/// Discord application with Rich Presence enabled for the handshake to be
+/// accepted.
+pub fn validate_client_id(client_id: &str) -> Result<(), ClientIdError> {
+    let trimmed = client_id.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    if !trimmed.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(ClientIdError::NotNumeric);
+    }
+    if !(17..=20).contains(&trimmed.len()) {
+        return Err(ClientIdError::Length);
+    }
+    Ok(())
+}
+
 /// Messages sent from the (fast) caller side to the (blocking) worker thread.
 enum Msg {
     Activity(Box<PresenceStatus>),
@@ -605,6 +639,52 @@ mod tests {
         assert!(cfg.enabled);
         assert_eq!(cfg.client_id, DEFAULT_CLIENT_ID);
         assert!(cfg.ipc_socket_path.is_none());
+    }
+
+    #[test]
+    fn client_id_validation_accepts_realistic_snowflakes() {
+        // The configured Rivulet app id (19 digits) and the documented example
+        // must pass.
+        assert_eq!(validate_client_id("1544027006847680532"), Ok(()));
+        assert_eq!(validate_client_id("1234567890123456789"), Ok(()));
+        // Empty keeps the adapter off by design — that is valid input.
+        assert_eq!(validate_client_id(""), Ok(()));
+        assert_eq!(validate_client_id("   "), Ok(()));
+    }
+
+    #[test]
+    fn client_id_validation_rejects_non_numeric_values() {
+        // Common paste mistakes: the app URL, a label prefix, or spaces inside.
+        assert_eq!(
+            validate_client_id("https://discord.com/developers/applications/1234567890"),
+            Err(ClientIdError::NotNumeric)
+        );
+        assert_eq!(
+            validate_client_id("client-1234567890123456"),
+            Err(ClientIdError::NotNumeric)
+        );
+        assert_eq!(
+            validate_client_id("1234 5678"),
+            Err(ClientIdError::NotNumeric)
+        );
+        assert_eq!(
+            validate_client_id("1234567890abcdefgh"),
+            Err(ClientIdError::NotNumeric)
+        );
+    }
+
+    #[test]
+    fn client_id_validation_rejects_implausible_lengths() {
+        assert_eq!(validate_client_id("123"), Err(ClientIdError::Length));
+        assert_eq!(
+            validate_client_id("1234567890123456"),
+            Err(ClientIdError::Length)
+        ); // 16 digits
+           // 21 digits exceeds the snowflake range.
+        assert_eq!(
+            validate_client_id("123456789012345678901"),
+            Err(ClientIdError::Length)
+        );
     }
 
     #[test]

@@ -60,6 +60,16 @@ Until a non-empty client id is entered and applied, the adapter stays off. The
 value is persisted across sessions; changing it (via the Apply button) rebuilds
 the adapter on the next frame.
 
+The Apply button **validates the format immediately**: a Discord client id is a
+numeric snowflake of 17-20 digits. Pasting the application URL, a label
+prefix, spaces, or a too-short/too-long value shows a warning („Ungültige
+Client-ID"/"Invalid client ID") and the id is **not** applied, instead of
+silently keeping the adapter off. Empty remains valid (adapter off by design).
+This is a format check only — the id still has to belong to a real Discord
+application with Rich Presence enabled for the handshake to succeed (see
+`validate_client_id` in `rivulet-core::discord` and the
+`discord_client_id_is_validated_on_apply` ci_pinning guard).
+
 > **Persistence note:** persisted settings are restored in `RivuletApp::new()`
 > via `eframe::get_value` from the eframe storage (the `save()` path used to
 > write the app state, but nothing read it back — every restart silently

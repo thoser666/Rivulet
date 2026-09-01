@@ -641,6 +641,39 @@ fn discord_reconnect_button_rebuilds_the_adapter() {
 }
 
 #[test]
+fn discord_client_id_is_validated_on_apply() {
+    // Settings must validate the client id format on Apply and warn instead of
+    // silently accepting a mistyped id (which would keep the adapter off).
+    let discord = read("rivulet-core/src/discord.rs");
+    assert!(discord.contains("pub fn validate_client_id"));
+    assert!(discord.contains("pub enum ClientIdError"));
+    assert!(discord.contains("ClientIdError::NotNumeric"));
+    assert!(discord.contains("ClientIdError::Length"));
+    // The validator must be unit-tested in the core.
+    assert!(discord.contains("client_id_validation_accepts_realistic_snowflakes"));
+    assert!(discord.contains("client_id_validation_rejects_non_numeric_values"));
+
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("fn apply_discord_client_id"));
+    assert!(gui.contains("validate_client_id(self.discord_presence_client_id.trim())"));
+    assert!(gui.contains("discord_client_id_warning"));
+    // Behavior test must stay wired.
+    assert!(gui.contains("discord_client_id_validation_blocks_invalid_apply_and_warns"));
+    // Both locales must translate the two error messages.
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in [
+        "discord_client_id_error_not_numeric",
+        "discord_client_id_error_length",
+    ] {
+        let k = format!("\"{key}\"");
+        assert!(
+            i18n.matches(&k).count() >= 2,
+            "{key} must exist in EN and DE"
+        );
+    }
+}
+
+#[test]
 fn discord_client_id_is_restored_from_eframe_storage() {
     // Bug regression: `save()` wrote the full app (including the Discord
     // application id) under eframe::APP_KEY, but nothing ever read the value
