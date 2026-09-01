@@ -143,6 +143,9 @@ pub use browser_source::{
     BrowserSourceError,
 };
 
+pub mod alerts;
+pub use alerts::{AlertOverlayError, AlertProvider};
+
 pub mod benchmark;
 pub mod capture_channel;
 pub mod opengl_hook;

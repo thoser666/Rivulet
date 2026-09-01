@@ -1274,3 +1274,38 @@ fn twitch_chat_dock_is_wired_and_covered() {
         "the chat dock must be documented with its architecture"
     );
 }
+
+#[test]
+fn alert_overlay_import_is_wired_through_browser_source() {
+    // M5 community dock: alert overlays are imported as browser-source widget
+    // URLs (Streamlabs/StreamElements), exactly like OBS. The core must know
+    // the provider URL shapes and validate tokens, the GUI must offer the
+    // import (provider picker + token + custom URL) and keep it tested, and
+    // the feature must be documented.
+    let core = read("rivulet-core/src/alerts.rs");
+    assert!(core.contains("pub enum AlertProvider"));
+    assert!(core.contains("streamlabs.com/alert-box/v2/"));
+    assert!(core.contains("streamelements.com/overlay/"));
+    assert!(core.contains("pub fn build_overlay_url"));
+    assert!(core.contains("pub fn validate_overlay_url"));
+    // The generated URLs must keep being accepted by the browser source.
+    assert!(core.contains("browser_source_accepts_the_generated_url"));
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("fn import_alert_overlay"));
+    assert!(gui.contains("alert_provider"));
+    assert!(gui.contains("alert_overlay_title"));
+    assert!(gui.contains("alert_import_loads_provider_widget_url_into_browser_source"));
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in ["alert_import", "alert_token", "alert_overlay_title"] {
+        let k = format!("\"{key}\"");
+        assert!(
+            i18n.matches(&k).count() >= 2,
+            "{key} must exist in EN and DE"
+        );
+    }
+    let docs = read("docs/alerts.md");
+    assert!(
+        docs.contains("# Stream Alerts") && docs.contains("streamelements.com/overlay/"),
+        "alert import must be documented"
+    );
+}

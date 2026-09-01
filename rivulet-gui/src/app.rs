@@ -966,6 +966,14 @@ pub struct RivuletApp {
     /// adapter is intentionally not stored in the app state yet; this config
     /// is the portable contract used by the future WebView2/WebKit backend.
     browser_source: rivulet_core::BrowserSource,
+    /// Alert overlay import state (provider + token) for the browser source.
+    /// The token is only ever used to build the widget URL; it is not logged.
+    #[serde(skip)]
+    alert_provider: rivulet_core::AlertProvider,
+    #[serde(skip)]
+    alert_token: String,
+    #[serde(skip)]
+    alert_custom_url: String,
     #[serde(skip)]
     scene_name_input: String,
     #[serde(skip)]
@@ -1310,6 +1318,9 @@ impl Default for RivuletApp {
 
             scenes: rivulet_core::SceneManager::new(),
             browser_source: rivulet_core::BrowserSource::default(),
+            alert_provider: rivulet_core::AlertProvider::default(),
+            alert_token: String::new(),
+            alert_custom_url: String::new(),
             scene_name_input: String::new(),
             scene_status: None,
             transition_kind: rivulet_core::TransitionKind::Cut,
@@ -3253,6 +3264,45 @@ impl RivuletApp {
                 }
             }
         });
+        // Alert overlay import (Streamlabs / StreamElements widget URLs).
+        ui.horizontal(|ui| {
+            ui.label(self.tr("alert_overlay_title"));
+            for provider in rivulet_core::AlertProvider::all() {
+                let label = self.tr(provider.i18n_key());
+                if ui
+                    .selectable_label(self.alert_provider == *provider, label)
+                    .clicked()
+                {
+                    self.alert_provider = *provider;
+                }
+            }
+        });
+        let alert_token_hint = self.tr("alert_token_hint");
+        if self.alert_provider != rivulet_core::AlertProvider::Custom {
+            ui.horizontal(|ui| {
+                ui.label(self.tr("alert_token"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.alert_token)
+                        .hint_text(alert_token_hint)
+                        .desired_width(300.0),
+                );
+            });
+        } else {
+            ui.horizontal(|ui| {
+                ui.label(self.tr("browser_url"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.alert_custom_url)
+                        .hint_text("https://...")
+                        .desired_width(300.0),
+                );
+            });
+        }
+        ui.horizontal(|ui| {
+            if theme::accent_button(ui, self.tr("alert_import")).clicked() {
+                self.import_alert_overlay();
+            }
+            ui.small(self.tr("alert_overlay_note"));
+        });
         ui.horizontal(|ui| {
             ui.label(self.tr("browser_viewport"));
             let mut width = self.browser_source.width as f32;
@@ -3307,6 +3357,34 @@ impl RivuletApp {
         }
         if let Some(status) = &self.scene_status {
             ui.colored_label(colors.info, status);
+        }
+    }
+
+    /// Import the configured alert overlay into the browser source: builds the
+    /// provider-specific widget URL from the token (or validates a custom URL),
+    /// loads it into the browser source, and reports the outcome via
+    /// `scene_status`. Testable without a running UI.
+    fn import_alert_overlay(&mut self) {
+        let custom =
+            (!self.alert_custom_url.trim().is_empty()).then(|| self.alert_custom_url.clone());
+        match rivulet_core::alerts::build_overlay_url(
+            self.alert_provider,
+            &self.alert_token,
+            custom.as_deref(),
+        ) {
+            Ok(url) => {
+                self.alert_token.clear();
+                self.alert_custom_url.clear();
+                self.browser_source.url = url.clone();
+                if let Err(error) = self.browser_source.navigate(url) {
+                    self.scene_status = Some(error.to_string());
+                } else {
+                    self.scene_status = Some(self.tr("alert_imported").to_owned());
+                }
+            }
+            Err(error) => {
+                self.scene_status = Some(error.to_string());
+            }
         }
     }
 
@@ -9613,5 +9691,65 @@ mod tests {
             vec!["Streaming"]
         );
         assert_eq!(restored.midi_preset_name, "Streaming");
+    }
+
+    // ── Alert overlay import (M5 community dock) ──────────────────
+
+    #[test]
+    fn alert_import_loads_provider_widget_url_into_browser_source() {
+        let mut app = RivuletApp {
+            alert_provider: rivulet_core::AlertProvider::Streamlabs,
+            alert_token: "tok-123".to_owned(),
+            ..Default::default()
+        };
+        app.import_alert_overlay();
+        assert_eq!(
+            app.browser_source.url,
+            "https://streamlabs.com/alert-box/v2/tok-123"
+        );
+        assert!(
+            app.alert_token.is_empty(),
+            "token must be cleared after import"
+        );
+        let status = app.scene_status.as_deref().unwrap_or_default();
+        assert!(!status.is_empty());
+    }
+
+    #[test]
+    fn alert_import_supports_streamelements_and_custom_urls() {
+        let mut app = RivuletApp {
+            alert_provider: rivulet_core::AlertProvider::StreamElements,
+            alert_token: "se-456".to_owned(),
+            ..Default::default()
+        };
+        app.import_alert_overlay();
+        assert_eq!(
+            app.browser_source.url,
+            "https://streamelements.com/overlay/se-456"
+        );
+
+        let mut app = RivuletApp {
+            alert_provider: rivulet_core::AlertProvider::Custom,
+            alert_custom_url: "https://cdn.example.com/alerts".to_owned(),
+            ..Default::default()
+        };
+        app.import_alert_overlay();
+        assert_eq!(app.browser_source.url, "https://cdn.example.com/alerts");
+    }
+
+    #[test]
+    fn alert_import_rejects_invalid_input_without_touching_browser_source() {
+        let mut app = RivuletApp {
+            alert_provider: rivulet_core::AlertProvider::Streamlabs,
+            alert_token: "has space".to_owned(),
+            ..Default::default()
+        };
+        let before = app.browser_source.url.clone();
+        app.import_alert_overlay();
+        // Invalid token: the browser source must stay untouched and the error
+        // must be surfaced in the scene status.
+        assert_eq!(app.browser_source.url, before);
+        let status = app.scene_status.as_deref().unwrap_or_default();
+        assert!(status.contains("invalid"), "status was: {status}");
     }
 }
