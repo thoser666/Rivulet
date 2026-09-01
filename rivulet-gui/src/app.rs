@@ -613,6 +613,12 @@ pub struct RivuletApp {
     /// adapter is rebuilt exactly once (not per keypress). Not persisted.
     #[serde(skip)]
     discord_client_id_dirty: bool,
+    /// Set when the user clicks "Reconnect" in the Stream view while the
+    /// adapter reports not connected, so the worker is torn down and rebuilt
+    /// exactly once (fresh handshake) without restarting the app. Not
+    /// persisted.
+    #[serde(skip)]
+    discord_reconnect_requested: bool,
     /// Last status pushed to the adapter, so updates only happen on activity
     /// transitions (per the adapter contract).
     #[serde(skip)]
@@ -1089,6 +1095,7 @@ impl Default for RivuletApp {
             discord_presence: None,
             discord_presence_active_client_id: None,
             discord_client_id_dirty: false,
+            discord_reconnect_requested: false,
             discord_presence_last: None,
             global_hotkeys_dirty: false,
             global_hotkeys: None,
@@ -4086,9 +4093,11 @@ impl RivuletApp {
             return;
         }
 
-        // Rebuild the adapter exactly once when the user applied a new client id.
-        if self.discord_client_id_dirty {
+        // Rebuild the adapter exactly once when the user applied a new client
+        // id or clicked "Reconnect": both force a fresh worker + handshake.
+        if self.discord_client_id_dirty || self.discord_reconnect_requested {
             self.discord_client_id_dirty = false;
+            self.discord_reconnect_requested = false;
             self.discord_presence_active_client_id = None;
         }
 
@@ -4749,6 +4758,18 @@ impl RivuletApp {
                     ui.visuals().weak_text_color()
                 };
                 ui.colored_label(current_color, conn_text);
+                // Offer a one-click reconnect when the handshake did not
+                // succeed (Discord was started after Rivulet, the socket
+                // died, ...): rebuilds the adapter without restarting the app.
+                if !is_connected
+                    && self.discord_presence_enabled
+                    && !self.discord_presence_client_id.trim().is_empty()
+                {
+                    let reconnect_label = self.tr("discord_reconnect");
+                    if ui.button(reconnect_label).clicked() {
+                        self.discord_reconnect_requested = true;
+                    }
+                }
             });
             ui.small(self.tr("discord_presence_privacy"));
         });
@@ -7692,6 +7713,68 @@ mod tests {
             Some("second-client")
         );
         assert!(!app.discord_client_id_dirty);
+    }
+
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn discord_presence_reconnect_rebuilds_the_adapter() {
+        // The Stream view offers a reconnect button when the adapter reports
+        // not connected (e.g. Discord was started after Rivulet). Clicking it
+        // must rebuild the worker on the next reconcile — without changing the
+        // client id and without restarting the app.
+        let mut app = RivuletApp {
+            discord_presence_enabled: true,
+            discord_presence_client_id: "reconnect-client".to_owned(),
+            ..Default::default()
+        };
+        app.sync_discord_presence();
+        assert_eq!(
+            app.discord_presence_active_client_id.as_deref(),
+            Some("reconnect-client")
+        );
+
+        // Mark a reconnect (button click): the next reconcile tears the old
+        // worker down and spawns a fresh one for the same client id.
+        app.discord_reconnect_requested = true;
+        app.sync_discord_presence();
+        assert!(
+            !app.discord_reconnect_requested,
+            "reconnect flag must be consumed by the reconcile"
+        );
+        assert!(
+            app.discord_presence.is_some(),
+            "reconnect must respawn the adapter"
+        );
+        assert_eq!(
+            app.discord_presence_active_client_id.as_deref(),
+            Some("reconnect-client"),
+            "client id must be unchanged by a reconnect"
+        );
+    }
+
+    #[test]
+    fn discord_presence_reconnect_button_is_wired_into_the_stream_view() {
+        // Source contract: the reconnect affordance lives in draw_presence_status,
+        // only appears while not connected and a client id is configured, and
+        // sets the flag that the reconcile consumes.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let draw = source
+            .split_once("fn draw_presence_status")
+            .map(|(_, rest)| rest)
+            .expect("draw_presence_status must exist");
+        assert!(draw.contains("discord_reconnect"));
+        assert!(
+            draw.contains("!is_connected && self.discord_presence_enabled"),
+            "reconnect must only be offered while not connected and enabled"
+        );
+        assert!(draw.contains("self.discord_reconnect_requested = true;"));
+        assert!(source.contains("discord_reconnect_requested"));
+        // The flag must force a rebuild in the reconcile, not just be ignored.
+        let sync = source
+            .split_once("fn sync_discord_presence")
+            .map(|(_, rest)| rest)
+            .expect("sync_discord_presence must exist");
+        assert!(sync.contains("self.discord_client_id_dirty || self.discord_reconnect_requested"));
     }
 
     #[allow(clippy::field_reassign_with_default)]

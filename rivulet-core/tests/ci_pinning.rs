@@ -616,6 +616,31 @@ fn discord_framing_uses_the_opcode_length_header() {
 }
 
 #[test]
+fn discord_reconnect_button_rebuilds_the_adapter() {
+    // The Stream view must offer a one-click reconnect when the adapter is
+    // not connected, and the flag must force a fresh worker + handshake in
+    // the reconcile (no app restart needed).
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("discord_reconnect_requested: bool"));
+    assert!(
+        gui.contains("self.discord_client_id_dirty || self.discord_reconnect_requested"),
+        "reconnect must trigger the same rebuild path as a client-id change"
+    );
+    let draw = gui
+        .split_once("fn draw_presence_status")
+        .map(|(_, rest)| rest)
+        .expect("draw_presence_status must exist");
+    assert!(draw.contains("discord_reconnect"));
+    assert!(draw.contains("!is_connected"));
+    assert!(draw.contains("self.discord_reconnect_requested = true;"));
+    // The behavior test must stay wired.
+    assert!(gui.contains("discord_presence_reconnect_rebuilds_the_adapter"));
+    // The i18n key exists in both locales (parity test enforces agreement).
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(i18n.matches("\"discord_reconnect\"").count() >= 2);
+}
+
+#[test]
 fn discord_client_id_is_restored_from_eframe_storage() {
     // Bug regression: `save()` wrote the full app (including the Discord
     // application id) under eframe::APP_KEY, but nothing ever read the value

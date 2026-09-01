@@ -171,6 +171,11 @@ being applied (or no valid state was ever delivered). The common causes:
 Since the worker now exposes its **connection state**, the Stream view shows a
 status line under the toggle that says whether the handshake was accepted
 („Verbunden"/"Connected" in the success color) or still connecting / off
-(`discord_conn_off`, `discord_conn_connecting`). Every IPC success or failure
-is also written to the daily crash logs, so the root cause is visible instead
-of silently swallowing the error.
+(`discord_conn_off`, `discord_conn_connecting`). While the adapter is **not
+connected** and a client id is configured, an **„Erneut verbinden"/"Reconnect"
+button** appears right next to the status line: clicking it tears the worker
+down and spawns a fresh one (new handshake) on the next frame — no app
+restart needed. This covers the common case of starting Discord *after*
+Rivulet, or a socket that died while Rivulet kept running. Every IPC success
+or failure is also written to the daily crash logs, so the root cause is
+visible instead of silently swallowing the error.
