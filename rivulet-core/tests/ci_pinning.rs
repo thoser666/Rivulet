@@ -1191,3 +1191,58 @@ fn daily_logging_defaults_to_info_not_empty_filter() {
         "the fallback rule must be covered by a unit test"
     );
 }
+
+#[test]
+fn cancelled_file_dialog_is_logged_at_info_level() {
+    // Regression: cancelling the recording save dialog was logged at debug
+    // level, which the daily log (default filter `info`) never showed. A user
+    // who pressed Record but cancelled the dialog saw nothing in the log and
+    // concluded the recording silently failed — while the real reason was a
+    // cancelled dialog. The cancellation must be visible in the daily log.
+    let app = read("rivulet-gui/src/app.rs");
+    let occurrences = app
+        .matches("tracing::info!(\"File selection cancelled\")")
+        .count();
+    assert!(
+        occurrences >= 3,
+        "every recording save-dialog path must log the cancellation at info \
+         level (found {occurrences}, expected >= 3)"
+    );
+    assert!(
+        !app.contains("tracing::debug!(\"File selection cancelled\")"),
+        "no recording save-dialog path may keep the debug-level cancellation log"
+    );
+}
+
+#[test]
+fn twitch_chat_dock_is_wired_and_covered() {
+    // M5 community dock: the Chat view must be a first-class sidebar entry
+    // (nav key + heading i18n), the core worker must keep its local-listener
+    // smoke test (deterministic in CI without real network), and the feature
+    // must be documented.
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(
+        app.contains("AppView::Chat") && app.contains("nav_chat"),
+        "the Chat view must be a first-class AppView with a nav key"
+    );
+    assert!(
+        app.contains("fn draw_chat_view") && app.contains("fn reconcile_twitch_chat"),
+        "the Chat view must have a draw + reconcile path"
+    );
+    let core = read("rivulet-core/src/twitch_chat.rs");
+    assert!(
+        core.contains("worker_connects_and_delivers_messages_to_local_listener"),
+        "the Twitch worker must keep its local-listener smoke test"
+    );
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.contains("(\"chat_title\", \"Twitch Chat\")")
+            && i18n.contains("(\"chat_title\", \"Twitch-Chat\")"),
+        "the chat view must be localized in DE and EN"
+    );
+    let docs = read("docs/twitch-chat.md");
+    assert!(
+        docs.contains("# Twitch Chat Dock") && docs.contains("parse_irc_line"),
+        "the chat dock must be documented with its architecture"
+    );
+}

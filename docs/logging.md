@@ -82,6 +82,15 @@ and the Windows Error Reporting entry in that case. Otherwise check:
 > that older builds (before this default existed) required `RUST_LOG=info`
 > to write *any* Rust events at all; a log file containing only
 > `RIVULET PRE-RUST EVENT` blocks indicates such a build.
+
+> **Recording start is observable:** pressing Record opens the save dialog;
+> if the dialog is cancelled, `File selection cancelled` is written to the
+> daily log at `info` level (on all platforms: Windows, PipeWire portal and
+> the Linux fallback). A recording that "never starts" after Record is
+> therefore always diagnosable: either the dialog was cancelled (entry
+> present) or the capture thread logged `Starting capture thread (...)` —
+> with neither entry the Record button was never enabled (no source
+> selected).
 4. If file logging cannot be initialized, startup continues and a
    `RIVULET CRASH` block is written to the intended path when possible; the
    bootstrap error is also sent to stderr.

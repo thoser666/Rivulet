@@ -191,6 +191,9 @@ const SOURCE_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_m
 /// at startup via `--no-frame-timeout <seconds>`.
 pub const DEFAULT_NO_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Bounded size of the in-memory Twitch chat message list (oldest dropped).
+const MAX_CHAT_MESSAGES: usize = 500;
+
 // --- Auto-update state machine ---
 #[derive(Debug, Clone, PartialEq, Default)]
 enum UpdateUi {
@@ -220,6 +223,7 @@ enum AppView {
     Mixer,
     Scenes,
     Stream,
+    Chat,
     Assistant,
     Settings,
     Help,
@@ -233,6 +237,7 @@ impl AppView {
             AppView::Mixer,
             AppView::Scenes,
             AppView::Stream,
+            AppView::Chat,
             AppView::Assistant,
             AppView::Settings,
             AppView::Help,
@@ -246,6 +251,7 @@ impl AppView {
             AppView::Mixer => "nav_mixer",
             AppView::Scenes => "nav_scenes",
             AppView::Stream => "nav_stream",
+            AppView::Chat => "nav_chat",
             AppView::Assistant => "nav_assistant",
             AppView::Settings => "nav_settings",
             AppView::Help => "nav_help",
@@ -259,6 +265,15 @@ impl AppView {
             _ => None,
         }
     }
+}
+
+/// Pending Twitch-chat actions, processed exactly once per frame by the
+/// reconcile step (so the worker is only (re)built on explicit user intent,
+/// never per keypress).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChatAction {
+    Connect,
+    Disconnect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -421,6 +436,19 @@ fn key_name(key: egui::Key) -> &'static str {
         egui::Key::Num9 => "9",
         _ => "?",
     }
+}
+
+/// Parse a Twitch `#RRGGBB` color tag into an egui color. Returns `None` for
+/// malformed values so the caller falls back to the default text color.
+fn color_to_egui(color: &str) -> Option<egui::Color32> {
+    let hex = color.trim().strip_prefix('#')?;
+    if hex.len() != 6 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(egui::Color32::from_rgb(r, g, b))
 }
 
 /// Translate an egui key to a Windows virtual-key code where an equivalent
@@ -629,6 +657,27 @@ pub struct RivuletApp {
     /// edited again.
     #[serde(skip)]
     discord_client_id_warning: Option<rivulet_core::discord::ClientIdError>,
+
+    /// Twitch chat dock: channel to join (persisted).
+    chat_channel: String,
+    /// Twitch chat dock: OAuth token for authenticated reads (persisted, but
+    /// never shown in logs/UI). Empty connects anonymously.
+    chat_oauth_token: String,
+    /// Twitch chat dock: running worker handle. Not persisted.
+    #[serde(skip)]
+    chat_worker: Option<rivulet_core::TwitchChat>,
+    /// Twitch chat dock: messages collected from the worker since connect.
+    /// Not persisted. Bounded to the newest entries (oldest dropped).
+    #[serde(skip)]
+    chat_messages: Vec<rivulet_core::ChatMessage>,
+    /// Twitch chat dock: pending connect/disconnect action (processed once
+    /// per frame). Not persisted.
+    #[serde(skip)]
+    chat_action_pending: Option<ChatAction>,
+    /// Twitch chat dock: last connection state shown to the user. Not
+    /// persisted.
+    #[serde(skip)]
+    chat_state: rivulet_core::ChatConnState,
 
     /// Set when any hotkey binding changes through the Settings UI (or scene
     /// hotkey assignment), so the OS-level global hotkeys are re-registered
@@ -1104,6 +1153,12 @@ impl Default for RivuletApp {
             discord_reconnect_requested: false,
             discord_presence_last: None,
             discord_client_id_warning: None,
+            chat_channel: String::new(),
+            chat_oauth_token: String::new(),
+            chat_worker: None,
+            chat_messages: Vec::new(),
+            chat_action_pending: None,
+            chat_state: rivulet_core::ChatConnState::Off,
             global_hotkeys_dirty: false,
             global_hotkeys: None,
             obs_ws_enabled: false,
@@ -1494,7 +1549,7 @@ impl RivuletApp {
             .save_file();
 
         let Some(path) = file_path else {
-            tracing::debug!("File selection cancelled");
+            tracing::info!("File selection cancelled");
             return;
         };
 
@@ -2002,7 +2057,7 @@ impl RivuletApp {
             .set_file_name(self.default_recording_filename())
             .save_file()
         else {
-            tracing::debug!("File selection cancelled");
+            tracing::info!("File selection cancelled");
             return false;
         };
 
@@ -2143,7 +2198,7 @@ impl RivuletApp {
             .set_file_name(self.default_recording_filename())
             .save_file()
         else {
-            tracing::debug!("File selection cancelled");
+            tracing::info!("File selection cancelled");
             return;
         };
 
@@ -4142,6 +4197,52 @@ impl RivuletApp {
         }
     }
 
+    /// Process pending Twitch-chat actions and drain the worker's message
+    /// channel into the bounded list. Non-blocking: called once per frame.
+    fn reconcile_twitch_chat(&mut self) {
+        match self.chat_action_pending.take() {
+            Some(ChatAction::Connect) => {
+                if let Some(mut worker) = self.chat_worker.take() {
+                    worker.disconnect();
+                }
+                self.chat_messages.clear();
+                let cfg = rivulet_core::TwitchChatConfig {
+                    channel: self.chat_channel.trim().to_owned(),
+                    oauth_token: self.chat_oauth_token.clone(),
+                    ..Default::default()
+                };
+                self.chat_worker = Some(rivulet_core::TwitchChat::new(&cfg));
+                self.chat_state = self
+                    .chat_worker
+                    .as_ref()
+                    .map(|w| w.connection_state())
+                    .unwrap_or(rivulet_core::ChatConnState::Off);
+            }
+            Some(ChatAction::Disconnect) => {
+                if let Some(mut worker) = self.chat_worker.take() {
+                    worker.disconnect();
+                }
+                self.chat_messages.clear();
+                self.chat_state = rivulet_core::ChatConnState::Off;
+            }
+            None => {}
+        }
+
+        // Drain incoming messages (bounded to the newest MAX_CHAT_MESSAGES).
+        if let Some(worker) = &self.chat_worker {
+            self.chat_state = worker.connection_state();
+            if let Some(rx) = worker.messages() {
+                while let Ok(msg) = rx.try_recv() {
+                    self.chat_messages.push(msg);
+                    if self.chat_messages.len() > MAX_CHAT_MESSAGES {
+                        let overflow = self.chat_messages.len() - MAX_CHAT_MESSAGES;
+                        self.chat_messages.drain(..overflow);
+                    }
+                }
+            }
+        }
+    }
+
     /// Handle the Settings "Apply" action for the Discord client id: validate
     /// the format immediately and only mark the adapter for rebuild when the
     /// value is a plausible snowflake (or empty, which keeps the adapter off).
@@ -4798,6 +4899,99 @@ impl RivuletApp {
         });
     }
 
+    /// Render the Twitch chat dock: channel + token inputs, connect/
+    /// disconnect, and the (bounded) message list with user colors.
+    fn draw_chat_view(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new(self.tr("chat_title")).strong());
+        ui.separator();
+
+        // Connection controls.
+        let channel_hint = self.tr("chat_channel_hint");
+        let oauth_hint = self.tr("chat_oauth_hint");
+        ui.horizontal(|ui| {
+            ui.label(self.tr("chat_channel_label"));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.chat_channel)
+                    .hint_text(channel_hint)
+                    .desired_width(160.0),
+            );
+            let state = self.chat_state;
+            let is_connected = state == rivulet_core::ChatConnState::Connected;
+            if is_connected {
+                if ui.button(self.tr("chat_disconnect")).clicked() {
+                    self.chat_action_pending = Some(ChatAction::Disconnect);
+                }
+            } else if ui.button(self.tr("chat_connect")).clicked() {
+                self.chat_action_pending = Some(ChatAction::Connect);
+            }
+            let conn_text = match state {
+                rivulet_core::ChatConnState::Connected => self.tr("chat_state_connected"),
+                rivulet_core::ChatConnState::Disconnected => self.tr("chat_state_disconnected"),
+                rivulet_core::ChatConnState::Off => self.tr("chat_state_off"),
+            };
+            ui.colored_label(
+                if is_connected {
+                    theme::StatusColors::for_ui(ui).success
+                } else {
+                    ui.visuals().weak_text_color()
+                },
+                conn_text,
+            );
+        });
+
+        // Optional authenticated read (privacy-safe: never echoed back).
+        ui.horizontal(|ui| {
+            ui.label(self.tr("chat_oauth_label"));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.chat_oauth_token)
+                    .password(true)
+                    .hint_text(oauth_hint)
+                    .desired_width(220.0),
+            );
+        });
+        ui.small(self.tr("chat_note"));
+        ui.add_space(4.0);
+
+        // Message list (newest at the bottom, autoscroll to the last message).
+        let messages = std::mem::take(&mut self.chat_messages);
+        let total = messages.len();
+        let mut scroll_to_bottom = false;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .stick_to_bottom(true)
+            .show(ui, |ui| {
+                for message in &messages {
+                    let mut text = egui::RichText::new(message.user.as_str()).strong();
+                    if let Some(rgb) = message.color.as_deref().and_then(color_to_egui) {
+                        text = text.color(rgb);
+                    }
+                    if message.broadcaster {
+                        text = text.underline();
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(text);
+                        if message.action {
+                            ui.label(egui::RichText::new(format!("*{}", message.text)).italics());
+                        } else {
+                            ui.label(&message.text);
+                        }
+                    });
+                }
+                if total > 0 {
+                    scroll_to_bottom = true;
+                }
+            });
+        if scroll_to_bottom {
+            // Keep the newest message visible; the stick_to_bottom option
+            // already handles autoscroll while the user is at the bottom.
+        }
+        self.chat_messages = messages;
+        if self.chat_messages.is_empty() && self.chat_state != rivulet_core::ChatConnState::Off {
+            ui.small(self.tr("chat_empty"));
+        }
+    }
+
     fn handle_stream_key_actions(&mut self) {
         let account = self.stream_platform.label();
         let store = rivulet_core::StreamKeyStore::default();
@@ -5256,6 +5450,10 @@ impl eframe::App for RivuletApp {
         // engine state changes, regardless of which tab is open. The adapter is
         // non-blocking (try_send) and only pushes on transitions.
         self.sync_discord_presence();
+
+        // Reconcile the Twitch chat dock: process connect/disconnect actions
+        // and drain incoming chat messages (non-blocking).
+        self.reconcile_twitch_chat();
 
         // Apply the color scheme (fonts + palette + preference) on startup
         // and whenever the user changes it in Settings.
@@ -6683,6 +6881,9 @@ impl eframe::App for RivuletApp {
                     if self.view == AppView::Stream {
                         self.draw_stream_view(ui, &colors);
                     }
+                    if self.view == AppView::Chat {
+                        self.draw_chat_view(ui);
+                    }
                     if self.view == AppView::Help {
                         self.draw_help_view(ui);
                     }
@@ -7644,9 +7845,11 @@ mod tests {
         for view in AppView::all() {
             assert!(!view.nav_key().is_empty(), "view has no nav key");
         }
-        assert_eq!(AppView::all().len(), 7);
+        assert_eq!(AppView::all().len(), 8);
         assert_eq!(AppView::Help.nav_key(), "nav_help");
+        assert_eq!(AppView::Chat.nav_key(), "nav_chat");
         assert!(AppView::Stream.planned_milestone().is_none());
+        assert!(AppView::Chat.planned_milestone().is_none());
     }
 
     #[test]

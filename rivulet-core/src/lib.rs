@@ -16,6 +16,8 @@ pub mod presence;
 pub use presence::{PresenceActivity, PresenceStatus};
 pub mod discord;
 pub use discord::{DiscordPresence, DiscordPresenceConfig};
+pub mod twitch_chat;
+pub use twitch_chat::{ChatConnState, ChatMessage, TwitchChat, TwitchChatConfig};
 pub mod global_hotkey;
 pub mod midi;
 pub use global_hotkey::{GlobalBinding, GlobalHotkey, KeyCode, ModMask};

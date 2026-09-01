@@ -20,6 +20,8 @@ vision rather than merely copying OBS.
 | Global hotkeys and remapping | Automation and accessible control | M5 | Conflict-aware rebinding, global scope, reserved-key handling, persistence, and platform-specific permission feedback |
 | obs-websocket compatibility | Automation, embeddability, and ecosystem migration | M5 | **Done** — versioned v5 (JSON) compatible subset (scenes, sources, recording/streaming control), optional SHA-256 auth, deterministic request responses, event subscriptions, and end-to-end tests against a real WebSocket client (see `docs/obs-websocket.md`, #72) |
 | Optional Discord Rich Presence adapter | Streamer-oriented status visibility without coupling the engine to a platform SDK | M5 | Non-blocking adapter consumes `PresenceStatus`, has an explicit opt-out, never sends secrets or local identifiers, handles Discord unavailability gracefully, and includes lifecycle/privacy tests |
+| Chat dock (Twitch IRC) | Core streamer interaction: reading the live chat while streaming | M5 | Native chat view in the GUI connected to Twitch IRC (anonymous read or OAuth), parsing `PRIVMSG`/tags/actions/notice, PING/PONG keepalive, reconnect with backoff, message list with user color, i18n DE/EN, and tests against a local IRC listener |
+| Alerts (follows/subs/donations) | Streamer engagement: surface events without coupling to a platform SDK | M5 | Event ingestion (Twitch EventSub or provider webhooks) mapped to localized alert entries, rendered as overlay entries or surfaced in the chat dock, with redaction of tokens and privacy tests |
 
 ## Decision rules
 
