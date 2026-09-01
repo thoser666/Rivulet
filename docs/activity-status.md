@@ -156,6 +156,18 @@ being applied (or no valid state was ever delivered). The common causes:
    ``Client ID`` of a Discord application with **Rich Presence** enabled that
    has been created/toggled for Rich Presence use.
 
+> **Known root cause (fixed):** older builds framed every IPC message with
+> only a 4-byte length prefix, but Discord v1 requires the 8-byte header
+> `[opcode:u32][length:u32]` (op 0 = HANDSHAKE, op 1 = FRAME). Discord
+> rejected that framing with `{"code":1003,"message":"protocol error"}`
+> and closed the connection — the presence never appeared although the
+> client id and the `discord-ipc-0` pipe were correct. The worker now emits
+> the correct header; a `ci_pinning` guard (`discord_framing_uses_the_
+> opcode_length_header`) locks the framing in, and the live handshake can be
+> verified against a running Discord client with
+> `powershell -File scripts/test-discord-handshake.ps1` (expect a
+> `DISPATCH`/`READY` reply).
+
 Since the worker now exposes its **connection state**, the Stream view shows a
 status line under the toggle that says whether the handshake was accepted
 („Verbunden"/"Connected" in the success color) or still connecting / off

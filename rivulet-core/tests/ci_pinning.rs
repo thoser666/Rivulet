@@ -577,6 +577,45 @@ fn discord_presence_error_state_is_wired_into_the_status_model() {
 }
 
 #[test]
+fn discord_framing_uses_the_opcode_length_header() {
+    // Regression: the adapter framed every IPC message with only a 4-byte
+    // length prefix, but Discord v1 requires the 8-byte header
+    // `[opcode:u32][length:u32]` (op 0 = HANDSHAKE, op 1 = FRAME). Discord
+    // rejected the old framing with `{"code":1003,"message":"protocol
+    // error"}` and closed the connection, so the presence never appeared
+    // even though the client id and pipe were correct.
+    let discord = read("rivulet-core/src/discord.rs");
+    assert!(
+        discord.contains("pub const HANDSHAKE: u32 = 0;"),
+        "opcode table must define HANDSHAKE"
+    );
+    assert!(
+        discord.contains("pub const FRAME: u32 = 1;"),
+        "opcode table must define FRAME"
+    );
+    assert!(
+        discord.contains("write_frame(w, op::HANDSHAKE, &bytes)"),
+        "handshake must be sent with the HANDSHAKE opcode"
+    );
+    assert!(
+        discord.contains("write_frame(w, op::FRAME, &bytes)"),
+        "SET_ACTIVITY must be sent with the FRAME opcode"
+    );
+    // The writer must emit the 8-byte header (opcode first, then length).
+    let write = discord
+        .split_once("fn write_frame")
+        .map(|(_, rest)| rest)
+        .expect("write_frame must exist");
+    assert!(
+        write.contains("opcode.to_le_bytes()") && write.contains("len.to_le_bytes()"),
+        "write_frame must write opcode then length"
+    );
+    // The wire tests must assert the opcodes end to end.
+    assert!(discord.contains("handshake must use the HANDSHAKE opcode"));
+    assert!(discord.contains("SET_ACTIVITY must use the FRAME opcode"));
+}
+
+#[test]
 fn discord_client_id_is_restored_from_eframe_storage() {
     // Bug regression: `save()` wrote the full app (including the Discord
     // application id) under eframe::APP_KEY, but nothing ever read the value

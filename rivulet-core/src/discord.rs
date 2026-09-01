@@ -318,22 +318,46 @@ fn ipc_socket_paths() -> Vec<std::path::PathBuf> {
     paths
 }
 
-/// One IPC frame: 4-byte little-endian length prefix, then the JSON payload.
-fn write_frame<W: Write + ?Sized>(w: &mut W, payload: &[u8]) -> io::Result<()> {
+/// Discord IPC frame opcodes.
+mod op {
+    /// Connect / identify with `client_id`.
+    pub const HANDSHAKE: u32 = 0;
+    /// A normal command/event frame (e.g. `SET_ACTIVITY`).
+    pub const FRAME: u32 = 1;
+    /// Connection closed (Discord sends this with `{code,message}` when it
+    /// rejects us, e.g. code 1003 = protocol error).
+    #[allow(dead_code)]
+    pub const CLOSE: u32 = 2;
+    /// Keepalive ping / pong.
+    #[allow(dead_code)]
+    pub const PING: u32 = 3;
+    #[allow(dead_code)]
+    pub const PONG: u32 = 4;
+}
+
+/// One IPC frame: 8-byte little-endian header `[opcode: u32][length: u32]`,
+/// then the JSON payload. Discord v1 rejects the old 4-byte-length-only
+/// framing with `{"code":1003,"message":"protocol error"}` and closes the
+/// connection — which is why the presence never appeared while the GUI still
+/// reported the desired status.
+fn write_frame<W: Write + ?Sized>(w: &mut W, opcode: u32, payload: &[u8]) -> io::Result<()> {
     let len = payload.len() as u32;
+    w.write_all(&opcode.to_le_bytes())?;
     w.write_all(&len.to_le_bytes())?;
     w.write_all(payload)
 }
 
-/// Read one Discord IPC frame (length prefix + JSON payload).
+/// Read one Discord IPC frame (8-byte `[opcode][length]` header + payload)
+/// and return `(opcode, payload)`.
 #[cfg(test)]
-fn read_frame<R: Read>(r: &mut R) -> io::Result<Vec<u8>> {
-    let mut header = [0u8; 4];
+fn read_frame<R: Read>(r: &mut R) -> io::Result<(u32, Vec<u8>)> {
+    let mut header = [0u8; 8];
     r.read_exact(&mut header)?;
-    let len = u32::from_le_bytes(header) as usize;
+    let opcode = u32::from_le_bytes([header[0], header[1], header[2], header[3]]);
+    let len = u32::from_le_bytes([header[4], header[5], header[6], header[7]]) as usize;
     let mut payload = vec![0u8; len];
     r.read_exact(&mut payload)?;
-    Ok(payload)
+    Ok((opcode, payload))
 }
 
 fn send_handshake<W: Write + ?Sized>(w: &mut W, client_id: &str) -> io::Result<()> {
@@ -343,7 +367,7 @@ fn send_handshake<W: Write + ?Sized>(w: &mut W, client_id: &str) -> io::Result<(
     });
     let bytes =
         serde_json::to_vec(&payload).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    write_frame(w, &bytes)
+    write_frame(w, op::HANDSHAKE, &bytes)
 }
 
 #[derive(Serialize)]
@@ -406,7 +430,7 @@ fn send_set_activity<W: Write + ?Sized>(
     let cmd = ActivityCommand::new(status, pid, *seq);
     let bytes =
         serde_json::to_vec(&cmd).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    write_frame(w, &bytes)
+    write_frame(w, op::FRAME, &bytes)
 }
 
 // ---------------------------------------------------------------------------
@@ -621,8 +645,12 @@ mod tests {
             send_handshake(&mut buf, "1111111111111111111").unwrap();
             buf
         };
-        // Strip the 4-byte length prefix for serialization checking.
-        let payload = &bytes[4..];
+        // 8-byte header: opcode 0 (HANDSHAKE) + length, then the JSON payload.
+        assert_eq!(
+            u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+            0
+        );
+        let payload = &bytes[8..];
         let value: serde_json::Value = serde_json::from_slice(payload).unwrap();
         assert_eq!(value["v"], 1);
         assert_eq!(value["client_id"], "1111111111111111111");
@@ -639,7 +667,9 @@ mod tests {
         let mut seq = 7;
         send_set_activity(&mut buf, &st, 1234, &mut seq).unwrap();
 
-        let payload = &buf[4..];
+        // 8-byte header: opcode 1 (FRAME) + length, then the JSON payload.
+        assert_eq!(u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]), 1);
+        let payload = &buf[8..];
         let value: serde_json::Value = serde_json::from_slice(payload).unwrap();
         assert_eq!(value["cmd"], "SET_ACTIVITY");
         assert_eq!(value["args"]["pid"], 1234);
@@ -656,7 +686,7 @@ mod tests {
         let mut buf = Vec::new();
         let mut seq = 0;
         send_set_activity(&mut buf, &st, 1, &mut seq).unwrap();
-        let text = String::from_utf8(buf[4..].to_vec()).unwrap();
+        let text = String::from_utf8(buf[8..].to_vec()).unwrap();
         assert!(!text.to_lowercase().contains("rtmp"));
         assert!(!text.to_lowercase().contains("key"));
         assert!(!text.contains('/') && !text.contains('\\'));
@@ -672,22 +702,27 @@ mod tests {
     }
 
     #[test]
-    fn frame_wires_length_prefix_then_payload() {
+    fn frame_wires_opcode_and_length_prefix_then_payload() {
         let mut buf = Vec::new();
         let payload = b"hello-discord";
-        write_frame(&mut buf, payload).unwrap();
-        assert_eq!(buf.len(), 4 + payload.len());
-        let len = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+        write_frame(&mut buf, op::FRAME, payload).unwrap();
+        assert_eq!(buf.len(), 8 + payload.len());
+        assert_eq!(
+            u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]),
+            op::FRAME
+        );
+        let len = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]) as usize;
         assert_eq!(len, payload.len());
-        assert_eq!(&buf[4..], payload);
+        assert_eq!(&buf[8..], payload);
     }
 
     #[test]
     fn read_frame_parses_wire_format() {
         let mut buf = Vec::new();
-        write_frame(&mut buf, b"{\"cmd\":\"ping\"}").unwrap();
+        write_frame(&mut buf, op::FRAME, b"{\"cmd\":\"ping\"}").unwrap();
         let mut cursor = std::io::Cursor::new(buf);
-        let payload = read_frame(&mut cursor).unwrap();
+        let (opcode, payload) = read_frame(&mut cursor).unwrap();
+        assert_eq!(opcode, op::FRAME);
         assert_eq!(payload, b"{\"cmd\":\"ping\"}");
     }
 
@@ -701,7 +736,8 @@ mod tests {
         let _ = a.set_write_timeout(Some(Duration::from_secs(2)));
         let _ = b.set_read_timeout(Some(Duration::from_secs(2)));
         send_set_activity(&mut a, &st, 42, &mut seq).unwrap();
-        let frame = read_frame(&mut b).unwrap();
+        let (opcode, frame) = read_frame(&mut b).unwrap();
+        assert_eq!(opcode, op::FRAME, "SET_ACTIVITY must be a FRAME op");
         let value: serde_json::Value = serde_json::from_slice(&frame).unwrap();
         assert_eq!(value["cmd"], "SET_ACTIVITY");
         assert_eq!(value["args"]["pid"], 42);
@@ -733,14 +769,16 @@ mod tests {
         conn.set_read_timeout(Some(Duration::from_secs(5)))
             .expect("read timeout");
 
-        // Frame 1: handshake.
-        let hs = read_frame(&mut conn).expect("handshake frame");
+        // Frame 1: handshake (opcode 0 = HANDSHAKE).
+        let (hs_op, hs) = read_frame(&mut conn).expect("handshake frame");
+        assert_eq!(hs_op, 0, "handshake must use the HANDSHAKE opcode");
         let hs: serde_json::Value = serde_json::from_slice(&hs).expect("json");
         assert_eq!(hs["v"], 1);
         assert_eq!(hs["client_id"], "smoke-client-unix");
 
-        // Frame 2: SET_ACTIVITY for the pushed status.
-        let set = read_frame(&mut conn).expect("set_activity frame");
+        // Frame 2: SET_ACTIVITY for the pushed status (opcode 1 = FRAME).
+        let (set_op, set) = read_frame(&mut conn).expect("set_activity frame");
+        assert_eq!(set_op, 1, "SET_ACTIVITY must use the FRAME opcode");
         let set: serde_json::Value = serde_json::from_slice(&set).expect("json");
         assert_eq!(set["cmd"], "SET_ACTIVITY");
         assert_eq!(set["args"]["pid"], std::process::id());
@@ -876,12 +914,14 @@ mod tests {
 
             server.connect().expect("connect pipe");
 
-            let hs = read_frame(&mut server).expect("handshake frame");
+            let (hs_op, hs) = read_frame(&mut server).expect("handshake frame");
+            assert_eq!(hs_op, 0, "handshake must use the HANDSHAKE opcode");
             let hs: serde_json::Value = serde_json::from_slice(&hs).expect("json");
             assert_eq!(hs["v"], 1);
             assert_eq!(hs["client_id"], "smoke-client-windows");
 
-            let set = read_frame(&mut server).expect("set_activity frame");
+            let (set_op, set) = read_frame(&mut server).expect("set_activity frame");
+            assert_eq!(set_op, 1, "SET_ACTIVITY must use the FRAME opcode");
             let set: serde_json::Value = serde_json::from_slice(&set).expect("json");
             assert_eq!(set["cmd"], "SET_ACTIVITY");
             assert_eq!(set["args"]["pid"], std::process::id());
