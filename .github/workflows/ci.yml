@@ -59,7 +59,8 @@ jobs:
             gstreamer1.0-tools \
             libglib2.0-dev \
             libpipewire-0.3-dev \
-            libspa-0.2-dev
+            libspa-0.2-dev \
+            libasound2-dev
 
       - name: Build RIST smoke image for diagnostics
         run: docker build --pull=true -t rivulet-rist-smoke:ci docker/rist-smoke
@@ -286,6 +287,7 @@ jobs:
             libglib2.0-dev \
             libpipewire-0.3-dev \
             libspa-0.2-dev \
+            libasound2-dev \
             xdotool \
             xvfb \
             x11-apps \

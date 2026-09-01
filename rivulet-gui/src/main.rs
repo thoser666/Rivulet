@@ -2,6 +2,7 @@
 
 mod app;
 mod logging;
+mod midi_io;
 mod theme;
 
 use crate::app::{parse_no_frame_timeout, RivuletApp, DEFAULT_NO_FRAME_TIMEOUT};

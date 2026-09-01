@@ -1,6 +1,8 @@
 # Changelog
 
 ## [0.65.0-alpha.55] - 2026-08-30
+- feat(m5): add MIDI controller mapping (Korg NanoKontrol etc.) — hardware-free parse/dispatch core in `rivulet-core::midi` (Note/CC → scene switch, master-volume fader, mute, chroma-key toggle), `midir` device bridge in the GUI, Settings section with device picker and binding table, persisted bindings, i18n DE/EN (see docs/midi.md)
+- ci: install libasound2-dev on Linux for the midir ALSA backend; add CI wiring test for the MIDI mapping
 - feat(m5): add OBS WebSocket v5 remote control server (`rivulet-obs-websocket`) for Stream Deck / TouchPortal — scenes, sources, recording/streaming control, optional SHA-256 auth, event subscriptions, request batches; verified end-to-end with a real WebSocket client (#72)
 - feat(gui): wire OBS WebSocket server into Settings (enable/port/password), bridge it to the real scene manager/engine, and broadcast GUI-initiated changes to connected clients (see docs/obs-websocket.md)
 - feat(presence): add opt-out, non-blocking Discord Rich Presence adapter (`rivulet-core::discord`) with IPC + graceful degradation

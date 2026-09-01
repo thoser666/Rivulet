@@ -1,5 +1,6 @@
 #![allow(unused_imports, dead_code, unused_variables)]
 
+use crate::midi_io::{list_devices, MidiListener};
 use crate::theme;
 use eframe::egui;
 use rivulet_core::{
@@ -666,6 +667,38 @@ pub struct RivuletApp {
     #[serde(skip)]
     obs_ws_last_public_state: Option<ObsWsPublicState>,
 
+    // --- MIDI controller mapping (M5) ---
+    /// Master switch for the MIDI listener. Persisted across sessions.
+    midi_enabled: bool,
+    /// Index into the enumerated MIDI input ports. Persisted.
+    midi_device_index: usize,
+    /// The user's bindings (channel/kind/number → action). Persisted.
+    midi_mapping: rivulet_core::MidiMapping,
+    /// Device list shown in Settings; refreshed when the section is opened.
+    #[serde(skip)]
+    midi_devices: Vec<String>,
+    /// Live listener handle (device thread). Rebuilt on config changes.
+    #[serde(skip)]
+    midi_handle: Option<MidiListener>,
+    /// Status/error line shown in Settings (e.g. no device, connect error).
+    #[serde(skip)]
+    midi_status: Option<String>,
+    /// Set when enable/device/bindings change so the listener is rebuilt
+    /// exactly once per frame.
+    #[serde(skip)]
+    midi_dirty: bool,
+    /// Pending "add binding" row state in Settings (kind/channel/number,
+    /// action name, optional scene). Persisted so the row survives restarts.
+    midi_new_kind: rivulet_core::MidiKind,
+    midi_new_channel: u8,
+    midi_new_number: u8,
+    midi_new_action: String,
+    midi_new_scene: Option<uuid::Uuid>,
+    /// Platform-independent mirror of the last MIDI fader value (0.0..1.0).
+    /// Applied to the Linux audio mixer when present; on other platforms it is
+    /// stored for future audio backends (no OS-level volume control).
+    midi_master_volume: f32,
+
     // Linux Fields
     #[cfg(target_os = "linux")]
     #[serde(skip)]
@@ -1045,6 +1078,19 @@ impl Default for RivuletApp {
             obs_ws_enabled: false,
             obs_ws_port: rivulet_obs_websocket::DEFAULT_PORT,
             obs_ws_password: String::new(),
+            midi_enabled: false,
+            midi_device_index: 0,
+            midi_mapping: rivulet_core::MidiMapping::default(),
+            midi_devices: Vec::new(),
+            midi_handle: None,
+            midi_status: None,
+            midi_dirty: false,
+            midi_new_kind: rivulet_core::MidiKind::default(),
+            midi_new_channel: 0,
+            midi_new_number: 7,
+            midi_new_action: "ToggleRecord".to_owned(),
+            midi_new_scene: None,
+            midi_master_volume: 1.0,
             obs_ws_server: None,
             obs_ws_snapshot: None,
             obs_ws_commands_rx: None,
@@ -4124,6 +4170,102 @@ impl RivuletApp {
         }
     }
 
+    /// Ensure the MIDI listener matches the current settings (enable toggle,
+    /// selected device), drain incoming MIDI messages, and apply their mapped
+    /// actions on the UI thread.
+    fn reconcile_midi(&mut self) {
+        if self.midi_dirty {
+            self.midi_dirty = false;
+            self.midi_handle = None; // drops the old connection (stops input)
+            self.midi_status = None;
+            if self.midi_enabled {
+                match MidiListener::start(self.midi_device_index) {
+                    Ok(handle) => self.midi_handle = Some(handle),
+                    Err(err) => self.midi_status = Some(err),
+                }
+            }
+        }
+
+        // Drain pending messages and apply the mapped actions.
+        let mut messages = Vec::new();
+        if let Some(handle) = &mut self.midi_handle {
+            while let Some(msg) = handle.try_recv() {
+                messages.push(msg);
+            }
+        }
+        for msg in messages {
+            let actions: Vec<rivulet_core::MidiAction> = self
+                .midi_mapping
+                .dispatch(&msg)
+                .into_iter()
+                .cloned()
+                .collect();
+            for action in actions {
+                self.apply_midi_action(&action, msg.value);
+            }
+        }
+    }
+
+    /// Human-readable, localized label for a mapped MIDI action (shown in the
+    /// Settings binding list).
+    fn midi_action_label(&self, action: &rivulet_core::MidiAction) -> String {
+        match action {
+            rivulet_core::MidiAction::SwitchScene(id) => {
+                let name = self
+                    .scenes
+                    .get(*id)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_else(|| self.tr("midi_scene_none").to_owned());
+                format!("{} · {}", self.tr("midi_action_scene"), name)
+            }
+            rivulet_core::MidiAction::ToggleRecord => self.tr("midi_action_record").to_owned(),
+            rivulet_core::MidiAction::ToggleStream => self.tr("midi_action_stream").to_owned(),
+            rivulet_core::MidiAction::ToggleMute => self.tr("midi_action_mute").to_owned(),
+            rivulet_core::MidiAction::SetMasterVolume => self.tr("midi_action_volume").to_owned(),
+            rivulet_core::MidiAction::ToggleChromaKey => self.tr("midi_action_chroma").to_owned(),
+        }
+    }
+
+    /// Execute one mapped MIDI action. `raw_value` is the CC value/velocity
+    /// used by fader-style actions (master volume).
+    fn apply_midi_action(&mut self, action: &rivulet_core::MidiAction, raw_value: u8) {
+        match action {
+            rivulet_core::MidiAction::SwitchScene(id) => {
+                self.scenes.switch_to(*id);
+            }
+            rivulet_core::MidiAction::ToggleRecord => {
+                if self.any_recording_active() {
+                    self.stop_active_recording();
+                } else {
+                    self.start_active_recording();
+                }
+            }
+            rivulet_core::MidiAction::ToggleStream => {
+                self.execute_obs_command(rivulet_obs_websocket::ObsCommand::ToggleStreaming);
+            }
+            rivulet_core::MidiAction::ToggleMute => {
+                if self.any_recording_active() {
+                    self.is_muted = !self.is_muted;
+                }
+            }
+            rivulet_core::MidiAction::SetMasterVolume => {
+                let ratio = rivulet_core::MidiMapping::volume_ratio(raw_value);
+                self.midi_master_volume = ratio;
+                #[cfg(target_os = "linux")]
+                if let Some(audio) = &mut self.audio {
+                    audio.set_master_volume(ratio);
+                }
+            }
+            rivulet_core::MidiAction::ToggleChromaKey => {
+                if let Some(source_id) = self.selected_composition_source {
+                    if let Some(source) = self.source_manager.get_source_mut(source_id) {
+                        source.chroma_key.enabled = !source.chroma_key.enabled;
+                    }
+                }
+            }
+        }
+    }
+
     /// Start, stop, or keep the OBS WebSocket server in sync with the setting
     /// toggle, refresh the read snapshot the server sees, execute commands the
     /// server received (scene switches, record/stream control) on the UI
@@ -4919,6 +5061,10 @@ impl eframe::App for RivuletApp {
         // sync the read snapshot, execute remote commands, and broadcast
         // GUI-initiated changes to connected Stream Deck/TouchPortal clients.
         self.reconcile_obs_websocket();
+
+        // Reconcile the MIDI listener: start/stop it with the setting and
+        // selected device, then apply mapped actions from incoming messages.
+        self.reconcile_midi();
 
         // Apply the color scheme (fonts + palette + preference) on startup
         // and whenever the user changes it in Settings.
@@ -6417,6 +6563,183 @@ impl eframe::App for RivuletApp {
                     self.obs_ws_status = Some(self.tr("obs_ws_stopped").to_owned());
                 }
                 ui.small(obs_ws_hint);
+
+                // Settings: MIDI controller mapping (Korg NanoKontrol etc.).
+                // Maps MIDI messages (note/CC on a channel) to actions such as
+                // scene switches, master volume, and chroma-key toggles.
+                let midi_section = self.tr("midi_section");
+                let midi_enable = self.tr("midi_enable");
+                let midi_device = self.tr("midi_device");
+                let midi_no_devices = self.tr("midi_no_devices");
+                let midi_hint = self.tr("midi_hint");
+                let midi_channel = self.tr("midi_channel");
+                let midi_kind = self.tr("midi_kind");
+                let midi_number = self.tr("midi_number");
+                let midi_action = self.tr("midi_action");
+                let midi_remove = self.tr("midi_remove");
+                let midi_add = self.tr("midi_add");
+                let midi_scene = self.tr("midi_scene");
+                ui.separator();
+                ui.label(egui::RichText::new(midi_section).strong());
+                if ui.checkbox(&mut self.midi_enabled, midi_enable).changed() {
+                    self.midi_dirty = true;
+                }
+                // Device picker: refresh the list whenever the user opens the
+                // dropdown so hot-plugged devices appear.
+                ui.horizontal(|ui| {
+                    ui.label(midi_device);
+                    if self.midi_devices.is_empty() {
+                        self.midi_devices = list_devices();
+                    }
+                    if self.midi_devices.is_empty() {
+                        ui.weak(midi_no_devices);
+                    } else {
+                        let selected = self
+                            .midi_devices
+                            .get(self.midi_device_index)
+                            .cloned()
+                            .unwrap_or_default();
+                        let before = self.midi_device_index;
+                        egui::ComboBox::from_id_salt("midi_device")
+                            .selected_text(selected)
+                            .show_ui(ui, |ui| {
+                                for (idx, name) in self.midi_devices.iter().enumerate() {
+                                    ui.selectable_value(&mut self.midi_device_index, idx, name);
+                                }
+                            });
+                        if self.midi_device_index != before {
+                            // Drop the cached list so it is re-enumerated (and
+                            // the index re-validated) on the next open.
+                            self.midi_devices = Vec::new();
+                            self.midi_dirty = true;
+                        }
+                    }
+                });
+                if let Some(status) = &self.midi_status {
+                    ui.colored_label(colors.warning, status);
+                }
+                // Binding list with a remove button per row.
+                let mut remove: Option<usize> = None;
+                for (idx, binding) in self.midi_mapping.bindings.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "{} {} · ch {}",
+                            binding.kind.label(),
+                            binding.number,
+                            binding.channel + 1
+                        ));
+                        ui.label(self.midi_action_label(&binding.action));
+                        if ui.small_button(midi_remove).clicked() {
+                            remove = Some(idx);
+                        }
+                    });
+                }
+                if let Some(idx) = remove {
+                    self.midi_mapping.bindings.remove(idx);
+                    self.midi_dirty = true;
+                }
+                // "Add binding" row.
+                ui.horizontal(|ui| {
+                    ui.label(midi_kind);
+                    for kind in [
+                        rivulet_core::MidiKind::NoteOn,
+                        rivulet_core::MidiKind::NoteOff,
+                        rivulet_core::MidiKind::ControlChange,
+                    ] {
+                        ui.selectable_value(&mut self.midi_new_kind, kind, kind.label());
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label(midi_channel);
+                    let mut channel_ui = self.midi_new_channel + 1;
+                    if ui
+                        .add(egui::DragValue::new(&mut channel_ui).range(1..=16))
+                        .changed()
+                    {
+                        self.midi_new_channel = channel_ui - 1;
+                    }
+                    ui.label(midi_number);
+                    ui.add(egui::DragValue::new(&mut self.midi_new_number).range(0..=127));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(midi_action);
+                    let actions = [
+                        ("ToggleRecord", self.tr("midi_action_record")),
+                        ("ToggleStream", self.tr("midi_action_stream")),
+                        ("ToggleMute", self.tr("midi_action_mute")),
+                        ("SetMasterVolume", self.tr("midi_action_volume")),
+                        ("ToggleChromaKey", self.tr("midi_action_chroma")),
+                        ("SwitchScene", self.tr("midi_action_scene")),
+                    ];
+                    let selected = actions
+                        .iter()
+                        .find(|(name, _)| *name == self.midi_new_action)
+                        .map(|(_, label)| *label)
+                        .unwrap_or_else(|| self.midi_new_action.as_str());
+                    egui::ComboBox::from_id_salt("midi_action")
+                        .selected_text(selected)
+                        .show_ui(ui, |ui| {
+                            for (name, label) in actions {
+                                ui.selectable_value(
+                                    &mut self.midi_new_action,
+                                    name.to_owned(),
+                                    label,
+                                );
+                            }
+                        });
+                    if self.midi_new_action == "SwitchScene" {
+                        ui.label(midi_scene);
+                        let names: Vec<(uuid::Uuid, String)> = self
+                            .scenes
+                            .scenes()
+                            .iter()
+                            .map(|s| (s.id, s.name.clone()))
+                            .collect();
+                        let selected_name = self
+                            .midi_new_scene
+                            .and_then(|id| names.iter().find(|(sid, _)| *sid == id))
+                            .map(|(_, name)| name.clone())
+                            .unwrap_or_else(|| self.tr("midi_scene_none").to_owned());
+                        egui::ComboBox::from_id_salt("midi_scene_pick")
+                            .selected_text(selected_name)
+                            .show_ui(ui, |ui| {
+                                for (id, name) in &names {
+                                    if ui
+                                        .selectable_label(self.midi_new_scene == Some(*id), name)
+                                        .clicked()
+                                    {
+                                        self.midi_new_scene = Some(*id);
+                                    }
+                                }
+                            });
+                    }
+                    if ui.button(midi_add).clicked() {
+                        let action = match self.midi_new_action.as_str() {
+                            "ToggleStream" => rivulet_core::MidiAction::ToggleStream,
+                            "ToggleMute" => rivulet_core::MidiAction::ToggleMute,
+                            "SetMasterVolume" => rivulet_core::MidiAction::SetMasterVolume,
+                            "ToggleChromaKey" => rivulet_core::MidiAction::ToggleChromaKey,
+                            "SwitchScene" => {
+                                if let Some(id) = self.midi_new_scene {
+                                    rivulet_core::MidiAction::SwitchScene(id)
+                                } else {
+                                    rivulet_core::MidiAction::ToggleRecord
+                                }
+                            }
+                            _ => rivulet_core::MidiAction::ToggleRecord,
+                        };
+                        self.midi_mapping
+                            .bindings
+                            .push(rivulet_core::MidiBinding::new(
+                                self.midi_new_channel,
+                                self.midi_new_kind,
+                                self.midi_new_number,
+                                action,
+                            ));
+                        self.midi_dirty = true;
+                    }
+                });
+                ui.small(midi_hint);
             }
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -8019,5 +8342,106 @@ mod tests {
         let app = RivuletApp::default();
         assert_eq!(app.obs_ws_port, 4455);
         assert!(!app.obs_ws_enabled, "remote control must be opt-in");
+    }
+
+    // ── MIDI controller mapping ────────────────────────────────────
+
+    #[test]
+    fn midi_defaults_are_opt_in_and_empty() {
+        let app = RivuletApp::default();
+        assert!(!app.midi_enabled, "MIDI input must be opt-in");
+        assert!(app.midi_mapping.bindings.is_empty());
+        assert_eq!(app.midi_master_volume, 1.0);
+    }
+
+    #[test]
+    fn midi_switch_scene_applies_to_the_scene_manager() {
+        let mut app = RivuletApp::default();
+        let game = app.scenes.add(rivulet_core::Scene::new("Game".to_owned()));
+        let cam = app.scenes.add(rivulet_core::Scene::new("Cam".to_owned()));
+        app.scenes.switch_to(game);
+        app.apply_midi_action(&rivulet_core::MidiAction::SwitchScene(cam), 0);
+        assert_eq!(app.scenes.active(), Some(cam));
+    }
+
+    #[test]
+    fn midi_master_volume_fader_scales_value() {
+        let mut app = RivuletApp::default();
+        app.apply_midi_action(&rivulet_core::MidiAction::SetMasterVolume, 64);
+        assert!((app.midi_master_volume - 0.5039).abs() < 0.001);
+        app.apply_midi_action(&rivulet_core::MidiAction::SetMasterVolume, 0);
+        assert_eq!(app.midi_master_volume, 0.0);
+        app.apply_midi_action(&rivulet_core::MidiAction::SetMasterVolume, 127);
+        assert_eq!(app.midi_master_volume, 1.0);
+    }
+
+    #[test]
+    fn midi_settings_and_mapping_persist_across_restarts() {
+        let scene = uuid::Uuid::new_v4();
+        let app = RivuletApp {
+            midi_enabled: true,
+            midi_device_index: 1,
+            midi_mapping: rivulet_core::MidiMapping {
+                bindings: vec![rivulet_core::MidiBinding::new(
+                    0,
+                    rivulet_core::MidiKind::ControlChange,
+                    7,
+                    rivulet_core::MidiAction::SwitchScene(scene),
+                )],
+            },
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&app).expect("serialize app");
+        assert_eq!(json["midi_enabled"], true);
+        assert_eq!(json["midi_device_index"], 1);
+        // Runtime-only state must not be persisted.
+        assert!(json.get("midi_handle").is_none());
+        assert!(json.get("midi_devices").is_none());
+
+        let restored: RivuletApp = serde_json::from_value(json).expect("deserialize app");
+        assert!(restored.midi_enabled);
+        assert_eq!(restored.midi_mapping.bindings.len(), 1);
+        assert_eq!(
+            restored.midi_mapping.bindings[0].action,
+            rivulet_core::MidiAction::SwitchScene(scene)
+        );
+        assert!(restored.midi_handle.is_none());
+    }
+
+    #[test]
+    fn midi_dispatch_routes_messages_to_bound_actions() {
+        // The end-to-end mapping path: raw MIDI bytes -> parsed message ->
+        // dispatch -> applied GUI action.
+        let scene = uuid::Uuid::new_v4();
+        let app = RivuletApp {
+            midi_mapping: rivulet_core::MidiMapping {
+                bindings: vec![
+                    rivulet_core::MidiBinding::new(
+                        0,
+                        rivulet_core::MidiKind::ControlChange,
+                        7,
+                        rivulet_core::MidiAction::SetMasterVolume,
+                    ),
+                    rivulet_core::MidiBinding::new(
+                        0,
+                        rivulet_core::MidiKind::NoteOn,
+                        60,
+                        rivulet_core::MidiAction::SwitchScene(scene),
+                    ),
+                ],
+            },
+            ..Default::default()
+        };
+        let cc = rivulet_core::parse_midi(&[0xB0, 7, 100]).unwrap();
+        let actions: Vec<_> = app
+            .midi_mapping
+            .dispatch(&cc)
+            .into_iter()
+            .cloned()
+            .collect();
+        assert_eq!(actions, vec![rivulet_core::MidiAction::SetMasterVolume]);
+        // Unbound messages dispatch to nothing.
+        let note = rivulet_core::parse_midi(&[0x90, 61, 100]).unwrap();
+        assert!(app.midi_mapping.dispatch(&note).is_empty());
     }
 }

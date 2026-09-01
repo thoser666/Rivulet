@@ -504,6 +504,34 @@ fn obs_websocket_smoke_is_wired_up() {
 }
 
 #[test]
+fn midi_mapping_is_wired_into_gui_and_ci() {
+    // The hardware-free mapping/parse core lives in rivulet-core::midi.
+    let midi_core = read("rivulet-core/src/midi.rs");
+    assert!(midi_core.contains("pub struct MidiMapping"));
+    assert!(midi_core.contains("pub fn parse_midi"));
+    assert!(midi_core.contains("pub enum MidiAction"));
+    // The GUI owns the midir device bridge.
+    let gui_cargo = read("rivulet-gui/Cargo.toml");
+    assert!(gui_cargo.contains("midir"), "GUI must depend on midir");
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("fn reconcile_midi"));
+    assert!(gui.contains("fn apply_midi_action"));
+    assert!(
+        gui.contains("midi_section"),
+        "Settings must expose the MIDI section"
+    );
+    // Linux needs the ALSA dev headers to build midir; CI must install them.
+    let workflow = read(".github/workflows/ci.yml");
+    assert!(
+        workflow.contains("libasound2-dev"),
+        "CI must install libasound2-dev for the midir ALSA backend"
+    );
+    // The i18n catalogs must cover the MIDI section in both locales.
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(i18n.matches("midi_section").count() >= 2);
+}
+
+#[test]
 fn adaptive_bitrate_live_change_diagnostics_are_wired_up() {
     let runtime = read("rivulet-core/src/stream_runtime.rs");
     let engine = read("rivulet-core/src/lib.rs");

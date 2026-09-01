@@ -32,6 +32,10 @@ anyhow = "1.0.81"
 rfd = "0.17"
 open = "5.3"
 
+# MIDI controller input (Korg NanoKontrol etc.); the mapping/parse logic
+# itself lives in rivulet-core::midi and is hardware-free.
+midir = "0.10"
+
 # Local core library
 rivulet-core = { path = "../rivulet-core" }
 

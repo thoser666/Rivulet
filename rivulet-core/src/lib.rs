@@ -17,7 +17,9 @@ pub use presence::{PresenceActivity, PresenceStatus};
 pub mod discord;
 pub use discord::{DiscordPresence, DiscordPresenceConfig};
 pub mod global_hotkey;
+pub mod midi;
 pub use global_hotkey::{GlobalBinding, GlobalHotkey, KeyCode, ModMask};
+pub use midi::{parse_midi, MidiAction, MidiBinding, MidiKind, MidiMapping, MidiMessage};
 pub mod virtual_camera;
 pub use virtual_camera::{
     VirtualCamera, VirtualCameraConfig, VirtualCameraError, VirtualCameraFormat, VirtualCameraState,
