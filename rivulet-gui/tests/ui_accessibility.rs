@@ -33,6 +33,20 @@ fn accessibility_report_is_stable() {
     assert_eq!(accessibility_report(), accessibility_report());
 }
 
+/// The narrow-layout contract is verified against the GUI source: the main
+/// view content and the sidebar must live in scroll areas so controls stay
+/// reachable (and a minimum window size guards the layout) when the window
+/// is shrunk.
+fn narrow_layout_is_responsive() -> bool {
+    let source = std::fs::read_to_string("src/app.rs").expect("GUI source must be readable");
+    let main = std::fs::read_to_string("src/main.rs").expect("GUI main must be readable");
+    source.contains("egui::ScrollArea::vertical()")
+        && source.contains("auto_shrink([false, false])")
+        && source.contains("nav_panel")
+        && source.contains("CentralPanel::default()")
+        && main.contains("with_min_inner_size")
+}
+
 fn accessibility_report() -> AccessibilityReport {
     AccessibilityReport {
         primary_actions_labeled: has_all_labels(&[
@@ -44,7 +58,7 @@ fn accessibility_report() -> AccessibilityReport {
         navigation_has_focus_order: true,
         errors_are_visible: true,
         status_is_not_color_only: true,
-        narrow_layout_is_responsive: true,
+        narrow_layout_is_responsive: narrow_layout_is_responsive(),
         secrets_are_redacted: true,
         stream_queue_diagnostics_labeled: has_all_labels(&[
             "Queue fill",

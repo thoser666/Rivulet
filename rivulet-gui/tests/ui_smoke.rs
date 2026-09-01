@@ -48,6 +48,30 @@ fn screenshot_contract_is_deterministic_and_redacts_secrets() {
 }
 
 #[test]
+fn responsive_contract_keeps_controls_reachable_on_narrow_windows() {
+    let app = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
+    let main = fs::read_to_string("src/main.rs").expect("GUI main must be readable");
+    // The central view content must be scrollable so buttons at the bottom of
+    // a view stay reachable when the window is shrunk.
+    assert!(
+        app.contains("egui::ScrollArea::vertical()"),
+        "central view content must live in a vertical ScrollArea"
+    );
+    assert!(
+        app.contains("auto_shrink([false, false])"),
+        "scroll area must use the full available size"
+    );
+    // The sidebar must not clip its entries on short windows.
+    assert!(app.contains("nav_panel"), "navigation sidebar must exist");
+    // A floor for the window size keeps the layout usable, complementing the
+    // scroll areas rather than replacing them.
+    assert!(
+        main.contains("with_min_inner_size"),
+        "main.rs must set a minimum inner window size"
+    );
+}
+
+#[test]
 fn accessibility_contract_requires_labels_focus_and_contrast() {
     let source = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
     let theme = fs::read_to_string("src/theme.rs").expect("theme source must be readable");

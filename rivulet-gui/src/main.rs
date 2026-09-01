@@ -88,6 +88,10 @@ fn run_native(
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size(egui::vec2(800.0, 600.0))
+            // Keep the UI usable on small screens: below this size the
+            // sidebar and view controls are guaranteed to stay reachable via
+            // the scroll areas instead of being clipped without a scrollbar.
+            .with_min_inner_size(egui::vec2(480.0, 360.0))
             .with_title(app_name)
             .with_icon(create_icon())
             .with_app_id("rivulet_main_window"),

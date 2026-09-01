@@ -5350,13 +5350,20 @@ impl eframe::App for RivuletApp {
                 ui.label(egui::RichText::new("Rivulet").strong().size(18.0));
                 ui.separator();
                 ui.add_space(6.0);
-                for view in AppView::all() {
-                    let response = ui.selectable_label(self.view == *view, self.tr(view.nav_key()));
-                    theme::paint_interaction_stroke(ui, &response);
-                    if response.clicked() {
-                        self.view = *view;
-                    }
-                }
+                // The nav list scrolls vertically too: on very short windows
+                // the sidebar must not clip the last entries.
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for view in AppView::all() {
+                            let response =
+                                ui.selectable_label(self.view == *view, self.tr(view.nav_key()));
+                            theme::paint_interaction_stroke(ui, &response);
+                            if response.clicked() {
+                                self.view = *view;
+                            }
+                        }
+                    });
             });
 
         egui::CentralPanel::default().show(ui, |ui| {
@@ -5364,1570 +5371,1652 @@ impl eframe::App for RivuletApp {
             ui.heading(self.tr(self.view.nav_key()));
             ui.separator();
 
-            // Hotkey hints (only on the Record view)
-            if self.view == AppView::Record {
-                self.draw_recording_preview_panel(ui);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "Hotkeys: {} [{}] · {} [{}] · {} [{}] · {} [{}]",
-                            self.tr("hotkey_record"),
-                            self.hotkeys.label_for("record"),
-                            self.tr("hotkey_pause"),
-                            self.hotkeys.label_for("pause"),
-                            self.tr("hotkey_mute"),
-                            self.hotkeys.label_for("mute"),
-                            self.tr("hotkey_save_replay"),
-                            self.hotkeys.label_for("save_replay"),
-                        ))
-                        .small()
-                        .color(colors.hint),
-                    );
-                });
-                ui.add_space(4.0);
-            }
-
-            #[cfg(target_os = "windows")]
-            if self.view == AppView::Record {
-                ui.add_space(10.0);
-                ui.label(egui::RichText::new(self.tr("windows_screen_recording")).strong());
-                if self.is_windows_recording || self.is_aux_recording {
-                    ui.horizontal(|ui| {
-                        let stop_response = theme::accent_button(ui, "⏹ Stop Recording");
-                        if stop_response.clicked() {
-                            if self.is_aux_recording {
-                                self.stop_aux_recording();
-                            } else {
-                                self.stop_windows_recording();
-                            }
-                            self.is_paused = false;
-                            self.is_muted = false;
-                        }
-                        let pause_label = if self.is_paused {
-                            "▶ Resume"
-                        } else {
-                            "⏸ Pause"
-                        };
-                        let pause_response = theme::accent_button(ui, pause_label);
-                        if pause_response.clicked() {
-                            self.is_paused = !self.is_paused;
-                        }
-                        let mute_label = if self.is_muted {
-                            "🔊 Unmute"
-                        } else {
-                            "🔇 Mute"
-                        };
-                        let mute_response = theme::accent_button(ui, mute_label);
-                        if mute_response.clicked() {
-                            self.is_muted = !self.is_muted;
-                        }
-                    });
-                    if self.is_paused {
-                        ui.label(
-                            egui::RichText::new(self.tr("paused"))
-                                .color(colors.warning)
-                                .strong(),
-                        );
-                    }
-                    if self.is_muted {
-                        ui.label(
-                            egui::RichText::new(self.tr("muted"))
-                                .color(colors.info)
-                                .strong(),
-                        );
-                    }
-                    ui.label(self.metrics_line());
-                    // Capture backend indicator (G2): show which backend is
-                    // active and whether the recording fell back from DXGI
-                    // Desktop Duplication to Windows Graphics Capture.
-                    if let Some(status) = &self.capture_backend {
-                        let (key, reason) = status.ui_key();
-                        let label = match reason {
-                            Some(r) if !r.is_empty() => self.tr_fmt(key, &[r.to_string()]),
-                            _ => self.tr(key).to_string(),
-                        };
-                        let color = match status.active {
-                            BackendKind::DesktopDuplication => colors.success,
-                            BackendKind::VulkanLayer => colors.success,
-                            BackendKind::OpenGLHook => colors.success,
-                            BackendKind::PipeWirePortal => colors.success,
-                            BackendKind::WindowsGraphicsCapture => colors.warning,
-                            BackendKind::None => colors.hint,
-                        };
-                        ui.label(egui::RichText::new(label).color(color).strong());
-                    }
-                } else {
-                    ui.horizontal(|ui| {
-                        ui.label(self.tr("source"));
-                        egui::ComboBox::from_id_salt("monitor_select")
-                            .selected_text(
-                                self.monitor_label()
-                                    .unwrap_or_else(|| self.tr("select_monitor").to_string()),
-                            )
-                            .show_ui(ui, |ui| {
-                                for (i, monitor) in self.monitors.iter().enumerate() {
-                                    if ui
-                                        .selectable_label(
-                                            self.selected_monitor_idx == Some(i),
-                                            monitor.name().unwrap_or_else(|_| {
-                                                self.tr("unknown_monitor").to_string()
-                                            }),
-                                        )
-                                        .clicked()
-                                    {
-                                        if self.selected_monitor_idx != Some(i) {
-                                            self.region = CaptureRegion::full(
-                                                monitor.width().unwrap_or(0),
-                                                monitor.height().unwrap_or(0),
-                                            );
-                                        }
-                                        self.selected_monitor_idx = Some(i);
-                                        self.selected_window_idx = None;
-                                    }
-                                }
-                            });
-                        egui::ComboBox::from_id_salt("window_select")
-                            .selected_text(
-                                self.selected_window_idx
-                                    .and_then(|idx| self.windows.get(idx))
-                                    .map(|w| w.title().unwrap_or_default())
-                                    .unwrap_or_else(|| self.tr("select_window").to_string()),
-                            )
-                            .show_ui(ui, |ui| {
-                                for (i, window) in self.windows.iter().enumerate() {
-                                    if ui
-                                        .selectable_label(
-                                            self.selected_window_idx == Some(i),
-                                            window.title().unwrap_or_default(),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.selected_window_idx = Some(i);
-                                        self.selected_monitor_idx = None;
-                                        // Region capture only applies to
-                                        // monitor capture; window capture is
-                                        // always full-window.
-                                        self.region_enabled = false;
-                                    }
-                                }
-                            });
-                        if ui
-                            .button("🔄")
-                            .on_hover_text(self.tr("refresh_sources"))
-                            .clicked()
-                        {
-                            self.refresh_capture_sources();
-                            self.refresh_camera_devices();
-                            self.refresh_game_windows();
-                        }
-                    });
-                    // Camera source selection
-                    ui.horizontal(|ui| {
-                        ui.label(self.tr("camera_source"));
-                        egui::ComboBox::from_id_salt("camera_select")
-                            .selected_text(
-                                self.selected_camera_idx
-                                    .and_then(|idx| self.camera_devices.get(idx))
-                                    .map(|c| c.name.clone())
-                                    .unwrap_or_else(|| self.tr("select_camera").to_string()),
-                            )
-                            .show_ui(ui, |ui| {
-                                for (i, device) in self.camera_devices.iter().enumerate() {
-                                    if ui
-                                        .selectable_label(
-                                            self.selected_camera_idx == Some(i),
-                                            &device.name,
-                                        )
-                                        .clicked()
-                                    {
-                                        self.selected_camera_idx = Some(i);
-                                        self.selected_monitor_idx = None;
-                                        self.selected_window_idx = None;
-                                        self.selected_game_window_idx = None;
-                                    }
-                                }
-                            });
-                    });
-                    // Game capture toggle + window selection + live preview
-                    self.update_game_preview(ui.ctx());
-                    ui.horizontal(|ui| {
-                        let gc_label = self.tr("game_capture");
-                        ui.checkbox(&mut self.use_game_capture, gc_label);
-                        if self.use_game_capture {
-                            egui::ComboBox::from_id_salt("game_window_select")
-                                .selected_text(
-                                    self.selected_game_window_idx
-                                        .and_then(|idx| self.game_windows.get(idx))
-                                        .map(|w| w.title.clone())
-                                        .unwrap_or_else(|| {
-                                            self.tr("select_game_window").to_string()
-                                        }),
-                                )
-                                .show_ui(ui, |ui| {
-                                    for (i, window) in self.game_windows.iter().enumerate() {
-                                        if ui
-                                            .selectable_label(
-                                                self.selected_game_window_idx == Some(i),
-                                                &window.title,
-                                            )
-                                            .clicked()
-                                        {
-                                            self.selected_game_window_idx = Some(i);
-                                            self.selected_monitor_idx = None;
-                                            self.selected_window_idx = None;
-                                            self.selected_camera_idx = None;
-                                        }
-                                    }
-                                });
-                            ui.separator();
-                            // Manual refresh of the window list (also refreshed
-                            // live while the picker is open).
-                            if ui
-                                .button("🔄")
-                                .on_hover_text(self.tr("refresh_game_windows"))
-                                .clicked()
-                            {
-                                self.refresh_game_windows();
-                            }
-                        }
-                    });
-                    // Live thumbnail of the selected game window, so the
-                    // user can verify the correct window is targeted before
-                    // recording starts (refreshes every ~500ms).
-                    if self.use_game_capture {
-                        if let Some(preview) = &self.game_preview {
-                            let scale = (ui.available_width().min(360.0)
-                                / preview.width.max(1) as f32)
-                                .min(0.5);
-                            let size = egui::vec2(
-                                preview.width as f32 * scale,
-                                preview.height as f32 * scale,
-                            );
-                            let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-                            let alpha = theme::preview_fade_alpha(
-                                ui.ctx(),
-                                egui::Id::new("game_preview_fade"),
-                                true,
-                            );
-                            let tint = egui::Color32::from_white_alpha((alpha * 255.0) as u8);
-                            let uv = egui::Rect::from_min_max(
-                                egui::pos2(0.0, 0.0),
-                                egui::pos2(1.0, 1.0),
-                            );
-                            ui.painter().image(preview.texture.id(), rect, uv, tint);
+            // The view content lives in a scroll area: when the window is
+            // shrunk (narrow layout), controls at the bottom of a view stay
+            // reachable instead of being clipped without any way to scroll.
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    // Hotkey hints (only on the Record view)
+                    if self.view == AppView::Record {
+                        self.draw_recording_preview_panel(ui);
+                        ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new(self.tr("game_preview_title"))
-                                    .small()
-                                    .color(colors.hint),
-                            );
-                        } else if let Some(err) = &self.game_preview_error {
-                            ui.colored_label(colors.warning, err);
-                        } else if self.selected_game_window_idx.is_some() {
-                            ui.colored_label(colors.hint, self.tr("game_preview_loading"));
-                        }
-                    }
-                    // Region capture controls (monitor capture only)
-                    ui.horizontal(|ui| {
-                        let monitor_selected = self.selected_monitor_idx.is_some();
-                        let capture_region_label = self.tr("capture_region");
-                        ui.add_enabled(
-                            monitor_selected,
-                            egui::Checkbox::new(&mut self.region_enabled, capture_region_label),
-                        );
-                        if ui
-                            .add_enabled(
-                                monitor_selected && self.region_enabled,
-                                egui::Button::new(self.tr("region_select")),
-                            )
-                            .clicked()
-                        {
-                            self.open_region_editor(ui.ctx());
-                        }
-                        if monitor_selected && self.region_enabled {
-                            let r = self.region;
-                            ui.label(self.tr_fmt(
-                                "region_status",
-                                &[
-                                    r.width.to_string(),
-                                    r.height.to_string(),
-                                    r.x.to_string(),
-                                    r.y.to_string(),
-                                ],
-                            ));
-                        }
-                    });
-                    let source_selected = self.selected_monitor_idx.is_some()
-                        || self.selected_window_idx.is_some()
-                        || self.selected_camera_idx.is_some()
-                        || (self.use_game_capture && self.selected_game_window_idx.is_some());
-                    ui.horizontal(|ui| {
-                        ui.label(self.tr("video_codec"));
-                        egui::ComboBox::from_id_salt("windows_codec_select")
-                            .selected_text(self.selected_codec.label())
-                            .show_ui(ui, |ui| {
-                                for codec in [
-                                    rivulet_core::VideoCodec::H264,
-                                    rivulet_core::VideoCodec::H265,
-                                    rivulet_core::VideoCodec::VP9,
-                                ] {
-                                    if ui
-                                        .selectable_label(
-                                            self.selected_codec == codec,
-                                            codec.label(),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.selected_codec = codec;
-                                    }
-                                }
-                            });
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(self.tr("recording_container"));
-                        egui::ComboBox::from_id_salt("windows_container_select")
-                            .selected_text(self.selected_container.label())
-                            .show_ui(ui, |ui| {
-                                for container in [
-                                    rivulet_core::RecordingContainer::Mp4,
-                                    rivulet_core::RecordingContainer::Mkv,
-                                    rivulet_core::RecordingContainer::Mov,
-                                    rivulet_core::RecordingContainer::MpegTs,
-                                ] {
-                                    if ui
-                                        .selectable_label(
-                                            self.selected_container == container,
-                                            container.label(),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.selected_container = container;
-                                    }
-                                }
-                            });
-                    });
-                    let auto_remux_label = self.tr("auto_remux");
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.auto_remux, auto_remux_label);
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(self.tr("split_after"));
-                        ui.add(egui::DragValue::new(&mut self.split_seconds).range(0..=3600));
-                        ui.label(self.tr("seconds"));
-                    });
-                    ui.separator();
-                    let rate_mode_label = self.tr("rate_mode");
-                    ui.horizontal(|ui| {
-                        ui.label(rate_mode_label);
-                        egui::ComboBox::from_id_salt("windows_rate_mode_select")
-                            .selected_text(self.rate_mode.label())
-                            .show_ui(ui, |ui| {
-                                for mode in [
-                                    rivulet_core::RateControlMode::Cbr,
-                                    rivulet_core::RateControlMode::Vbr,
-                                    rivulet_core::RateControlMode::Cq,
-                                    rivulet_core::RateControlMode::CqVbr,
-                                ] {
-                                    ui.selectable_value(&mut self.rate_mode, mode, mode.label())
-                                        .on_hover_text(mode.hint());
-                                }
-                            });
-                    });
-                    if matches!(
-                        self.rate_mode,
-                        rivulet_core::RateControlMode::Cq | rivulet_core::RateControlMode::CqVbr
-                    ) {
-                        ui.horizontal(|ui| {
-                            ui.label(self.tr("rate_quality"));
-                            ui.add(egui::Slider::new(&mut self.rate_quality, 0..=51));
-                        });
-                    }
-                    if matches!(
-                        self.rate_mode,
-                        rivulet_core::RateControlMode::Vbr | rivulet_core::RateControlMode::CqVbr
-                    ) {
-                        ui.horizontal(|ui| {
-                            ui.label(self.tr("rate_max_bitrate"));
-                            ui.add(
-                                egui::DragValue::new(&mut self.rate_max_kbps).range(0..=100_000),
+                                egui::RichText::new(format!(
+                                    "Hotkeys: {} [{}] · {} [{}] · {} [{}] · {} [{}]",
+                                    self.tr("hotkey_record"),
+                                    self.hotkeys.label_for("record"),
+                                    self.tr("hotkey_pause"),
+                                    self.hotkeys.label_for("pause"),
+                                    self.tr("hotkey_mute"),
+                                    self.hotkeys.label_for("mute"),
+                                    self.tr("hotkey_save_replay"),
+                                    self.hotkeys.label_for("save_replay"),
+                                ))
+                                .small()
+                                .color(colors.hint),
                             );
                         });
+                        ui.add_space(4.0);
                     }
-                    ui.horizontal(|ui| {
-                        ui.label(self.tr("rate_custom_options"));
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.encoder_extra_options)
-                                .hint_text("key-int-max=250"),
-                        );
-                    });
-                    ui.separator();
-                    let ve_title = self.tr("video_effects");
-                    let (vb, vc, vs, vh, vf_blur, vf_sharpen) = (
-                        self.tr("vf_brightness"),
-                        self.tr("vf_contrast"),
-                        self.tr("vf_saturation"),
-                        self.tr("vf_hue"),
-                        self.tr("vf_blur"),
-                        self.tr("vf_sharpen"),
-                    );
-                    ui.label(egui::RichText::new(ve_title).strong());
-                    let mut eff = self.video_effects;
-                    ui.horizontal_wrapped(|ui| {
-                        ui.add(egui::Slider::new(&mut eff.brightness, -1.0..=1.0).text(vb));
-                        ui.add(egui::Slider::new(&mut eff.contrast, -1.0..=1.0).text(vc));
-                        ui.add(egui::Slider::new(&mut eff.saturation, -1.0..=1.0).text(vs));
-                        ui.add(egui::Slider::new(&mut eff.hue, -1.0..=1.0).text(vh));
-                    });
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut eff.blur, vf_blur);
-                        ui.checkbox(&mut eff.sharpen, vf_sharpen);
-                    });
-                    self.video_effects = eff;
-                    let auto_record_label = self.tr("auto_record_with_stream");
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.auto_record_with_stream, auto_record_label);
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(self.tr("recording_preset"));
-                        egui::ComboBox::from_id_salt("windows_preset_select")
-                            .selected_text(self.selected_preset.label)
-                            .show_ui(ui, |ui| {
-                                for preset in rivulet_core::RecordingPreset::all() {
-                                    if ui
-                                        .selectable_label(
-                                            self.selected_preset == *preset,
-                                            preset.label,
-                                        )
-                                        .clicked()
-                                    {
-                                        self.selected_preset = *preset;
+
+                    #[cfg(target_os = "windows")]
+                    if self.view == AppView::Record {
+                        ui.add_space(10.0);
+                        ui.label(egui::RichText::new(self.tr("windows_screen_recording")).strong());
+                        if self.is_windows_recording || self.is_aux_recording {
+                            ui.horizontal(|ui| {
+                                let stop_response = theme::accent_button(ui, "⏹ Stop Recording");
+                                if stop_response.clicked() {
+                                    if self.is_aux_recording {
+                                        self.stop_aux_recording();
+                                    } else {
+                                        self.stop_windows_recording();
                                     }
+                                    self.is_paused = false;
+                                    self.is_muted = false;
                                 }
-                            });
-                    });
-                    ui.horizontal(|ui| {
-                        let label = self.tr("overlay_toggle").to_string();
-                        ui.checkbox(&mut self.show_overlay, label);
-                    });
-                    if ui
-                        .add_enabled(
-                            source_selected,
-                            egui::Button::new(format!(
-                                "⏺ {} [{}]",
-                                self.tr("start_recording"),
-                                self.hotkeys.label_for("record")
-                            )),
-                        )
-                        .clicked()
-                    {
-                        self.start_windows_recording();
-                    };
-                }
-                if let Some(err) = &self.last_error {
-                    ui.colored_label(colors.error, err);
-                }
-            }
-
-            #[cfg(target_os = "linux")]
-            {
-                self.drain_linux_frames();
-                // Surface engine failures (pipeline build/start/push errors)
-                // in the UI instead of only on the console.
-                if let Some(err) = self.engine.take_error() {
-                    self.record_status = Some(err);
-                }
-                // Abort when the capture delivers no frames within the
-                // timeout: the capture thread died or its source became
-                // unavailable, so the recording would run forever while
-                // writing nothing.
-                if self.is_recording
-                    && should_abort_for_stalled_frames(
-                        self.record_started,
-                        self.last_frame_at,
-                        Instant::now(),
-                        self.no_frame_timeout,
-                    )
-                {
-                    let secs = self.no_frame_timeout.as_secs();
-                    tracing::error!(
-                        timeout_seconds = secs,
-                        "No frames received; stopping recording"
-                    );
-                    // stop_linux_recording sets record_status to
-                    // "recording_saved"; override it with the abort reason.
-                    self.stop_linux_recording();
-                    self.record_status =
-                        Some(self.tr_fmt("recording_no_frames", &[secs.to_string()]));
-                }
-
-                if self.view == AppView::Record {
-                    ui.add_space(10.0);
-                    ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
-
-                    if self.is_recording || self.is_aux_recording {
-                        ui.horizontal(|ui| {
-                            let elapsed = self.record_started.elapsed().as_secs();
-                            ui.label(
-                                egui::RichText::new(
-                                    self.tr_fmt("recording_in_progress", &[elapsed.to_string()]),
-                                )
-                                .color(colors.active),
-                            );
-                            if ui
-                                .button(format!("⏹ {}", self.tr("stop_recording")))
-                                .clicked()
-                            {
-                                if self.is_aux_recording {
-                                    self.stop_aux_recording();
+                                let pause_label = if self.is_paused {
+                                    "▶ Resume"
                                 } else {
-                                    self.stop_linux_recording();
+                                    "⏸ Pause"
+                                };
+                                let pause_response = theme::accent_button(ui, pause_label);
+                                if pause_response.clicked() {
+                                    self.is_paused = !self.is_paused;
                                 }
-                                self.is_paused = false;
-                                self.is_muted = false;
+                                let mute_label = if self.is_muted {
+                                    "🔊 Unmute"
+                                } else {
+                                    "🔇 Mute"
+                                };
+                                let mute_response = theme::accent_button(ui, mute_label);
+                                if mute_response.clicked() {
+                                    self.is_muted = !self.is_muted;
+                                }
+                            });
+                            if self.is_paused {
+                                ui.label(
+                                    egui::RichText::new(self.tr("paused"))
+                                        .color(colors.warning)
+                                        .strong(),
+                                );
                             }
-                            let pause_label = if self.is_paused {
-                                "▶ Resume"
-                            } else {
-                                "⏸ Pause"
-                            };
-                            if ui.button(pause_label).clicked() {
-                                self.is_paused = !self.is_paused;
+                            if self.is_muted {
+                                ui.label(
+                                    egui::RichText::new(self.tr("muted"))
+                                        .color(colors.info)
+                                        .strong(),
+                                );
                             }
-                            let mute_label = if self.is_muted {
-                                "🔊 Unmute"
-                            } else {
-                                "🔇 Mute"
-                            };
-                            if ui.button(mute_label).clicked() {
-                                self.is_muted = !self.is_muted;
+                            ui.label(self.metrics_line());
+                            // Capture backend indicator (G2): show which backend is
+                            // active and whether the recording fell back from DXGI
+                            // Desktop Duplication to Windows Graphics Capture.
+                            if let Some(status) = &self.capture_backend {
+                                let (key, reason) = status.ui_key();
+                                let label = match reason {
+                                    Some(r) if !r.is_empty() => self.tr_fmt(key, &[r.to_string()]),
+                                    _ => self.tr(key).to_string(),
+                                };
+                                let color = match status.active {
+                                    BackendKind::DesktopDuplication => colors.success,
+                                    BackendKind::VulkanLayer => colors.success,
+                                    BackendKind::OpenGLHook => colors.success,
+                                    BackendKind::PipeWirePortal => colors.success,
+                                    BackendKind::WindowsGraphicsCapture => colors.warning,
+                                    BackendKind::None => colors.hint,
+                                };
+                                ui.label(egui::RichText::new(label).color(color).strong());
                             }
-                        });
-                        if self.is_paused {
-                            ui.label(
-                                egui::RichText::new(self.tr("paused"))
-                                    .color(colors.warning)
-                                    .strong(),
-                            );
-                        }
-                        if self.is_muted {
-                            ui.label(
-                                egui::RichText::new(self.tr("muted"))
-                                    .color(colors.info)
-                                    .strong(),
-                            );
-                        }
-                        ui.label(self.metrics_line());
-                    } else {
-                        ui.horizontal(|ui| {
-                            ui.label(self.tr("source"));
-                            egui::ComboBox::from_id_salt("linux_monitor_select")
-                                .selected_text(
-                                    self.selected_monitor_idx
-                                        .and_then(|idx| self.monitors.get(idx))
-                                        .map(|m| {
-                                            format!(
-                                                "{} ({}x{})",
-                                                m.name().unwrap_or_default(),
-                                                m.width().unwrap_or(0),
-                                                m.height().unwrap_or(0)
-                                            )
-                                        })
-                                        .unwrap_or_else(|| self.tr("select_monitor").to_string()),
-                                )
-                                .show_ui(ui, |ui| {
-                                    for (i, m) in self.monitors.iter().enumerate() {
-                                        if ui
-                                            .selectable_label(
-                                                self.selected_monitor_idx == Some(i),
-                                                format!(
-                                                    "{} ({}x{})",
-                                                    m.name().unwrap_or_default(),
-                                                    m.width().unwrap_or(0),
-                                                    m.height().unwrap_or(0)
-                                                ),
-                                            )
-                                            .clicked()
-                                        {
-                                            if self.selected_monitor_idx != Some(i) {
-                                                self.region = CaptureRegion::full(
-                                                    m.width().unwrap_or(0),
-                                                    m.height().unwrap_or(0),
-                                                );
-                                            }
-                                            self.selected_monitor_idx = Some(i);
-                                            self.selected_window_idx = None;
-                                        }
-                                    }
-                                });
-                            egui::ComboBox::from_id_salt("linux_window_select")
-                                .selected_text(
-                                    self.selected_window_idx
-                                        .and_then(|idx| self.windows.get(idx))
-                                        .map(|w| {
-                                            format!(
-                                                "\"{}\" ({}x{})",
-                                                w.title().unwrap_or_default(),
-                                                w.width().unwrap_or(0),
-                                                w.height().unwrap_or(0)
-                                            )
-                                        })
-                                        .unwrap_or_else(|| self.tr("select_window").to_string()),
-                                )
-                                .show_ui(ui, |ui| {
-                                    for (i, w) in self.windows.iter().enumerate() {
-                                        if ui
-                                            .selectable_label(
-                                                self.selected_window_idx == Some(i),
-                                                format!(
-                                                    "\"{}\" ({}x{})",
-                                                    w.title().unwrap_or_default(),
-                                                    w.width().unwrap_or(0),
-                                                    w.height().unwrap_or(0)
-                                                ),
-                                            )
-                                            .clicked()
-                                        {
-                                            self.selected_window_idx = Some(i);
-                                            self.selected_monitor_idx = None;
-                                            // Region capture only applies to
-                                            // monitor capture; window capture is
-                                            // always full-window.
-                                            self.region_enabled = false;
-                                        }
-                                    }
-                                });
-                            if ui
-                                .button("🔄")
-                                .on_hover_text(self.tr("refresh_sources"))
-                                .clicked()
-                            {
-                                self.refresh_linux_sources();
-                                self.refresh_game_windows();
-                            }
-                        });
-                        // Game capture toggle + window selection + live preview
-                        self.update_game_preview(ui.ctx());
-                        ui.horizontal(|ui| {
-                            let gc_label = self.tr("game_capture");
-                            ui.checkbox(&mut self.use_game_capture, gc_label);
-                            if self.use_game_capture {
-                                egui::ComboBox::from_id_salt("linux_game_window_select")
+                        } else {
+                            ui.horizontal(|ui| {
+                                ui.label(self.tr("source"));
+                                egui::ComboBox::from_id_salt("monitor_select")
                                     .selected_text(
-                                        self.selected_game_window_idx
-                                            .and_then(|idx| self.game_windows.get(idx))
-                                            .map(|w| w.title.clone())
-                                            .unwrap_or_else(|| {
-                                                self.tr("select_game_window").to_string()
-                                            }),
+                                        self.monitor_label().unwrap_or_else(|| {
+                                            self.tr("select_monitor").to_string()
+                                        }),
                                     )
                                     .show_ui(ui, |ui| {
-                                        for (i, window) in self.game_windows.iter().enumerate() {
+                                        for (i, monitor) in self.monitors.iter().enumerate() {
                                             if ui
                                                 .selectable_label(
-                                                    self.selected_game_window_idx == Some(i),
-                                                    &window.title,
+                                                    self.selected_monitor_idx == Some(i),
+                                                    monitor.name().unwrap_or_else(|_| {
+                                                        self.tr("unknown_monitor").to_string()
+                                                    }),
                                                 )
                                                 .clicked()
                                             {
-                                                self.selected_game_window_idx = Some(i);
-                                                self.selected_monitor_idx = None;
+                                                if self.selected_monitor_idx != Some(i) {
+                                                    self.region = CaptureRegion::full(
+                                                        monitor.width().unwrap_or(0),
+                                                        monitor.height().unwrap_or(0),
+                                                    );
+                                                }
+                                                self.selected_monitor_idx = Some(i);
                                                 self.selected_window_idx = None;
-                                                self.selected_camera_idx = None;
                                             }
                                         }
                                     });
-                                ui.separator();
-                                // Manual refresh of the window list (also
-                                // refreshed live while the picker is open).
+                                egui::ComboBox::from_id_salt("window_select")
+                                    .selected_text(
+                                        self.selected_window_idx
+                                            .and_then(|idx| self.windows.get(idx))
+                                            .map(|w| w.title().unwrap_or_default())
+                                            .unwrap_or_else(|| {
+                                                self.tr("select_window").to_string()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for (i, window) in self.windows.iter().enumerate() {
+                                            if ui
+                                                .selectable_label(
+                                                    self.selected_window_idx == Some(i),
+                                                    window.title().unwrap_or_default(),
+                                                )
+                                                .clicked()
+                                            {
+                                                self.selected_window_idx = Some(i);
+                                                self.selected_monitor_idx = None;
+                                                // Region capture only applies to
+                                                // monitor capture; window capture is
+                                                // always full-window.
+                                                self.region_enabled = false;
+                                            }
+                                        }
+                                    });
                                 if ui
                                     .button("🔄")
-                                    .on_hover_text(self.tr("refresh_game_windows"))
+                                    .on_hover_text(self.tr("refresh_sources"))
                                     .clicked()
                                 {
+                                    self.refresh_capture_sources();
+                                    self.refresh_camera_devices();
                                     self.refresh_game_windows();
                                 }
-                            }
-                        });
-                        // Live thumbnail of the selected game window, so the
-                        // user can verify the correct window is targeted
-                        // before recording starts (refreshes every ~500ms).
-                        if self.use_game_capture {
-                            if let Some(preview) = &self.game_preview {
-                                let scale = (ui.available_width().min(360.0)
-                                    / preview.width.max(1) as f32)
-                                    .min(0.5);
-                                let size = egui::vec2(
-                                    preview.width as f32 * scale,
-                                    preview.height as f32 * scale,
-                                );
-                                let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-                                let alpha = theme::preview_fade_alpha(
-                                    ui.ctx(),
-                                    egui::Id::new("game_preview_fade_linux"),
-                                    true,
-                                );
-                                let tint = egui::Color32::from_white_alpha((alpha * 255.0) as u8);
-                                let uv = egui::Rect::from_min_max(
-                                    egui::pos2(0.0, 0.0),
-                                    egui::pos2(1.0, 1.0),
-                                );
-                                ui.painter().image(preview.texture.id(), rect, uv, tint);
-                                ui.label(
-                                    egui::RichText::new(self.tr("game_preview_title"))
-                                        .small()
-                                        .color(colors.hint),
-                                );
-                            } else if let Some(err) = &self.game_preview_error {
-                                ui.colored_label(colors.warning, err);
-                            } else if self.selected_game_window_idx.is_some() {
-                                ui.colored_label(colors.hint, self.tr("game_preview_loading"));
-                            }
-                        }
-                        // Region capture controls (monitor capture only)
-                        ui.horizontal(|ui| {
-                            let monitor_selected = self.selected_monitor_idx.is_some();
-                            let capture_region_label = self.tr("capture_region");
-                            ui.add_enabled(
-                                monitor_selected,
-                                egui::Checkbox::new(&mut self.region_enabled, capture_region_label),
-                            );
-                            if ui
-                                .add_enabled(
-                                    monitor_selected && self.region_enabled,
-                                    egui::Button::new(self.tr("region_select")),
-                                )
-                                .clicked()
-                            {
-                                self.open_region_editor(ui.ctx());
-                            }
-                            if monitor_selected && self.region_enabled {
-                                let r = self.region;
-                                ui.label(self.tr_fmt(
-                                    "region_status",
-                                    &[
-                                        r.width.to_string(),
-                                        r.height.to_string(),
-                                        r.x.to_string(),
-                                        r.y.to_string(),
-                                    ],
-                                ));
-                            }
-                        });
-                        let source_selected = self.selected_monitor_idx.is_some()
-                            || self.selected_window_idx.is_some()
-                            || self.selected_camera_idx.is_some()
-                            || (self.use_game_capture && self.selected_game_window_idx.is_some());
-                        ui.horizontal(|ui| {
-                            ui.label(self.tr("video_codec"));
-                            egui::ComboBox::from_id_salt("linux_codec_select")
-                                .selected_text(self.selected_codec.label())
-                                .show_ui(ui, |ui| {
-                                    for codec in [
-                                        rivulet_core::VideoCodec::H264,
-                                        rivulet_core::VideoCodec::H265,
-                                        rivulet_core::VideoCodec::VP9,
-                                    ] {
-                                        if ui
-                                            .selectable_label(
-                                                self.selected_codec == codec,
-                                                codec.label(),
-                                            )
-                                            .clicked()
-                                        {
-                                            self.selected_codec = codec;
-                                        }
-                                    }
-                                });
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(self.tr("recording_container"));
-                            egui::ComboBox::from_id_salt("linux_container_select")
-                                .selected_text(self.selected_container.label())
-                                .show_ui(ui, |ui| {
-                                    for container in [
-                                        rivulet_core::RecordingContainer::Mp4,
-                                        rivulet_core::RecordingContainer::Mkv,
-                                        rivulet_core::RecordingContainer::Mov,
-                                        rivulet_core::RecordingContainer::MpegTs,
-                                    ] {
-                                        if ui
-                                            .selectable_label(
-                                                self.selected_container == container,
-                                                container.label(),
-                                            )
-                                            .clicked()
-                                        {
-                                            self.selected_container = container;
-                                        }
-                                    }
-                                });
-                        });
-                        let auto_remux_label = self.tr("auto_remux");
-                        ui.horizontal(|ui| {
-                            ui.checkbox(&mut self.auto_remux, auto_remux_label);
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(self.tr("split_after"));
-                            ui.add(egui::DragValue::new(&mut self.split_seconds).range(0..=3600));
-                            ui.label(self.tr("seconds"));
-                        });
-                        let auto_record_label = self.tr("auto_record_with_stream");
-                        ui.horizontal(|ui| {
-                            ui.checkbox(&mut self.auto_record_with_stream, auto_record_label);
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(self.tr("recording_preset"));
-                            egui::ComboBox::from_id_salt("linux_preset_select")
-                                .selected_text(self.selected_preset.label)
-                                .show_ui(ui, |ui| {
-                                    for preset in rivulet_core::RecordingPreset::all() {
-                                        if ui
-                                            .selectable_label(
-                                                self.selected_preset == *preset,
-                                                preset.label,
-                                            )
-                                            .clicked()
-                                        {
-                                            self.selected_preset = *preset;
-                                        }
-                                    }
-                                });
-                        });
-                        ui.horizontal(|ui| {
-                            let label = self.tr("overlay_toggle").to_string();
-                            ui.checkbox(&mut self.show_overlay, label);
-                        });
-                        if ui
-                            .add_enabled(
-                                source_selected,
-                                egui::Button::new(format!(
-                                    "⏺ {} [{}]",
-                                    self.tr("start_recording"),
-                                    self.hotkeys.label_for("record")
-                                )),
-                            )
-                            .clicked()
-                        {
-                            self.start_linux_recording();
-                        }
-                    }
-                    if let Some(status) = &self.record_status {
-                        ui.colored_label(colors.info, status);
-                    }
-                }
-
-                if self.view == AppView::Stream {
-                    self.draw_stream_health_panel(ui, colors);
-                    ui.label(self.tr("stream_health_help"));
-                }
-
-                if self.view == AppView::Mixer {
-                    ui.separator();
-                    ui.label(egui::RichText::new(self.tr("audio_mixer")).strong());
-
-                    ui.horizontal(|ui| {
-                        if self.audio_preview {
-                            if theme::accent_button(ui, format!("⏹ {}", self.tr("stop_audio")))
-                                .clicked()
-                            {
-                                self.stop_audio_capture();
-                            }
-                            ui.label(
-                                egui::RichText::new(format!("● {}", self.tr("running")))
-                                    .color(colors.success),
-                            );
-                        } else if theme::accent_button(ui, format!("▶ {}", self.tr("start_audio")))
-                            .clicked()
-                        {
-                            self.start_audio_capture();
-                        }
-                    });
-
-                    let mut sys = self.capture_system;
-                    let mut mic = self.capture_mic;
-                    let mut separate = self.separate_tracks;
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut sys, self.tr("system_audio"));
-                        ui.checkbox(&mut mic, self.tr("microphone"));
-                        ui.separator();
-                        ui.checkbox(&mut separate, self.tr("separate_tracks"));
-                    });
-                    if sys != self.capture_system || mic != self.capture_mic {
-                        self.capture_system = sys;
-                        self.capture_mic = mic;
-                        if self.audio_preview {
-                            self.start_audio_capture();
-                        }
-                    }
-                    if separate != self.separate_tracks {
-                        self.separate_tracks = separate;
-                        if self.audio_preview {
-                            self.start_audio_capture();
-                        }
-                    }
-
-                    if self.separate_tracks {
-                        let et_system = self.tr("export_track_system");
-                        let et_mic = self.tr("export_track_microphone");
-                        let mt_mapping = self.tr("multi_track_mapping");
-                        let mt_label = format!(
-                            "{} · {}",
-                            self.tr("separate_tracks"),
-                            rivulet_core::AudioTrack::System.label()
-                        );
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(mt_label).weak());
-                            ui.checkbox(&mut self.export_system_track, et_system);
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(rivulet_core::AudioTrack::Microphone.label())
-                                    .weak(),
-                            );
-                            ui.checkbox(&mut self.export_mic_track, et_mic);
-                        });
-                        ui.label(egui::RichText::new(mt_mapping).small().weak());
-                    }
-
-                    let mut sys_vol = self.system_volume;
-                    let mut mic_vol = self.mic_volume;
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut sys_vol, 0.0..=1.0)
-                                .text(self.tr("system_audio")),
-                        )
-                        .changed()
-                    {
-                        self.system_volume = sys_vol;
-                        if let Some(audio) = &self.audio {
-                            audio.set_system_volume(sys_vol);
-                        }
-                    }
-                    if ui
-                        .add(egui::Slider::new(&mut mic_vol, 0.0..=1.0).text(self.tr("microphone")))
-                        .changed()
-                    {
-                        self.mic_volume = mic_vol;
-                        if let Some(audio) = &self.audio {
-                            audio.set_mic_volume(mic_vol);
-                        }
-                    }
-
-                    ui.separator();
-                    ui.label(egui::RichText::new(self.tr("audio_filters")).strong());
-                    let before = self.system_filters.clone();
-                    let before_mic = self.mic_filters.clone();
-                    let gate_label = self.tr("filter_noise_gate");
-                    let expander_label = self.tr("filter_expander");
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.system_filters.noise_suppression, "NS·Sys");
-                        ui.checkbox(&mut self.system_filters.noise_gate, gate_label);
-                        ui.checkbox(&mut self.system_filters.compressor, "Cmp·Sys");
-                        ui.checkbox(&mut self.system_filters.limiter, "Lim·Sys");
-                        ui.checkbox(&mut self.system_filters.expander, expander_label);
-                    });
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut self.mic_filters.noise_suppression, "NS·Mic");
-                        ui.checkbox(&mut self.mic_filters.noise_gate, "Gate·Mic");
-                        ui.checkbox(&mut self.mic_filters.compressor, "Cmp·Mic");
-                        ui.checkbox(&mut self.mic_filters.limiter, "Lim·Mic");
-                        ui.checkbox(&mut self.mic_filters.expander, "Exp·Mic");
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label(self.tr("filter_gain"));
-                        ui.add(
-                            egui::Slider::new(&mut self.system_filters.gain_db, -30.0..=30.0)
-                                .text("Sys"),
-                        );
-                        ui.add(
-                            egui::Slider::new(&mut self.mic_filters.gain_db, -30.0..=30.0)
-                                .text("Mic"),
-                        );
-                    });
-                    egui::CollapsingHeader::new(self.tr("filter_eq"))
-                        .default_open(false)
-                        .show(ui, |ui| {
-                            ui.label("System");
-                            ui.horizontal_wrapped(|ui| {
-                                for band in self.system_filters.eq_bands.iter_mut() {
-                                    ui.add(egui::Slider::new(band, -12.0..=12.0));
-                                }
                             });
-                            ui.label("Mikro");
-                            ui.horizontal_wrapped(|ui| {
-                                for band in self.mic_filters.eq_bands.iter_mut() {
-                                    ui.add(egui::Slider::new(band, -12.0..=12.0));
-                                }
+                            // Camera source selection
+                            ui.horizontal(|ui| {
+                                ui.label(self.tr("camera_source"));
+                                egui::ComboBox::from_id_salt("camera_select")
+                                    .selected_text(
+                                        self.selected_camera_idx
+                                            .and_then(|idx| self.camera_devices.get(idx))
+                                            .map(|c| c.name.clone())
+                                            .unwrap_or_else(|| {
+                                                self.tr("select_camera").to_string()
+                                            }),
+                                    )
+                                    .show_ui(ui, |ui| {
+                                        for (i, device) in self.camera_devices.iter().enumerate() {
+                                            if ui
+                                                .selectable_label(
+                                                    self.selected_camera_idx == Some(i),
+                                                    &device.name,
+                                                )
+                                                .clicked()
+                                            {
+                                                self.selected_camera_idx = Some(i);
+                                                self.selected_monitor_idx = None;
+                                                self.selected_window_idx = None;
+                                                self.selected_game_window_idx = None;
+                                            }
+                                        }
+                                    });
                             });
-                        });
-                    if (self.system_filters != before || self.mic_filters != before_mic)
-                        && self.audio_preview
-                    {
-                        self.start_audio_capture();
-                    }
-
-                    ui.separator();
-                    ui.label(egui::RichText::new(self.tr("audio_monitoring")).strong());
-                    let mut sys_mon = self.system_monitor;
-                    let mut mic_mon = self.mic_monitor;
-                    ui.horizontal(|ui| {
-                        ui.checkbox(&mut sys_mon, self.tr("monitoring_system"));
-                        ui.checkbox(&mut mic_mon, self.tr("monitoring_microphone"));
-                    });
-                    if sys_mon != self.system_monitor || mic_mon != self.mic_monitor {
-                        self.system_monitor = sys_mon;
-                        self.mic_monitor = mic_mon;
-                        if self.audio_preview {
-                            self.start_audio_capture();
-                        }
-                    }
-                    let mut mon_vol = self.monitor_volume;
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut mon_vol, 0.0..=1.0)
-                                .text(self.tr("monitoring_volume")),
-                        )
-                        .changed()
-                    {
-                        self.monitor_volume = mon_vol;
-                        if let Some(audio) = &self.audio {
-                            audio.set_monitor_volume(mon_vol);
-                        }
-                    }
-
-                    ui.separator();
-                    ui.label(egui::RichText::new(self.tr("master_output")).strong());
-                    let mut master_vol = self.master_volume;
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut master_vol, 0.0..=1.0)
-                                .text(self.tr("master_volume")),
-                        )
-                        .changed()
-                    {
-                        self.master_volume = master_vol;
-                        if let Some(audio) = &self.audio {
-                            audio.set_master_volume(master_vol);
-                        }
-                    }
-
-                    // Master output VU meter (level of the whole mix after the
-                    // master volume is applied).
-                    let peak =
-                        f32::from_bits(self.audio_peak.load(Ordering::SeqCst)).clamp(0.0, 1.0);
-                    let db = if peak > 0.0 {
-                        20.0 * peak.log10()
-                    } else {
-                        -96.0
-                    };
-                    ui.add(
-                        egui::ProgressBar::new(peak)
-                            .desired_width(f32::INFINITY)
-                            .text(self.tr_fmt("output_vu", &[format!("{db:.1}")])),
-                    );
-
-                    if let Some(status) = &self.audio_status {
-                        ui.colored_label(colors.error, status);
-                    }
-                    if let Some(warning) = &self.audio_warning {
-                        ui.colored_label(colors.warning, warning);
-                    }
-                }
-            }
-
-            #[cfg(not(target_os = "linux"))]
-            if self.view == AppView::Mixer {
-                ui.add_space(20.0);
-                ui.label(self.tr("mixer_unavailable"));
-            }
-
-            // Scenes: list, switching, add/rename/remove
-            if self.view == AppView::Scenes {
-                self.draw_scenes_view(ui, &colors);
-            }
-            if self.view == AppView::Scenes {
-                self.draw_source_composition(ui, &colors);
-                self.draw_scene_overlay_panel(ui);
-                self.draw_chroma_key_panel(ui);
-                self.draw_browser_source_panel(ui, &colors);
-            }
-
-            #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-            if self.view == AppView::Record {
-                ui.add_space(20.0);
-                ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
-                ui.label(self.tr("screen_recording_unavailable"));
-            }
-
-            // Streaming controls are implemented in M3 and must not render
-            // the generic planned-section placeholder.
-            if self.view == AppView::Stream {
-                self.draw_stream_view(ui, &colors);
-            }
-            if self.view == AppView::Help {
-                self.draw_help_view(ui);
-            }
-
-            // Placeholder views (still-planned milestones)
-            if let Some(milestone) = self.view.planned_milestone() {
-                ui.add_space(20.0);
-                ui.label(self.tr_fmt("section_planned", &[milestone.to_string()]));
-            }
-
-            // Settings: updates section
-            if self.view == AppView::Settings {
-                ui.separator();
-                ui.label(egui::RichText::new(self.tr("updates")).strong());
-                ui.horizontal(|ui| {
-                    ui.label(self.tr_fmt(
-                        "updates_current_version",
-                        &[env!("CARGO_PKG_VERSION").to_string()],
-                    ));
-                    if theme::accent_button(ui, self.tr("check_for_updates")).clicked() {
-                        self.update_check_clicked = true;
-                    }
-                });
-                self.draw_update_status(ui);
-                self.handle_update_actions(ui.ctx().clone());
-
-                // Settings: appearance (color scheme)
-                ui.separator();
-                ui.label(egui::RichText::new(self.tr("theme")).strong());
-                ui.horizontal(|ui| {
-                    for preference in theme::ThemePreference::all() {
-                        if ui
-                            .selectable_label(self.theme == *preference, self.tr(preference.key()))
-                            .clicked()
-                        {
-                            self.theme = *preference;
-                        }
-                    }
-                });
-
-                // Settings: Discord Rich Presence (client id + opt-out)
-                let discord_section = self.tr("discord_section");
-                let discord_enable = self.tr("discord_presence_enable");
-                let discord_client_id_label = self.tr("discord_client_id");
-                let discord_client_id_hint = self.tr("discord_client_id_hint");
-                let discord_client_id_apply = self.tr("discord_client_id_apply");
-                let discord_client_id_note = self.tr("discord_client_id_note");
-                ui.separator();
-                ui.label(egui::RichText::new(discord_section).strong());
-                ui.checkbox(&mut self.discord_presence_enabled, discord_enable);
-                let mut apply_client_id = false;
-                ui.horizontal(|ui| {
-                    ui.label(discord_client_id_label);
-                    apply_client_id = ui
-                        .add(
-                            egui::TextEdit::singleline(&mut self.discord_presence_client_id)
-                                .hint_text(discord_client_id_hint)
-                                .desired_width(220.0),
-                        )
-                        .lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                });
-                if ui.button(discord_client_id_apply).clicked() {
-                    apply_client_id = true;
-                }
-                if apply_client_id {
-                    self.discord_client_id_dirty = true;
-                }
-                ui.small(discord_client_id_note);
-
-                // Settings: hotkeys (per-action rebinding). In-app bindings
-                // apply while the app is focused on every platform; on Windows
-                // the bindings are additionally registered at the OS level so
-                // they keep working while the app is unfocused (see
-                // `reconcile_global_hotkeys`). See docs/hotkeys.md for the
-                // exact platform matrix.
-                let hotkeys_section = self.tr("hotkeys_section");
-                let hotkeys_hint = self.tr("hotkeys_hint");
-                let modifier_ctrl = self.tr("modifier_ctrl");
-                let modifier_alt = self.tr("modifier_alt");
-                let modifier_shift = self.tr("modifier_shift");
-                ui.separator();
-                ui.label(egui::RichText::new(hotkeys_section).strong());
-                for action in ["record", "pause", "mute", "save_replay"] {
-                    self.draw_hotkey_rebind_row(ui, action);
-                }
-                ui.small(hotkeys_hint);
-
-                // Settings: OBS WebSocket remote control (Stream Deck /
-                // TouchPortal). Serves the obs-websocket v5 (JSON) protocol on
-                // 127.0.0.1 so ecosystem tools can switch scenes and control
-                // recording/streaming (see docs/obs-websocket.md).
-                let obs_ws_section = self.tr("obs_ws_section");
-                let obs_ws_enable = self.tr("obs_ws_enable");
-                let obs_ws_port = self.tr("obs_ws_port");
-                let obs_ws_password = self.tr("obs_ws_password");
-                let obs_ws_password_hint = self.tr("obs_ws_password_hint");
-                let obs_ws_hint = self.tr("obs_ws_hint");
-                ui.separator();
-                ui.label(egui::RichText::new(obs_ws_section).strong());
-                let was_enabled = self.obs_ws_enabled;
-                ui.checkbox(&mut self.obs_ws_enabled, obs_ws_enable);
-                let mut port_dirty = false;
-                let old_port = self.obs_ws_port;
-                ui.horizontal(|ui| {
-                    ui.label(obs_ws_port);
-                    port_dirty = ui
-                        .add(
-                            egui::DragValue::new(&mut self.obs_ws_port)
-                                .range(1..=65535)
-                                .speed(1),
-                        )
-                        .changed();
-                });
-                let mut password_dirty = false;
-                let old_password = self.obs_ws_password.clone();
-                ui.horizontal(|ui| {
-                    ui.label(obs_ws_password);
-                    password_dirty = ui
-                        .add(egui::TextEdit::singleline(&mut self.obs_ws_password).password(true))
-                        .changed();
-                });
-                ui.small(obs_ws_password_hint);
-                if (port_dirty && old_port != self.obs_ws_port)
-                    || (password_dirty && old_password != self.obs_ws_password)
-                {
-                    self.obs_ws_restart = true;
-                }
-                if let Some(status) = &self.obs_ws_status {
-                    ui.colored_label(
-                        if self.obs_ws_enabled {
-                            colors.success
-                        } else {
-                            colors.warning
-                        },
-                        status,
-                    );
-                }
-                if !self.obs_ws_enabled && was_enabled {
-                    self.obs_ws_status = Some(self.tr("obs_ws_stopped").to_owned());
-                }
-                ui.small(obs_ws_hint);
-
-                // Settings: MIDI controller mapping (Korg NanoKontrol etc.).
-                // Maps MIDI messages (note/CC on a channel) to actions such as
-                // scene switches, master volume, and chroma-key toggles.
-                let midi_section = self.tr("midi_section");
-                let midi_enable = self.tr("midi_enable");
-                let midi_device = self.tr("midi_device");
-                let midi_no_devices = self.tr("midi_no_devices");
-                let midi_hint = self.tr("midi_hint");
-                let midi_channel = self.tr("midi_channel");
-                let midi_kind = self.tr("midi_kind");
-                let midi_number = self.tr("midi_number");
-                let midi_action = self.tr("midi_action");
-                let midi_remove = self.tr("midi_remove");
-                let midi_add = self.tr("midi_add");
-                let midi_scene = self.tr("midi_scene");
-                ui.separator();
-                ui.label(egui::RichText::new(midi_section).strong());
-                if ui.checkbox(&mut self.midi_enabled, midi_enable).changed() {
-                    self.midi_dirty = true;
-                }
-                // Device picker: refresh the list whenever the user opens the
-                // dropdown so hot-plugged devices appear.
-                ui.horizontal(|ui| {
-                    ui.label(midi_device);
-                    if self.midi_devices.is_empty() {
-                        self.midi_devices = list_devices();
-                    }
-                    if self.midi_devices.is_empty() {
-                        ui.weak(midi_no_devices);
-                    } else {
-                        let selected = self
-                            .midi_devices
-                            .get(self.midi_device_index)
-                            .cloned()
-                            .unwrap_or_default();
-                        let before = self.midi_device_index;
-                        egui::ComboBox::from_id_salt("midi_device")
-                            .selected_text(selected)
-                            .show_ui(ui, |ui| {
-                                for (idx, name) in self.midi_devices.iter().enumerate() {
-                                    ui.selectable_value(&mut self.midi_device_index, idx, name);
-                                }
-                            });
-                        if self.midi_device_index != before {
-                            // Drop the cached list so it is re-enumerated (and
-                            // the index re-validated) on the next open.
-                            self.midi_devices = Vec::new();
-                            self.midi_dirty = true;
-                        }
-                    }
-                });
-                if let Some(status) = &self.midi_status {
-                    ui.colored_label(colors.warning, status);
-                }
-                // Binding list with a remove button per row.
-                let mut remove: Option<usize> = None;
-                for (idx, binding) in self.midi_mapping.bindings.iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.label(format!(
-                            "{} {} · ch {}",
-                            binding.kind.label(),
-                            binding.number,
-                            binding.channel + 1
-                        ));
-                        ui.label(self.midi_action_label(&binding.action));
-                        if ui.small_button(midi_remove).clicked() {
-                            remove = Some(idx);
-                        }
-                    });
-                }
-                if let Some(idx) = remove {
-                    self.midi_mapping.bindings.remove(idx);
-                    self.midi_dirty = true;
-                }
-                // "Add binding" row.
-                ui.horizontal(|ui| {
-                    ui.label(midi_kind);
-                    for kind in [
-                        rivulet_core::MidiKind::NoteOn,
-                        rivulet_core::MidiKind::NoteOff,
-                        rivulet_core::MidiKind::ControlChange,
-                    ] {
-                        ui.selectable_value(&mut self.midi_new_kind, kind, kind.label());
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.label(midi_channel);
-                    let mut channel_ui = self.midi_new_channel + 1;
-                    if ui
-                        .add(egui::DragValue::new(&mut channel_ui).range(1..=16))
-                        .changed()
-                    {
-                        self.midi_new_channel = channel_ui - 1;
-                    }
-                    ui.label(midi_number);
-                    ui.add(egui::DragValue::new(&mut self.midi_new_number).range(0..=127));
-                });
-                ui.horizontal(|ui| {
-                    ui.label(midi_action);
-                    let actions = [
-                        ("ToggleRecord", self.tr("midi_action_record")),
-                        ("ToggleStream", self.tr("midi_action_stream")),
-                        ("ToggleMute", self.tr("midi_action_mute")),
-                        ("SetMasterVolume", self.tr("midi_action_volume")),
-                        ("ToggleChromaKey", self.tr("midi_action_chroma")),
-                        ("SwitchScene", self.tr("midi_action_scene")),
-                    ];
-                    let selected = actions
-                        .iter()
-                        .find(|(name, _)| *name == self.midi_new_action)
-                        .map(|(_, label)| *label)
-                        .unwrap_or_else(|| self.midi_new_action.as_str());
-                    egui::ComboBox::from_id_salt("midi_action")
-                        .selected_text(selected)
-                        .show_ui(ui, |ui| {
-                            for (name, label) in actions {
-                                ui.selectable_value(
-                                    &mut self.midi_new_action,
-                                    name.to_owned(),
-                                    label,
-                                );
-                            }
-                        });
-                    if self.midi_new_action == "SwitchScene" {
-                        ui.label(midi_scene);
-                        let names: Vec<(uuid::Uuid, String)> = self
-                            .scenes
-                            .scenes()
-                            .iter()
-                            .map(|s| (s.id, s.name.clone()))
-                            .collect();
-                        let selected_name = self
-                            .midi_new_scene
-                            .and_then(|id| names.iter().find(|(sid, _)| *sid == id))
-                            .map(|(_, name)| name.clone())
-                            .unwrap_or_else(|| self.tr("midi_scene_none").to_owned());
-                        egui::ComboBox::from_id_salt("midi_scene_pick")
-                            .selected_text(selected_name)
-                            .show_ui(ui, |ui| {
-                                for (id, name) in &names {
+                            // Game capture toggle + window selection + live preview
+                            self.update_game_preview(ui.ctx());
+                            ui.horizontal(|ui| {
+                                let gc_label = self.tr("game_capture");
+                                ui.checkbox(&mut self.use_game_capture, gc_label);
+                                if self.use_game_capture {
+                                    egui::ComboBox::from_id_salt("game_window_select")
+                                        .selected_text(
+                                            self.selected_game_window_idx
+                                                .and_then(|idx| self.game_windows.get(idx))
+                                                .map(|w| w.title.clone())
+                                                .unwrap_or_else(|| {
+                                                    self.tr("select_game_window").to_string()
+                                                }),
+                                        )
+                                        .show_ui(ui, |ui| {
+                                            for (i, window) in self.game_windows.iter().enumerate()
+                                            {
+                                                if ui
+                                                    .selectable_label(
+                                                        self.selected_game_window_idx == Some(i),
+                                                        &window.title,
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    self.selected_game_window_idx = Some(i);
+                                                    self.selected_monitor_idx = None;
+                                                    self.selected_window_idx = None;
+                                                    self.selected_camera_idx = None;
+                                                }
+                                            }
+                                        });
+                                    ui.separator();
+                                    // Manual refresh of the window list (also refreshed
+                                    // live while the picker is open).
                                     if ui
-                                        .selectable_label(self.midi_new_scene == Some(*id), name)
+                                        .button("🔄")
+                                        .on_hover_text(self.tr("refresh_game_windows"))
                                         .clicked()
                                     {
-                                        self.midi_new_scene = Some(*id);
+                                        self.refresh_game_windows();
                                     }
                                 }
                             });
-                    }
-                    if ui.button(midi_add).clicked() {
-                        let action = match self.midi_new_action.as_str() {
-                            "ToggleStream" => rivulet_core::MidiAction::ToggleStream,
-                            "ToggleMute" => rivulet_core::MidiAction::ToggleMute,
-                            "SetMasterVolume" => rivulet_core::MidiAction::SetMasterVolume,
-                            "ToggleChromaKey" => rivulet_core::MidiAction::ToggleChromaKey,
-                            "SwitchScene" => {
-                                if let Some(id) = self.midi_new_scene {
-                                    rivulet_core::MidiAction::SwitchScene(id)
-                                } else {
-                                    rivulet_core::MidiAction::ToggleRecord
+                            // Live thumbnail of the selected game window, so the
+                            // user can verify the correct window is targeted before
+                            // recording starts (refreshes every ~500ms).
+                            if self.use_game_capture {
+                                if let Some(preview) = &self.game_preview {
+                                    let scale = (ui.available_width().min(360.0)
+                                        / preview.width.max(1) as f32)
+                                        .min(0.5);
+                                    let size = egui::vec2(
+                                        preview.width as f32 * scale,
+                                        preview.height as f32 * scale,
+                                    );
+                                    let (rect, _) =
+                                        ui.allocate_exact_size(size, egui::Sense::hover());
+                                    let alpha = theme::preview_fade_alpha(
+                                        ui.ctx(),
+                                        egui::Id::new("game_preview_fade"),
+                                        true,
+                                    );
+                                    let tint =
+                                        egui::Color32::from_white_alpha((alpha * 255.0) as u8);
+                                    let uv = egui::Rect::from_min_max(
+                                        egui::pos2(0.0, 0.0),
+                                        egui::pos2(1.0, 1.0),
+                                    );
+                                    ui.painter().image(preview.texture.id(), rect, uv, tint);
+                                    ui.label(
+                                        egui::RichText::new(self.tr("game_preview_title"))
+                                            .small()
+                                            .color(colors.hint),
+                                    );
+                                } else if let Some(err) = &self.game_preview_error {
+                                    ui.colored_label(colors.warning, err);
+                                } else if self.selected_game_window_idx.is_some() {
+                                    ui.colored_label(colors.hint, self.tr("game_preview_loading"));
                                 }
                             }
-                            _ => rivulet_core::MidiAction::ToggleRecord,
-                        };
-                        self.midi_mapping
-                            .bindings
-                            .push(rivulet_core::MidiBinding::new(
-                                self.midi_new_channel,
-                                self.midi_new_kind,
-                                self.midi_new_number,
-                                action,
-                            ));
-                        self.midi_dirty = true;
-                    }
-                });
-                // Learn mode: capture the next moved control into the row.
-                ui.horizontal(|ui| {
-                    let learn_label = if self.midi_learn {
-                        self.tr("midi_learn_waiting")
-                    } else {
-                        self.tr("midi_learn")
-                    };
-                    let mut learn = self.midi_learn;
-                    if ui.selectable_label(self.midi_learn, learn_label).clicked() {
-                        learn = !self.midi_learn;
-                        if learn {
-                            // Start fresh: clear any earlier capture.
-                            self.midi_learn_captured = None;
-                        }
-                    }
-                    self.midi_learn = learn;
-                    if let Some(captured) = &self.midi_learn_captured {
-                        ui.label(format!(
-                            "{}: {} {} · ch {}",
-                            self.tr("midi_learn_captured"),
-                            captured.kind.label(),
-                            captured.number,
-                            captured.channel + 1
-                        ));
-                        if ui.small_button(self.tr("midi_learn_clear")).clicked() {
-                            self.midi_learn_captured = None;
-                        }
-                    }
-                });
-                // Per-device presets: save the whole mapping under a name for
-                // the currently selected device, load it back, or delete it.
-                let midi_presets_label = self.tr("midi_presets");
-                let midi_preset_name_hint = self.tr("midi_preset_name_hint");
-                let midi_preset_save = self.tr("midi_preset_save");
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(midi_presets_label).strong());
-                    if ui
-                        .add_enabled(
-                            self.midi_devices.get(self.midi_device_index).is_some(),
-                            egui::TextEdit::singleline(&mut self.midi_preset_name)
-                                .hint_text(midi_preset_name_hint),
-                        )
-                        .changed()
-                    {
-                        // Keep the dropdown in sync with the typed name.
-                        self.midi_selected_preset = Some(self.midi_preset_name.clone());
-                    }
-                    if ui
-                        .add_enabled(
-                            !self.midi_preset_name.trim().is_empty()
-                                && self.midi_devices.get(self.midi_device_index).is_some(),
-                            egui::Button::new(midi_preset_save),
-                        )
-                        .clicked()
-                    {
-                        if let Some(device) = self.midi_devices.get(self.midi_device_index).cloned()
-                        {
-                            self.midi_presets.save(
-                                &device,
-                                self.midi_preset_name.trim(),
-                                self.midi_mapping.clone(),
+                            // Region capture controls (monitor capture only)
+                            ui.horizontal(|ui| {
+                                let monitor_selected = self.selected_monitor_idx.is_some();
+                                let capture_region_label = self.tr("capture_region");
+                                ui.add_enabled(
+                                    monitor_selected,
+                                    egui::Checkbox::new(
+                                        &mut self.region_enabled,
+                                        capture_region_label,
+                                    ),
+                                );
+                                if ui
+                                    .add_enabled(
+                                        monitor_selected && self.region_enabled,
+                                        egui::Button::new(self.tr("region_select")),
+                                    )
+                                    .clicked()
+                                {
+                                    self.open_region_editor(ui.ctx());
+                                }
+                                if monitor_selected && self.region_enabled {
+                                    let r = self.region;
+                                    ui.label(self.tr_fmt(
+                                        "region_status",
+                                        &[
+                                            r.width.to_string(),
+                                            r.height.to_string(),
+                                            r.x.to_string(),
+                                            r.y.to_string(),
+                                        ],
+                                    ));
+                                }
+                            });
+                            let source_selected = self.selected_monitor_idx.is_some()
+                                || self.selected_window_idx.is_some()
+                                || self.selected_camera_idx.is_some()
+                                || (self.use_game_capture
+                                    && self.selected_game_window_idx.is_some());
+                            ui.horizontal(|ui| {
+                                ui.label(self.tr("video_codec"));
+                                egui::ComboBox::from_id_salt("windows_codec_select")
+                                    .selected_text(self.selected_codec.label())
+                                    .show_ui(ui, |ui| {
+                                        for codec in [
+                                            rivulet_core::VideoCodec::H264,
+                                            rivulet_core::VideoCodec::H265,
+                                            rivulet_core::VideoCodec::VP9,
+                                        ] {
+                                            if ui
+                                                .selectable_label(
+                                                    self.selected_codec == codec,
+                                                    codec.label(),
+                                                )
+                                                .clicked()
+                                            {
+                                                self.selected_codec = codec;
+                                            }
+                                        }
+                                    });
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(self.tr("recording_container"));
+                                egui::ComboBox::from_id_salt("windows_container_select")
+                                    .selected_text(self.selected_container.label())
+                                    .show_ui(ui, |ui| {
+                                        for container in [
+                                            rivulet_core::RecordingContainer::Mp4,
+                                            rivulet_core::RecordingContainer::Mkv,
+                                            rivulet_core::RecordingContainer::Mov,
+                                            rivulet_core::RecordingContainer::MpegTs,
+                                        ] {
+                                            if ui
+                                                .selectable_label(
+                                                    self.selected_container == container,
+                                                    container.label(),
+                                                )
+                                                .clicked()
+                                            {
+                                                self.selected_container = container;
+                                            }
+                                        }
+                                    });
+                            });
+                            let auto_remux_label = self.tr("auto_remux");
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.auto_remux, auto_remux_label);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(self.tr("split_after"));
+                                ui.add(
+                                    egui::DragValue::new(&mut self.split_seconds).range(0..=3600),
+                                );
+                                ui.label(self.tr("seconds"));
+                            });
+                            ui.separator();
+                            let rate_mode_label = self.tr("rate_mode");
+                            ui.horizontal(|ui| {
+                                ui.label(rate_mode_label);
+                                egui::ComboBox::from_id_salt("windows_rate_mode_select")
+                                    .selected_text(self.rate_mode.label())
+                                    .show_ui(ui, |ui| {
+                                        for mode in [
+                                            rivulet_core::RateControlMode::Cbr,
+                                            rivulet_core::RateControlMode::Vbr,
+                                            rivulet_core::RateControlMode::Cq,
+                                            rivulet_core::RateControlMode::CqVbr,
+                                        ] {
+                                            ui.selectable_value(
+                                                &mut self.rate_mode,
+                                                mode,
+                                                mode.label(),
+                                            )
+                                            .on_hover_text(mode.hint());
+                                        }
+                                    });
+                            });
+                            if matches!(
+                                self.rate_mode,
+                                rivulet_core::RateControlMode::Cq
+                                    | rivulet_core::RateControlMode::CqVbr
+                            ) {
+                                ui.horizontal(|ui| {
+                                    ui.label(self.tr("rate_quality"));
+                                    ui.add(egui::Slider::new(&mut self.rate_quality, 0..=51));
+                                });
+                            }
+                            if matches!(
+                                self.rate_mode,
+                                rivulet_core::RateControlMode::Vbr
+                                    | rivulet_core::RateControlMode::CqVbr
+                            ) {
+                                ui.horizontal(|ui| {
+                                    ui.label(self.tr("rate_max_bitrate"));
+                                    ui.add(
+                                        egui::DragValue::new(&mut self.rate_max_kbps)
+                                            .range(0..=100_000),
+                                    );
+                                });
+                            }
+                            ui.horizontal(|ui| {
+                                ui.label(self.tr("rate_custom_options"));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.encoder_extra_options)
+                                        .hint_text("key-int-max=250"),
+                                );
+                            });
+                            ui.separator();
+                            let ve_title = self.tr("video_effects");
+                            let (vb, vc, vs, vh, vf_blur, vf_sharpen) = (
+                                self.tr("vf_brightness"),
+                                self.tr("vf_contrast"),
+                                self.tr("vf_saturation"),
+                                self.tr("vf_hue"),
+                                self.tr("vf_blur"),
+                                self.tr("vf_sharpen"),
                             );
-                            self.midi_selected_preset = Some(self.midi_preset_name.clone());
+                            ui.label(egui::RichText::new(ve_title).strong());
+                            let mut eff = self.video_effects;
+                            ui.horizontal_wrapped(|ui| {
+                                ui.add(egui::Slider::new(&mut eff.brightness, -1.0..=1.0).text(vb));
+                                ui.add(egui::Slider::new(&mut eff.contrast, -1.0..=1.0).text(vc));
+                                ui.add(egui::Slider::new(&mut eff.saturation, -1.0..=1.0).text(vs));
+                                ui.add(egui::Slider::new(&mut eff.hue, -1.0..=1.0).text(vh));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut eff.blur, vf_blur);
+                                ui.checkbox(&mut eff.sharpen, vf_sharpen);
+                            });
+                            self.video_effects = eff;
+                            let auto_record_label = self.tr("auto_record_with_stream");
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.auto_record_with_stream, auto_record_label);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(self.tr("recording_preset"));
+                                egui::ComboBox::from_id_salt("windows_preset_select")
+                                    .selected_text(self.selected_preset.label)
+                                    .show_ui(ui, |ui| {
+                                        for preset in rivulet_core::RecordingPreset::all() {
+                                            if ui
+                                                .selectable_label(
+                                                    self.selected_preset == *preset,
+                                                    preset.label,
+                                                )
+                                                .clicked()
+                                            {
+                                                self.selected_preset = *preset;
+                                            }
+                                        }
+                                    });
+                            });
+                            ui.horizontal(|ui| {
+                                let label = self.tr("overlay_toggle").to_string();
+                                ui.checkbox(&mut self.show_overlay, label);
+                            });
+                            if ui
+                                .add_enabled(
+                                    source_selected,
+                                    egui::Button::new(format!(
+                                        "⏺ {} [{}]",
+                                        self.tr("start_recording"),
+                                        self.hotkeys.label_for("record")
+                                    )),
+                                )
+                                .clicked()
+                            {
+                                self.start_windows_recording();
+                            };
+                        }
+                        if let Some(err) = &self.last_error {
+                            ui.colored_label(colors.error, err);
                         }
                     }
-                });
-                let midi_preset_load = self.tr("midi_preset_load");
-                let midi_preset_apply = self.tr("midi_preset_apply");
-                let midi_preset_apply_hint = self.tr("midi_preset_apply_hint");
-                let midi_preset_delete = self.tr("midi_preset_delete");
-                let midi_preset_delete_hint = self.tr("midi_preset_delete_hint");
-                if let Some(device) = self.midi_devices.get(self.midi_device_index).cloned() {
-                    // Clone the names: they are only used to drive the dropdown
-                    // and the borrow would otherwise fight the mutable `self`
-                    // captures below.
-                    let names: Vec<String> = self
-                        .midi_presets
-                        .names_for(&device)
-                        .into_iter()
-                        .map(str::to_owned)
-                        .collect();
-                    if !names.is_empty() {
-                        ui.horizontal(|ui| {
-                            ui.label(midi_preset_load);
-                            egui::ComboBox::from_id_salt("midi_preset_pick")
-                                .selected_text(
-                                    self.midi_selected_preset
-                                        .as_deref()
-                                        .filter(|n| names.iter().any(|c| c == n))
-                                        .unwrap_or_default(),
+
+                    #[cfg(target_os = "linux")]
+                    {
+                        self.drain_linux_frames();
+                        // Surface engine failures (pipeline build/start/push errors)
+                        // in the UI instead of only on the console.
+                        if let Some(err) = self.engine.take_error() {
+                            self.record_status = Some(err);
+                        }
+                        // Abort when the capture delivers no frames within the
+                        // timeout: the capture thread died or its source became
+                        // unavailable, so the recording would run forever while
+                        // writing nothing.
+                        if self.is_recording
+                            && should_abort_for_stalled_frames(
+                                self.record_started,
+                                self.last_frame_at,
+                                Instant::now(),
+                                self.no_frame_timeout,
+                            )
+                        {
+                            let secs = self.no_frame_timeout.as_secs();
+                            tracing::error!(
+                                timeout_seconds = secs,
+                                "No frames received; stopping recording"
+                            );
+                            // stop_linux_recording sets record_status to
+                            // "recording_saved"; override it with the abort reason.
+                            self.stop_linux_recording();
+                            self.record_status =
+                                Some(self.tr_fmt("recording_no_frames", &[secs.to_string()]));
+                        }
+
+                        if self.view == AppView::Record {
+                            ui.add_space(10.0);
+                            ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
+
+                            if self.is_recording || self.is_aux_recording {
+                                ui.horizontal(|ui| {
+                                    let elapsed = self.record_started.elapsed().as_secs();
+                                    ui.label(
+                                        egui::RichText::new(self.tr_fmt(
+                                            "recording_in_progress",
+                                            &[elapsed.to_string()],
+                                        ))
+                                        .color(colors.active),
+                                    );
+                                    if ui
+                                        .button(format!("⏹ {}", self.tr("stop_recording")))
+                                        .clicked()
+                                    {
+                                        if self.is_aux_recording {
+                                            self.stop_aux_recording();
+                                        } else {
+                                            self.stop_linux_recording();
+                                        }
+                                        self.is_paused = false;
+                                        self.is_muted = false;
+                                    }
+                                    let pause_label = if self.is_paused {
+                                        "▶ Resume"
+                                    } else {
+                                        "⏸ Pause"
+                                    };
+                                    if ui.button(pause_label).clicked() {
+                                        self.is_paused = !self.is_paused;
+                                    }
+                                    let mute_label = if self.is_muted {
+                                        "🔊 Unmute"
+                                    } else {
+                                        "🔇 Mute"
+                                    };
+                                    if ui.button(mute_label).clicked() {
+                                        self.is_muted = !self.is_muted;
+                                    }
+                                });
+                                if self.is_paused {
+                                    ui.label(
+                                        egui::RichText::new(self.tr("paused"))
+                                            .color(colors.warning)
+                                            .strong(),
+                                    );
+                                }
+                                if self.is_muted {
+                                    ui.label(
+                                        egui::RichText::new(self.tr("muted"))
+                                            .color(colors.info)
+                                            .strong(),
+                                    );
+                                }
+                                ui.label(self.metrics_line());
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.label(self.tr("source"));
+                                    egui::ComboBox::from_id_salt("linux_monitor_select")
+                                        .selected_text(
+                                            self.selected_monitor_idx
+                                                .and_then(|idx| self.monitors.get(idx))
+                                                .map(|m| {
+                                                    format!(
+                                                        "{} ({}x{})",
+                                                        m.name().unwrap_or_default(),
+                                                        m.width().unwrap_or(0),
+                                                        m.height().unwrap_or(0)
+                                                    )
+                                                })
+                                                .unwrap_or_else(|| {
+                                                    self.tr("select_monitor").to_string()
+                                                }),
+                                        )
+                                        .show_ui(ui, |ui| {
+                                            for (i, m) in self.monitors.iter().enumerate() {
+                                                if ui
+                                                    .selectable_label(
+                                                        self.selected_monitor_idx == Some(i),
+                                                        format!(
+                                                            "{} ({}x{})",
+                                                            m.name().unwrap_or_default(),
+                                                            m.width().unwrap_or(0),
+                                                            m.height().unwrap_or(0)
+                                                        ),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    if self.selected_monitor_idx != Some(i) {
+                                                        self.region = CaptureRegion::full(
+                                                            m.width().unwrap_or(0),
+                                                            m.height().unwrap_or(0),
+                                                        );
+                                                    }
+                                                    self.selected_monitor_idx = Some(i);
+                                                    self.selected_window_idx = None;
+                                                }
+                                            }
+                                        });
+                                    egui::ComboBox::from_id_salt("linux_window_select")
+                                        .selected_text(
+                                            self.selected_window_idx
+                                                .and_then(|idx| self.windows.get(idx))
+                                                .map(|w| {
+                                                    format!(
+                                                        "\"{}\" ({}x{})",
+                                                        w.title().unwrap_or_default(),
+                                                        w.width().unwrap_or(0),
+                                                        w.height().unwrap_or(0)
+                                                    )
+                                                })
+                                                .unwrap_or_else(|| {
+                                                    self.tr("select_window").to_string()
+                                                }),
+                                        )
+                                        .show_ui(ui, |ui| {
+                                            for (i, w) in self.windows.iter().enumerate() {
+                                                if ui
+                                                    .selectable_label(
+                                                        self.selected_window_idx == Some(i),
+                                                        format!(
+                                                            "\"{}\" ({}x{})",
+                                                            w.title().unwrap_or_default(),
+                                                            w.width().unwrap_or(0),
+                                                            w.height().unwrap_or(0)
+                                                        ),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    self.selected_window_idx = Some(i);
+                                                    self.selected_monitor_idx = None;
+                                                    // Region capture only applies to
+                                                    // monitor capture; window capture is
+                                                    // always full-window.
+                                                    self.region_enabled = false;
+                                                }
+                                            }
+                                        });
+                                    if ui
+                                        .button("🔄")
+                                        .on_hover_text(self.tr("refresh_sources"))
+                                        .clicked()
+                                    {
+                                        self.refresh_linux_sources();
+                                        self.refresh_game_windows();
+                                    }
+                                });
+                                // Game capture toggle + window selection + live preview
+                                self.update_game_preview(ui.ctx());
+                                ui.horizontal(|ui| {
+                                    let gc_label = self.tr("game_capture");
+                                    ui.checkbox(&mut self.use_game_capture, gc_label);
+                                    if self.use_game_capture {
+                                        egui::ComboBox::from_id_salt("linux_game_window_select")
+                                            .selected_text(
+                                                self.selected_game_window_idx
+                                                    .and_then(|idx| self.game_windows.get(idx))
+                                                    .map(|w| w.title.clone())
+                                                    .unwrap_or_else(|| {
+                                                        self.tr("select_game_window").to_string()
+                                                    }),
+                                            )
+                                            .show_ui(ui, |ui| {
+                                                for (i, window) in
+                                                    self.game_windows.iter().enumerate()
+                                                {
+                                                    if ui
+                                                        .selectable_label(
+                                                            self.selected_game_window_idx
+                                                                == Some(i),
+                                                            &window.title,
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        self.selected_game_window_idx = Some(i);
+                                                        self.selected_monitor_idx = None;
+                                                        self.selected_window_idx = None;
+                                                        self.selected_camera_idx = None;
+                                                    }
+                                                }
+                                            });
+                                        ui.separator();
+                                        // Manual refresh of the window list (also
+                                        // refreshed live while the picker is open).
+                                        if ui
+                                            .button("🔄")
+                                            .on_hover_text(self.tr("refresh_game_windows"))
+                                            .clicked()
+                                        {
+                                            self.refresh_game_windows();
+                                        }
+                                    }
+                                });
+                                // Live thumbnail of the selected game window, so the
+                                // user can verify the correct window is targeted
+                                // before recording starts (refreshes every ~500ms).
+                                if self.use_game_capture {
+                                    if let Some(preview) = &self.game_preview {
+                                        let scale = (ui.available_width().min(360.0)
+                                            / preview.width.max(1) as f32)
+                                            .min(0.5);
+                                        let size = egui::vec2(
+                                            preview.width as f32 * scale,
+                                            preview.height as f32 * scale,
+                                        );
+                                        let (rect, _) =
+                                            ui.allocate_exact_size(size, egui::Sense::hover());
+                                        let alpha = theme::preview_fade_alpha(
+                                            ui.ctx(),
+                                            egui::Id::new("game_preview_fade_linux"),
+                                            true,
+                                        );
+                                        let tint =
+                                            egui::Color32::from_white_alpha((alpha * 255.0) as u8);
+                                        let uv = egui::Rect::from_min_max(
+                                            egui::pos2(0.0, 0.0),
+                                            egui::pos2(1.0, 1.0),
+                                        );
+                                        ui.painter().image(preview.texture.id(), rect, uv, tint);
+                                        ui.label(
+                                            egui::RichText::new(self.tr("game_preview_title"))
+                                                .small()
+                                                .color(colors.hint),
+                                        );
+                                    } else if let Some(err) = &self.game_preview_error {
+                                        ui.colored_label(colors.warning, err);
+                                    } else if self.selected_game_window_idx.is_some() {
+                                        ui.colored_label(
+                                            colors.hint,
+                                            self.tr("game_preview_loading"),
+                                        );
+                                    }
+                                }
+                                // Region capture controls (monitor capture only)
+                                ui.horizontal(|ui| {
+                                    let monitor_selected = self.selected_monitor_idx.is_some();
+                                    let capture_region_label = self.tr("capture_region");
+                                    ui.add_enabled(
+                                        monitor_selected,
+                                        egui::Checkbox::new(
+                                            &mut self.region_enabled,
+                                            capture_region_label,
+                                        ),
+                                    );
+                                    if ui
+                                        .add_enabled(
+                                            monitor_selected && self.region_enabled,
+                                            egui::Button::new(self.tr("region_select")),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.open_region_editor(ui.ctx());
+                                    }
+                                    if monitor_selected && self.region_enabled {
+                                        let r = self.region;
+                                        ui.label(self.tr_fmt(
+                                            "region_status",
+                                            &[
+                                                r.width.to_string(),
+                                                r.height.to_string(),
+                                                r.x.to_string(),
+                                                r.y.to_string(),
+                                            ],
+                                        ));
+                                    }
+                                });
+                                let source_selected = self.selected_monitor_idx.is_some()
+                                    || self.selected_window_idx.is_some()
+                                    || self.selected_camera_idx.is_some()
+                                    || (self.use_game_capture
+                                        && self.selected_game_window_idx.is_some());
+                                ui.horizontal(|ui| {
+                                    ui.label(self.tr("video_codec"));
+                                    egui::ComboBox::from_id_salt("linux_codec_select")
+                                        .selected_text(self.selected_codec.label())
+                                        .show_ui(ui, |ui| {
+                                            for codec in [
+                                                rivulet_core::VideoCodec::H264,
+                                                rivulet_core::VideoCodec::H265,
+                                                rivulet_core::VideoCodec::VP9,
+                                            ] {
+                                                if ui
+                                                    .selectable_label(
+                                                        self.selected_codec == codec,
+                                                        codec.label(),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    self.selected_codec = codec;
+                                                }
+                                            }
+                                        });
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(self.tr("recording_container"));
+                                    egui::ComboBox::from_id_salt("linux_container_select")
+                                        .selected_text(self.selected_container.label())
+                                        .show_ui(ui, |ui| {
+                                            for container in [
+                                                rivulet_core::RecordingContainer::Mp4,
+                                                rivulet_core::RecordingContainer::Mkv,
+                                                rivulet_core::RecordingContainer::Mov,
+                                                rivulet_core::RecordingContainer::MpegTs,
+                                            ] {
+                                                if ui
+                                                    .selectable_label(
+                                                        self.selected_container == container,
+                                                        container.label(),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    self.selected_container = container;
+                                                }
+                                            }
+                                        });
+                                });
+                                let auto_remux_label = self.tr("auto_remux");
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut self.auto_remux, auto_remux_label);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(self.tr("split_after"));
+                                    ui.add(
+                                        egui::DragValue::new(&mut self.split_seconds)
+                                            .range(0..=3600),
+                                    );
+                                    ui.label(self.tr("seconds"));
+                                });
+                                let auto_record_label = self.tr("auto_record_with_stream");
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(
+                                        &mut self.auto_record_with_stream,
+                                        auto_record_label,
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(self.tr("recording_preset"));
+                                    egui::ComboBox::from_id_salt("linux_preset_select")
+                                        .selected_text(self.selected_preset.label)
+                                        .show_ui(ui, |ui| {
+                                            for preset in rivulet_core::RecordingPreset::all() {
+                                                if ui
+                                                    .selectable_label(
+                                                        self.selected_preset == *preset,
+                                                        preset.label,
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    self.selected_preset = *preset;
+                                                }
+                                            }
+                                        });
+                                });
+                                ui.horizontal(|ui| {
+                                    let label = self.tr("overlay_toggle").to_string();
+                                    ui.checkbox(&mut self.show_overlay, label);
+                                });
+                                if ui
+                                    .add_enabled(
+                                        source_selected,
+                                        egui::Button::new(format!(
+                                            "⏺ {} [{}]",
+                                            self.tr("start_recording"),
+                                            self.hotkeys.label_for("record")
+                                        )),
+                                    )
+                                    .clicked()
+                                {
+                                    self.start_linux_recording();
+                                }
+                            }
+                            if let Some(status) = &self.record_status {
+                                ui.colored_label(colors.info, status);
+                            }
+                        }
+
+                        if self.view == AppView::Stream {
+                            self.draw_stream_health_panel(ui, colors);
+                            ui.label(self.tr("stream_health_help"));
+                        }
+
+                        if self.view == AppView::Mixer {
+                            ui.separator();
+                            ui.label(egui::RichText::new(self.tr("audio_mixer")).strong());
+
+                            ui.horizontal(|ui| {
+                                if self.audio_preview {
+                                    if theme::accent_button(
+                                        ui,
+                                        format!("⏹ {}", self.tr("stop_audio")),
+                                    )
+                                    .clicked()
+                                    {
+                                        self.stop_audio_capture();
+                                    }
+                                    ui.label(
+                                        egui::RichText::new(format!("● {}", self.tr("running")))
+                                            .color(colors.success),
+                                    );
+                                } else if theme::accent_button(
+                                    ui,
+                                    format!("▶ {}", self.tr("start_audio")),
                                 )
+                                .clicked()
+                                {
+                                    self.start_audio_capture();
+                                }
+                            });
+
+                            let mut sys = self.capture_system;
+                            let mut mic = self.capture_mic;
+                            let mut separate = self.separate_tracks;
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut sys, self.tr("system_audio"));
+                                ui.checkbox(&mut mic, self.tr("microphone"));
+                                ui.separator();
+                                ui.checkbox(&mut separate, self.tr("separate_tracks"));
+                            });
+                            if sys != self.capture_system || mic != self.capture_mic {
+                                self.capture_system = sys;
+                                self.capture_mic = mic;
+                                if self.audio_preview {
+                                    self.start_audio_capture();
+                                }
+                            }
+                            if separate != self.separate_tracks {
+                                self.separate_tracks = separate;
+                                if self.audio_preview {
+                                    self.start_audio_capture();
+                                }
+                            }
+
+                            if self.separate_tracks {
+                                let et_system = self.tr("export_track_system");
+                                let et_mic = self.tr("export_track_microphone");
+                                let mt_mapping = self.tr("multi_track_mapping");
+                                let mt_label = format!(
+                                    "{} · {}",
+                                    self.tr("separate_tracks"),
+                                    rivulet_core::AudioTrack::System.label()
+                                );
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(mt_label).weak());
+                                    ui.checkbox(&mut self.export_system_track, et_system);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(
+                                            rivulet_core::AudioTrack::Microphone.label(),
+                                        )
+                                        .weak(),
+                                    );
+                                    ui.checkbox(&mut self.export_mic_track, et_mic);
+                                });
+                                ui.label(egui::RichText::new(mt_mapping).small().weak());
+                            }
+
+                            let mut sys_vol = self.system_volume;
+                            let mut mic_vol = self.mic_volume;
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut sys_vol, 0.0..=1.0)
+                                        .text(self.tr("system_audio")),
+                                )
+                                .changed()
+                            {
+                                self.system_volume = sys_vol;
+                                if let Some(audio) = &self.audio {
+                                    audio.set_system_volume(sys_vol);
+                                }
+                            }
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut mic_vol, 0.0..=1.0)
+                                        .text(self.tr("microphone")),
+                                )
+                                .changed()
+                            {
+                                self.mic_volume = mic_vol;
+                                if let Some(audio) = &self.audio {
+                                    audio.set_mic_volume(mic_vol);
+                                }
+                            }
+
+                            ui.separator();
+                            ui.label(egui::RichText::new(self.tr("audio_filters")).strong());
+                            let before = self.system_filters.clone();
+                            let before_mic = self.mic_filters.clone();
+                            let gate_label = self.tr("filter_noise_gate");
+                            let expander_label = self.tr("filter_expander");
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.system_filters.noise_suppression, "NS·Sys");
+                                ui.checkbox(&mut self.system_filters.noise_gate, gate_label);
+                                ui.checkbox(&mut self.system_filters.compressor, "Cmp·Sys");
+                                ui.checkbox(&mut self.system_filters.limiter, "Lim·Sys");
+                                ui.checkbox(&mut self.system_filters.expander, expander_label);
+                            });
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut self.mic_filters.noise_suppression, "NS·Mic");
+                                ui.checkbox(&mut self.mic_filters.noise_gate, "Gate·Mic");
+                                ui.checkbox(&mut self.mic_filters.compressor, "Cmp·Mic");
+                                ui.checkbox(&mut self.mic_filters.limiter, "Lim·Mic");
+                                ui.checkbox(&mut self.mic_filters.expander, "Exp·Mic");
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label(self.tr("filter_gain"));
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut self.system_filters.gain_db,
+                                        -30.0..=30.0,
+                                    )
+                                    .text("Sys"),
+                                );
+                                ui.add(
+                                    egui::Slider::new(&mut self.mic_filters.gain_db, -30.0..=30.0)
+                                        .text("Mic"),
+                                );
+                            });
+                            egui::CollapsingHeader::new(self.tr("filter_eq"))
+                                .default_open(false)
+                                .show(ui, |ui| {
+                                    ui.label("System");
+                                    ui.horizontal_wrapped(|ui| {
+                                        for band in self.system_filters.eq_bands.iter_mut() {
+                                            ui.add(egui::Slider::new(band, -12.0..=12.0));
+                                        }
+                                    });
+                                    ui.label("Mikro");
+                                    ui.horizontal_wrapped(|ui| {
+                                        for band in self.mic_filters.eq_bands.iter_mut() {
+                                            ui.add(egui::Slider::new(band, -12.0..=12.0));
+                                        }
+                                    });
+                                });
+                            if (self.system_filters != before || self.mic_filters != before_mic)
+                                && self.audio_preview
+                            {
+                                self.start_audio_capture();
+                            }
+
+                            ui.separator();
+                            ui.label(egui::RichText::new(self.tr("audio_monitoring")).strong());
+                            let mut sys_mon = self.system_monitor;
+                            let mut mic_mon = self.mic_monitor;
+                            ui.horizontal(|ui| {
+                                ui.checkbox(&mut sys_mon, self.tr("monitoring_system"));
+                                ui.checkbox(&mut mic_mon, self.tr("monitoring_microphone"));
+                            });
+                            if sys_mon != self.system_monitor || mic_mon != self.mic_monitor {
+                                self.system_monitor = sys_mon;
+                                self.mic_monitor = mic_mon;
+                                if self.audio_preview {
+                                    self.start_audio_capture();
+                                }
+                            }
+                            let mut mon_vol = self.monitor_volume;
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut mon_vol, 0.0..=1.0)
+                                        .text(self.tr("monitoring_volume")),
+                                )
+                                .changed()
+                            {
+                                self.monitor_volume = mon_vol;
+                                if let Some(audio) = &self.audio {
+                                    audio.set_monitor_volume(mon_vol);
+                                }
+                            }
+
+                            ui.separator();
+                            ui.label(egui::RichText::new(self.tr("master_output")).strong());
+                            let mut master_vol = self.master_volume;
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut master_vol, 0.0..=1.0)
+                                        .text(self.tr("master_volume")),
+                                )
+                                .changed()
+                            {
+                                self.master_volume = master_vol;
+                                if let Some(audio) = &self.audio {
+                                    audio.set_master_volume(master_vol);
+                                }
+                            }
+
+                            // Master output VU meter (level of the whole mix after the
+                            // master volume is applied).
+                            let peak = f32::from_bits(self.audio_peak.load(Ordering::SeqCst))
+                                .clamp(0.0, 1.0);
+                            let db = if peak > 0.0 {
+                                20.0 * peak.log10()
+                            } else {
+                                -96.0
+                            };
+                            ui.add(
+                                egui::ProgressBar::new(peak)
+                                    .desired_width(f32::INFINITY)
+                                    .text(self.tr_fmt("output_vu", &[format!("{db:.1}")])),
+                            );
+
+                            if let Some(status) = &self.audio_status {
+                                ui.colored_label(colors.error, status);
+                            }
+                            if let Some(warning) = &self.audio_warning {
+                                ui.colored_label(colors.warning, warning);
+                            }
+                        }
+                    }
+
+                    #[cfg(not(target_os = "linux"))]
+                    if self.view == AppView::Mixer {
+                        ui.add_space(20.0);
+                        ui.label(self.tr("mixer_unavailable"));
+                    }
+
+                    // Scenes: list, switching, add/rename/remove
+                    if self.view == AppView::Scenes {
+                        self.draw_scenes_view(ui, &colors);
+                    }
+                    if self.view == AppView::Scenes {
+                        self.draw_source_composition(ui, &colors);
+                        self.draw_scene_overlay_panel(ui);
+                        self.draw_chroma_key_panel(ui);
+                        self.draw_browser_source_panel(ui, &colors);
+                    }
+
+                    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+                    if self.view == AppView::Record {
+                        ui.add_space(20.0);
+                        ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
+                        ui.label(self.tr("screen_recording_unavailable"));
+                    }
+
+                    // Streaming controls are implemented in M3 and must not render
+                    // the generic planned-section placeholder.
+                    if self.view == AppView::Stream {
+                        self.draw_stream_view(ui, &colors);
+                    }
+                    if self.view == AppView::Help {
+                        self.draw_help_view(ui);
+                    }
+
+                    // Placeholder views (still-planned milestones)
+                    if let Some(milestone) = self.view.planned_milestone() {
+                        ui.add_space(20.0);
+                        ui.label(self.tr_fmt("section_planned", &[milestone.to_string()]));
+                    }
+
+                    // Settings: updates section
+                    if self.view == AppView::Settings {
+                        ui.separator();
+                        ui.label(egui::RichText::new(self.tr("updates")).strong());
+                        ui.horizontal(|ui| {
+                            ui.label(self.tr_fmt(
+                                "updates_current_version",
+                                &[env!("CARGO_PKG_VERSION").to_string()],
+                            ));
+                            if theme::accent_button(ui, self.tr("check_for_updates")).clicked() {
+                                self.update_check_clicked = true;
+                            }
+                        });
+                        self.draw_update_status(ui);
+                        self.handle_update_actions(ui.ctx().clone());
+
+                        // Settings: appearance (color scheme)
+                        ui.separator();
+                        ui.label(egui::RichText::new(self.tr("theme")).strong());
+                        ui.horizontal(|ui| {
+                            for preference in theme::ThemePreference::all() {
+                                if ui
+                                    .selectable_label(
+                                        self.theme == *preference,
+                                        self.tr(preference.key()),
+                                    )
+                                    .clicked()
+                                {
+                                    self.theme = *preference;
+                                }
+                            }
+                        });
+
+                        // Settings: Discord Rich Presence (client id + opt-out)
+                        let discord_section = self.tr("discord_section");
+                        let discord_enable = self.tr("discord_presence_enable");
+                        let discord_client_id_label = self.tr("discord_client_id");
+                        let discord_client_id_hint = self.tr("discord_client_id_hint");
+                        let discord_client_id_apply = self.tr("discord_client_id_apply");
+                        let discord_client_id_note = self.tr("discord_client_id_note");
+                        ui.separator();
+                        ui.label(egui::RichText::new(discord_section).strong());
+                        ui.checkbox(&mut self.discord_presence_enabled, discord_enable);
+                        let mut apply_client_id = false;
+                        ui.horizontal(|ui| {
+                            ui.label(discord_client_id_label);
+                            apply_client_id = ui
+                                .add(
+                                    egui::TextEdit::singleline(
+                                        &mut self.discord_presence_client_id,
+                                    )
+                                    .hint_text(discord_client_id_hint)
+                                    .desired_width(220.0),
+                                )
+                                .lost_focus()
+                                && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        });
+                        if ui.button(discord_client_id_apply).clicked() {
+                            apply_client_id = true;
+                        }
+                        if apply_client_id {
+                            self.discord_client_id_dirty = true;
+                        }
+                        ui.small(discord_client_id_note);
+
+                        // Settings: hotkeys (per-action rebinding). In-app bindings
+                        // apply while the app is focused on every platform; on Windows
+                        // the bindings are additionally registered at the OS level so
+                        // they keep working while the app is unfocused (see
+                        // `reconcile_global_hotkeys`). See docs/hotkeys.md for the
+                        // exact platform matrix.
+                        let hotkeys_section = self.tr("hotkeys_section");
+                        let hotkeys_hint = self.tr("hotkeys_hint");
+                        let modifier_ctrl = self.tr("modifier_ctrl");
+                        let modifier_alt = self.tr("modifier_alt");
+                        let modifier_shift = self.tr("modifier_shift");
+                        ui.separator();
+                        ui.label(egui::RichText::new(hotkeys_section).strong());
+                        for action in ["record", "pause", "mute", "save_replay"] {
+                            self.draw_hotkey_rebind_row(ui, action);
+                        }
+                        ui.small(hotkeys_hint);
+
+                        // Settings: OBS WebSocket remote control (Stream Deck /
+                        // TouchPortal). Serves the obs-websocket v5 (JSON) protocol on
+                        // 127.0.0.1 so ecosystem tools can switch scenes and control
+                        // recording/streaming (see docs/obs-websocket.md).
+                        let obs_ws_section = self.tr("obs_ws_section");
+                        let obs_ws_enable = self.tr("obs_ws_enable");
+                        let obs_ws_port = self.tr("obs_ws_port");
+                        let obs_ws_password = self.tr("obs_ws_password");
+                        let obs_ws_password_hint = self.tr("obs_ws_password_hint");
+                        let obs_ws_hint = self.tr("obs_ws_hint");
+                        ui.separator();
+                        ui.label(egui::RichText::new(obs_ws_section).strong());
+                        let was_enabled = self.obs_ws_enabled;
+                        ui.checkbox(&mut self.obs_ws_enabled, obs_ws_enable);
+                        let mut port_dirty = false;
+                        let old_port = self.obs_ws_port;
+                        ui.horizontal(|ui| {
+                            ui.label(obs_ws_port);
+                            port_dirty = ui
+                                .add(
+                                    egui::DragValue::new(&mut self.obs_ws_port)
+                                        .range(1..=65535)
+                                        .speed(1),
+                                )
+                                .changed();
+                        });
+                        let mut password_dirty = false;
+                        let old_password = self.obs_ws_password.clone();
+                        ui.horizontal(|ui| {
+                            ui.label(obs_ws_password);
+                            password_dirty = ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut self.obs_ws_password)
+                                        .password(true),
+                                )
+                                .changed();
+                        });
+                        ui.small(obs_ws_password_hint);
+                        if (port_dirty && old_port != self.obs_ws_port)
+                            || (password_dirty && old_password != self.obs_ws_password)
+                        {
+                            self.obs_ws_restart = true;
+                        }
+                        if let Some(status) = &self.obs_ws_status {
+                            ui.colored_label(
+                                if self.obs_ws_enabled {
+                                    colors.success
+                                } else {
+                                    colors.warning
+                                },
+                                status,
+                            );
+                        }
+                        if !self.obs_ws_enabled && was_enabled {
+                            self.obs_ws_status = Some(self.tr("obs_ws_stopped").to_owned());
+                        }
+                        ui.small(obs_ws_hint);
+
+                        // Settings: MIDI controller mapping (Korg NanoKontrol etc.).
+                        // Maps MIDI messages (note/CC on a channel) to actions such as
+                        // scene switches, master volume, and chroma-key toggles.
+                        let midi_section = self.tr("midi_section");
+                        let midi_enable = self.tr("midi_enable");
+                        let midi_device = self.tr("midi_device");
+                        let midi_no_devices = self.tr("midi_no_devices");
+                        let midi_hint = self.tr("midi_hint");
+                        let midi_channel = self.tr("midi_channel");
+                        let midi_kind = self.tr("midi_kind");
+                        let midi_number = self.tr("midi_number");
+                        let midi_action = self.tr("midi_action");
+                        let midi_remove = self.tr("midi_remove");
+                        let midi_add = self.tr("midi_add");
+                        let midi_scene = self.tr("midi_scene");
+                        ui.separator();
+                        ui.label(egui::RichText::new(midi_section).strong());
+                        if ui.checkbox(&mut self.midi_enabled, midi_enable).changed() {
+                            self.midi_dirty = true;
+                        }
+                        // Device picker: refresh the list whenever the user opens the
+                        // dropdown so hot-plugged devices appear.
+                        ui.horizontal(|ui| {
+                            ui.label(midi_device);
+                            if self.midi_devices.is_empty() {
+                                self.midi_devices = list_devices();
+                            }
+                            if self.midi_devices.is_empty() {
+                                ui.weak(midi_no_devices);
+                            } else {
+                                let selected = self
+                                    .midi_devices
+                                    .get(self.midi_device_index)
+                                    .cloned()
+                                    .unwrap_or_default();
+                                let before = self.midi_device_index;
+                                egui::ComboBox::from_id_salt("midi_device")
+                                    .selected_text(selected)
+                                    .show_ui(ui, |ui| {
+                                        for (idx, name) in self.midi_devices.iter().enumerate() {
+                                            ui.selectable_value(
+                                                &mut self.midi_device_index,
+                                                idx,
+                                                name,
+                                            );
+                                        }
+                                    });
+                                if self.midi_device_index != before {
+                                    // Drop the cached list so it is re-enumerated (and
+                                    // the index re-validated) on the next open.
+                                    self.midi_devices = Vec::new();
+                                    self.midi_dirty = true;
+                                }
+                            }
+                        });
+                        if let Some(status) = &self.midi_status {
+                            ui.colored_label(colors.warning, status);
+                        }
+                        // Binding list with a remove button per row.
+                        let mut remove: Option<usize> = None;
+                        for (idx, binding) in self.midi_mapping.bindings.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.label(format!(
+                                    "{} {} · ch {}",
+                                    binding.kind.label(),
+                                    binding.number,
+                                    binding.channel + 1
+                                ));
+                                ui.label(self.midi_action_label(&binding.action));
+                                if ui.small_button(midi_remove).clicked() {
+                                    remove = Some(idx);
+                                }
+                            });
+                        }
+                        if let Some(idx) = remove {
+                            self.midi_mapping.bindings.remove(idx);
+                            self.midi_dirty = true;
+                        }
+                        // "Add binding" row.
+                        ui.horizontal(|ui| {
+                            ui.label(midi_kind);
+                            for kind in [
+                                rivulet_core::MidiKind::NoteOn,
+                                rivulet_core::MidiKind::NoteOff,
+                                rivulet_core::MidiKind::ControlChange,
+                            ] {
+                                ui.selectable_value(&mut self.midi_new_kind, kind, kind.label());
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(midi_channel);
+                            let mut channel_ui = self.midi_new_channel + 1;
+                            if ui
+                                .add(egui::DragValue::new(&mut channel_ui).range(1..=16))
+                                .changed()
+                            {
+                                self.midi_new_channel = channel_ui - 1;
+                            }
+                            ui.label(midi_number);
+                            ui.add(egui::DragValue::new(&mut self.midi_new_number).range(0..=127));
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(midi_action);
+                            let actions = [
+                                ("ToggleRecord", self.tr("midi_action_record")),
+                                ("ToggleStream", self.tr("midi_action_stream")),
+                                ("ToggleMute", self.tr("midi_action_mute")),
+                                ("SetMasterVolume", self.tr("midi_action_volume")),
+                                ("ToggleChromaKey", self.tr("midi_action_chroma")),
+                                ("SwitchScene", self.tr("midi_action_scene")),
+                            ];
+                            let selected = actions
+                                .iter()
+                                .find(|(name, _)| *name == self.midi_new_action)
+                                .map(|(_, label)| *label)
+                                .unwrap_or_else(|| self.midi_new_action.as_str());
+                            egui::ComboBox::from_id_salt("midi_action")
+                                .selected_text(selected)
                                 .show_ui(ui, |ui| {
-                                    for name in &names {
+                                    for (name, label) in actions {
                                         ui.selectable_value(
-                                            &mut self.midi_selected_preset,
-                                            Some(name.clone()),
-                                            name,
+                                            &mut self.midi_new_action,
+                                            name.to_owned(),
+                                            label,
                                         );
                                     }
                                 });
-                            if ui
-                                .add_enabled(
-                                    self.midi_selected_preset.is_some(),
-                                    egui::Button::new(midi_preset_apply),
-                                )
-                                .on_hover_text(midi_preset_apply_hint)
-                                .clicked()
-                            {
-                                if let Some(name) = self.midi_selected_preset.clone() {
-                                    if let Some(mapping) = self.midi_presets.load(&device, &name) {
-                                        self.midi_mapping = mapping.clone();
-                                        self.midi_dirty = true;
+                            if self.midi_new_action == "SwitchScene" {
+                                ui.label(midi_scene);
+                                let names: Vec<(uuid::Uuid, String)> = self
+                                    .scenes
+                                    .scenes()
+                                    .iter()
+                                    .map(|s| (s.id, s.name.clone()))
+                                    .collect();
+                                let selected_name = self
+                                    .midi_new_scene
+                                    .and_then(|id| names.iter().find(|(sid, _)| *sid == id))
+                                    .map(|(_, name)| name.clone())
+                                    .unwrap_or_else(|| self.tr("midi_scene_none").to_owned());
+                                egui::ComboBox::from_id_salt("midi_scene_pick")
+                                    .selected_text(selected_name)
+                                    .show_ui(ui, |ui| {
+                                        for (id, name) in &names {
+                                            if ui
+                                                .selectable_label(
+                                                    self.midi_new_scene == Some(*id),
+                                                    name,
+                                                )
+                                                .clicked()
+                                            {
+                                                self.midi_new_scene = Some(*id);
+                                            }
+                                        }
+                                    });
+                            }
+                            if ui.button(midi_add).clicked() {
+                                let action = match self.midi_new_action.as_str() {
+                                    "ToggleStream" => rivulet_core::MidiAction::ToggleStream,
+                                    "ToggleMute" => rivulet_core::MidiAction::ToggleMute,
+                                    "SetMasterVolume" => rivulet_core::MidiAction::SetMasterVolume,
+                                    "ToggleChromaKey" => rivulet_core::MidiAction::ToggleChromaKey,
+                                    "SwitchScene" => {
+                                        if let Some(id) = self.midi_new_scene {
+                                            rivulet_core::MidiAction::SwitchScene(id)
+                                        } else {
+                                            rivulet_core::MidiAction::ToggleRecord
+                                        }
                                     }
+                                    _ => rivulet_core::MidiAction::ToggleRecord,
+                                };
+                                self.midi_mapping
+                                    .bindings
+                                    .push(rivulet_core::MidiBinding::new(
+                                        self.midi_new_channel,
+                                        self.midi_new_kind,
+                                        self.midi_new_number,
+                                        action,
+                                    ));
+                                self.midi_dirty = true;
+                            }
+                        });
+                        // Learn mode: capture the next moved control into the row.
+                        ui.horizontal(|ui| {
+                            let learn_label = if self.midi_learn {
+                                self.tr("midi_learn_waiting")
+                            } else {
+                                self.tr("midi_learn")
+                            };
+                            let mut learn = self.midi_learn;
+                            if ui.selectable_label(self.midi_learn, learn_label).clicked() {
+                                learn = !self.midi_learn;
+                                if learn {
+                                    // Start fresh: clear any earlier capture.
+                                    self.midi_learn_captured = None;
                                 }
                             }
-                            if ui
-                                .add_enabled(
-                                    self.midi_selected_preset.is_some(),
-                                    egui::Button::new(midi_preset_delete),
-                                )
-                                .on_hover_text(midi_preset_delete_hint)
-                                .clicked()
-                            {
-                                if let Some(name) = self.midi_selected_preset.clone() {
-                                    self.midi_presets.delete(&device, &name);
-                                    self.midi_selected_preset = None;
+                            self.midi_learn = learn;
+                            if let Some(captured) = &self.midi_learn_captured {
+                                ui.label(format!(
+                                    "{}: {} {} · ch {}",
+                                    self.tr("midi_learn_captured"),
+                                    captured.kind.label(),
+                                    captured.number,
+                                    captured.channel + 1
+                                ));
+                                if ui.small_button(self.tr("midi_learn_clear")).clicked() {
+                                    self.midi_learn_captured = None;
                                 }
                             }
                         });
+                        // Per-device presets: save the whole mapping under a name for
+                        // the currently selected device, load it back, or delete it.
+                        let midi_presets_label = self.tr("midi_presets");
+                        let midi_preset_name_hint = self.tr("midi_preset_name_hint");
+                        let midi_preset_save = self.tr("midi_preset_save");
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(midi_presets_label).strong());
+                            if ui
+                                .add_enabled(
+                                    self.midi_devices.get(self.midi_device_index).is_some(),
+                                    egui::TextEdit::singleline(&mut self.midi_preset_name)
+                                        .hint_text(midi_preset_name_hint),
+                                )
+                                .changed()
+                            {
+                                // Keep the dropdown in sync with the typed name.
+                                self.midi_selected_preset = Some(self.midi_preset_name.clone());
+                            }
+                            if ui
+                                .add_enabled(
+                                    !self.midi_preset_name.trim().is_empty()
+                                        && self.midi_devices.get(self.midi_device_index).is_some(),
+                                    egui::Button::new(midi_preset_save),
+                                )
+                                .clicked()
+                            {
+                                if let Some(device) =
+                                    self.midi_devices.get(self.midi_device_index).cloned()
+                                {
+                                    self.midi_presets.save(
+                                        &device,
+                                        self.midi_preset_name.trim(),
+                                        self.midi_mapping.clone(),
+                                    );
+                                    self.midi_selected_preset = Some(self.midi_preset_name.clone());
+                                }
+                            }
+                        });
+                        let midi_preset_load = self.tr("midi_preset_load");
+                        let midi_preset_apply = self.tr("midi_preset_apply");
+                        let midi_preset_apply_hint = self.tr("midi_preset_apply_hint");
+                        let midi_preset_delete = self.tr("midi_preset_delete");
+                        let midi_preset_delete_hint = self.tr("midi_preset_delete_hint");
+                        if let Some(device) = self.midi_devices.get(self.midi_device_index).cloned()
+                        {
+                            // Clone the names: they are only used to drive the dropdown
+                            // and the borrow would otherwise fight the mutable `self`
+                            // captures below.
+                            let names: Vec<String> = self
+                                .midi_presets
+                                .names_for(&device)
+                                .into_iter()
+                                .map(str::to_owned)
+                                .collect();
+                            if !names.is_empty() {
+                                ui.horizontal(|ui| {
+                                    ui.label(midi_preset_load);
+                                    egui::ComboBox::from_id_salt("midi_preset_pick")
+                                        .selected_text(
+                                            self.midi_selected_preset
+                                                .as_deref()
+                                                .filter(|n| names.iter().any(|c| c == n))
+                                                .unwrap_or_default(),
+                                        )
+                                        .show_ui(ui, |ui| {
+                                            for name in &names {
+                                                ui.selectable_value(
+                                                    &mut self.midi_selected_preset,
+                                                    Some(name.clone()),
+                                                    name,
+                                                );
+                                            }
+                                        });
+                                    if ui
+                                        .add_enabled(
+                                            self.midi_selected_preset.is_some(),
+                                            egui::Button::new(midi_preset_apply),
+                                        )
+                                        .on_hover_text(midi_preset_apply_hint)
+                                        .clicked()
+                                    {
+                                        if let Some(name) = self.midi_selected_preset.clone() {
+                                            if let Some(mapping) =
+                                                self.midi_presets.load(&device, &name)
+                                            {
+                                                self.midi_mapping = mapping.clone();
+                                                self.midi_dirty = true;
+                                            }
+                                        }
+                                    }
+                                    if ui
+                                        .add_enabled(
+                                            self.midi_selected_preset.is_some(),
+                                            egui::Button::new(midi_preset_delete),
+                                        )
+                                        .on_hover_text(midi_preset_delete_hint)
+                                        .clicked()
+                                    {
+                                        if let Some(name) = self.midi_selected_preset.clone() {
+                                            self.midi_presets.delete(&device, &name);
+                                            self.midi_selected_preset = None;
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                        ui.small(midi_hint);
                     }
-                }
-                ui.small(midi_hint);
-            }
 
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    ui.label(format!("{} ", self.tr("powered_by")));
-                    ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-                    ui.label(" & ");
-                    ui.hyperlink_to(
-                        "eframe",
-                        "https://github.com/emilk/egui/tree/master/crates/eframe",
-                    );
-                    ui.label(".");
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        ui.label(format!("{} ", self.tr("powered_by")));
+                        ui.hyperlink_to("egui", "https://github.com/emilk/egui");
+                        ui.label(" & ");
+                        ui.hyperlink_to(
+                            "eframe",
+                            "https://github.com/emilk/egui/tree/master/crates/eframe",
+                        );
+                        ui.label(".");
+                    });
                 });
-            });
         });
 
         // Region capture editor (floating window, rendered after the panels

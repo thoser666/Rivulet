@@ -504,6 +504,27 @@ fn obs_websocket_smoke_is_wired_up() {
 }
 
 #[test]
+fn responsive_layout_contract_is_pinned_in_the_gui() {
+    // Shrinking the window must never clip controls without a way to reach
+    // them: the central view content and the sidebar live in scroll areas and
+    // the window has a minimum inner size (guards in main.rs).
+    let app = read("rivulet-gui/src/app.rs");
+    let main = read("rivulet-gui/src/main.rs");
+    assert!(app.contains("egui::ScrollArea::vertical()"));
+    assert!(app.contains("auto_shrink([false, false])"));
+    assert!(app.contains("nav_panel"));
+    assert!(main.contains("with_min_inner_size"));
+    // The source-contract tests must stay wired to these guarantees.
+    let smoke = read("rivulet-gui/tests/ui_smoke.rs");
+    assert!(smoke.contains("responsive_contract_keeps_controls_reachable_on_narrow_windows"));
+    let accessibility = read("rivulet-gui/tests/ui_accessibility.rs");
+    assert!(accessibility.contains("fn narrow_layout_is_responsive"));
+    let regression = read("rivulet-gui/tests/ui_regression.rs");
+    assert!(regression.contains("640, 480"), "640x480 must be covered");
+    assert!(regression.contains("content=scrollable"));
+}
+
+#[test]
 fn midi_mapping_is_wired_into_gui_and_ci() {
     // The hardware-free mapping/parse core lives in rivulet-core::midi.
     let midi_core = read("rivulet-core/src/midi.rs");
