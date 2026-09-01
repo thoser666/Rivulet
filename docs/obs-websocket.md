@@ -218,5 +218,11 @@ The crate contains two layers of tests:
   control, request batches incl. `haltOnFailure`, unknown request rejection,
   and clean shutdown. This is the “verified with a real client” acceptance
   criterion of the issue.
+- **CI loopback smoke** — the `OBS WebSocket Smoke` job in `.github/workflows/ci.yml`
+  runs `cargo test -p rivulet-obs-websocket --test client_smoke` on every push,
+  starting the server on `127.0.0.1` and driving it with the real tungstenite
+  client inside the pipeline. The job is wired into the required `CI`
+  aggregate check, and `rivulet-core/tests/ci_pinning.rs` fails if the wiring
+  drifts (job name, real-loopback usage, aggregate dependency).
 - **GUI integration**: settings toggle/port/password persistence is covered
   by the existing GUI test harness, and i18n keys exist in both locales.

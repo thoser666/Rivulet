@@ -478,6 +478,32 @@ fn rist_receiver_smoke_is_wired_up() {
 }
 
 #[test]
+fn obs_websocket_smoke_is_wired_up() {
+    let workflow = read(".github/workflows/ci.yml");
+    assert!(workflow.contains("name: OBS WebSocket Smoke"));
+    let smoke_job = workflow
+        .find("name: OBS WebSocket Smoke")
+        .expect("OBS WebSocket smoke job");
+    let aggregate = workflow.find("    name: CI").expect("CI aggregate job");
+    assert!(
+        smoke_job < aggregate,
+        "the OBS WebSocket smoke job must run before the CI aggregate"
+    );
+    assert!(
+        workflow.contains("cargo test -p rivulet-obs-websocket --test client_smoke -- --nocapture"),
+        "CI must run the real-client smoke test against the server"
+    );
+    assert!(
+        workflow.contains("needs.obs_websocket_smoke.result"),
+        "the CI aggregate must require the OBS WebSocket smoke result"
+    );
+    // The smoke must drive the server over a real loopback TCP connection.
+    let smoke = read("rivulet-obs-websocket/tests/client_smoke.rs");
+    assert!(smoke.contains("real (non-mock) WebSocket client"));
+    assert!(smoke.contains("ws://127.0.0.1:{port}"));
+}
+
+#[test]
 fn adaptive_bitrate_live_change_diagnostics_are_wired_up() {
     let runtime = read("rivulet-core/src/stream_runtime.rs");
     let engine = read("rivulet-core/src/lib.rs");
@@ -531,7 +557,7 @@ fn develop_required_checks_have_stable_job_names() {
             && ci.contains("cargo test -p rivulet-core --test ci_pinning")
             && ci.contains("name: CI")
             && ci.contains(
-                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke]"
+                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke]"
             ),
         "CI must expose dedicated Pinning-Tests and aggregate CI checks"
     );
