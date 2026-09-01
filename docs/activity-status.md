@@ -209,6 +209,53 @@ Discord renders two different things on your profile:
   (e.g. `rivulet_logo`) and click Apply. Discord then renders the artwork
   instead of the generic icon, OBS-style.
 
+## Uploading the Rivulet logo as an Art Asset
+
+The repository ships a ready-to-upload artwork:
+
+![Rivulet Rich Presence artwork (512px preview)](assets/rivulet-rich-presence-512.png)
+
+| File | Size | Use |
+|------|------|-----|
+| `docs/assets/rivulet-rich-presence-1024.png` | 1024×1024 PNG | **Upload this one** to Discord |
+| `docs/assets/rivulet-rich-presence-512.png` | 512×512 PNG | Documentation preview |
+| `rivulet-gui/assets/rivulet_logo.jpg` | 1024×1024 JPG | Source logo (app icon) |
+
+**Discord's requirements and best practices:**
+
+- **Size:** exactly **1024×1024** pixels (Discord's recommended art-asset
+  size; smaller images are scaled up and look soft).
+- **Format:** **PNG** (preferred) or JPG. PNG avoids the compression artifacts
+  that show up on the profile card.
+- **File size:** keep it under Discord's 5 MB upload limit — the shipped
+  PNG is ~130 KB.
+- **Padding:** the artwork is displayed inside a card with rounded corners
+  and slight zoom, so the motif must not touch the image edges. The shipped
+  asset keeps ~8 % padding around the logo.
+- **Square:** the card is square; a non-square image gets cropped.
+
+**Step-by-step upload (once, by the app owner):**
+
+1. Go to
+   `https://discord.com/developers/applications/1544027006847680532/rich-presence`.
+2. In the **Rich Presence** section, open the **Art Assets** tab.
+3. Click **Upload Image**, select `docs/assets/rivulet-rich-presence-1024.png`.
+4. Discord asks for an **asset name** — enter exactly `rivulet_logo` (this
+   is the key referenced by the client; spaces are replaced by `_`).
+5. Click **Save**. The asset now appears in the list with the key
+   `rivulet_logo`.
+
+**Wire it up in Rivulet:**
+
+1. Settings → Discord Rich Presence → **Art asset key (optional)**.
+2. Enter `rivulet_logo` and click **Apply**.
+3. The next `SET_ACTIVITY` carries `assets.large_image = "rivulet_logo"`;
+   Discord renders the artwork instead of the generic placeholder icon.
+   (Verified live: the handshake accepts the activity with the asset key.)
+
+If you upload the artwork under a different asset name, use that exact name
+as the key in Settings — the two must match character-for-character.
+
 The payload itself follows the OBS layout: `state` carries the plain status
 label ("Recording"/"Aufnahme") and `details` carries the selected game name
 (when a game/window source is selected) — the application name is rendered
