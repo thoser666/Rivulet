@@ -213,3 +213,36 @@ The payload itself follows the OBS layout: `state` carries the plain status
 label ("Recording"/"Aufnahme") and `details` carries the selected game name
 (when a game/window source is selected) — the application name is rendered
 by the Discord registration and is never duplicated into the payload.
+
+## Verifying Rich Presence is enabled for the application
+
+Rich Presence must be **enabled on the Discord application itself**, not just
+configured in Rivulet. There are two complementary checks:
+
+1. **Developer Portal (authoritative, requires the app owner to be logged
+   in):** open
+   `https://discord.com/developers/applications/<client-id>/rich-presence`
+   (for the configured Rivulet app: `1544027006847680532` →
+   `https://discord.com/developers/applications/1544027006847680532/rich-presence`).
+   The **Rich Presence** page in the left-hand sidebar shows the feature
+   status and the **Art Assets** tab where images (e.g. `rivulet_logo`) are
+   uploaded. If the app has never been opened there, or the side menu shows no
+   Rich Presence entry, the feature is not enabled for that application.
+2. **Live IPC handshake (no portal login needed, proves acceptance):** run
+   `powershell -File scripts/test-discord-handshake.ps1` while Discord desktop
+   is running. A successful check prints `READY` (with the logged-in user) and
+   then the `SET_ACTIVITY` frame **without any error reply**. Discord rejects
+   `SET_ACTIVITY` with an error frame (e.g. `40001` / `DISALLOWED`) when the
+   application does not have Rich Presence enabled — so a clean exchange
+   confirms the feature is active for the configured client id.
+
+> **Why the public API is not the check:** `GET
+> https://discord.com/api/v10/applications/<id>` returns `401 Unauthorized`
+> without an OAuth2/bot token, and the Rich Presence flag is not part of the
+> unauthenticated application payload anyway. The IPC handshake above is the
+> practical verification for a locally-running client.
+
+For the Rivulet application `1544027006847680532` the live handshake against
+the local Discord client succeeds: `READY` is returned and the `SET_ACTIVITY`
+frame is accepted without an error reply, which confirms Rich Presence is
+enabled on that application.
