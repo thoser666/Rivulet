@@ -3216,8 +3216,12 @@ mod tests {
         // and the container selection yields an mkv extension.
         assert!(name.starts_with("rivulet_recording_"), "got {name}");
         assert!(name.ends_with(".mkv"), "got {name}");
+        // The timestamp date component is the current local date, so compare
+        // dynamically instead of hard-coding a month (the test used to break
+        // on every month boundary).
+        let today = chrono::Local::now().format("%Y-%m-").to_string();
         assert!(
-            name.contains("-08-"),
+            name.contains(&today),
             "timestamp date component missing: {name}"
         );
         // The parent directory is preserved from the dir argument.
