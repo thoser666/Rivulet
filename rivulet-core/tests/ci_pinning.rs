@@ -615,6 +615,51 @@ fn discord_client_id_is_restored_from_eframe_storage() {
 }
 
 #[test]
+fn discord_presence_errors_are_logged_and_connection_state_is_exposed() {
+    // Regression: the presence worker swallowed IPC failures silently, so the
+    // GUI showed the desired status while Discord displayed only the plain
+    // "Playing Rivulet" game card. The worker must log (crash-log feature)
+    // and expose a shared connection state that the Stream view renders.
+    let discord = read("rivulet-core/src/discord.rs");
+    assert!(discord.contains("pub enum DiscordConnState"));
+    assert!(discord.contains("pub fn connection_state"));
+    assert!(
+        discord.contains("tracing::warn!(")
+            && discord.contains("Discord Rich Presence IPC unavailable"),
+        "IPC failures must be logged for the crash logs"
+    );
+    assert!(
+        discord.contains("tracing::trace!") && discord.contains("SET_ACTIVITY delivered"),
+        "successful delivery must be logged"
+    );
+    assert!(
+        discord.contains("DiscordConnState::Connected"),
+        "worker must flip to Connected"
+    );
+
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        gui.contains("p.connection_state()"),
+        "Stream view must poll the real connection state"
+    );
+    assert!(gui.contains("discord_conn_off"));
+    assert!(gui.contains("discord_conn_connected"));
+    // Locales must translate every new key (parity test enforces agreement).
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in [
+        "discord_conn_off",
+        "discord_conn_connecting",
+        "discord_conn_connected",
+    ] {
+        let k = format!("\"{key}\"");
+        assert!(
+            i18n.matches(&k).count() >= 2,
+            "{key} must exist in EN and DE"
+        );
+    }
+}
+
+#[test]
 fn presence_legend_lists_every_state_with_a_tooltip() {
     // The Stream view renders a legend: one row per state with an explanatory
     // tooltip, highlighting the active row. The i18n tables must translate

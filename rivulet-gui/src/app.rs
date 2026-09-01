@@ -4710,6 +4710,46 @@ impl RivuletApp {
             let hint = self.tr("discord_presence_hint");
             ui.checkbox(&mut self.discord_presence_enabled, enable_label)
                 .on_hover_text(hint);
+
+            // Surface the actual IPC state, not just the desired status: when
+            // Discord is not running, no client id is configured, or the
+            // handshake failed, the user otherwise only sees the plain game
+            // card ("Playing Rivulet") without the rich-presence details.
+            let conn_text = if !self.discord_presence_enabled
+                || (self.discord_presence.is_none()
+                    && self.discord_presence_client_id.trim().is_empty())
+            {
+                self.tr("discord_conn_off").to_owned()
+            } else {
+                match self
+                    .discord_presence
+                    .as_ref()
+                    .map(|p| p.connection_state())
+                    .unwrap_or(rivulet_core::discord::DiscordConnState::Connecting)
+                {
+                    rivulet_core::discord::DiscordConnState::Connected => {
+                        self.tr("discord_conn_connected").to_owned()
+                    }
+                    rivulet_core::discord::DiscordConnState::Connecting => {
+                        self.tr("discord_conn_connecting").to_owned()
+                    }
+                    rivulet_core::discord::DiscordConnState::Off => {
+                        self.tr("discord_conn_off").to_owned()
+                    }
+                }
+            };
+            let is_connected = matches!(
+                self.discord_presence.as_ref().map(|p| p.connection_state()),
+                Some(rivulet_core::discord::DiscordConnState::Connected)
+            );
+            ui.horizontal(|ui| {
+                let current_color = if is_connected {
+                    theme::StatusColors::for_ui(ui).success
+                } else {
+                    ui.visuals().weak_text_color()
+                };
+                ui.colored_label(current_color, conn_text);
+            });
             ui.small(self.tr("discord_presence_privacy"));
         });
     }
@@ -7902,6 +7942,34 @@ mod tests {
         assert_eq!(app.current_presence_activity(), PresenceActivity::Idle);
         // The legend covers every state in display order.
         assert_eq!(PresenceActivity::all().len(), 6);
+    }
+
+    #[test]
+    fn discord_presence_connection_state_is_surfaced_in_the_stream_view() {
+        // Regression: the presence group showed only the *desired* status
+        // text, never whether Discord actually accepted it. When the IPC
+        // handshake fails (Discord closed, wrong client id), the user only
+        // sees Discord's plain "Playing Rivulet" game card with no rich-
+        // presence lines and no explanation. The Stream view must expose the
+        // adapter's real connection state.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let draw = source
+            .split_once("fn draw_presence_status")
+            .map(|(_, rest)| rest)
+            .expect("draw_presence_status must exist");
+        // The adapter state is polled from the shared handle and rendered
+        // with a locale-aware status line.
+        assert!(
+            draw.contains("p.connection_state()"),
+            "status must read the real state"
+        );
+        assert!(draw.contains("discord_conn_connected"));
+        assert!(draw.contains("discord_conn_connecting"));
+        assert!(draw.contains("discord_conn_off"));
+        assert!(
+            draw.contains("StatusColors::for_ui(ui).success"),
+            "connected state must render in the success color"
+        );
     }
 
     #[test]

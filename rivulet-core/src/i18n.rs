@@ -387,6 +387,9 @@ impl Locale {
                 ("discord_presence_hint", "Share your recording/streaming status as
 Discord Rich Presence. Never includes stream keys, URLs, paths or window titles."),
                 ("discord_presence_privacy", "Only Rivulet and a localized status are shown; no stream keys, URLs, paths or window titles are ever transmitted."),
+                ("discord_conn_off", "Not connected to the Discord desktop app (or activity disabled / no client ID)."),
+                ("discord_conn_connecting", "Connecting to the Discord desktop app…"),
+                ("discord_conn_connected", "Connected — Discord shows the Rivulet status."),
                 ("discord_section", "Discord Rich Presence"),
                 ("discord_client_id", "Application client ID"),
                 ("discord_client_id_hint", "e.g. 1234567890123456789"),
@@ -857,6 +860,9 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("discord_presence_hint", "Teile deinen Aufnahme-/Stream-Status als
 Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."),
                 ("discord_presence_privacy", "Es werden nur Rivulet und ein lokalisierter Status angezeigt; Stream-Keys, URLs, Pfade oder Fenstertitel werden nie übertragen."),
+                ("discord_conn_off", "Nicht mit der Discord-Desktop-App verbunden (oder Aktivität deaktiviert / keine Client-ID)."),
+                ("discord_conn_connecting", "Verbinde mit der Discord-Desktop-App…"),
+                ("discord_conn_connected", "Verbunden — Discord zeigt den Rivulet-Status."),
                 ("discord_section", "Discord Rich Presence"),
                 ("discord_client_id", "Anwendungs-Client-ID"),
                 ("discord_client_id_hint", "z. B. 1234567890123456789"),

@@ -64,6 +64,19 @@ enum Msg {
     Disconnect,
 }
 
+/// Connection state of the presence worker, shared with the caller side so
+/// the GUI can surface whether Discord actually accepted the handshake instead
+/// of silently showing nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscordConnState {
+    /// Worker not running (adapter disabled or no client id configured).
+    Off,
+    /// Worker is running but has not (yet) established the IPC handshake.
+    Connecting,
+    /// Handshake accepted; a status was delivered to Discord.
+    Connected,
+}
+
 /// Handle to a running adapter. Cloning is not supported; the handle owns the
 /// worker lifecycle. Non-blocking by construction: [`Self::set_activity`] only
 /// enqueues a message and returns immediately.
@@ -71,6 +84,9 @@ pub struct DiscordPresence {
     tx: Option<Sender<Msg>>,
     stop: Arc<AtomicBool>,
     enabled: bool,
+    /// Reference to the worker's connection state so the GUI can show whether
+    /// Discord actually accepted the presence.
+    conn: Arc<std::sync::atomic::AtomicU8>,
 }
 
 impl DiscordPresence {
@@ -83,33 +99,49 @@ impl DiscordPresence {
                 tx: None,
                 stop: Arc::new(AtomicBool::new(true)),
                 enabled: false,
+                conn: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             };
         }
         let (tx, rx) = unbounded();
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
+        // Worker running but no handshake completed yet.
+        let conn = Arc::new(std::sync::atomic::AtomicU8::new(1));
+        let worker_conn = Arc::clone(&conn);
         let cfg = config.clone();
         let spawned = std::thread::Builder::new()
             .name("rivulet-discord-presence".to_owned())
-            .spawn(move || worker_loop(rx, cfg, worker_stop))
+            .spawn(move || worker_loop(rx, cfg, worker_stop, worker_conn))
             .is_ok();
         if !spawned {
             return Self {
                 tx: None,
                 stop: Arc::new(AtomicBool::new(true)),
                 enabled: false,
+                conn: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             };
         }
         Self {
             tx: Some(tx),
             stop,
             enabled: true,
+            conn,
         }
     }
 
     /// Whether a worker is actually running (i.e. the feature is active).
     pub fn enabled(&self) -> bool {
         self.enabled
+    }
+
+    /// Current IPC connection state, so callers can surface whether Discord
+    /// accepted the presence instead of silently showing nothing.
+    pub fn connection_state(&self) -> DiscordConnState {
+        match self.conn.load(std::sync::atomic::Ordering::SeqCst) {
+            2 => DiscordConnState::Connected,
+            1 => DiscordConnState::Connecting,
+            _ => DiscordConnState::Off,
+        }
     }
 
     /// Push a status update to the worker. Returns `false` when the adapter is
@@ -144,11 +176,17 @@ impl Drop for DiscordPresence {
     }
 }
 
-fn worker_loop(rx: Receiver<Msg>, cfg: DiscordPresenceConfig, stop: Arc<AtomicBool>) {
+fn worker_loop(
+    rx: Receiver<Msg>,
+    cfg: DiscordPresenceConfig,
+    stop: Arc<AtomicBool>,
+    conn: Arc<std::sync::atomic::AtomicU8>,
+) {
     let pid = std::process::id();
     let mut stream: Option<Box<dyn IpcStream>> = None;
     let mut last: Option<PresenceStatus> = None;
     let mut seq: u64 = 0;
+    let mut backoff = 1u64;
 
     loop {
         if stop.load(Ordering::SeqCst) {
@@ -174,10 +212,30 @@ fn worker_loop(rx: Receiver<Msg>, cfg: DiscordPresenceConfig, stop: Arc<AtomicBo
         // only when an activity transition is pending.
         let result = ensure_connected(&mut stream, &cfg.client_id, cfg.ipc_socket_path.as_deref())
             .and_then(|_| send_set_activity(stream.as_mut().unwrap(), &status, pid, &mut seq));
-        if result.is_err() {
-            // Discord gone or the socket died: drop it and reconnect lazily on
-            // the next transition.
-            stream = None;
+        match result {
+            Ok(()) => {
+                backoff = 1;
+                // Expose the connection state so the GUI can show whether
+                // Discord actually accepted the presence.
+                conn.store(2, Ordering::SeqCst);
+                tracing::trace!(
+                    state = %status.state,
+                    "Discord Rich Presence SET_ACTIVITY delivered"
+                );
+            }
+            Err(e) => {
+                // Discord gone or the socket died: drop it, mark the state and
+                // reconnect lazily on the next transition.
+                stream = None;
+                conn.store(0, Ordering::SeqCst);
+                tracing::warn!(
+                    error = %e,
+                    backoff_secs = backoff,
+                    "Discord Rich Presence IPC unavailable"
+                );
+                std::thread::sleep(Duration::from_secs(backoff));
+                backoff = (backoff * 2).min(30);
+            }
         }
     }
 }
@@ -195,7 +253,6 @@ fn ensure_connected(
         Err(e) => {
             // Discord is unavailable; back off on the worker thread so we do
             // not spin. The caller side is unaffected.
-            std::thread::sleep(Duration::from_secs(5));
             return Err(e);
         }
     };
@@ -482,6 +539,7 @@ mod tests {
         let presence = DiscordPresence::new(&cfg);
         assert!(!presence.enabled());
         assert!(!presence.set_activity(&status()));
+        assert_eq!(presence.connection_state(), DiscordConnState::Off);
     }
 
     #[test]
@@ -493,6 +551,30 @@ mod tests {
         };
         let presence = DiscordPresence::new(&cfg);
         assert!(!presence.enabled());
+        assert_eq!(presence.connection_state(), DiscordConnState::Off);
+    }
+
+    #[test]
+    fn connection_state_starts_connecting_and_degrades_without_discord() {
+        // No Discord running: the worker cannot complete the handshake, so the
+        // connection state must never claim success. The GUI surfaces this so
+        // the user sees why only the plain game card shows.
+        let cfg = DiscordPresenceConfig {
+            enabled: true,
+            client_id: "dummy-client".to_owned(),
+            ipc_socket_path: Some(std::path::PathBuf::from(
+                std::env::temp_dir().join("rivulet-missing-discord-ipc.sock"),
+            )),
+        };
+        let mut presence = DiscordPresence::new(&cfg);
+        assert!(presence.enabled());
+        let _ = presence.set_activity(&status());
+        // Give the worker time to attempt the (failing) connect; because the
+        // worker sleeps on failure, the state stays off/connecting, never
+        // connected.
+        std::thread::sleep(Duration::from_millis(600));
+        assert_ne!(presence.connection_state(), DiscordConnState::Connected);
+        presence.disconnect();
     }
 
     #[test]
@@ -667,7 +749,24 @@ mod tests {
         assert_eq!(set["args"]["activity"]["type"], 0);
         assert_eq!(set["args"]["activity"]["state"], "Recording");
 
+        // The shared connection state must reflect the successful handshake so
+        // the GUI can show "connected" instead of only the plain game card.
+        wait_until(|| presence.connection_state() == DiscordConnState::Connected);
         presence.disconnect();
+    }
+
+    /// Poll `condition` until it holds or the deadline passes (test helper for
+    /// the async worker: the SET_ACTIVITY frame may be buffered before the
+    /// worker flips the shared connection state).
+    fn wait_until(condition: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if condition() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        panic!("condition not met within 5s");
     }
 
     /// End-to-end smoke test for the Windows transport: run the real worker
@@ -790,6 +889,9 @@ mod tests {
             assert_eq!(set["args"]["pid"], std::process::id());
             assert_eq!(set["args"]["activity"]["state"], "Streaming");
 
+            // The shared connection state must reflect the successful handshake
+            // (same contract as the Unix listener smoke test).
+            super::wait_until(|| presence.connection_state() == DiscordConnState::Connected);
             presence.disconnect();
         }
     }

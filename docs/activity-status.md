@@ -137,3 +137,28 @@ label is sent, never the raw error text (which may contain paths or other
 implementation details). The state recovers automatically on the next start —
 recording starts and both streaming-start paths clear `last_error`, so the
 status moves back to the activity label rather than sticking on "Error".
+
+## Connection diagnostics ("only Rivulet shows on Discord")
+
+If your Discord profile shows the plain "Playing Rivulet" card **without** the
+status lines you configured, that is Discord's built-in **game detection** for
+the running Rivulet process — the Rich Presence `SET_ACTIVITY` frame is not
+being applied (or no valid state was ever delivered). The common causes:
+
+1. **No client ID configured** (or the feature is disabled): an empty
+   Application client ID keeps the adapter fully off. Configure it in Settings
+   → Discord Rich Presence.
+2. **Discord desktop is not running**: the adapter connects to the local
+   `discord-ipc-0` endpoint of a running Discord client. With Discord closed,
+   the worker retries with exponential backoff and reports the failure to the
+   crash logs (`Discord Rich Presence IPC unavailable`).
+3. **The client ID belongs to the wrong application**: the ID must be the
+   ``Client ID`` of a Discord application with **Rich Presence** enabled that
+   has been created/toggled for Rich Presence use.
+
+Since the worker now exposes its **connection state**, the Stream view shows a
+status line under the toggle that says whether the handshake was accepted
+(„Verbunden"/"Connected" in the success color) or still connecting / off
+(`discord_conn_off`, `discord_conn_connecting`). Every IPC success or failure
+is also written to the daily crash logs, so the root cause is visible instead
+of silently swallowing the error.
