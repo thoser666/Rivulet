@@ -218,7 +218,7 @@ fn worker_loop(
                 // Expose the connection state so the GUI can show whether
                 // Discord actually accepted the presence.
                 conn.store(2, Ordering::SeqCst);
-                tracing::trace!(
+                tracing::info!(
                     state = %status.state,
                     "Discord Rich Presence SET_ACTIVITY delivered"
                 );

@@ -629,8 +629,8 @@ fn discord_presence_errors_are_logged_and_connection_state_is_exposed() {
         "IPC failures must be logged for the crash logs"
     );
     assert!(
-        discord.contains("tracing::trace!") && discord.contains("SET_ACTIVITY delivered"),
-        "successful delivery must be logged"
+        discord.contains("tracing::info!") && discord.contains("SET_ACTIVITY delivered"),
+        "successful delivery must be logged at info level (visible with the default RUST_LOG)"
     );
     assert!(
         discord.contains("DiscordConnState::Connected"),
@@ -1062,4 +1062,35 @@ fn build_caches_do_not_restore_stale_target_artifacts() {
             "{workflow} must not restore an unrelated old Cargo cache"
         );
     }
+}
+
+#[test]
+fn daily_logging_defaults_to_info_not_empty_filter() {
+    // Regression: logging init used EnvFilter::from_default_env(), which with
+    // RUST_LOG unset filters out everything — the daily crash log stayed empty
+    // and Discord/engine diagnostics were invisible. The init must resolve a
+    // user-friendly default (info) and the fallback must be unit-tested.
+    let logging = read("rivulet-gui/src/logging.rs");
+    // Only the *production* init code must not use from_default_env; a doc
+    // comment mentioning the old bug is fine and expected.
+    let production = logging
+        .split_once("pub fn init(")
+        .map(|(_, rest)| {
+            rest.split_once("#[cfg(test)]")
+                .map(|(head, _)| head)
+                .unwrap_or(rest)
+        })
+        .expect("init() must exist");
+    assert!(
+        !production.contains("EnvFilter::from_default_env()"),
+        "unset RUST_LOG must not silently disable all logging"
+    );
+    assert!(
+        production.contains("resolve_filter_spec(std::env::var(\"RUST_LOG\").ok())"),
+        "init must resolve the filter from the env with an info fallback"
+    );
+    assert!(
+        logging.contains("filter_spec_defaults_to_info_when_rust_log_unset"),
+        "the fallback rule must be covered by a unit test"
+    );
 }
