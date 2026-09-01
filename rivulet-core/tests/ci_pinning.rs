@@ -604,6 +604,28 @@ fn presence_legend_lists_every_state_with_a_tooltip() {
     ] {
         assert!(i18n.matches(key).count() >= 2, "{key} must be localized");
     }
+    // The operator-facing docs must document all six states with their labels
+    // and transitions so the model cannot drift from the documented contract.
+    let docs = read("docs/activity-status.md");
+    assert!(
+        docs.contains("## State reference"),
+        "docs must have the state table"
+    );
+    for (de, en) in [
+        ("Bereit", "Ready"),
+        ("Aufnahme", "Recording"),
+        ("Streamt", "Streaming"),
+        ("Aufnahme + Stream", "Recording + streaming"),
+        ("Pausiert", "Paused"),
+        ("Fehler", "Error"),
+    ] {
+        assert!(
+            docs.contains(de) && docs.contains(en),
+            "docs must document both labels ({de}/{en})"
+        );
+    }
+    // The documented transition language (arrows) signals the table is alive.
+    assert!(docs.contains("Transitions out"));
 }
 
 #[test]

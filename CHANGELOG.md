@@ -1,6 +1,7 @@
 # Changelog
 
 ## [0.65.0-alpha.55] - 2026-08-30
+- docs(presence): add a state-reference table to docs/activity-status.md covering all six states — DE/EN labels, trigger conditions, and transitions; the ci_pinning guard now keeps the documented table in sync with the model
 - feat(ui): add a status legend to the Stream view — one row per presence state with a hover tooltip explaining when it appears and what it means; the active state is highlighted, keys are localized DE/EN and pinned by ci_pinning
 - feat(presence): wire the previously unused PresenceActivity::Error state — engine/capture failures surface as a localized "Error"/"Fehler" status with priority over activity labels, streaming starts clear stale errors, and the payload never leaks the raw error text (tests + docs updated)
 - fix(presence): sync Discord Rich Presence from the global UI update every frame, not only while the Stream view is visible — starting/stopping a recording now updates the Discord status from any tab; regression + ci_pinning guards added, docs updated

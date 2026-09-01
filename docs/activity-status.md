@@ -92,6 +92,25 @@ never drifts from the model) and every tooltip is localized through
 `tooltip_i18n_key()` in both DE/EN (enforced by the i18n parity test and the
 `presence_legend_lists_every_state_with_a_tooltip` ci_pinning guard).
 
+## State reference
+
+All six states, their i18n labels, what triggers them, and the transitions that
+leave them. The evaluation priority (newest first) is: Error → Recording + 
+streaming → Paused → Recording → Streaming → Ready.
+
+| State | DE | EN | Appears when | Transitions out |
+|---|---|---|---|---|
+| Bereit | `presence_ready` → „Bereit" | `presence_ready` → "Ready" | On startup and whenever neither recording nor streaming is active | → Aufnahme (recording starts) · → Streamt (streaming starts) |
+| Aufnahme | `presence_recording` → „Aufnahme" | `presence_recording` → "Recording" | Recording is running and writing frames | → Pausiert (pause) · → Aufnahme+Stream (stream starts) · → Bereit (stop) · → Fehler (engine/capture failure) |
+| Streamt | `presence_streaming` → „Streamt" | `presence_streaming` → "Streaming" | Streaming to the ingest server is running | → Aufnahme+Stream (recording starts) · → Bereit (stop) · → Fehler (engine failure) |
+| Aufnahme + Stream | `presence_recording_streaming` → „Aufnahme + Stream" | `presence_recording_streaming` → "Recording + streaming" | Recording and streaming run at the same time | → Aufnahme (stream stops) · → Streamt (recording stops) · → Bereit (both stop) · → Fehler (failure) |
+| Pausiert | `presence_paused` → „Pausiert" | `presence_paused` → "Paused" | Recording is active but paused (frames captured, not written) | → Aufnahme (resume) · → Fehler (failure) |
+| Fehler | `presence_error` → „Fehler" | `presence_error` → "Error" | Engine/capture reported a failure; has priority over every activity label | → next state of the next start (recording/streaming starts clear `last_error`) · → Bereit (idle after clear) |
+
+Only **transitions** cross the IPC boundary: an unchanged state is never
+re-pushed, and "Fehler" is cleared by the next recording/streaming start —
+never by the UI alone.
+
 ## The "Error" state
 
 `PresenceActivity::Error` is produced whenever the engine or a capture thread
