@@ -732,6 +732,15 @@ fn discord_presence_uses_obs_style_assets_and_no_duplicate_name() {
     assert!(discord.contains("#[serde(rename = \"large_image\")]"));
     // Wire-level coverage: assets attached when configured, absent otherwise.
     assert!(discord.contains("set_activity_attaches_large_image_when_configured"));
+    // Discord rejects an empty details string (4000: "details" is not allowed
+    // to be empty, verified live), so the details field must be omitted when
+    // there is no game name instead of being sent empty.
+    assert!(
+        discord.contains("details: Option<String>")
+            && discord.contains("!status.details.trim().is_empty()"),
+        "empty details must be omitted, never sent as an empty string"
+    );
+    assert!(discord.contains("empty_details_is_omitted_not_sent_empty"));
     let gui = read("rivulet-gui/src/app.rs");
     assert!(gui.contains("discord_presence_large_image"));
     assert!(gui.contains("discord_large_image"));

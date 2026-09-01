@@ -38,10 +38,11 @@ function Read-WithTimeout($stream, $milliseconds) {
 Write-DiscordFrame $pipe 0 "{`"v`":1,`"client_id`":`"$clientId`"}"
 Write-Output "HANDSHAKE_SENT (op 0)"
 
-# 2. SET_ACTIVITY (op 1)
-$activity = '{"cmd":"SET_ACTIVITY","args":{"pid":' + $PID + ',"activity":{"type":0,"state":"Ready","details":"Rivulet · Ready"}},"nonce":"rivulet-live-1"}'
+# 2. SET_ACTIVITY (op 1) — OBS-style payload with the Rivulet artwork asset
+# (large_image key must match an uploaded Art Asset in the Developer Portal).
+$activity = '{"cmd":"SET_ACTIVITY","args":{"pid":' + $PID + ',"activity":{"type":0,"state":"Ready","details":"","assets":{"large_image":"rivulet_logo","large_text":"Rivulet"}}},"nonce":"rivulet-live-1"}'
 Write-DiscordFrame $pipe 1 $activity
-Write-Output "SET_ACTIVITY_SENT (op 1, pid $PID)"
+Write-Output "SET_ACTIVITY_SENT (op 1, pid $PID, assets.large_image=rivulet_logo)"
 
 # Read as many reply frames as arrive (up to 3, 3s each).
 for ($frame = 1; $frame -le 3; $frame++) {

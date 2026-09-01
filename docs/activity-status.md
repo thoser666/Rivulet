@@ -261,6 +261,14 @@ label ("Recording"/"Aufnahme") and `details` carries the selected game name
 (when a game/window source is selected) — the application name is rendered
 by the Discord registration and is never duplicated into the payload.
 
+> **Empty `details` is rejected by Discord (fixed):** Discord refuses a
+> `SET_ACTIVITY` whose `details` is an empty string with
+> `4000: "details" is not allowed to be empty` (verified live against a
+> running client). Rivulet therefore **omits the field entirely** when no
+> game name is selected instead of sending an empty string — the card then
+> shows only the status line, exactly like OBS without a game. A `ci_pinning`
+> guard (`empty_details_is_omitted_not_sent_empty`) locks this in.
+
 ## Verifying Rich Presence is enabled for the application
 
 Rich Presence must be **enabled on the Discord application itself**, not just

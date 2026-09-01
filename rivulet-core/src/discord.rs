@@ -440,7 +440,12 @@ struct Activity {
     #[serde(rename = "type")]
     r#type: u32,
     state: String,
-    details: String,
+    /// Optional detail line. Discord **rejects** an empty string here with
+    /// `4000: "details" is not allowed to be empty`, so the field is omitted
+    /// entirely when there is no game name to show (verified live against a
+    /// running Discord client).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    details: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     assets: Option<ActivityAssets>,
 }
@@ -473,7 +478,7 @@ impl ActivityCommand {
                 activity: Activity {
                     r#type: 0, // 0 == "Playing" / Game presence
                     state: truncate(&status.state),
-                    details: truncate(&status.details),
+                    details: (!status.details.trim().is_empty()).then(|| truncate(&status.details)),
                     assets,
                 },
             },
@@ -798,6 +803,31 @@ mod tests {
         assert!(value["args"]["activity"]["assets"].is_null());
         assert!(!value["nonce"].as_str().unwrap().is_empty());
         assert!(seq > 7);
+    }
+
+    #[test]
+    fn empty_details_is_omitted_not_sent_empty() {
+        // Regression (verified live): Discord rejects SET_ACTIVITY with
+        // `4000: "details" is not allowed to be empty`, so a status without a
+        // game name (empty details) must omit the field entirely instead of
+        // sending an empty string.
+        let mut buf = Vec::new();
+        let st = PresenceStatus::for_activity(PresenceActivity::Idle);
+        assert!(st.details.is_empty());
+        let mut seq = 2;
+        send_set_activity(&mut buf, &st, 5, &mut seq, None).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&buf[8..]).unwrap();
+        assert!(
+            value["args"]["activity"]["details"].is_null(),
+            "empty details must be omitted, got: {}",
+            value["args"]["activity"]["details"]
+        );
+        assert_eq!(value["args"]["activity"]["state"], "Ready");
+        let text = String::from_utf8(buf[8..].to_vec()).unwrap();
+        assert!(
+            !text.contains("\"details\":\"\""),
+            "payload must not contain an empty details string"
+        );
     }
 
     #[test]

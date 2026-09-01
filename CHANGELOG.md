@@ -1,6 +1,7 @@
 # Changelog
 
 ## [Unreleased]
+- fix(presence): omit the Discord activity `details` field when empty instead of sending an empty string — Discord rejects `SET_ACTIVITY` with `4000: "details" is not allowed to be empty` (verified live), which silently dropped every presence update whenever no game name was selected; regression test + ci_pinning guard + docs updated
 - docs(presence): ship a ready-to-upload Discord Rich Presence artwork (`docs/assets/rivulet-rich-presence-1024.png`, 1024×1024 PNG with padding) and document the exact upload path (Developer Portal → Rich Presence → Art Assets, asset name `rivulet_logo`) plus size/format/padding requirements in docs/activity-status.md
 - feat(m5): alert overlay import — Streamlabs/StreamElements widget URLs (and any custom https URL) can be imported into the browser source via a guided provider + token flow in the Scenes view; the token is cleared after import and never logged; core URL-shape/validation tests, GUI import tests, ci_pinning guard and docs/alerts.md added
 - feat(presence): OBS-style Discord activity card — the payload now carries the art asset (`large_image`) uploaded in the Discord Developer Portal (configurable asset key in Settings, persisted), so the card shows Rivulet artwork instead of the generic placeholder icon; the layout splits state (plain status label) and details (selected game name) like OBS, and the app name is no longer duplicated into the payload (Discord renders it from the application registration); tests + ci_pinning guard + docs updated
