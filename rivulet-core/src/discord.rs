@@ -102,6 +102,65 @@ pub fn validate_client_id(client_id: &str) -> Result<(), ClientIdError> {
     Ok(())
 }
 
+/// Why a `SET_ACTIVITY` payload violates Discord's Rich Presence validation
+/// rules. Discord rejects offending payloads with error code `4000` (verified
+/// live), so every violation here is a *wire-level* rejection, not a cosmetic
+/// nit — the whole status update is dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PayloadIssue {
+    /// `state` or `details` exceeds Discord's 128-character limit. The
+    /// serializer truncates silently, so this flags the condition before the
+    /// truncation hides it (e.g. in Settings previews).
+    FieldTooLong { field: &'static str, len: usize },
+    /// The configured `large_image` asset key is not a plausible Discord art
+    /// asset key (non-empty, letters/digits/underscore only, ≤ 64 chars).
+    /// Unlike truncation, an invalid key is sent **verbatim** and Discord
+    /// silently drops the image — it never appears on the card.
+    InvalidAssetKey,
+}
+
+/// Validate a `PresenceStatus` (plus optional asset key) against Discord's
+/// documented Rich Presence rules **before** it is put on the wire. Returns
+/// every violation found; an empty slice means the payload would be accepted.
+///
+/// This is the single source of truth for the limits that otherwise only
+/// surface as silent truncation (`state`/`details` ≤ 128 chars) or as a
+/// silently dropped image (invalid `large_image` key). The empty-`details`
+/// rule is enforced on the wire itself: the serializer **omits** the field
+/// when there is no game name (Discord rejects an empty string with `4000`),
+/// and the exhaustive contract test asserts no serialized payload ever
+/// contains an empty `details`.
+pub fn validate_set_activity_payload(
+    status: &PresenceStatus,
+    large_image_key: Option<&str>,
+) -> Vec<PayloadIssue> {
+    let mut issues = Vec::new();
+    let details = status.details.trim();
+    if !details.is_empty() && details.len() > 128 {
+        issues.push(PayloadIssue::FieldTooLong {
+            field: "details",
+            len: details.len(),
+        });
+    }
+    let state = status.state.trim();
+    if state.len() > 128 {
+        issues.push(PayloadIssue::FieldTooLong {
+            field: "state",
+            len: state.len(),
+        });
+    }
+    if let Some(key) = large_image_key {
+        let key = key.trim();
+        if key.is_empty()
+            || key.len() > 64
+            || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            issues.push(PayloadIssue::InvalidAssetKey);
+        }
+    }
+    issues
+}
+
 /// Messages sent from the (fast) caller side to the (blocking) worker thread.
 enum Msg {
     Activity(Box<PresenceStatus>),
@@ -465,10 +524,21 @@ impl ActivityCommand {
     /// uploaded art asset, its key is attached so Discord shows the Rivulet
     /// artwork instead of the generic placeholder icon (OBS-style).
     fn new(status: &PresenceStatus, pid: u32, seq: u64, large_image: Option<&str>) -> Self {
+        // Only attach the artwork when the key is plausible: an empty or
+        // malformed key would be sent verbatim and Discord would silently drop
+        // the image (no error, no artwork). The same rule is exposed through
+        // `validate_set_activity_payload` for pre-wire warnings.
         let assets = large_image
-            .filter(|k| !k.trim().is_empty())
+            .filter(|key| {
+                !key.trim().is_empty()
+                    && key.trim().len() <= 64
+                    && key
+                        .trim()
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            })
             .map(|key| ActivityAssets {
-                large_image: key.to_owned(),
+                large_image: key.trim().to_owned(),
                 large_text: Some("Rivulet".to_owned()),
             });
         ActivityCommand {
@@ -827,6 +897,154 @@ mod tests {
         assert!(
             !text.contains("\"details\":\"\""),
             "payload must not contain an empty details string"
+        );
+    }
+
+    #[test]
+    fn payload_validator_reports_overlong_state_and_details() {
+        // 129+ chars must be flagged so Settings can warn before the
+        // truncation silently hides the condition.
+        let long_details = "x".repeat(129);
+        let long_state = "y".repeat(200);
+        let st = PresenceStatus {
+            application: "Rivulet",
+            details: long_details,
+            state: long_state,
+        };
+        let issues = validate_set_activity_payload(&st, None);
+        assert!(issues.contains(&PayloadIssue::FieldTooLong {
+            field: "details",
+            len: 129,
+        }));
+        assert!(issues.contains(&PayloadIssue::FieldTooLong {
+            field: "state",
+            len: 200,
+        }));
+        // Exactly 128 chars is the limit — not a violation.
+        let ok = PresenceStatus {
+            application: "Rivulet",
+            details: "x".repeat(128),
+            state: "Ready".to_owned(),
+        };
+        assert!(validate_set_activity_payload(&ok, None).is_empty());
+    }
+
+    #[test]
+    fn payload_validator_rejects_invalid_asset_keys() {
+        // A key is sent verbatim, so an implausible one must be flagged before
+        // Discord silently drops the image from the card.
+        let too_long = "x".repeat(65);
+        for bad in [
+            "",
+            "  ",
+            "with space",
+            "with/slash",
+            "emoji😀",
+            too_long.as_str(),
+        ] {
+            assert!(
+                validate_set_activity_payload(&status(), Some(bad))
+                    .contains(&PayloadIssue::InvalidAssetKey),
+                "key {bad:?} must be rejected"
+            );
+        }
+        for good in ["rivulet_logo", "logo_2026", "RIVULET_LOGO"] {
+            assert!(
+                validate_set_activity_payload(&status(), Some(good)).is_empty(),
+                "key {good:?} must be accepted"
+            );
+        }
+        // No key configured is always fine.
+        assert!(validate_set_activity_payload(&status(), None).is_empty());
+    }
+
+    /// Exhaustive wire-contract check: serialize *every* payload variant and
+    /// assert the JSON actually sent to Discord satisfies its documented
+    /// validation rules. This is the CI-enforced guarantee that a `4000`
+    /// rejection (empty `details`) or a silently truncated/dropped field can
+    /// never reach the wire again.
+    #[test]
+    fn every_payload_variant_conforms_to_discord_rules_on_the_wire() {
+        use crate::presence::PresenceActivity;
+        let game_names: &[Option<&str>] = &[None, Some("Elden Ring"), Some(&"é".repeat(200))];
+        let asset_keys: &[Option<&str>] = &[None, Some("rivulet_logo"), Some("bad key")];
+        let mut checked = 0;
+        for activity in PresenceActivity::all() {
+            for locale in [crate::Locale::En, crate::Locale::De] {
+                for game in game_names {
+                    for asset in asset_keys {
+                        let st = PresenceStatus::for_activity_localized(activity, locale, *game);
+                        let mut buf = Vec::new();
+                        let mut seq = 0;
+                        send_set_activity(&mut buf, &st, 1234, &mut seq, *asset).unwrap();
+                        let value: serde_json::Value = serde_json::from_slice(&buf[8..]).unwrap();
+                        let act = &value["args"]["activity"];
+
+                        // Rule 1 (error 4000): details must never be an empty
+                        // string — it is either present with content or omitted.
+                        match act["details"].as_str() {
+                            Some(d) => assert!(
+                                !d.is_empty(),
+                                "empty details on the wire for {activity:?}/{locale:?}/{game:?}"
+                            ),
+                            None => {
+                                // Omitted: only valid when there is no game name.
+                                let has_game = game.is_some_and(|g| !g.trim().is_empty());
+                                assert!(
+                                    !has_game,
+                                    "details must be present when a game is set: \
+                                     {activity:?}/{locale:?}/{game:?}"
+                                );
+                            }
+                        }
+
+                        // Rule 2: state/details never exceed 128 chars on the
+                        // wire (the serializer truncates at a char boundary).
+                        for field in ["state", "details"] {
+                            if let Some(text) = act[field].as_str() {
+                                assert!(
+                                    text.len() <= 128,
+                                    "{field} too long on the wire: {} chars",
+                                    text.len()
+                                );
+                            }
+                        }
+
+                        // Rule 3: an asset key on the wire is always plausible
+                        // (validated before send; serializer filters empty).
+                        if let Some(img) = act["assets"]["large_image"].as_str() {
+                            assert!(
+                                !img.is_empty()
+                                    && img.len() <= 64
+                                    && img.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'),
+                                "implausible large_image on the wire: {img:?}"
+                            );
+                        } else {
+                            // No assets on the wire: the serializer filters
+                            // empty *and* implausible keys (never sent
+                            // verbatim), so this is valid whenever the key was
+                            // not a plausible one.
+                            let plausible = asset.is_some_and(|k| {
+                                let k = k.trim();
+                                !k.is_empty()
+                                    && k.len() <= 64
+                                    && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                            });
+                            assert!(
+                                !plausible,
+                                "large_image must be present for configured key {asset:?}"
+                            );
+                        }
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        // 6 activities × 2 locales × 3 game variants × 3 asset variants.
+        assert_eq!(
+            checked,
+            6 * 2 * 3 * 3,
+            "contract matrix must stay exhaustive"
         );
     }
 

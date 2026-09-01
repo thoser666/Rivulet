@@ -269,6 +269,28 @@ by the Discord registration and is never duplicated into the payload.
 > shows only the status line, exactly like OBS without a game. A `ci_pinning`
 > guard (`empty_details_is_omitted_not_sent_empty`) locks this in.
 
+### Payload validation contract (CI-enforced)
+
+Discord's Rich Presence validation rules are enforced by a dedicated CI
+check (`Discord payload contract check` in `.github/workflows/ci.yml`), so a
+`4000` rejection can never reach a live client unnoticed again. The contract
+lives in `rivulet-core/src/discord.rs`:
+
+| Rule | Behavior | Enforced by |
+|---|---|---|
+| `details` must never be empty | Empty `details` is **omitted** entirely, never sent as `""` (Discord: `4000: "details" is not allowed to be empty`) | Wire contract test over every payload variant |
+| `state`/`details` ≤ 128 characters | Overlong values are truncated at a UTF-8 boundary; the validator flags the pre-truncation condition so Settings can warn | `truncate()` + `validate_set_activity_payload` |
+| `large_image` key format | Only plausible keys (`[A-Za-z0-9_]`, ≤ 64 chars) are attached; empty or malformed keys are filtered before send — Discord would otherwise silently drop the image | Serializer filter + `PayloadIssue::InvalidAssetKey` |
+
+`pub fn validate_set_activity_payload(status, large_image_key)` returns every
+`PayloadIssue` (`FieldTooLong`, `InvalidAssetKey`) for a status before it is
+put on the wire. The exhaustive test
+`every_payload_variant_conforms_to_discord_rules_on_the_wire` serializes all
+combinations (6 activities × 2 locales × game/no-game/long-game ×
+asset/no-asset/bad-asset) and asserts the actual JSON sent to Discord
+satisfies all three rules — a regression in the serializer fails CI locally
+instead of producing a silent `4000` on a live client.
+
 ## Verifying Rich Presence is enabled for the application
 
 Rich Presence must be **enabled on the Discord application itself**, not just

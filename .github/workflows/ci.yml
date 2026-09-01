@@ -492,6 +492,14 @@ jobs:
       - name: Discord adapter IPC smoke test
         run: cargo test -p rivulet-core discord -- --nocapture
 
+      # Validates the SET_ACTIVITY payload against Discord's documented Rich
+      # Presence rules (empty details, 128-char limit, asset-key format). The
+      # contract test serializes every payload variant and asserts the wire
+      # output conforms, so a 4000 rejection surfaces locally in CI instead of
+      # on a live Discord client.
+      - name: Discord payload contract check
+        run: cargo test -p rivulet-core --lib payload -- --nocapture
+
       - name: Test
         run: cargo test --workspace --verbose
 

@@ -616,6 +616,43 @@ fn discord_framing_uses_the_opcode_length_header() {
 }
 
 #[test]
+fn discord_payload_validation_contract_is_ci_enforced() {
+    // Regression: Discord rejected a SET_ACTIVITY whose `details` was an empty
+    // string with `4000: "details" is not allowed to be empty` (verified
+    // live), silently dropping the whole status update. The payload validator
+    // plus the exhaustive wire-contract test must stay wired so such 4000
+    // rejections surface locally in CI instead of on a live Discord client.
+    let discord = read("rivulet-core/src/discord.rs");
+    // The reusable pre-wire validator encodes the documented rules.
+    assert!(discord.contains("pub enum PayloadIssue"));
+    assert!(discord.contains("pub fn validate_set_activity_payload"));
+    assert!(discord.contains("FieldTooLong"));
+    assert!(discord.contains("InvalidAssetKey"));
+    // The serializer must filter implausible asset keys, never send them
+    // verbatim (Discord silently drops the image, no error).
+    assert!(discord.contains("key.trim().len() <= 64"));
+    // The exhaustive contract test serializes every payload variant and
+    // asserts the wire output satisfies all three rules.
+    assert!(discord.contains("every_payload_variant_conforms_to_discord_rules_on_the_wire"));
+    assert!(discord.contains("empty details on the wire"));
+    assert!(discord.contains("text.len() <= 128"));
+    assert!(discord.contains("implausible large_image on the wire"));
+    // CI runs the contract check as a dedicated, named step.
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("Discord payload contract check")
+            && ci.contains("cargo test -p rivulet-core --lib payload"),
+        "CI must expose a dedicated Discord payload contract check"
+    );
+    // The docs must describe the rules and the 4000 rejection.
+    let docs = read("docs/activity-status.md");
+    assert!(
+        docs.contains("128 characters") && docs.contains("4000"),
+        "activity-status.md must document the payload rules and the 4000 rejection"
+    );
+}
+
+#[test]
 fn discord_reconnect_button_rebuilds_the_adapter() {
     // The Stream view must offer a one-click reconnect when the adapter is
     // not connected, and the flag must force a fresh worker + handshake in
