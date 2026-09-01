@@ -69,3 +69,13 @@ an actual `discord-ipc-0`-style Unix-domain socket in a temp dir (the config
 `ipc_socket_path` override points the worker at it); on Windows the worker is
 run against a local **named pipe** server. The step is `Discord adapter IPC smoke
 Test` in `ci.yml` (job `Build & Test on <os>-latest`).
+
+## When is the status updated?
+
+The presence is pushed on **activity transitions** (Ready → Recording,
+Recording → Paused, …), never every frame. The per-frame reconcile call lives in
+the global UI update (`ui()`), **not** inside the Stream view's draw code:
+starting or stopping a recording from the Record view updates the Discord status
+immediately, without having to open the Stream tab. Only activity changes cross
+the IPC boundary; an unchanged status is a no-op even when the sync runs every
+frame.

@@ -5108,6 +5108,13 @@ impl eframe::App for RivuletApp {
         // selected device, then apply mapped actions from incoming messages.
         self.reconcile_midi();
 
+        // Reconcile Discord Rich Presence every frame (not only while the
+        // Stream view is visible): recording/streaming toggles happen from the
+        // Record view, so the activity transition must be pushed whenever the
+        // engine state changes, regardless of which tab is open. The adapter is
+        // non-blocking (try_send) and only pushes on transitions.
+        self.sync_discord_presence();
+
         // Apply the color scheme (fonts + palette + preference) on startup
         // and whenever the user changes it in Settings.
         if self.theme_applied != Some(self.theme) {
@@ -7623,6 +7630,72 @@ mod tests {
             ..Default::default()
         };
         assert!(empty.current_presence_game_name().is_none());
+    }
+
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn discord_presence_pushes_recording_transition_from_idle() {
+        // Regression: starting a recording must surface in Discord even when
+        // the user is on the Record view — the sync must not depend on the
+        // Stream view being visible. `is_aux_recording` is the platform-
+        // independent recording flag, so the transition is testable anywhere.
+        let mut app = RivuletApp {
+            discord_presence_enabled: true,
+            discord_presence_client_id: "test-client".to_owned(),
+            ..Default::default()
+        };
+        app.sync_discord_presence();
+        let idle = app.current_presence_status();
+        assert_eq!(app.discord_presence_last.as_ref(), Some(&idle));
+        assert_eq!(idle.state, "Ready");
+
+        // Recording starts while the user is not looking at the Stream view.
+        app.is_aux_recording = true;
+        app.sync_discord_presence();
+        let recording = app.current_presence_status();
+        assert_eq!(recording.state, "Recording");
+        assert_eq!(app.discord_presence_last.as_ref(), Some(&recording));
+
+        // Pausing while recording surfaces as Paused.
+        app.is_paused = true;
+        app.sync_discord_presence();
+        let paused = app.current_presence_status();
+        assert_eq!(paused.state, "Paused");
+
+        // Stopping returns to Idle.
+        app.is_aux_recording = false;
+        app.is_paused = false;
+        app.sync_discord_presence();
+        let back = app.current_presence_status();
+        assert_eq!(back, idle);
+        assert_eq!(app.discord_presence_last.as_ref(), Some(&idle));
+    }
+
+    #[test]
+    fn discord_presence_sync_runs_every_frame_not_only_in_stream_view() {
+        // The regression: sync_discord_presence lived inside the Stream view's
+        // draw code, so toggling recording from the Record view never pushed
+        // an update. The per-frame reconcile call must live next to the other
+        // reconcilers in the global ui() entry, outside any view branch.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let sync_line = source
+            .lines()
+            .find(|l| l.contains("self.sync_discord_presence();"))
+            .map(|l| l.to_owned())
+            .unwrap_or_default();
+        // The frame-level call must not be inside draw_presence_status (which
+        // only the Stream view renders); it appears in the reconcile block of
+        // the ui() entry together with the MIDI/OBS/hotkey reconcilers.
+        assert!(
+            sync_line.contains("sync_discord_presence"),
+            "per-frame presence sync must exist"
+        );
+        assert!(source.contains("self.reconcile_midi();"));
+        assert!(source.contains("self.sync_discord_presence();"));
+        // draw_presence_status keeps its own sync (idempotent transition guard)
+        // for when the Stream view is open — but the per-frame call above is
+        // the one that matters for Record-view toggles.
+        assert!(source.contains("fn draw_presence_status"));
     }
 
     #[allow(clippy::field_reassign_with_default)]

@@ -525,6 +525,34 @@ fn responsive_layout_contract_is_pinned_in_the_gui() {
 }
 
 #[test]
+fn discord_presence_tracks_record_state_from_every_view() {
+    // The Discord adapter must stay in sync with recording/streaming
+    // transitions regardless of which view is open: the per-frame reconcile
+    // call lives in the ui() entry next to the other reconcilers, NOT only
+    // inside the Stream view's draw code. Reverting this lets the presence
+    // freeze on "Ready" while the user records from the Record view.
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("fn sync_discord_presence"));
+    assert!(gui.contains("fn current_presence_status"));
+    // The frame-level call must sit INSIDE the ui() entry body, after the
+    // reconcile block anchor (fn ui( ... self.reconcile_midi();), NOT merely
+    // inside the Stream view's draw_presence_status. Both calls may coexist;
+    // the ui() one is what keeps Record-view toggles in sync.
+    let ui_fn = gui
+        .find("fn ui(&mut self, ui: &mut egui::Ui")
+        .expect("ui() entry");
+    let body: &str = &gui[ui_fn..];
+    assert!(
+        body.contains("self.reconcile_midi();"),
+        "reconcile block must exist in ui() as the anchor"
+    );
+    assert!(
+        body.contains("self.sync_discord_presence();"),
+        "per-frame presence sync must live in the ui() reconcile block"
+    );
+}
+
+#[test]
 fn midi_mapping_is_wired_into_gui_and_ci() {
     // The hardware-free mapping/parse core lives in rivulet-core::midi.
     let midi_core = read("rivulet-core/src/midi.rs");
