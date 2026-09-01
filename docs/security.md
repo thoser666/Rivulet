@@ -159,6 +159,40 @@ permissions and data handling; GitHub Apps can request broad repository scopes.
 - Apps that require a deployed service (AccessLint/accessibility-scanner) are
   deferred until there is an always-available deployment to point them at.
 
+### Removed / deactivated (2026-08-31)
+
+Several GitHub Apps were installed on the repository without ever being
+configured. Because the apps subscribe to `push` events and request the
+`checks: write` permission, every push created a check suite that stayed
+`queued` forever (no workflow/config in the repo ever completed it). These
+queued suites kept the combined commit status of every commit in `pending`
+indefinitely, even though all six required checks were green. The apps were
+deactivated via **Settings -> Applications -> GitHub Apps -> Configure ->
+Uninstall**:
+
+| App | Why it was removed |
+| --- | --- |
+| codecov | No `codecov.yml`/`codecov.yaml`, no coverage upload in any workflow. |
+| deepsource.io | No `deepsource.toml` or analyzer configuration. |
+| nx-cloud | No `nx.json` or Nx configuration anywhere in the repo. |
+| cypress | No `cypress.config.*` or `cypress/` directory; UI tests use `ui_smoke`/`ui_accessibility` instead. |
+| docker-scout | No Docker Scout configuration or workflow reference. |
+| mistralai | No Mistral configuration or workflow reference. |
+
+**Kept on purpose:**
+
+- **Renovate** stays enabled — it is actively configured (`renovate.json`) and
+  drives grouped Cargo updates next to Dependabot.
+- **freebuff-web** stays enabled — it is the GitHub integration used by the
+  Freebuff development session (commits/issues) and is not part of this cleanup.
+
+**Operational note:** uninstalling an app does **not** retroactively remove check
+suites that were already created. Historical commits (e.g. `0abb497`) keep their
+queued suites and their combined status therefore stays `pending`; only commits
+pushed after the uninstall are free of the removed apps' suites. When verifying
+an uninstall, push a throwaway commit and check its check suites rather than
+re-reading an old commit's status.
+
 ## Required Repository Settings
 
 The active `develop` branch ruleset requires pull requests and these exact status

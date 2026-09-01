@@ -650,6 +650,7 @@ fn workspace_manifests_declare_the_workspace_license() {
         "rivulet-gui/Cargo.toml",
         "rivulet-launcher/Cargo.toml",
         "rivulet-obs-compat/Cargo.toml",
+        "rivulet-obs-websocket/Cargo.toml",
         "rivulet-opengl-hook-dll/Cargo.toml",
         "rivulet-plugins/Cargo.toml",
         "rivulet-streaming/Cargo.toml",

@@ -385,6 +385,16 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("discord_client_id_hint", "e.g. 1234567890123456789"),
                 ("discord_client_id_apply", "Apply"),
                 ("discord_client_id_note", "Create a Discord application at discord.com/developers/applications, enable Rich Presence, and enter its client ID here. Empty keeps the adapter off."),
+                // OBS WebSocket remote control (Stream Deck / TouchPortal)
+                ("obs_ws_section", "OBS WebSocket (Stream Deck)"),
+                ("obs_ws_enable", "Enable remote control"),
+                ("obs_ws_port", "Port"),
+                ("obs_ws_password", "Password (optional)"),
+                ("obs_ws_password_hint", "Empty disables authentication."),
+                ("obs_ws_running", "Server running on ws://127.0.0.1:{0}"),
+                ("obs_ws_stopped", "Server stopped"),
+                ("obs_ws_error", "Could not start server: {0}"),
+                ("obs_ws_hint", "OBS WebSocket v5 compatible endpoint for Stream Deck / TouchPortal. Scenes, sources, recording and streaming control, with optional password authentication."),
                 // Navigation
                 ("nav_record", "Record"),
                 ("nav_mixer", "Mixer"),
@@ -806,6 +816,16 @@ Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."
                 ("discord_client_id_hint", "z. B. 1234567890123456789"),
                 ("discord_client_id_apply", "Übernehmen"),
                 ("discord_client_id_note", "Erstelle eine Discord-App unter discord.com/developers/applications, aktiviere Rich Presence und trage hier ihre Client-ID ein. Leer hält den Adapter deaktiviert."),
+                // OBS WebSocket Fernbedienung (Stream Deck / TouchPortal)
+                ("obs_ws_section", "OBS WebSocket (Stream Deck)"),
+                ("obs_ws_enable", "Fernbedienung aktivieren"),
+                ("obs_ws_port", "Port"),
+                ("obs_ws_password", "Passwort (optional)"),
+                ("obs_ws_password_hint", "Leer deaktiviert die Authentifizierung."),
+                ("obs_ws_running", "Server läuft unter ws://127.0.0.1:{0}"),
+                ("obs_ws_stopped", "Server gestoppt"),
+                ("obs_ws_error", "Server konnte nicht gestartet werden: {0}"),
+                ("obs_ws_hint", "OBS-WebSocket-v5-kompatibler Endpunkt für Stream Deck / TouchPortal. Szenen, Quellen, Aufnahme- und Streaming-Steuerung, optional mit Passwort-Authentifizierung."),
                 // Navigation
                 ("nav_record", "Aufnehmen"),
                 ("nav_mixer", "Mixer"),

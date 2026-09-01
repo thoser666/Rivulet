@@ -11,7 +11,7 @@ use rivulet_core::{
 use std::sync::mpsc::Receiver;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
-    Arc,
+    Arc, Mutex, RwLock,
 };
 use std::time::Instant;
 
@@ -628,6 +628,44 @@ pub struct RivuletApp {
     #[serde(skip)]
     global_hotkeys: Option<GlobalHotkey>,
 
+    /// OBS WebSocket remote control (Stream Deck / TouchPortal): master
+    /// switch. Persisted across sessions.
+    obs_ws_enabled: bool,
+    /// OBS WebSocket listen port. Persisted across sessions.
+    obs_ws_port: u16,
+    /// OBS WebSocket password (empty = no authentication). Persisted.
+    obs_ws_password: String,
+    /// Running server handle. Not persisted; rebuilt on app start when the
+    /// feature is enabled.
+    #[serde(skip)]
+    obs_ws_server: Option<rivulet_obs_websocket::ObsServerHandle>,
+    /// Shared state snapshot the websocket thread reads requests against;
+    /// the GUI refreshes it every frame.
+    #[serde(skip)]
+    obs_ws_snapshot: Option<Arc<Mutex<rivulet_obs_websocket::ObsSnapshot>>>,
+    /// Queue of commands the websocket thread wants the GUI to execute on the
+    /// next frame (set scene, start/stop recording, start/stop streaming).
+    /// The reply channel is used to return the ObsCommandResult synchronously.
+    #[serde(skip)]
+    obs_ws_commands_rx: Option<
+        Receiver<(
+            rivulet_obs_websocket::ObsCommand,
+            std::sync::mpsc::Sender<rivulet_obs_websocket::ObsCommandResult>,
+        )>,
+    >,
+    /// Status/error line shown in Settings (e.g. bind failure, running port).
+    #[serde(skip)]
+    obs_ws_status: Option<String>,
+    /// Set when the user changes port/password in Settings so a running
+    /// server is restarted with the new values exactly once.
+    #[serde(skip)]
+    obs_ws_restart: bool,
+    /// Last broadcast-relevant public state, used to diff GUI-initiated
+    /// changes (scene switch, record/stream toggles made in the window).
+    /// Not persisted, rebuilt after the server starts.
+    #[serde(skip)]
+    obs_ws_last_public_state: Option<ObsWsPublicState>,
+
     // Linux Fields
     #[cfg(target_os = "linux")]
     #[serde(skip)]
@@ -974,6 +1012,18 @@ pub struct RivuletApp {
     is_aux_recording: bool,
 }
 
+/// Subset of the observable app state used to broadcast OBS WebSocket events
+/// for GUI-initiated changes (scene switch, record/stream toggles made in the
+/// window rather than by a remote client).
+#[derive(Debug, Clone, PartialEq, Default)]
+struct ObsWsPublicState {
+    current_scene: Option<String>,
+    recording: bool,
+    recording_paused: bool,
+    streaming: bool,
+    reconnecting: bool,
+}
+
 impl Default for RivuletApp {
     fn default() -> Self {
         #[cfg(target_os = "linux")]
@@ -992,6 +1042,15 @@ impl Default for RivuletApp {
             discord_presence_last: None,
             global_hotkeys_dirty: false,
             global_hotkeys: None,
+            obs_ws_enabled: false,
+            obs_ws_port: rivulet_obs_websocket::DEFAULT_PORT,
+            obs_ws_password: String::new(),
+            obs_ws_server: None,
+            obs_ws_snapshot: None,
+            obs_ws_commands_rx: None,
+            obs_ws_status: None,
+            obs_ws_restart: false,
+            obs_ws_last_public_state: None,
 
             #[cfg(target_os = "linux")]
             is_previewing: false,
@@ -4065,6 +4124,302 @@ impl RivuletApp {
         }
     }
 
+    /// Start, stop, or keep the OBS WebSocket server in sync with the setting
+    /// toggle, refresh the read snapshot the server sees, execute commands the
+    /// server received (scene switches, record/stream control) on the UI
+    /// thread, and broadcast GUI-initiated state changes to subscribed
+    /// clients.
+    fn reconcile_obs_websocket(&mut self) {
+        use rivulet_obs_websocket::backend::ObsBackend as _;
+
+        // Start the server when the feature is enabled and it is not running;
+        // stop it when the toggle is off.
+        if self.obs_ws_enabled {
+            if self.obs_ws_server.is_none() {
+                self.start_obs_websocket();
+            } else if self.obs_gw_restart_requested() {
+                self.obs_ws_server = None;
+                self.start_obs_websocket();
+            }
+        } else if self.obs_ws_server.is_some() {
+            tracing::info!("Stopping OBS WebSocket server");
+            self.obs_ws_server = None;
+            self.obs_ws_commands_rx = None;
+            self.obs_ws_snapshot = None;
+            self.obs_ws_status = Some(self.tr("obs_ws_stopped").to_owned());
+        }
+
+        self.refresh_obs_ws_snapshot();
+
+        // Execute commands the server thread queued for the UI thread. The
+        // receiver borrow must end before we mutate `self` for each command.
+        let pending: Vec<(
+            rivulet_obs_websocket::ObsCommand,
+            std::sync::mpsc::Sender<rivulet_obs_websocket::ObsCommandResult>,
+        )> = self
+            .obs_ws_commands_rx
+            .as_ref()
+            .map(|rx| rx.try_iter().collect())
+            .unwrap_or_default();
+        for (command, reply) in pending {
+            let result = self.execute_obs_command(command);
+            let _ = reply.send(result);
+        }
+
+        // Broadcast GUI-initiated changes (scene switch, record/stream toggle
+        // made in the window) so connected clients stay in sync. Remote-triggered
+        // changes were already broadcast by the server via execute() return
+        // events, so the diff baseline below is refreshed after each drain.
+        let current = self.obs_ws_public_state();
+        if let Some(server) = &self.obs_ws_server {
+            if let Some(last) = self.obs_ws_last_public_state.take() {
+                if current != last {
+                    let mut events = Vec::new();
+                    if current.current_scene != last.current_scene {
+                        if let Some(name) = &current.current_scene {
+                            events.push(
+                                rivulet_obs_websocket::ObsEvent::CurrentProgramSceneChanged {
+                                    scene_name: name.clone(),
+                                },
+                            );
+                        }
+                    }
+                    if current.recording != last.recording
+                        || current.recording_paused != last.recording_paused
+                    {
+                        events.push(rivulet_obs_websocket::ObsEvent::RecordStateChanged {
+                            active: current.recording,
+                            paused: current.recording_paused,
+                        });
+                    }
+                    if current.streaming != last.streaming
+                        || current.reconnecting != last.reconnecting
+                    {
+                        events.push(rivulet_obs_websocket::ObsEvent::StreamStateChanged {
+                            active: current.streaming,
+                            reconnecting: current.reconnecting,
+                        });
+                    }
+                    server.broadcast(events);
+                }
+            }
+            self.obs_ws_last_public_state = Some(current);
+        } else {
+            self.obs_ws_last_public_state = None;
+        }
+    }
+
+    /// Attempt to start the OBS WebSocket server with the current settings.
+    /// On failure a status message is stored for the Settings view.
+    fn start_obs_websocket(&mut self) {
+        let snapshot = Arc::new(Mutex::new(rivulet_obs_websocket::ObsSnapshot::default()));
+        self.obs_ws_snapshot = Some(snapshot.clone());
+
+        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
+        let backend = Arc::new(rivulet_obs_websocket::ChannelBackend::new(snapshot, cmd_tx));
+        let password = if self.obs_ws_password.is_empty() {
+            None
+        } else {
+            Some(self.obs_ws_password.clone())
+        };
+        match rivulet_obs_websocket::server::start(backend, password, self.obs_ws_port) {
+            Ok(server) => {
+                self.obs_ws_server = Some(server);
+                self.obs_ws_commands_rx = Some(cmd_rx);
+                self.obs_ws_status =
+                    Some(self.tr_fmt("obs_ws_running", &[self.obs_ws_port.to_string()]));
+                tracing::info!(port = self.obs_ws_port, "OBS WebSocket server started");
+            }
+            Err(err) => {
+                self.obs_ws_server = None;
+                self.obs_ws_commands_rx = None;
+                self.obs_ws_status = Some(self.tr_fmt("obs_ws_error", &[err.to_string()]));
+                tracing::error!(error = %err, "OBS WebSocket server failed to start");
+            }
+        }
+    }
+
+    /// Whether a setting change (port or password) requires a server restart.
+    fn obs_gw_restart_requested(&self) -> bool {
+        // Tracked via the field below: the Settings UI flips it when the user
+        // edits port/password.
+        self.obs_ws_restart
+    }
+
+    /// Refresh the shared snapshot the server reads for Get*/Status requests.
+    fn refresh_obs_ws_snapshot(&mut self) {
+        let Some(snapshot) = &self.obs_ws_snapshot else {
+            return;
+        };
+        let mut snap = snapshot.lock().unwrap();
+        snap.scenes = self
+            .scenes
+            .scenes()
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
+        snap.current_scene = self.scenes.active_scene().map(|s| s.name.clone());
+        snap.sources = self
+            .source_manager
+            .sources()
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
+        snap.recording = self.any_recording_active();
+        snap.streaming = self.engine.is_streaming();
+        snap.reconnecting = false;
+        snap.output_duration_ms = self.record_started.elapsed().as_millis() as u64;
+    }
+
+    /// The subset of the snapshot used for GUI-initiated event broadcasting.
+    fn obs_ws_public_state(&self) -> ObsWsPublicState {
+        ObsWsPublicState {
+            current_scene: self.scenes.active_scene().map(|s| s.name.clone()),
+            recording: self.any_recording_active(),
+            recording_paused: self.is_paused,
+            streaming: self.engine.is_streaming(),
+            reconnecting: false,
+        }
+    }
+
+    /// Execute one command received from an OBS WebSocket client, on the UI
+    /// thread. Returns the result to be sent back to the client. Events are
+    /// broadcast by the server itself; the returned event list is what the
+    /// server broadcasts to subscribed clients.
+    fn execute_obs_command(
+        &mut self,
+        command: rivulet_obs_websocket::ObsCommand,
+    ) -> rivulet_obs_websocket::ObsCommandResult {
+        use rivulet_obs_websocket::ObsCommand;
+        use rivulet_obs_websocket::ObsEvent;
+        match command {
+            ObsCommand::SetCurrentScene(name) => {
+                let Some(scene) = self.scenes.scenes().iter().find(|s| s.name == name) else {
+                    return rivulet_obs_websocket::ObsCommandResult::Failure {
+                        status_code: rivulet_obs_websocket::protocol::status::RESOURCE_NOT_FOUND,
+                        comment: format!("Scene '{name}' not found"),
+                    };
+                };
+                self.scenes.switch_to(scene.id);
+                self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
+                rivulet_obs_websocket::ObsCommandResult::Success(vec![
+                    ObsEvent::CurrentProgramSceneChanged { scene_name: name },
+                ])
+            }
+            ObsCommand::StartRecording => {
+                if self.any_recording_active() {
+                    rivulet_obs_websocket::ObsCommandResult::Failure {
+                        status_code: rivulet_obs_websocket::protocol::status::OUTPUT_RUNNING,
+                        comment: "Recording already active".into(),
+                    }
+                } else {
+                    self.start_active_recording();
+                    let active = self.any_recording_active();
+                    self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
+                    if active {
+                        rivulet_obs_websocket::ObsCommandResult::Success(vec![
+                            ObsEvent::RecordStateChanged {
+                                active: true,
+                                paused: false,
+                            },
+                        ])
+                    } else {
+                        rivulet_obs_websocket::ObsCommandResult::Failure {
+                            status_code:
+                                rivulet_obs_websocket::protocol::status::REQUEST_PROCESSING_FAILED,
+                            comment:
+                                "Recording could not be started (no capture source configured)"
+                                    .into(),
+                        }
+                    }
+                }
+            }
+            ObsCommand::StopRecording => {
+                if !self.any_recording_active() {
+                    rivulet_obs_websocket::ObsCommandResult::Failure {
+                        status_code: rivulet_obs_websocket::protocol::status::OUTPUT_NOT_RUNNING,
+                        comment: "Recording not active".into(),
+                    }
+                } else {
+                    let was_paused = self.is_paused;
+                    self.stop_active_recording();
+                    self.is_paused = false;
+                    self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
+                    rivulet_obs_websocket::ObsCommandResult::Success(vec![
+                        ObsEvent::RecordStateChanged {
+                            active: false,
+                            paused: false,
+                        },
+                    ])
+                }
+            }
+            ObsCommand::ToggleRecording => {
+                if self.any_recording_active() {
+                    self.execute_obs_command(ObsCommand::StopRecording)
+                } else {
+                    self.execute_obs_command(ObsCommand::StartRecording)
+                }
+            }
+            ObsCommand::StartStreaming => {
+                if self.engine.is_streaming() {
+                    rivulet_obs_websocket::ObsCommandResult::Failure {
+                        status_code: rivulet_obs_websocket::protocol::status::OUTPUT_RUNNING,
+                        comment: "Stream already active".into(),
+                    }
+                } else {
+                    let settings = StreamSettings::new(
+                        self.stream_platform,
+                        self.stream_ingest_url.clone(),
+                        self.stream_key.clone(),
+                    )
+                    .with_preset(self.stream_preset);
+                    self.engine.set_stream_settings(Some(settings));
+                    self.engine.start_streaming();
+                    let active = self.engine.is_streaming();
+                    self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
+                    if active {
+                        rivulet_obs_websocket::ObsCommandResult::Success(vec![
+                            ObsEvent::StreamStateChanged {
+                                active: true,
+                                reconnecting: false,
+                            },
+                        ])
+                    } else {
+                        rivulet_obs_websocket::ObsCommandResult::Failure {
+                            status_code:
+                                rivulet_obs_websocket::protocol::status::REQUEST_PROCESSING_FAILED,
+                            comment: "Streaming could not be started (no ingest configured)".into(),
+                        }
+                    }
+                }
+            }
+            ObsCommand::StopStreaming => {
+                if !self.engine.is_streaming() {
+                    rivulet_obs_websocket::ObsCommandResult::Failure {
+                        status_code: rivulet_obs_websocket::protocol::status::OUTPUT_NOT_RUNNING,
+                        comment: "Stream not active".into(),
+                    }
+                } else {
+                    self.engine.set_stream_settings(None);
+                    self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
+                    rivulet_obs_websocket::ObsCommandResult::Success(vec![
+                        ObsEvent::StreamStateChanged {
+                            active: false,
+                            reconnecting: false,
+                        },
+                    ])
+                }
+            }
+            ObsCommand::ToggleStreaming => {
+                if self.engine.is_streaming() {
+                    self.execute_obs_command(ObsCommand::StopStreaming)
+                } else {
+                    self.execute_obs_command(ObsCommand::StartStreaming)
+                }
+            }
+        }
+    }
+
     /// Shared action dispatch used by both the in-app (focused) key handling
     /// and OS-level global hotkey events (Windows).
     fn dispatch_hotkey_action(&mut self, action: &str) {
@@ -4559,6 +4914,11 @@ impl eframe::App for RivuletApp {
         // Reconcile OS-level global hotkeys (create/rebind on change) and
         // dispatch any global hotkey events fired while the app was unfocused.
         self.reconcile_global_hotkeys();
+
+        // Reconcile the OBS WebSocket server: start/stop it with the setting,
+        // sync the read snapshot, execute remote commands, and broadcast
+        // GUI-initiated changes to connected Stream Deck/TouchPortal clients.
+        self.reconcile_obs_websocket();
 
         // Apply the color scheme (fonts + palette + preference) on startup
         // and whenever the user changes it in Settings.
@@ -6002,6 +6362,61 @@ impl eframe::App for RivuletApp {
                     self.draw_hotkey_rebind_row(ui, action);
                 }
                 ui.small(hotkeys_hint);
+
+                // Settings: OBS WebSocket remote control (Stream Deck /
+                // TouchPortal). Serves the obs-websocket v5 (JSON) protocol on
+                // 127.0.0.1 so ecosystem tools can switch scenes and control
+                // recording/streaming (see docs/obs-websocket.md).
+                let obs_ws_section = self.tr("obs_ws_section");
+                let obs_ws_enable = self.tr("obs_ws_enable");
+                let obs_ws_port = self.tr("obs_ws_port");
+                let obs_ws_password = self.tr("obs_ws_password");
+                let obs_ws_password_hint = self.tr("obs_ws_password_hint");
+                let obs_ws_hint = self.tr("obs_ws_hint");
+                ui.separator();
+                ui.label(egui::RichText::new(obs_ws_section).strong());
+                let was_enabled = self.obs_ws_enabled;
+                ui.checkbox(&mut self.obs_ws_enabled, obs_ws_enable);
+                let mut port_dirty = false;
+                let old_port = self.obs_ws_port;
+                ui.horizontal(|ui| {
+                    ui.label(obs_ws_port);
+                    port_dirty = ui
+                        .add(
+                            egui::DragValue::new(&mut self.obs_ws_port)
+                                .range(1..=65535)
+                                .speed(1),
+                        )
+                        .changed();
+                });
+                let mut password_dirty = false;
+                let old_password = self.obs_ws_password.clone();
+                ui.horizontal(|ui| {
+                    ui.label(obs_ws_password);
+                    password_dirty = ui
+                        .add(egui::TextEdit::singleline(&mut self.obs_ws_password).password(true))
+                        .changed();
+                });
+                ui.small(obs_ws_password_hint);
+                if (port_dirty && old_port != self.obs_ws_port)
+                    || (password_dirty && old_password != self.obs_ws_password)
+                {
+                    self.obs_ws_restart = true;
+                }
+                if let Some(status) = &self.obs_ws_status {
+                    ui.colored_label(
+                        if self.obs_ws_enabled {
+                            colors.success
+                        } else {
+                            colors.warning
+                        },
+                        status,
+                    );
+                }
+                if !self.obs_ws_enabled && was_enabled {
+                    self.obs_ws_status = Some(self.tr("obs_ws_stopped").to_owned());
+                }
+                ui.small(obs_ws_hint);
             }
 
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -7544,5 +7959,65 @@ mod tests {
         theme::ThemePreference::Light.apply(&ctx);
         let visual = ctx.theme();
         assert_eq!(visual, egui::Theme::Light);
+    }
+
+    // ── OBS WebSocket remote control ───────────────────────────────
+
+    #[test]
+    fn obs_ws_public_state_defaults_to_idle() {
+        let state = ObsWsPublicState::default();
+        assert_eq!(state.current_scene, None);
+        assert!(!state.recording);
+        assert!(!state.recording_paused);
+        assert!(!state.streaming);
+        assert!(!state.reconnecting);
+    }
+
+    #[test]
+    fn obs_ws_public_state_derives_scene_and_output_changes() {
+        let a = ObsWsPublicState {
+            current_scene: Some("Game".into()),
+            ..Default::default()
+        };
+        let b = ObsWsPublicState {
+            current_scene: Some("BRB".into()),
+            ..Default::default()
+        };
+        assert_ne!(a, b);
+        assert_eq!(a.current_scene, Some("Game".to_string()));
+        assert_eq!(b.current_scene, Some("BRB".to_string()));
+    }
+
+    #[test]
+    fn obs_ws_settings_persist_across_restarts() {
+        // The RivuletApp serde round-trip must carry the websocket settings
+        // (toggle + port + password) so they survive an app restart.
+        let app = RivuletApp {
+            obs_ws_enabled: true,
+            obs_ws_port: 4455,
+            obs_ws_password: "hunter2".into(),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&app).expect("serialize app");
+        assert_eq!(json["obs_ws_enabled"], true);
+        assert_eq!(json["obs_ws_port"], 4455);
+        assert_eq!(json["obs_ws_password"], "hunter2");
+        // Runtime-only state must not be persisted.
+        assert!(json.get("obs_ws_server").is_none());
+        assert!(json.get("obs_ws_snapshot").is_none());
+        assert!(json.get("obs_ws_status").is_none());
+
+        let restored: RivuletApp = serde_json::from_value(json).expect("deserialize app");
+        assert!(restored.obs_ws_enabled);
+        assert_eq!(restored.obs_ws_port, 4455);
+        assert_eq!(restored.obs_ws_password, "hunter2");
+        assert!(restored.obs_ws_server.is_none());
+    }
+
+    #[test]
+    fn obs_ws_port_defaults_to_obs_compatible_4455() {
+        let app = RivuletApp::default();
+        assert_eq!(app.obs_ws_port, 4455);
+        assert!(!app.obs_ws_enabled, "remote control must be opt-in");
     }
 }

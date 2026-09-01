@@ -35,6 +35,9 @@ open = "5.3"
 # Local core library
 rivulet-core = { path = "../rivulet-core" }
 
+# OBS WebSocket v5 remote control (Stream Deck / TouchPortal)
+rivulet-obs-websocket = { path = "../rivulet-obs-websocket" }
+
 # Update checking and installation (GitHub Releases)
 rivulet-updater = { path = "../rivulet-updater" }
 

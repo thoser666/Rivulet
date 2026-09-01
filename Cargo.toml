@@ -10,7 +10,8 @@ members = [
     "rivulet-updater",
     "rivulet-vulkan-layer",
     "rivulet-opengl-hook-dll",
-    "rivulet-launcher"
+    "rivulet-launcher",
+    "rivulet-obs-websocket"
 ]
 resolver = "2"
 

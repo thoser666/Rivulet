@@ -341,7 +341,7 @@ must not be implied by beta parity.
 - [ ] **WASM plugin runtime** (stable ABI, sandboxed: plugins can never crash the app; long-term target plugin model)
 - [ ] **OBS plugin compatibility layer** — *temporary bridge*: opt-in "Compatibility Mode" (explicitly marked as unsafe), loads native libobs plugins (encoders/filters/sources without UI); UI plugins (Qt) are out of scope; the goal is migration to the WASM plugin system
 - [ ] Mobile companion app (remote control)
-- [ ] **obs-websocket compatibility** — Streamdeck/TouchPortal ecosystem remote control (bridge to the mobile companion API). *Tracked in [#72](https://github.com/thoser666/Rivulet/issues/72).*
+- [x] **obs-websocket compatibility** — OBS WebSocket v5 server (JSON) for Streamdeck/TouchPortal ecosystem remote control: scene list/switch, source listing, recording/streaming start/stop/toggle/status, optional password authentication and event subscriptions, verified end-to-end with a real WebSocket client (see [`docs/obs-websocket.md`](docs/obs-websocket.md)). [#72](https://github.com/thoser666/Rivulet/issues/72)
 - [ ] **Windows/macOS feature parity** (currently Linux-first; window capture on Windows exists, macOS still open) — as a release blocker, not an afterthought
 - [x] Installers (Windows MSI, macOS DMG, Linux AppImage) — automated in CI
 - [x] Code signing (signing automation present, secrets needed)
@@ -487,7 +487,7 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | VOD track | Done (config model clean; per-track mux routing follow-up, M3) |
 | Multi-track audio | Partial (2 local tracks; VOD-track model in M3) |
 | Plugin ecosystem & OBS compatibility | Open |
-| obs-websocket / Streamdeck | Open (M5) |
+| obs-websocket / Streamdeck | Implemented (M5) |
 | Mobile remote & MIDI | Open (M5) |
 | Cloud & telemetry | Partial (M4 S3 SigV4 PUT upload after stop; multipart + GUI settings open) |
 | Discord Rich Presence | Implemented (optional, privacy-safe activity status; M5, see docs/activity-status.md) |

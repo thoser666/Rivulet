@@ -1,6 +1,8 @@
 # Changelog
 
 ## [0.65.0-alpha.55] - 2026-08-30
+- feat(m5): add OBS WebSocket v5 remote control server (`rivulet-obs-websocket`) for Stream Deck / TouchPortal — scenes, sources, recording/streaming control, optional SHA-256 auth, event subscriptions, request batches; verified end-to-end with a real WebSocket client (#72)
+- feat(gui): wire OBS WebSocket server into Settings (enable/port/password), bridge it to the real scene manager/engine, and broadcast GUI-initiated changes to connected clients (see docs/obs-websocket.md)
 - feat(presence): add opt-out, non-blocking Discord Rich Presence adapter (`rivulet-core::discord`) with IPC + graceful degradation
 - feat(presence): wire opt-out toggle into the Stream view and persist it
 - feat(presence): include the user-selected game/source name in the presence state; make the Discord application client ID configurable in Settings
