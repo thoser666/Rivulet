@@ -562,9 +562,7 @@ mod tests {
         let cfg = DiscordPresenceConfig {
             enabled: true,
             client_id: "dummy-client".to_owned(),
-            ipc_socket_path: Some(std::path::PathBuf::from(
-                std::env::temp_dir().join("rivulet-missing-discord-ipc.sock"),
-            )),
+            ipc_socket_path: Some(std::env::temp_dir().join("rivulet-missing-discord-ipc.sock")),
         };
         let mut presence = DiscordPresence::new(&cfg);
         assert!(presence.enabled());
