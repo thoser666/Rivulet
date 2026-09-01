@@ -60,6 +60,16 @@ Until a non-empty client id is entered and applied, the adapter stays off. The
 value is persisted across sessions; changing it (via the Apply button) rebuilds
 the adapter on the next frame.
 
+> **Persistence note:** persisted settings are restored in `RivuletApp::new()`
+> via `eframe::get_value` from the eframe storage (the `save()` path used to
+> write the app state, but nothing read it back — every restart silently
+> dropped ALL configured settings). The restore re-attaches the live engine and
+> the CLI `--no-frame-timeout` value; everything else (theme, locale, hotkeys,
+> OBS WebSocket, MIDI presets, Discord client id, …) comes from the storage. A
+> regression test (`discord_client_id_survives_eframe_storage_round_trip`)
+> walks the full save → restore round trip, and a CI pinning guard keeps the
+> restore wiring in `new()` locked in.
+
 ## CI smoke test
 
 CI runs the real adapter worker (`DiscordPresence`) end to end against a local

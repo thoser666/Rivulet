@@ -577,6 +577,44 @@ fn discord_presence_error_state_is_wired_into_the_status_model() {
 }
 
 #[test]
+fn discord_client_id_is_restored_from_eframe_storage() {
+    // Bug regression: `save()` wrote the full app (including the Discord
+    // application id) under eframe::APP_KEY, but nothing ever read the value
+    // back — every launch started from Default and silently dropped ALL
+    // persisted settings. The startup path must restore from storage and
+    // re-attach the live engine/CLI values.
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        gui.contains("fn restore_from_storage"),
+        "a storage restore helper must exist"
+    );
+    assert!(
+        gui.contains("eframe::get_value::<RivuletApp>(storage?, eframe::APP_KEY)"),
+        "restore must read via eframe::get_value under APP_KEY"
+    );
+    // The constructor must actually wire the restore in (not just define it).
+    let new_fn = gui
+        .split_once("pub fn new(")
+        .map(|(_, rest)| rest)
+        .expect("RivuletApp::new must exist");
+    assert!(
+        new_fn.contains("Self::restore_from_storage(cc.storage)"),
+        "new() must call restore_from_storage with cc.storage"
+    );
+    assert!(
+        new_fn.contains("restored.engine = app.engine;"),
+        "restored state must keep the live engine"
+    );
+    assert!(
+        new_fn.contains("restored.no_frame_timeout"),
+        "restored state must keep the CLI no-frame timeout"
+    );
+    // The regression test that guarantees the round trip must stay wired.
+    assert!(gui.contains("discord_client_id_survives_eframe_storage_round_trip"));
+    assert!(gui.contains("impl eframe::Storage for MemoryStorage"));
+}
+
+#[test]
 fn presence_legend_lists_every_state_with_a_tooltip() {
     // The Stream view renders a legend: one row per state with an explanatory
     // tooltip, highlighting the active row. The i18n tables must translate

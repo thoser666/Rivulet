@@ -5093,6 +5093,15 @@ impl RivuletApp {
         }
     }
 
+    /// Restore the persisted app state (theme, locale, hotkeys, OBS
+    /// WebSocket, MIDI presets, Discord client id, …) written by `save()` on
+    /// the previous run. Runtime-only handles (engine, adapters, previews) are
+    /// `#[serde(skip)]` and therefore stay at their defaults here; the caller
+    /// re-attaches the live engine and CLI parameters.
+    fn restore_from_storage(storage: Option<&dyn eframe::Storage>) -> Option<Self> {
+        eframe::get_value::<RivuletApp>(storage?, eframe::APP_KEY)
+    }
+
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         engine: RivuletEngine,
@@ -5104,6 +5113,17 @@ impl RivuletApp {
             no_frame_timeout,
             ..Default::default()
         };
+        // Reload settings persisted by `save()` on the previous run. Without
+        // this the app would always start from Default, silently dropping
+        // every setting the user configured (theme, Discord client id, …).
+        if let Some(mut restored) = Self::restore_from_storage(cc.storage) {
+            tracing::info!(theme = ?restored.theme, "Restoring persisted app state");
+            // Keep the live engine and the CLI-provided timeout; everything
+            // else (persisted settings) comes from storage.
+            restored.engine = app.engine;
+            restored.no_frame_timeout = no_frame_timeout;
+            app = restored;
+        }
         // Apply the persisted color scheme (fonts + palette + preference)
         // immediately, so the first frame already renders with the right theme.
         theme::init(&cc.egui_ctx, app.theme);
@@ -7707,6 +7727,61 @@ mod tests {
         let back = app.current_presence_status();
         assert_eq!(back, idle);
         assert_eq!(app.discord_presence_last.as_ref(), Some(&idle));
+    }
+
+    /// Minimal in-memory eframe storage used to verify the real persistence
+    /// round-trip: `save()` writes under `eframe::APP_KEY` and
+    /// `restore_from_storage` reads it back.
+    #[derive(Default)]
+    struct MemoryStorage {
+        values: std::collections::HashMap<String, String>,
+    }
+
+    impl eframe::Storage for MemoryStorage {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.values.get(key).cloned()
+        }
+
+        fn set_string(&mut self, key: &str, value: String) {
+            self.values.insert(key.to_owned(), value);
+        }
+
+        fn remove_string(&mut self, key: &str) {
+            self.values.remove(key);
+        }
+
+        fn flush(&mut self) {}
+    }
+
+    #[test]
+    fn discord_client_id_survives_eframe_storage_round_trip() {
+        // Regression: the application id was serialized by `save()` but never
+        // read back, so every restart lost it. The full eframe persistence
+        // path (save -> get_value under APP_KEY) must restore it.
+        let mut app = RivuletApp {
+            discord_presence_enabled: true,
+            discord_presence_client_id: "1234567890123456".to_owned(),
+            ..Default::default()
+        };
+        let mut storage = MemoryStorage::default();
+        eframe::App::save(&mut app, &mut storage);
+
+        let restored = RivuletApp::restore_from_storage(Some(&storage))
+            .expect("persisted app state must be restored");
+        assert_eq!(restored.discord_presence_client_id, "1234567890123456");
+        assert!(restored.discord_presence_enabled);
+        // Runtime-only handles must stay at their defaults after restore.
+        assert!(restored.discord_presence.is_none());
+        assert!(restored.discord_presence_active_client_id.is_none());
+    }
+
+    #[test]
+    fn restore_from_storage_returns_none_when_nothing_persisted() {
+        // First launch (or a wiped storage) must cleanly fall back to the
+        // defaults instead of panicking.
+        let storage = MemoryStorage::default();
+        assert!(RivuletApp::restore_from_storage(Some(&storage)).is_none());
+        assert!(RivuletApp::restore_from_storage(None).is_none());
     }
 
     #[test]
