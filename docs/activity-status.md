@@ -291,6 +291,13 @@ asset/no-asset/bad-asset) and asserts the actual JSON sent to Discord
 satisfies all three rules — a regression in the serializer fails CI locally
 instead of producing a silent `4000` on a live client.
 
+The same validator is wired into **Settings**: clicking **Apply** (client id
+or art asset key) runs `validate_set_activity_payload` against the current
+status and the configured key, and any violation is shown immediately in red
+next to the Discord section (`discord_payload_error_field_too_long`,
+`discord_payload_error_asset_key`, DE/EN). An empty art-asset key is treated
+exactly like no key (placeholder icon) and never triggers the warning.
+
 ## Verifying Rich Presence is enabled for the application
 
 Rich Presence must be **enabled on the Discord application itself**, not just

@@ -151,9 +151,11 @@ pub fn validate_set_activity_payload(
     }
     if let Some(key) = large_image_key {
         let key = key.trim();
-        if key.is_empty()
-            || key.len() > 64
-            || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        // Empty is treated exactly like `None` (serializer filters it and the
+        // generic placeholder icon stays) — only a *non-empty* implausible key
+        // is a violation.
+        if !key.is_empty()
+            && (key.len() > 64 || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
         {
             issues.push(PayloadIssue::InvalidAssetKey);
         }
@@ -934,18 +936,19 @@ mod tests {
         // A key is sent verbatim, so an implausible one must be flagged before
         // Discord silently drops the image from the card.
         let too_long = "x".repeat(65);
-        for bad in [
-            "",
-            "  ",
-            "with space",
-            "with/slash",
-            "emoji😀",
-            too_long.as_str(),
-        ] {
+        for bad in ["with space", "with/slash", "emoji😀", too_long.as_str()] {
             assert!(
                 validate_set_activity_payload(&status(), Some(bad))
                     .contains(&PayloadIssue::InvalidAssetKey),
                 "key {bad:?} must be rejected"
+            );
+        }
+        // Empty and whitespace-only are treated like `None` (the serializer
+        // filters them and the placeholder icon stays) — never a violation.
+        for empty in ["", "  "] {
+            assert!(
+                validate_set_activity_payload(&status(), Some(empty)).is_empty(),
+                "empty key {empty:?} must be accepted"
             );
         }
         for good in ["rivulet_logo", "logo_2026", "RIVULET_LOGO"] {

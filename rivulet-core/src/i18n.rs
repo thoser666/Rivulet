@@ -410,6 +410,8 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("discord_large_image", "Art asset key (optional)"),
                 ("discord_large_image_hint", "e.g. rivulet_logo"),
                 ("discord_large_image_note", "Upload an image under Rich Presence → Art Assets in the Discord Developer Portal and enter its asset name here. Discord then shows the Rivulet artwork on the activity card instead of the generic placeholder icon."),
+                ("discord_payload_error_field_too_long", "Discord rejects status text longer than 128 characters: the {0} field would be {1} characters and is truncated (or dropped). Shorten the game name or status before applying."),
+                ("discord_payload_error_asset_key", "The art asset key looks invalid (letters, digits and underscores only, up to 64 characters). Discord would silently drop the artwork — check the name in the Developer Portal."),
                 // OBS WebSocket remote control (Stream Deck / TouchPortal)
                 ("obs_ws_section", "OBS WebSocket (Stream Deck)"),
                 ("obs_ws_enable", "Enable remote control"),
@@ -914,6 +916,8 @@ Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."
                 ("discord_large_image", "Art-Asset-Schlüssel (optional)"),
                 ("discord_large_image_hint", "z. B. rivulet_logo"),
                 ("discord_large_image_note", "Lade unter Rich Presence → Art Assets im Discord-Developer-Portal ein Bild hoch und trage hier seinen Asset-Namen ein. Discord zeigt dann das Rivulet-Artwork auf der Activity-Karte statt des generischen Platzhalter-Icons."),
+                ("discord_payload_error_field_too_long", "Discord lehnt Statustexte länger als 128 Zeichen ab: Das Feld {0} hätte {1} Zeichen und wird gekürzt (oder verworfen). Kürze den Spielnamen oder Status, bevor du übernimmst."),
+                ("discord_payload_error_asset_key", "Der Art-Asset-Schlüssel sieht ungültig aus (nur Buchstaben, Ziffern und Unterstriche, maximal 64 Zeichen). Discord würde das Artwork stillschweigend verwerfen — prüfe den Namen im Developer-Portal."),
                 // OBS WebSocket Fernbedienung (Stream Deck / TouchPortal)
                 ("obs_ws_section", "OBS WebSocket (Stream Deck)"),
                 ("obs_ws_enable", "Fernbedienung aktivieren"),

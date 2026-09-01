@@ -644,6 +644,21 @@ fn discord_payload_validation_contract_is_ci_enforced() {
             && ci.contains("cargo test -p rivulet-core --lib payload"),
         "CI must expose a dedicated Discord payload contract check"
     );
+    // The Settings UI must warn immediately on Apply: the payload validator
+    // runs next to the client-id check and both warnings render with the
+    // error palette, in both locales.
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("fn apply_discord_payload_validation"));
+    assert!(gui.contains("discord_payload_warning"));
+    assert!(gui.contains("discord_payload_error_field_too_long"));
+    assert!(gui.contains("discord_payload_error_asset_key"));
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.matches("\"discord_payload_error_field_too_long\"")
+            .count()
+            >= 2
+    );
+    assert!(i18n.matches("\"discord_payload_error_asset_key\"").count() >= 2);
     // The docs must describe the rules and the 4000 rejection.
     let docs = read("docs/activity-status.md");
     assert!(

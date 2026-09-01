@@ -662,6 +662,13 @@ pub struct RivuletApp {
     /// edited again.
     #[serde(skip)]
     discord_client_id_warning: Option<rivulet_core::discord::ClientIdError>,
+    /// Set when the user applied the presence settings (client id / art asset
+    /// key) and the resulting SET_ACTIVITY payload would violate Discord's
+    /// validation rules (overlong state/details, implausible asset key), so a
+    /// warning is shown immediately instead of Discord silently dropping the
+    /// update or the artwork. Not persisted; cleared on a clean apply.
+    #[serde(skip)]
+    discord_payload_warning: Option<rivulet_core::discord::PayloadIssue>,
 
     /// Twitch chat dock: channel to join (persisted).
     chat_channel: String,
@@ -1171,6 +1178,7 @@ impl Default for RivuletApp {
             discord_reconnect_requested: false,
             discord_presence_last: None,
             discord_client_id_warning: None,
+            discord_payload_warning: None,
             chat_channel: String::new(),
             chat_oauth_token: String::new(),
             chat_input: String::new(),
@@ -4370,6 +4378,20 @@ impl RivuletApp {
         }
     }
 
+    /// Validate the current SET_ACTIVITY payload (status + configured art
+    /// asset key) against Discord's rules and remember the first violation so
+    /// Settings can warn immediately on Apply — instead of Discord silently
+    /// dropping an overlong status or an implausible artwork key. Called on
+    /// every presence Apply; the client id check stays separate.
+    fn apply_discord_payload_validation(&mut self) {
+        let status = self.current_presence_status();
+        let issues = rivulet_core::discord::validate_set_activity_payload(
+            &status,
+            Some(self.discord_presence_large_image.trim()),
+        );
+        self.discord_payload_warning = issues.into_iter().next();
+    }
+
     /// Build the current OS-level bindings from the hotkey config, translating
     /// egui keys to Windows virtual-key codes where they exist. Bindings whose
     /// key has no VK equivalent (or is modifier-only) are skipped so the OS is
@@ -7106,13 +7128,16 @@ impl eframe::App for RivuletApp {
                             );
                             if ui.button(self.tr("discord_client_id_apply")).clicked() {
                                 // Force a rebuild so the new artwork applies
-                                // without restarting the app.
-                                self.discord_client_id_dirty = true;
+                                // without restarting the app, and validate the
+                                // resulting payload immediately (overlong
+                                // status text / implausible asset key).
+                                apply_client_id = true;
                             }
                         });
                         ui.small(self.tr("discord_large_image_note"));
                         if apply_client_id {
                             self.apply_discord_client_id();
+                            self.apply_discord_payload_validation();
                         }
                         if let Some(warning) = self.discord_client_id_warning {
                             let text = match warning {
@@ -7121,6 +7146,21 @@ impl eframe::App for RivuletApp {
                                 }
                                 rivulet_core::discord::ClientIdError::Length => {
                                     self.tr("discord_client_id_error_length")
+                                }
+                            };
+                            ui.colored_label(theme::StatusColors::for_ui(ui).error, text);
+                        }
+                        if let Some(issue) = self.discord_payload_warning {
+                            let text = match issue {
+                                rivulet_core::discord::PayloadIssue::FieldTooLong {
+                                    field,
+                                    len,
+                                } => self.tr_fmt(
+                                    "discord_payload_error_field_too_long",
+                                    &[field.to_owned(), len.to_string()],
+                                ),
+                                rivulet_core::discord::PayloadIssue::InvalidAssetKey => {
+                                    self.tr("discord_payload_error_asset_key").to_string()
                                 }
                             };
                             ui.colored_label(theme::StatusColors::for_ui(ui).error, text);
@@ -8186,6 +8226,90 @@ mod tests {
         app.apply_discord_client_id();
         assert!(app.discord_client_id_warning.is_none());
         assert!(app.discord_client_id_dirty);
+    }
+
+    #[test]
+    fn discord_payload_validation_warns_on_implausible_asset_key() {
+        // Apply must validate the SET_ACTIVITY payload: an implausible art
+        // asset key sets the payload warning so Settings can show it
+        // immediately, while a plausible key (or empty) stays clean.
+        let mut app = RivuletApp {
+            discord_presence_enabled: true,
+            discord_presence_client_id: "1544027006847680532".to_owned(),
+            discord_presence_large_image: "bad key!".to_owned(),
+            ..Default::default()
+        };
+        app.apply_discord_payload_validation();
+        assert_eq!(
+            app.discord_payload_warning,
+            Some(rivulet_core::discord::PayloadIssue::InvalidAssetKey)
+        );
+
+        // Plausible key: no warning.
+        app.discord_presence_large_image = "rivulet_logo".to_owned();
+        app.apply_discord_payload_validation();
+        assert!(app.discord_payload_warning.is_none());
+
+        // Empty keeps the placeholder icon by design — no warning either.
+        app.discord_presence_large_image = String::new();
+        app.apply_discord_payload_validation();
+        assert!(app.discord_payload_warning.is_none());
+    }
+
+    #[test]
+    fn discord_payload_validation_warns_on_overlong_game_name() {
+        // A game name longer than Discord's 128-char limit must be flagged so
+        // the user can shorten it instead of the status being silently
+        // truncated (or dropped) on the wire.
+        let mut app = RivuletApp {
+            discord_presence_enabled: true,
+            discord_presence_client_id: "1544027006847680532".to_owned(),
+            ..Default::default()
+        };
+        // Simulate an overlong selected game window title.
+        app.selected_game_window_idx = Some(0);
+        app.game_windows = vec![rivulet_core::GameWindow {
+            id: 1,
+            title: "x".repeat(200),
+            width: 1920,
+            height: 1080,
+        }];
+        app.use_game_capture = true;
+        app.apply_discord_payload_validation();
+        assert!(matches!(
+            app.discord_payload_warning,
+            Some(rivulet_core::discord::PayloadIssue::FieldTooLong {
+                field: "details",
+                len: 200,
+            })
+        ));
+    }
+
+    #[test]
+    fn discord_payload_validation_is_wired_into_settings() {
+        // Source contract: the Settings Apply path runs the payload validator
+        // alongside the client id check and renders both warnings with the
+        // error palette; both locales translate the new keys (parity test
+        // enforces agreement).
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        assert!(source.contains("fn apply_discord_payload_validation"));
+        assert!(source.contains("validate_set_activity_payload"));
+        assert!(source.contains("discord_payload_warning"));
+        assert!(source.contains("discord_payload_error_field_too_long"));
+        assert!(source.contains("discord_payload_error_asset_key"));
+        assert!(source.contains("StatusColors::for_ui(ui).error"));
+        // The Apply flow must call the payload validator after the client id
+        // validator, so both warnings appear together.
+        let apply = source
+            .split_once("fn apply_discord_client_id")
+            .map(|(_, rest)| rest)
+            .expect("apply_discord_client_id must exist");
+        assert!(apply.contains("fn apply_discord_payload_validation"));
+        let settings = source
+            .split_once("fn draw_settings")
+            .map(|(_, rest)| rest)
+            .expect("draw_settings must exist");
+        assert!(settings.contains("apply_discord_payload_validation()"));
     }
 
     #[test]
