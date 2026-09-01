@@ -88,19 +88,24 @@ impl PresenceStatus {
     /// Build a localized status and optionally include the current game name.
     /// The game name is user-selected metadata; callers must not pass window
     /// titles or other untrusted sensitive data.
+    ///
+    /// Like OBS, the presence is split into a status line (`state`, e.g.
+    /// "Recording") and a detail line (`details`, the game name when a game
+    /// source is selected). The application name "Rivulet" is supplied by the
+    /// Discord application registration itself and must not be duplicated here
+    /// — Discord renders it as the card title together with the configured
+    /// large image.
     pub fn for_activity_localized(
         activity: PresenceActivity,
         locale: crate::Locale,
         game_name: Option<&str>,
     ) -> Self {
         let label = locale.tr(activity.i18n_key());
-        let details = match game_name.filter(|name| !name.trim().is_empty()) {
-            Some(_game) => format!("Rivulet · {label}"),
-            None => format!("Rivulet · {label}"),
-        };
-        let state = match game_name.filter(|name| !name.trim().is_empty()) {
-            Some(game) => format!("{label} · {game}"),
-            None => label.to_owned(),
+        let game = game_name.filter(|name| !name.trim().is_empty());
+        let state = label.to_owned();
+        let details = match game {
+            Some(game) => game.to_owned(),
+            None => String::new(),
         };
         Self {
             application: "Rivulet",
@@ -126,8 +131,11 @@ mod tests {
         ] {
             let status = PresenceStatus::for_activity(activity);
             assert_eq!(status.application, "Rivulet");
-            assert!(status.details.starts_with("Rivulet"));
+            // The app name is rendered by the Discord application registration
+            // (card title), never duplicated into state or details.
+            assert!(!status.state.contains("Rivulet"));
             assert!(status.state.contains(activity.fallback_label()));
+            assert!(status.details.is_empty());
         }
     }
 
@@ -150,10 +158,23 @@ mod tests {
             crate::Locale::De,
             Some("Elden Ring"),
         );
-        assert_eq!(status.details, "Rivulet · Streamt");
-        assert_eq!(status.state, "Streamt · Elden Ring");
+        // OBS-style layout: state carries the status, details the game name,
+        // and the app name stays out of both (Discord shows it as the title).
+        assert_eq!(status.state, "Streamt");
+        assert_eq!(status.details, "Elden Ring");
         assert!(!status.state.contains("rtmp"));
         assert!(!status.state.contains("/"));
+    }
+
+    #[test]
+    fn without_game_name_details_stays_empty() {
+        let status = PresenceStatus::for_activity_localized(
+            PresenceActivity::Recording,
+            crate::Locale::En,
+            None,
+        );
+        assert_eq!(status.state, "Recording");
+        assert!(status.details.is_empty());
     }
 
     #[test]

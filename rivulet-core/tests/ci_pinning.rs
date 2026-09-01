@@ -712,6 +712,34 @@ fn discord_client_id_is_restored_from_eframe_storage() {
 }
 
 #[test]
+fn discord_presence_uses_obs_style_assets_and_no_duplicate_name() {
+    // Like OBS, the activity card should render the app artwork (large image
+    // from the Discord Developer Portal) instead of the generic placeholder
+    // icon, and the payload must not duplicate the app name into state or
+    // details (Discord renders the name from the application registration).
+    let presence = read("rivulet-core/src/presence.rs");
+    assert!(
+        presence.contains("let details = match game"),
+        "the game name must live in details (state stays the plain label)"
+    );
+    assert!(
+        presence.contains("let state = label.to_owned()"),
+        "state must be the plain localized label without the app name"
+    );
+    let discord = read("rivulet-core/src/discord.rs");
+    assert!(discord.contains("large_image_key: Option<String>"));
+    assert!(discord.contains("struct ActivityAssets"));
+    assert!(discord.contains("#[serde(rename = \"large_image\")]"));
+    // Wire-level coverage: assets attached when configured, absent otherwise.
+    assert!(discord.contains("set_activity_attaches_large_image_when_configured"));
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("discord_presence_large_image"));
+    assert!(gui.contains("discord_large_image"));
+    // The artwork key must survive the eframe persistence round trip.
+    assert!(gui.contains("discord_presence_large_image, \"rivulet_logo\""));
+}
+
+#[test]
 fn discord_presence_errors_are_logged_and_connection_state_is_exposed() {
     // Regression: the presence worker swallowed IPC failures silently, so the
     // GUI showed the desired status while Discord displayed only the plain

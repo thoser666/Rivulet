@@ -189,3 +189,27 @@ restart needed. This covers the common case of starting Discord *after*
 Rivulet, or a socket that died while Rivulet kept running. Every IPC success
 or failure is also written to the daily crash logs, so the root cause is
 visible instead of silently swallowing the error.
+
+## Card artwork and the "game controller" icon
+
+Discord renders two different things on your profile:
+
+- **Discord's own game detection** ("Playing Rivulet" with a game-controller
+  icon, no status lines below) is Discord's built-in detection of the running
+  `rivulet-gui.exe` process. It is not part of Rivulet's Rich Presence and
+  cannot be removed over the IPC protocol. To hide it, remove Rivulet from
+  Discord → Settings → Activity Status → **Registered Games** (✕ next to the
+  entry), or disable game detection entirely.
+- **The Rich Presence card** ("Rivulet" title + status line below) is ours.
+  It always shows the application name as the title — exactly like OBS shows
+  "OBS Studio" — but the **placeholder game-controller icon** can be replaced
+  with real artwork: upload an image under **Rich Presence → Art Assets** in
+  the Discord Developer Portal for your application, then enter its asset
+  name in Settings → Discord Rich Presence → **Art asset key (optional)**
+  (e.g. `rivulet_logo`) and click Apply. Discord then renders the artwork
+  instead of the generic icon, OBS-style.
+
+The payload itself follows the OBS layout: `state` carries the plain status
+label ("Recording"/"Aufnahme") and `details` carries the selected game name
+(when a game/window source is selected) — the application name is rendered
+by the Discord registration and is never duplicated into the payload.

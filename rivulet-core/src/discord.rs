@@ -46,6 +46,14 @@ pub struct DiscordPresenceConfig {
     /// default `discord-ipc-0` endpoint from the environment. Exposed so the
     /// adapter can be run deterministically against a local listener in tests.
     pub ipc_socket_path: Option<std::path::PathBuf>,
+    /// Asset key of the large image uploaded in the Discord Developer Portal
+    /// (Rich Presence → Art Assets). When set, Discord renders that image as
+    /// the card artwork instead of the generic placeholder icon, like OBS
+    /// shows its logo. The image is uploaded by the application owner; the key
+    /// is the name given to the asset there.
+    pub large_image_key: Option<String>,
+    /// Hover text for the large image. Defaults to the app name when unset.
+    pub large_image_text: Option<String>,
 }
 
 impl Default for DiscordPresenceConfig {
@@ -54,6 +62,8 @@ impl Default for DiscordPresenceConfig {
             enabled: true,
             client_id: DEFAULT_CLIENT_ID.to_owned(),
             ipc_socket_path: None,
+            large_image_key: None,
+            large_image_text: None,
         }
     }
 }
@@ -245,7 +255,15 @@ fn worker_loop(
         // Non-blocking for the caller: this I/O happens on the worker thread and
         // only when an activity transition is pending.
         let result = ensure_connected(&mut stream, &cfg.client_id, cfg.ipc_socket_path.as_deref())
-            .and_then(|_| send_set_activity(stream.as_mut().unwrap(), &status, pid, &mut seq));
+            .and_then(|_| {
+                send_set_activity(
+                    stream.as_mut().unwrap(),
+                    &status,
+                    pid,
+                    &mut seq,
+                    cfg.large_image_key.as_deref(),
+                )
+            });
         match result {
             Ok(()) => {
                 backoff = 1;
@@ -423,13 +441,31 @@ struct Activity {
     r#type: u32,
     state: String,
     details: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assets: Option<ActivityAssets>,
+}
+
+#[derive(Serialize)]
+struct ActivityAssets {
+    #[serde(rename = "large_image")]
+    large_image: String,
+    #[serde(rename = "large_text", skip_serializing_if = "Option::is_none")]
+    large_text: Option<String>,
 }
 
 impl ActivityCommand {
     /// Build a `SET_ACTIVITY` command from the privacy-safe status payload.
     /// `state`/`details` are truncated to Discord's 128-char limit at a UTF-8
-    /// character boundary.
-    fn new(status: &PresenceStatus, pid: u32, seq: u64) -> Self {
+    /// character boundary. When the configured Discord application has an
+    /// uploaded art asset, its key is attached so Discord shows the Rivulet
+    /// artwork instead of the generic placeholder icon (OBS-style).
+    fn new(status: &PresenceStatus, pid: u32, seq: u64, large_image: Option<&str>) -> Self {
+        let assets = large_image
+            .filter(|k| !k.trim().is_empty())
+            .map(|key| ActivityAssets {
+                large_image: key.to_owned(),
+                large_text: Some("Rivulet".to_owned()),
+            });
         ActivityCommand {
             cmd: "SET_ACTIVITY",
             args: ActivityArgs {
@@ -438,6 +474,7 @@ impl ActivityCommand {
                     r#type: 0, // 0 == "Playing" / Game presence
                     state: truncate(&status.state),
                     details: truncate(&status.details),
+                    assets,
                 },
             },
             nonce: format!("rivulet-{seq}"),
@@ -459,9 +496,10 @@ fn send_set_activity<W: Write + ?Sized>(
     status: &PresenceStatus,
     pid: u32,
     seq: &mut u64,
+    large_image: Option<&str>,
 ) -> io::Result<()> {
     *seq += 1;
-    let cmd = ActivityCommand::new(status, pid, *seq);
+    let cmd = ActivityCommand::new(status, pid, *seq, large_image);
     let bytes =
         serde_json::to_vec(&cmd).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     write_frame(w, op::FRAME, &bytes)
@@ -621,6 +659,7 @@ mod tests {
             enabled: true,
             client_id: "dummy-client".to_owned(),
             ipc_socket_path: Some(std::env::temp_dir().join("rivulet-missing-discord-ipc.sock")),
+            ..Default::default()
         };
         let mut presence = DiscordPresence::new(&cfg);
         assert!(presence.enabled());
@@ -745,7 +784,7 @@ mod tests {
             Some("Elden Ring"),
         );
         let mut seq = 7;
-        send_set_activity(&mut buf, &st, 1234, &mut seq).unwrap();
+        send_set_activity(&mut buf, &st, 1234, &mut seq, None).unwrap();
 
         // 8-byte header: opcode 1 (FRAME) + length, then the JSON payload.
         assert_eq!(u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]), 1);
@@ -754,10 +793,23 @@ mod tests {
         assert_eq!(value["cmd"], "SET_ACTIVITY");
         assert_eq!(value["args"]["pid"], 1234);
         assert_eq!(value["args"]["activity"]["type"], 0);
-        assert_eq!(value["args"]["activity"]["details"], "Rivulet · Streaming");
-        assert_eq!(value["args"]["activity"]["state"], "Streaming · Elden Ring");
+        assert_eq!(value["args"]["activity"]["details"], "Elden Ring");
+        assert_eq!(value["args"]["activity"]["state"], "Streaming");
+        assert!(value["args"]["activity"]["assets"].is_null());
         assert!(!value["nonce"].as_str().unwrap().is_empty());
         assert!(seq > 7);
+    }
+
+    #[test]
+    fn set_activity_attaches_large_image_when_configured() {
+        let mut buf = Vec::new();
+        let st = PresenceStatus::for_activity(PresenceActivity::Recording);
+        let mut seq = 1;
+        send_set_activity(&mut buf, &st, 9, &mut seq, Some("rivulet_logo")).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&buf[8..]).unwrap();
+        let assets = &value["args"]["activity"]["assets"];
+        assert_eq!(assets["large_image"], "rivulet_logo");
+        assert_eq!(assets["large_text"], "Rivulet");
     }
 
     #[test]
@@ -765,7 +817,7 @@ mod tests {
         let st = PresenceStatus::for_activity(PresenceActivity::Streaming);
         let mut buf = Vec::new();
         let mut seq = 0;
-        send_set_activity(&mut buf, &st, 1, &mut seq).unwrap();
+        send_set_activity(&mut buf, &st, 1, &mut seq, None).unwrap();
         let text = String::from_utf8(buf[8..].to_vec()).unwrap();
         assert!(!text.to_lowercase().contains("rtmp"));
         assert!(!text.to_lowercase().contains("key"));
@@ -815,7 +867,7 @@ mod tests {
         let mut seq = 1;
         let _ = a.set_write_timeout(Some(Duration::from_secs(2)));
         let _ = b.set_read_timeout(Some(Duration::from_secs(2)));
-        send_set_activity(&mut a, &st, 42, &mut seq).unwrap();
+        send_set_activity(&mut a, &st, 42, &mut seq, None).unwrap();
         let (opcode, frame) = read_frame(&mut b).unwrap();
         assert_eq!(opcode, op::FRAME, "SET_ACTIVITY must be a FRAME op");
         let value: serde_json::Value = serde_json::from_slice(&frame).unwrap();
@@ -838,6 +890,7 @@ mod tests {
             enabled: true,
             client_id: "smoke-client-unix".to_owned(),
             ipc_socket_path: Some(sock_path),
+            ..Default::default()
         };
         let mut presence = DiscordPresence::new(&cfg);
         assert!(presence.enabled());
@@ -980,6 +1033,7 @@ mod tests {
                 enabled: true,
                 client_id: "smoke-client-windows".to_owned(),
                 ipc_socket_path: Some(std::path::PathBuf::from(&pipe_name)),
+                ..Default::default()
             };
             let mut presence = DiscordPresence::new(&cfg);
             assert!(presence.enabled());

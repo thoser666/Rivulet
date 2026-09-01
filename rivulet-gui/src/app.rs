@@ -630,6 +630,10 @@ pub struct RivuletApp {
     /// Persisted across sessions. Empty disables the adapter until a real
     /// application id is configured.
     discord_presence_client_id: String,
+    /// Asset key of the large image uploaded in the Discord Developer Portal
+    /// (Rich Presence → Art Assets). Persisted; empty keeps the generic
+    /// placeholder icon.
+    discord_presence_large_image: String,
     /// Live adapter handle. Not persisted; rebuilt when the app starts.
     #[serde(skip)]
     discord_presence: Option<DiscordPresence>,
@@ -1147,6 +1151,7 @@ impl Default for RivuletApp {
             theme_applied: None,
             discord_presence_enabled: true,
             discord_presence_client_id: String::new(),
+            discord_presence_large_image: String::new(),
             discord_presence: None,
             discord_presence_active_client_id: None,
             discord_client_id_dirty: false,
@@ -4164,6 +4169,7 @@ impl RivuletApp {
         }
 
         let client_id = self.discord_presence_client_id.trim().to_owned();
+        let large_image = self.discord_presence_large_image.trim().to_owned();
         let needs_create = self.discord_presence.is_none()
             || self.discord_presence_active_client_id.as_deref() != Some(client_id.as_str());
         if needs_create {
@@ -4180,6 +4186,8 @@ impl RivuletApp {
             let cfg = DiscordPresenceConfig {
                 enabled: true,
                 client_id: client_id.clone(),
+                large_image_key: (!large_image.is_empty()).then(|| large_image.clone()),
+                large_image_text: Some("Rivulet".to_owned()),
                 ..Default::default()
             };
             self.discord_presence = Some(DiscordPresence::new(&cfg));
@@ -6934,6 +6942,8 @@ impl eframe::App for RivuletApp {
                         let discord_client_id_hint = self.tr("discord_client_id_hint");
                         let discord_client_id_apply = self.tr("discord_client_id_apply");
                         let discord_client_id_note = self.tr("discord_client_id_note");
+                        let discord_large_image_label = self.tr("discord_large_image");
+                        let discord_large_image_hint = self.tr("discord_large_image_hint");
                         ui.separator();
                         ui.label(egui::RichText::new(discord_section).strong());
                         ui.checkbox(&mut self.discord_presence_enabled, discord_enable);
@@ -6954,6 +6964,24 @@ impl eframe::App for RivuletApp {
                         if ui.button(discord_client_id_apply).clicked() {
                             apply_client_id = true;
                         }
+                        // Optional artwork asset: the key of an image uploaded
+                        // in the Discord Developer Portal (Rich Presence → Art
+                        // Assets). Rendered as the card artwork like OBS shows
+                        // its logo instead of the generic placeholder icon.
+                        ui.horizontal(|ui| {
+                            ui.label(discord_large_image_label);
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.discord_presence_large_image)
+                                    .hint_text(discord_large_image_hint)
+                                    .desired_width(180.0),
+                            );
+                            if ui.button(self.tr("discord_client_id_apply")).clicked() {
+                                // Force a rebuild so the new artwork applies
+                                // without restarting the app.
+                                self.discord_client_id_dirty = true;
+                            }
+                        });
+                        ui.small(self.tr("discord_large_image_note"));
                         if apply_client_id {
                             self.apply_discord_client_id();
                         }
@@ -8085,15 +8113,12 @@ mod tests {
         }];
         app.selected_game_window_idx = Some(0);
         let status = app.current_presence_status();
-        // The user-selected game name appears in the state, and the details
-        // line stays free of it (so details stays short on Discord).
-        assert!(
-            status.state.contains("Elden Ring"),
-            "state was: {}",
-            status.state
-        );
-        assert!(status.details.starts_with("Rivulet · "));
-        assert!(!status.details.contains("Elden Ring"));
+        // OBS-style layout: the game name lives in the details line, the
+        // state carries the plain status label, and the app name is rendered
+        // by the Discord application registration (card title) — never
+        // duplicated into the payload.
+        assert_eq!(status.state, "Ready");
+        assert_eq!(status.details, "Elden Ring");
 
         // No selection -> plain status without a game name.
         let empty = RivuletApp {
@@ -8175,6 +8200,7 @@ mod tests {
         let mut app = RivuletApp {
             discord_presence_enabled: true,
             discord_presence_client_id: "1234567890123456".to_owned(),
+            discord_presence_large_image: "rivulet_logo".to_owned(),
             ..Default::default()
         };
         let mut storage = MemoryStorage::default();
@@ -8183,6 +8209,7 @@ mod tests {
         let restored = RivuletApp::restore_from_storage(Some(&storage))
             .expect("persisted app state must be restored");
         assert_eq!(restored.discord_presence_client_id, "1234567890123456");
+        assert_eq!(restored.discord_presence_large_image, "rivulet_logo");
         assert!(restored.discord_presence_enabled);
         // Runtime-only handles must stay at their defaults after restore.
         assert!(restored.discord_presence.is_none());
@@ -8215,7 +8242,7 @@ mod tests {
         app.last_error = Some("pipeline failed".to_owned());
         let status = app.current_presence_status();
         assert_eq!(status.state, "Error");
-        assert_eq!(status.details, "Rivulet · Error");
+        assert!(status.details.is_empty());
 
         // The error text itself is never sent (privacy-safe payload).
         assert!(!status.state.contains("pipeline"));
@@ -8379,8 +8406,13 @@ mod tests {
         let mut app = RivuletApp::default();
         app.locale = Locale::De;
         let status = app.current_presence_status();
-        assert!(status.details.starts_with("Rivulet"));
-        // German locale label, and never any sensitive token/path.
+        // OBS-style: the app name is the Discord card title (application
+        // registration), the state carries the German label, and no game name
+        // is selected so the details line stays empty.
+        assert_eq!(status.application, "Rivulet");
+        assert_eq!(status.state, "Bereit");
+        assert!(status.details.is_empty());
+        // Never any sensitive token/path.
         assert!(!status.state.to_lowercase().contains("rtmp"));
         assert!(!status.state.contains('/') && !status.state.contains('\\'));
     }
