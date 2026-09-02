@@ -1206,7 +1206,7 @@ fn develop_required_checks_have_stable_job_names() {
             && ci.contains("cargo test -p rivulet-core --test ci_pinning")
             && ci.contains("name: CI")
             && ci.contains(
-                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke]"
+                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke]"
             ),
         "CI must expose dedicated Pinning-Tests and aggregate CI checks"
     );
@@ -1391,6 +1391,62 @@ fn updater_verifies_release_checksums_before_install() {
     assert!(
         gui.contains("verify_downloaded_asset"),
         "the GUI download flow must verify the installer before Downloaded"
+    );
+}
+
+#[test]
+fn fuzz_targets_cover_the_untrusted_input_parsers() {
+    // Every parser that consumes remote-controlled bytes must have a fuzz
+    // target, and CI must run a libFuzzer smoke over all of them so parser
+    // regressions (panics on crafted input) fail the build.
+    for (target, _crate_under_test, symbol) in [
+        ("parse_irc_line.rs", "rivulet-core", "parse_irc_line"),
+        (
+            "sdp_offer_endpoint.rs",
+            "rivulet-core",
+            "SdpOffer::h264_opus",
+        ),
+        (
+            "parse_latest_release.rs",
+            "rivulet-updater",
+            "parse_latest_release",
+        ),
+        ("parse_checksums.rs", "rivulet-updater", "parse_checksums"),
+    ] {
+        let path = format!("fuzz/fuzz_targets/{target}");
+        let source = read(&path);
+        assert!(
+            source.contains("no_main") && source.contains("fuzz_target!"),
+            "{path} must be a real libFuzzer target"
+        );
+        assert!(source.contains(symbol), "{path} must exercise {symbol}");
+    }
+    assert!(
+        read("fuzz/Cargo.toml").contains("cargo-fuzz = true"),
+        "fuzz/Cargo.toml must be a cargo-fuzz crate"
+    );
+    let workspace = read("Cargo.toml");
+    assert!(
+        workspace.contains("exclude = [\"fuzz\"]"),
+        "the fuzz crate must stay excluded from the normal workspace build"
+    );
+
+    let smoke = read("scripts/fuzz-smoke.sh");
+    for target in [
+        "parse_irc_line",
+        "sdp_offer_endpoint",
+        "parse_latest_release",
+        "parse_checksums",
+    ] {
+        assert!(smoke.contains(target), "smoke must run {target}");
+    }
+
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("Fuzz smoke (regression corpus)")
+            && ci.contains("scripts/fuzz-smoke.sh")
+            && ci.contains("fuzz-crashes"),
+        "CI must run the fuzz smoke and upload crash artifacts"
     );
 }
 

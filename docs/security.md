@@ -264,6 +264,19 @@ wiring in place. Transport security (HTTPS) plus this digest check protect
 the update path; artifact signing (Authenticode/codesign) is exercised by the
 signing E2E workflow and can be layered on top later.
 
+### Fuzzing the untrusted-input parsers
+
+Every parser that consumes remote-controlled bytes has a libFuzzer target in
+`fuzz/` (see `fuzz/README.md`): Twitch IRC lines, the WHIP endpoint feeding
+the SDP generator, the GitHub Releases JSON behind the update check, and the
+`SHA256SUMS` manifest itself. The CI job **Fuzz smoke (regression corpus)**
+builds the targets with cargo-fuzz (nightly toolchain) and runs a fixed,
+short number of executions each; a crash fails the build and the offending
+input is uploaded as an artifact. The smoke guards against parser
+regressions (panics on crafted input); long-running campaigns before parser
+dependency upgrades stay a manual task. A ci_pinning guard keeps the
+targets, the workspace exclusion, and the CI wiring in place.
+
 ## Incident Response
 
 1. Stop the affected workflow or release if a credential may be exposed.

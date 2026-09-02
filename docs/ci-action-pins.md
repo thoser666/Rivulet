@@ -25,7 +25,7 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | `actions/dependency-review-action` | `v5.0.0` | `a1d282b36b6f3519aa1f3fc636f609c47dddb294` | security.yml |
 | `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | ci.yml, release.yml |
 | `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | build-package.yml, obs-upstream.yml, scorecard.yml |
-| `dtolnay/rust-toolchain` | `stable` | `4360b52568e2003a75bf9bc1d59f33a8e3fc893c` | build-package.yml, ci.yml, nightly.yml, security.yml |
+| `dtolnay/rust-toolchain` | `stable` | `4360b52568e2003a75bf9bc1d59f33a8e3fc893c` | build-package.yml, ci.yml, nightly.yml, security.yml — the fuzz_smoke job overrides `toolchain: nightly` (cargo-fuzz requirement), still at the same pinned SHA |
 | `github/codeql-action/analyze` | `v4.37.9` | `cdf488f595d80d6e07e03d4674febd5ab45fa938` | security.yml |
 | `github/codeql-action/autobuild` | `v4.37.9` | `cdf488f595d80d6e07e03d4674febd5ab45fa938` | security.yml |
 | `github/codeql-action/init` | `v4.37.9` | `cdf488f595d80d6e07e03d4674febd5ab45fa938` | security.yml |

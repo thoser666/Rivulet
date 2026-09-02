@@ -13,6 +13,10 @@ members = [
     "rivulet-launcher",
     "rivulet-obs-websocket"
 ]
+# The fuzz crate builds with libFuzzer's sanitizer runtime and is driven by
+# cargo-fuzz (see fuzz/ + scripts/fuzz-smoke.sh); it must stay out of the
+# normal workspace build/test/clippy paths.
+exclude = ["fuzz"]
 resolver = "2"
 
 [workspace.package]

@@ -91,3 +91,7 @@ bench/
 # Environment
 .env
 .env.local
+# cargo-fuzz build outputs and crash artifacts (fuzz/)
+fuzz/target/
+fuzz/artifacts/
+fuzz/coverage/
