@@ -231,6 +231,12 @@ The crate contains two layers of tests:
   (`Protocol(HandshakeIncomplete)` under parallel test load). `run_session`
   therefore restores blocking **before** the handshake (not after), and the
   auth-rejection smoke uses the same retry loop as `TestClient::connect` so a
-  transient drop cannot flake the suite. Both are locked in by `ci_pinning.rs`.
+  transient drop cannot flake the suite. A **parallel load test**
+  (`parallel_clients_all_complete_handshake_under_load`) bursts 24 clients at
+  one server simultaneously — released through a `Barrier` so the TCP connects
+  and WebSocket handshakes really overlap — and requires every client to
+  complete Hello/Identify plus a request round-trip, then proves a fresh
+  client still connects afterwards. All of it (blocking order, shared retry,
+  load test) is locked in by `ci_pinning.rs`.
 - **GUI integration**: settings toggle/port/password persistence is covered
   by the existing GUI test harness, and i18n keys exist in both locales.

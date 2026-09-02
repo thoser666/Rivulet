@@ -125,25 +125,25 @@ pub enum PayloadIssue {
 ///
 /// This is the single source of truth for the limits that otherwise only
 /// surface as silent truncation (`state`/`details` ≤ 128 chars) or as a
-/// silently dropped image (invalid `large_image` key). The empty-`details`
-/// rule is enforced on the wire itself: the serializer **omits** the field
-/// when there is no game name (Discord rejects an empty string with `4000`),
-/// and the exhaustive contract test asserts no serialized payload ever
-/// contains an empty `details`.
+/// silently dropped image (invalid `large_image` key). The empty-`state`
+/// rule is enforced on the wire itself: `details` always carries the status
+/// label, while the serializer **omits** `state` when there is no game name
+/// (Discord rejects an empty string with `4000`), and the exhaustive contract
+/// test asserts no serialized payload ever contains an empty `state`.
 pub fn validate_set_activity_payload(
     status: &PresenceStatus,
     large_image_key: Option<&str>,
 ) -> Vec<PayloadIssue> {
     let mut issues = Vec::new();
     let details = status.details.trim();
-    if !details.is_empty() && details.len() > 128 {
+    if details.len() > 128 {
         issues.push(PayloadIssue::FieldTooLong {
             field: "details",
             len: details.len(),
         });
     }
     let state = status.state.trim();
-    if state.len() > 128 {
+    if !state.is_empty() && state.len() > 128 {
         issues.push(PayloadIssue::FieldTooLong {
             field: "state",
             len: state.len(),
@@ -332,7 +332,8 @@ fn worker_loop(
                 // Discord actually accepted the presence.
                 conn.store(2, Ordering::SeqCst);
                 tracing::info!(
-                    state = %status.state,
+                    activity = %status.details,
+                    game = %status.state,
                     "Discord Rich Presence SET_ACTIVITY delivered"
                 );
             }
@@ -500,13 +501,15 @@ struct ActivityArgs {
 struct Activity {
     #[serde(rename = "type")]
     r#type: u32,
-    state: String,
-    /// Optional detail line. Discord **rejects** an empty string here with
-    /// `4000: "details" is not allowed to be empty`, so the field is omitted
-    /// entirely when there is no game name to show (verified live against a
-    /// running Discord client).
+    /// First card line, always present: the localized status label (e.g.
+    /// "Recording"). Never empty — it is built from the i18n tables.
+    details: String,
+    /// Second card line, optional: the game name. Discord **rejects** an
+    /// empty string with `4000: "..." is not allowed to be empty`, so the
+    /// field is omitted entirely when there is no game name to show (verified
+    /// live against a running Discord client).
     #[serde(skip_serializing_if = "Option::is_none")]
-    details: Option<String>,
+    state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     assets: Option<ActivityAssets>,
 }
@@ -549,8 +552,8 @@ impl ActivityCommand {
                 pid,
                 activity: Activity {
                     r#type: 0, // 0 == "Playing" / Game presence
-                    state: truncate(&status.state),
-                    details: (!status.details.trim().is_empty()).then(|| truncate(&status.details)),
+                    details: truncate(&status.details),
+                    state: (!status.state.trim().is_empty()).then(|| truncate(&status.state)),
                     assets,
                 },
             },
@@ -870,35 +873,36 @@ mod tests {
         assert_eq!(value["cmd"], "SET_ACTIVITY");
         assert_eq!(value["args"]["pid"], 1234);
         assert_eq!(value["args"]["activity"]["type"], 0);
-        assert_eq!(value["args"]["activity"]["details"], "Elden Ring");
-        assert_eq!(value["args"]["activity"]["state"], "Streaming");
+        assert_eq!(value["args"]["activity"]["details"], "Streaming");
+        assert_eq!(value["args"]["activity"]["state"], "Elden Ring");
         assert!(value["args"]["activity"]["assets"].is_null());
         assert!(!value["nonce"].as_str().unwrap().is_empty());
         assert!(seq > 7);
     }
 
     #[test]
-    fn empty_details_is_omitted_not_sent_empty() {
+    fn empty_state_is_omitted_not_sent_empty() {
         // Regression (verified live): Discord rejects SET_ACTIVITY with
-        // `4000: "details" is not allowed to be empty`, so a status without a
-        // game name (empty details) must omit the field entirely instead of
-        // sending an empty string.
+        // `4000: "..." is not allowed to be empty`, so a status without a
+        // game name (empty `state`) must omit the field entirely instead of
+        // sending an empty string. `details` always carries the status label.
         let mut buf = Vec::new();
         let st = PresenceStatus::for_activity(PresenceActivity::Idle);
-        assert!(st.details.is_empty());
+        assert!(st.state.is_empty());
+        assert_eq!(st.details, "Ready");
         let mut seq = 2;
         send_set_activity(&mut buf, &st, 5, &mut seq, None).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&buf[8..]).unwrap();
         assert!(
-            value["args"]["activity"]["details"].is_null(),
-            "empty details must be omitted, got: {}",
-            value["args"]["activity"]["details"]
+            value["args"]["activity"]["state"].is_null(),
+            "empty state must be omitted, got: {}",
+            value["args"]["activity"]["state"]
         );
-        assert_eq!(value["args"]["activity"]["state"], "Ready");
+        assert_eq!(value["args"]["activity"]["details"], "Ready");
         let text = String::from_utf8(buf[8..].to_vec()).unwrap();
         assert!(
-            !text.contains("\"details\":\"\""),
-            "payload must not contain an empty details string"
+            !text.contains("\"state\":\"\""),
+            "payload must not contain an empty state string"
         );
     }
 
@@ -964,7 +968,7 @@ mod tests {
     /// Exhaustive wire-contract check: serialize *every* payload variant and
     /// assert the JSON actually sent to Discord satisfies its documented
     /// validation rules. This is the CI-enforced guarantee that a `4000`
-    /// rejection (empty `details`) or a silently truncated/dropped field can
+    /// rejection (empty `state`) or a silently truncated/dropped field can
     /// never reach the wire again.
     #[test]
     fn every_payload_variant_conforms_to_discord_rules_on_the_wire() {
@@ -983,19 +987,28 @@ mod tests {
                         let value: serde_json::Value = serde_json::from_slice(&buf[8..]).unwrap();
                         let act = &value["args"]["activity"];
 
-                        // Rule 1 (error 4000): details must never be an empty
-                        // string — it is either present with content or omitted.
-                        match act["details"].as_str() {
-                            Some(d) => assert!(
-                                !d.is_empty(),
-                                "empty details on the wire for {activity:?}/{locale:?}/{game:?}"
+                        // Rule 1 (error 4000): `details` is the first card line
+                        // and always carries the status label — it must be
+                        // present and non-empty on the wire.
+                        assert_eq!(
+                            act["details"].as_str(),
+                            Some(locale.tr(activity.i18n_key())),
+                            "details must carry the status label on the wire: \
+                             {activity:?}/{locale:?}"
+                        );
+                        // The game name lives in `state` (second line); it
+                        // must never be an empty string — present with content
+                        // or omitted entirely when there is no game name.
+                        match act["state"].as_str() {
+                            Some(s) => assert!(
+                                !s.is_empty(),
+                                "empty state on the wire for {activity:?}/{locale:?}/{game:?}"
                             ),
                             None => {
-                                // Omitted: only valid when there is no game name.
                                 let has_game = game.is_some_and(|g| !g.trim().is_empty());
                                 assert!(
                                     !has_game,
-                                    "details must be present when a game is set: \
+                                    "state must be present when a game is set: \
                                      {activity:?}/{locale:?}/{game:?}"
                                 );
                             }
@@ -1310,7 +1323,10 @@ mod tests {
             let set: serde_json::Value = serde_json::from_slice(&set).expect("json");
             assert_eq!(set["cmd"], "SET_ACTIVITY");
             assert_eq!(set["args"]["pid"], std::process::id());
-            assert_eq!(set["args"]["activity"]["state"], "Streaming");
+            // First card line carries the status label; the game name lives in
+            // `state` and is omitted when no game is selected.
+            assert_eq!(set["args"]["activity"]["details"], "Streaming");
+            assert!(set["args"]["activity"]["state"].is_null());
 
             // The shared connection state must reflect the successful handshake
             // (same contract as the Unix listener smoke test).

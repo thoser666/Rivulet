@@ -153,30 +153,7 @@ impl TestClient {
     fn connect(port: u16, password: Option<&str>) -> Self {
         eprintln!("[client] connecting to {port}");
         let url = format!("ws://127.0.0.1:{port}");
-        let mut request = url.into_client_request().unwrap();
-        // Match the JSON subprotocol real OBS clients negotiate.
-        request.headers_mut().insert(
-            "Sec-WebSocket-Protocol",
-            protocol::JSON_SUBPROTOCOL.parse().unwrap(),
-        );
-        let mut ws = None;
-        // The non-blocking accept loop can momentarily drop a handshake when
-        // tests run in parallel on loaded CI runners; retry briefly instead
-        // of failing the whole suite on a transient "Connection reset".
-        for attempt in 0..10 {
-            match connect(request.clone()) {
-                Ok((w, _)) => {
-                    ws = Some(w);
-                    break;
-                }
-                Err(e) if attempt < 9 => {
-                    eprintln!("[client] connect attempt {attempt} failed: {e}; retrying");
-                    std::thread::sleep(Duration::from_millis(50));
-                }
-                Err(e) => panic!("websocket connect: {e}"),
-            }
-        }
-        let mut ws = ws.expect("websocket connect");
+        let mut ws = connect_with_retry(&url);
         eprintln!("[client] connected, reading hello");
 
         // Read Hello.
@@ -233,11 +210,13 @@ impl TestClient {
     }
 }
 
-/// Connect with a short retry loop, matching `TestClient::connect`: the
-/// server's non-blocking accept loop can transiently drop a handshake under
-/// parallel load (fixed in `run_session` by restoring blocking before the
-/// handshake), so a bare `connect().unwrap()` would flake the suite.
+/// Connect with a short retry loop — the single retry implementation used by
+/// both `TestClient::connect` and the raw-socket smokes: the server's
+/// non-blocking accept loop can transiently drop a handshake under parallel
+/// load (fixed in `run_session` by restoring blocking before the handshake), so
+/// a bare `connect().unwrap()` would flake the suite.
 fn connect_with_retry(url: &str) -> WebSocket<MaybeTlsStream<std::net::TcpStream>> {
+    // Match the JSON subprotocol real OBS clients negotiate.
     let mut request = url.into_client_request().unwrap();
     request.headers_mut().insert(
         "Sec-WebSocket-Protocol",
@@ -490,6 +469,56 @@ fn auth_rejects_wrong_password_with_close_code_4009() {
         Ok(other) => panic!("expected close, got: {other:?}"),
         Err(other) => panic!("expected close, got: {other:?}"),
     }
+}
+
+#[test]
+fn parallel_clients_all_complete_handshake_under_load() {
+    // Handshake-under-load regression guard: the non-blocking accept loop
+    // once made concurrent connects intermittently fail with
+    // `Protocol(HandshakeIncomplete)` (fixed by restoring blocking before the
+    // handshake). Burst this many clients at one server simultaneously; every
+    // one must complete Hello/Identify *and* a request round-trip, and the
+    // server must still accept a fresh client afterwards.
+    const CLIENTS: usize = 24;
+
+    let (_handle, port, _backend) = start_server(None);
+    let barrier = Arc::new(std::sync::Barrier::new(CLIENTS));
+    let handles: Vec<_> = (0..CLIENTS)
+        .map(|_| {
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                // Release all client threads at once so the TCP connects and
+                // WebSocket handshakes really overlap against the listener.
+                barrier.wait();
+                let mut client = TestClient::connect(port, None);
+                let d = client.request("GetVersion", serde_json::json!({}));
+                assert!(
+                    d["requestStatus"]["result"].as_bool().unwrap(),
+                    "GetVersion must round-trip after a loaded handshake"
+                );
+            })
+        })
+        .collect();
+
+    // Collect panics instead of aborting at the first failure so the message
+    // names how many of the CLIENTS clients failed.
+    let mut failures = Vec::new();
+    for handle in handles {
+        if let Err(payload) = handle.join() {
+            failures.push(format!("client panicked: {payload:?}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{}/{} clients failed the handshake under load: {failures:?}",
+        failures.len(),
+        CLIENTS
+    );
+
+    // The server must keep working for a fresh client after the burst.
+    let mut client = TestClient::connect(port, None);
+    let d = client.request("GetVersion", serde_json::json!({}));
+    assert!(d["requestStatus"]["result"].as_bool().unwrap());
 }
 
 #[test]

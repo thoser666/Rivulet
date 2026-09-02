@@ -256,18 +256,20 @@ The repository ships a ready-to-upload artwork:
 If you upload the artwork under a different asset name, use that exact name
 as the key in Settings — the two must match character-for-character.
 
-The payload itself follows the OBS layout: `state` carries the plain status
-label ("Recording"/"Aufnahme") and `details` carries the selected game name
-(when a game/window source is selected) — the application name is rendered
-by the Discord registration and is never duplicated into the payload.
+The two card lines follow Discord's rendering order: `details` is the
+**first line** and always carries the plain status label
+("Recording"/"Aufnahme"), `state` is the **second line** and carries the
+selected game name when a game/window source is selected — the application
+name is rendered by the Discord registration and is never duplicated into
+the payload.
 
-> **Empty `details` is rejected by Discord (fixed):** Discord refuses a
-> `SET_ACTIVITY` whose `details` is an empty string with
-> `4000: "details" is not allowed to be empty` (verified live against a
-> running client). Rivulet therefore **omits the field entirely** when no
-> game name is selected instead of sending an empty string — the card then
-> shows only the status line, exactly like OBS without a game. A `ci_pinning`
-> guard (`empty_details_is_omitted_not_sent_empty`) locks this in.
+> **Empty `state` is rejected by Discord (fixed):** Discord refuses a
+> `SET_ACTIVITY` that contains an empty string with
+> `4000: "..." is not allowed to be empty` (verified live against a
+> running client, originally for the `details` field). Rivulet therefore
+> **omits `state` entirely** when no game name is selected instead of sending
+> an empty string — the card then shows only the status line. A `ci_pinning`
+> guard (`empty_state_is_omitted_not_sent_empty`) locks this in.
 
 ### Payload validation contract (CI-enforced)
 
@@ -278,7 +280,8 @@ lives in `rivulet-core/src/discord.rs`:
 
 | Rule | Behavior | Enforced by |
 |---|---|---|
-| `details` must never be empty | Empty `details` is **omitted** entirely, never sent as `""` (Discord: `4000: "details" is not allowed to be empty`) | Wire contract test over every payload variant |
+| `details` always non-empty | `details` is the first card line and always carries the status label — never sent empty | Wire contract test over every payload variant |
+| `state` must never be empty | Empty `state` is **omitted** entirely, never sent as `""` (Discord rejects empty strings with `4000`) | Wire contract test over every payload variant |
 | `state`/`details` ≤ 128 characters | Overlong values are truncated at a UTF-8 boundary; the validator flags the pre-truncation condition so Settings can warn | `truncate()` + `validate_set_activity_payload` |
 | `large_image` key format | Only plausible keys (`[A-Za-z0-9_]`, ≤ 64 chars) are attached; empty or malformed keys are filtered before send — Discord would otherwise silently drop the image | Serializer filter + `PayloadIssue::InvalidAssetKey` |
 

@@ -523,6 +523,13 @@ fn obs_websocket_smoke_is_wired_up() {
     // The auth-close smoke must use the same retry as TestClient::connect so a
     // transient handshake drop cannot flake it.
     assert!(smoke.contains("fn connect_with_retry"));
+    // Handshake-under-load must stay covered permanently: the parallel burst
+    // test connects many clients at once and requires every one plus a fresh
+    // client afterwards to complete Hello/Identify and a request round-trip.
+    assert!(smoke.contains("fn parallel_clients_all_complete_handshake_under_load"));
+    assert!(smoke.contains("const CLIENTS: usize = 24;"));
+    assert!(smoke.contains("std::sync::Barrier"));
+    assert!(smoke.contains("TestClient::connect(port, None)"));
 }
 
 #[test]
@@ -639,11 +646,11 @@ fn discord_framing_uses_the_opcode_length_header() {
 
 #[test]
 fn discord_payload_validation_contract_is_ci_enforced() {
-    // Regression: Discord rejected a SET_ACTIVITY whose `details` was an empty
-    // string with `4000: "details" is not allowed to be empty` (verified
-    // live), silently dropping the whole status update. The payload validator
-    // plus the exhaustive wire-contract test must stay wired so such 4000
-    // rejections surface locally in CI instead of on a live Discord client.
+    // Regression: Discord rejected a SET_ACTIVITY containing an empty string
+    // with `4000: "..." is not allowed to be empty` (verified live), silently
+    // dropping the whole status update. The payload validator plus the
+    // exhaustive wire-contract test must stay wired so such 4000 rejections
+    // surface locally in CI instead of on a live Discord client.
     let discord = read("rivulet-core/src/discord.rs");
     // The reusable pre-wire validator encodes the documented rules.
     assert!(discord.contains("pub enum PayloadIssue"));
@@ -656,7 +663,7 @@ fn discord_payload_validation_contract_is_ci_enforced() {
     // The exhaustive contract test serializes every payload variant and
     // asserts the wire output satisfies all three rules.
     assert!(discord.contains("every_payload_variant_conforms_to_discord_rules_on_the_wire"));
-    assert!(discord.contains("empty details on the wire"));
+    assert!(discord.contains("empty state on the wire"));
     assert!(discord.contains("text.len() <= 128"));
     assert!(discord.contains("implausible large_image on the wire"));
     // CI runs the contract check as a dedicated, named step.
@@ -793,12 +800,12 @@ fn discord_presence_uses_obs_style_assets_and_no_duplicate_name() {
     // details (Discord renders the name from the application registration).
     let presence = read("rivulet-core/src/presence.rs");
     assert!(
-        presence.contains("let details = match game"),
-        "the game name must live in details (state stays the plain label)"
+        presence.contains("let state = match game"),
+        "the game name must live in state (details stays the plain label)"
     );
     assert!(
-        presence.contains("let state = label.to_owned()"),
-        "state must be the plain localized label without the app name"
+        presence.contains("let details = label.to_owned()"),
+        "details must be the plain localized label without the app name"
     );
     let discord = read("rivulet-core/src/discord.rs");
     assert!(discord.contains("large_image_key: Option<String>"));
@@ -806,15 +813,14 @@ fn discord_presence_uses_obs_style_assets_and_no_duplicate_name() {
     assert!(discord.contains("#[serde(rename = \"large_image\")]"));
     // Wire-level coverage: assets attached when configured, absent otherwise.
     assert!(discord.contains("set_activity_attaches_large_image_when_configured"));
-    // Discord rejects an empty details string (4000: "details" is not allowed
-    // to be empty, verified live), so the details field must be omitted when
-    // there is no game name instead of being sent empty.
+    // Discord rejects an empty string field (4000: "..." is not allowed to be
+    // empty, verified live), so `state` must be omitted when there is no game
+    // name instead of being sent empty; `details` always carries the label.
     assert!(
-        discord.contains("details: Option<String>")
-            && discord.contains("!status.details.trim().is_empty()"),
-        "empty details must be omitted, never sent as an empty string"
+        discord.contains("details: String") && discord.contains("!status.state.trim().is_empty()"),
+        "empty state must be omitted, never sent as an empty string"
     );
-    assert!(discord.contains("empty_details_is_omitted_not_sent_empty"));
+    assert!(discord.contains("empty_state_is_omitted_not_sent_empty"));
     let gui = read("rivulet-gui/src/app.rs");
     assert!(gui.contains("discord_presence_large_image"));
     assert!(gui.contains("discord_large_image"));

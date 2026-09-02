@@ -8276,10 +8276,12 @@ mod tests {
         }];
         app.use_game_capture = true;
         app.apply_discord_payload_validation();
+        // The game name lives in `state` (second card line) since the line
+        // swap, so an overlong one is reported as a state violation.
         assert!(matches!(
             app.discord_payload_warning,
             Some(rivulet_core::discord::PayloadIssue::FieldTooLong {
-                field: "details",
+                field: "state",
                 len: 200,
             })
         ));
@@ -8366,12 +8368,12 @@ mod tests {
         }];
         app.selected_game_window_idx = Some(0);
         let status = app.current_presence_status();
-        // OBS-style layout: the game name lives in the details line, the
-        // state carries the plain status label, and the app name is rendered
+        // Line layout: the status label lives in `details` (first card line),
+        // the game name in `state` (second line), and the app name is rendered
         // by the Discord application registration (card title) — never
         // duplicated into the payload.
-        assert_eq!(status.state, "Ready");
-        assert_eq!(status.details, "Elden Ring");
+        assert_eq!(status.details, "Ready");
+        assert_eq!(status.state, "Elden Ring");
 
         // No selection -> plain status without a game name.
         let empty = RivuletApp {
@@ -8397,20 +8399,20 @@ mod tests {
         app.sync_discord_presence();
         let idle = app.current_presence_status();
         assert_eq!(app.discord_presence_last.as_ref(), Some(&idle));
-        assert_eq!(idle.state, "Ready");
+        assert_eq!(idle.details, "Ready");
 
         // Recording starts while the user is not looking at the Stream view.
         app.is_aux_recording = true;
         app.sync_discord_presence();
         let recording = app.current_presence_status();
-        assert_eq!(recording.state, "Recording");
+        assert_eq!(recording.details, "Recording");
         assert_eq!(app.discord_presence_last.as_ref(), Some(&recording));
 
         // Pausing while recording surfaces as Paused.
         app.is_paused = true;
         app.sync_discord_presence();
         let paused = app.current_presence_status();
-        assert_eq!(paused.state, "Paused");
+        assert_eq!(paused.details, "Paused");
 
         // Stopping returns to Idle.
         app.is_aux_recording = false;
@@ -8494,29 +8496,29 @@ mod tests {
         app.is_aux_recording = true;
         app.last_error = Some("pipeline failed".to_owned());
         let status = app.current_presence_status();
-        assert_eq!(status.state, "Error");
-        assert!(status.details.is_empty());
+        assert_eq!(status.details, "Error");
+        assert!(status.state.is_empty());
 
         // The error text itself is never sent (privacy-safe payload).
-        assert!(!status.state.contains("pipeline"));
         assert!(!status.details.contains("pipeline"));
+        assert!(!status.state.contains("pipeline"));
 
         // Error has priority over pause and streaming too.
         app.is_paused = true;
         let status = app.current_presence_status();
-        assert_eq!(status.state, "Error");
+        assert_eq!(status.details, "Error");
 
         // Clearing the error (next start) returns to the activity label.
         app.last_error = None;
         let status = app.current_presence_status();
-        assert_eq!(status.state, "Paused");
+        assert_eq!(status.details, "Paused");
 
         // Error label is localized.
         app.locale = Locale::De;
         app.is_paused = false;
         app.last_error = Some("pipeline failed".to_owned());
         let status = app.current_presence_status();
-        assert_eq!(status.state, "Fehler");
+        assert_eq!(status.details, "Fehler");
     }
 
     #[test]
@@ -8531,12 +8533,12 @@ mod tests {
         };
         app.last_error = Some("old failure".to_owned());
         let before = app.current_presence_status();
-        assert_eq!(before.state, "Error");
+        assert_eq!(before.details, "Error");
 
         // The same reset the streaming start path applies.
         app.last_error = None;
         let status = app.current_presence_status();
-        assert_eq!(status.state, "Ready");
+        assert_eq!(status.details, "Ready");
 
         // Source contract: every streaming start path (OBS-WebSocket command
         // and GUI stream button) clears last_error. Only inspect the part of
@@ -8659,15 +8661,15 @@ mod tests {
         let mut app = RivuletApp::default();
         app.locale = Locale::De;
         let status = app.current_presence_status();
-        // OBS-style: the app name is the Discord card title (application
-        // registration), the state carries the German label, and no game name
-        // is selected so the details line stays empty.
+        // The app name is the Discord card title (application registration),
+        // `details` carries the German label, and no game name is selected so
+        // the `state` line stays empty.
         assert_eq!(status.application, "Rivulet");
-        assert_eq!(status.state, "Bereit");
-        assert!(status.details.is_empty());
+        assert_eq!(status.details, "Bereit");
+        assert!(status.state.is_empty());
         // Never any sensitive token/path.
-        assert!(!status.state.to_lowercase().contains("rtmp"));
-        assert!(!status.state.contains('/') && !status.state.contains('\\'));
+        assert!(!status.details.to_lowercase().contains("rtmp"));
+        assert!(!status.details.contains('/') && !status.details.contains('\\'));
     }
 
     // ── Vulkan layer backend status (G3) ──────────────────────────
