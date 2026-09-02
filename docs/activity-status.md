@@ -263,6 +263,13 @@ selected game name when a game/window source is selected — the application
 name is rendered by the Discord registration and is never duplicated into
 the payload.
 
+The configured art asset key is attached twice: as `large_image` (rendered
+as the big artwork on the profile card) and mirrored as `small_image`
+(rendered as the small icon in the **member list**, replacing the generic
+game-controller placeholder there). Both reference the same uploaded asset,
+so no second upload is needed; the mirroring is covered by the wire-contract
+test and pinned by `ci_pinning.rs`.
+
 > **Empty `state` is rejected by Discord (fixed):** Discord refuses a
 > `SET_ACTIVITY` that contains an empty string with
 > `4000: "..." is not allowed to be empty` (verified live against a

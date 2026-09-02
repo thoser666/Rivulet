@@ -518,16 +518,25 @@ struct Activity {
 struct ActivityAssets {
     #[serde(rename = "large_image")]
     large_image: String,
+    /// Discord renders the small image in the member list next to the activity
+    /// text; the configured key is mirrored here so the same uploaded asset
+    /// replaces the generic game-controller placeholder there too (docs:
+    /// small image = member list, large image = profile card).
+    #[serde(rename = "small_image")]
+    small_image: String,
     #[serde(rename = "large_text", skip_serializing_if = "Option::is_none")]
     large_text: Option<String>,
+    #[serde(rename = "small_text", skip_serializing_if = "Option::is_none")]
+    small_text: Option<String>,
 }
 
 impl ActivityCommand {
     /// Build a `SET_ACTIVITY` command from the privacy-safe status payload.
     /// `state`/`details` are truncated to Discord's 128-char limit at a UTF-8
     /// character boundary. When the configured Discord application has an
-    /// uploaded art asset, its key is attached so Discord shows the Rivulet
-    /// artwork instead of the generic placeholder icon (OBS-style).
+    /// uploaded art asset, its key is attached as `large_image` (profile card)
+    /// and mirrored as `small_image` (member list) so Discord shows the
+    /// Rivulet artwork instead of the generic placeholder icons.
     fn new(status: &PresenceStatus, pid: u32, seq: u64, large_image: Option<&str>) -> Self {
         // Only attach the artwork when the key is plausible: an empty or
         // malformed key would be sent verbatim and Discord would silently drop
@@ -542,9 +551,14 @@ impl ActivityCommand {
                         .bytes()
                         .all(|b| b.is_ascii_alphanumeric() || b == b'_')
             })
-            .map(|key| ActivityAssets {
-                large_image: key.trim().to_owned(),
-                large_text: Some("Rivulet".to_owned()),
+            .map(|key| {
+                let key = key.trim().to_owned();
+                ActivityAssets {
+                    large_image: key.clone(),
+                    small_image: key,
+                    large_text: Some("Rivulet".to_owned()),
+                    small_text: Some("Rivulet".to_owned()),
+                }
             });
         ActivityCommand {
             cmd: "SET_ACTIVITY",
@@ -1026,14 +1040,26 @@ mod tests {
                             }
                         }
 
-                        // Rule 3: an asset key on the wire is always plausible
-                        // (validated before send; serializer filters empty).
+                        // Rule 3: asset keys on the wire are always plausible
+                        // (validated before send; serializer filters empty),
+                        // and the configured key is mirrored to both large
+                        // (profile card) and small (member list) images.
                         if let Some(img) = act["assets"]["large_image"].as_str() {
                             assert!(
                                 !img.is_empty()
                                     && img.len() <= 64
                                     && img.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'),
                                 "implausible large_image on the wire: {img:?}"
+                            );
+                            assert_eq!(
+                                act["assets"]["small_image"].as_str(),
+                                Some(img),
+                                "small_image must mirror large_image for {activity:?}/{asset:?}"
+                            );
+                            assert_eq!(
+                                act["assets"]["small_text"].as_str(),
+                                Some("Rivulet"),
+                                "small_text must label the small image"
                             );
                         } else {
                             // No assets on the wire: the serializer filters
@@ -1049,6 +1075,10 @@ mod tests {
                             assert!(
                                 !plausible,
                                 "large_image must be present for configured key {asset:?}"
+                            );
+                            assert!(
+                                act["assets"]["small_image"].is_null(),
+                                "small_image must be absent when large_image is absent"
                             );
                         }
                         checked += 1;
@@ -1072,8 +1102,12 @@ mod tests {
         send_set_activity(&mut buf, &st, 9, &mut seq, Some("rivulet_logo")).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&buf[8..]).unwrap();
         let assets = &value["args"]["activity"]["assets"];
+        // The configured key is mirrored to small_image (member list) so the
+        // same uploaded asset replaces the game-controller placeholder there.
         assert_eq!(assets["large_image"], "rivulet_logo");
+        assert_eq!(assets["small_image"], "rivulet_logo");
         assert_eq!(assets["large_text"], "Rivulet");
+        assert_eq!(assets["small_text"], "Rivulet");
     }
 
     #[test]

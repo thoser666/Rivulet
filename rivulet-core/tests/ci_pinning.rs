@@ -811,6 +811,11 @@ fn discord_presence_uses_obs_style_assets_and_no_duplicate_name() {
     assert!(discord.contains("large_image_key: Option<String>"));
     assert!(discord.contains("struct ActivityAssets"));
     assert!(discord.contains("#[serde(rename = \"large_image\")]"));
+    // The key is mirrored to small_image (member list) alongside large_image
+    // (profile card) so the same uploaded asset replaces the placeholder in
+    // both places; Discord renders small_image in the member list.
+    assert!(discord.contains("#[serde(rename = \"small_image\")]"));
+    assert!(discord.contains("small_image: key,"));
     // Wire-level coverage: assets attached when configured, absent otherwise.
     assert!(discord.contains("set_activity_attaches_large_image_when_configured"));
     // Discord rejects an empty string field (4000: "..." is not allowed to be
