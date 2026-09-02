@@ -790,7 +790,11 @@ For Discord, upload `docs/assets/rivulet-rich-presence-1024.png` under
 `docs/assets/rivulet-app-icon-512.png` as the **App Icon** (General
 Information) — the artwork renders on the profile card and the app icon
 replaces the generic game-controller placeholder in the server member list
-(see `docs/activity-status.md` for details).
+(see `docs/activity-status.md` for details). The installers ship both
+files together with the setup documentation inside the package (Windows:
+`discord\` in the install folder; Linux: `usr/share/doc/rivulet/discord/`
+in the AppImage; macOS: `Contents/Resources/discord/` in the app bundle),
+and the GitHub release attaches them as standalone downloads.
 
 > **Note:** On Linux, set `LIBCLANG_PATH` to your LLVM `lib` directory (e.g. `export LIBCLANG_PATH=/usr/lib/llvm-14/lib`) if the `clang-sys` build fails.
 

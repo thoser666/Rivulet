@@ -277,6 +277,78 @@ fn asset_drift_check_is_wired_up() {
 }
 
 #[test]
+fn installers_ship_discord_assets_and_docs() {
+    // The Discord Rich Presence setup files (app icon for the member list,
+    // Rich Presence artwork for the profile card, setup docs) must ship in
+    // every installer so users can complete the configuration offline.
+    let required = [
+        "docs/assets/rivulet-app-icon-512.png",
+        "docs/assets/rivulet-rich-presence-1024.png",
+        "docs/assets/rivulet-rich-presence-512.png",
+        "docs/activity-status.md",
+    ];
+    for rel in required {
+        assert!(
+            repo_file(rel).exists(),
+            "{rel} must be committed so the installers can ship it"
+        );
+    }
+
+    // Windows: the portable bundle step copies the files into the bundle dir;
+    // the MSI harvests the whole bundle dir, so the bundle is the single
+    // staging point for both Windows installers.
+    let portable = read("packaging/windows/build-portable.ps1");
+    for needle in [
+        "rivulet-app-icon-512.png",
+        "rivulet-rich-presence-1024.png",
+        "rivulet-rich-presence-512.png",
+        "activity-status.md",
+        "$discordDir",
+    ] {
+        assert!(
+            portable.contains(needle),
+            "build-portable.ps1 must stage {needle} for the Discord setup"
+        );
+    }
+
+    // Linux: the AppImage ships them under usr/share/doc/rivulet/discord.
+    let appimage = read("packaging/linux/build-appimage.sh");
+    assert!(
+        appimage.contains("usr/share/doc/rivulet/discord"),
+        "build-appimage.sh must install the Discord assets into the AppImage doc dir"
+    );
+    assert!(
+        appimage.contains("rivulet-app-icon-512.png")
+            && appimage.contains("rivulet-rich-presence-1024.png")
+            && appimage.contains("activity-status.md"),
+        "build-appimage.sh must copy the Discord setup files"
+    );
+
+    // macOS: the app bundle ships them under Contents/Resources/discord.
+    let app = read("packaging/macos/build-app.sh");
+    assert!(
+        app.contains("Contents/Resources/discord"),
+        "build-app.sh must install the Discord assets into the bundle Resources"
+    );
+    assert!(
+        app.contains("rivulet-app-icon-512.png")
+            && app.contains("rivulet-rich-presence-1024.png")
+            && app.contains("activity-status.md"),
+        "build-app.sh must copy the Discord setup files"
+    );
+
+    // The formal GitHub release additionally attaches the three files so they
+    // are downloadable without installing anything.
+    let release = read(".github/workflows/release.yml");
+    assert!(
+        release.contains("docs/assets/rivulet-app-icon-512.png")
+            && release.contains("docs/assets/rivulet-rich-presence-1024.png")
+            && release.contains("docs/activity-status.md"),
+        "release.yml must attach the Discord setup files as release assets"
+    );
+}
+
+#[test]
 fn docker_wrapper_regenerates_assets_in_the_pinned_image() {
     let wrapper = read("scripts/generate-assets-docker.sh");
     assert!(

@@ -62,6 +62,30 @@ set GST_REGISTRY=%TEMP%\rivulet-gst-registry.bin
 start "" "%~dp0rivulet.exe" %*
 "@ | Set-Content -Path (Join-Path $bundle "Rivulet.bat") -Encoding ASCII
 
+# 7. Discord setup assets: the app icon (member list), the Rich Presence
+# artwork (profile card) and the setup docs ship inside the installer so
+# users can complete the Discord Rich Presence configuration offline. The
+# layout mirrors the repo (docs/assets/...) so relative image links in the
+# markdown keep working. The MSI harvests the whole bundle directory, so
+# everything placed here lands in the installer automatically.
+$repoRoot = Join-Path $PSScriptRoot "..\.."
+$discordDir = Join-Path $bundle "discord"
+New-Item -ItemType Directory -Force -Path (Join-Path $discordDir "assets") | Out-Null
+foreach ($file in @(
+  @{ Src = "docs/assets/rivulet-app-icon-512.png";      Dst = "rivulet-app-icon-512.png" },
+  @{ Src = "docs/assets/rivulet-rich-presence-1024.png"; Dst = "rivulet-rich-presence-1024.png" },
+  @{ Src = "docs/assets/rivulet-rich-presence-512.png";  Dst = "assets\rivulet-rich-presence-512.png" },
+  @{ Src = "docs/activity-status.md";                    Dst = "activity-status.md" }
+)) {
+  $src = Join-Path $repoRoot $file.Src
+  $dst = Join-Path $discordDir $file.Dst
+  if (Test-Path $src) {
+    Copy-Item $src $dst -Force
+  } else {
+    Write-Host "WARNING: Discord asset missing, skipped: $src" -ForegroundColor Yellow
+  }
+}
+
 # 6. Zip the bundle (portable variant).
 if (Test-Path $OutFile) { Remove-Item $OutFile -Force }
 Compress-Archive -Path (Join-Path $bundle "*") -DestinationPath $OutFile -CompressionLevel Optimal
