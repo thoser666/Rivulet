@@ -1378,8 +1378,9 @@ fn updater_verifies_release_checksums_before_install() {
         "the release workflow must generate the checksum manifest"
     );
     assert!(
-        workflow.contains("xargs -0 -r sha256sum > SHA256SUMS"),
-        "the manifest must cover every attached asset (relative paths, sorted)"
+        workflow.contains("sha256sum) > SHA256SUMS.tmp"),
+        "the manifest must cover every attached asset (relative paths, sorted) \
+         and be written outside the scanned directory (shellcheck SC2094)"
     );
     assert!(
         workflow.contains("release-assets/SHA256SUMS"),

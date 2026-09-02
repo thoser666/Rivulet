@@ -226,12 +226,15 @@ jobs:
           # SHA256SUMS (or whose digest differs), so the manifest must cover
           # exactly the files attached to the release. docs/opengraph.png is
           # used as the release card image by softprops and must NOT be part
-          # of the manifest (see the files list below).
-          cd release-assets
-          find . -type f ! -name opengraph.png ! -name SHA256SUMS -printf '%P\0' \
+          # of the manifest (see the files list below). The pipeline writes
+          # to a temp file OUTSIDE the scanned directory so it never reads
+          # and writes the same file in one pipeline (shellcheck SC2094).
+          (cd release-assets \
+            && find . -type f ! -name opengraph.png ! -name SHA256SUMS -printf '%P\0' \
             | sort -z \
-            | xargs -0 -r sha256sum > SHA256SUMS
-          cat SHA256SUMS
+            | xargs -0 -r sha256sum) > SHA256SUMS.tmp
+          mv SHA256SUMS.tmp release-assets/SHA256SUMS
+          cat release-assets/SHA256SUMS
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
