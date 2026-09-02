@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use crate::capture_channel::CapturedFrame;
 #[cfg(target_os = "windows")]
-use crate::capture_channel::{FrameHeader, DEFAULT_SHM_SIZE};
+use crate::capture_channel::FrameHeader;
 
 /// Errors specific to the OpenGL hook backend.
 #[derive(Debug, Clone)]
@@ -118,8 +118,9 @@ impl ShmFrameReader {
     /// no game writing).
     pub fn open() -> Option<Self> {
         use winapi::um::handleapi::CloseHandle;
-        use winapi::um::memoryapi::{MapViewOfFile, FILE_MAP_READ};
+        use winapi::um::memoryapi::{MapViewOfFile, UnmapViewOfFile, VirtualQuery, FILE_MAP_READ};
         use winapi::um::winbase::OpenFileMappingA;
+        use winapi::um::winnt::MEMORY_BASIC_INFORMATION;
 
         let name = CString::new(crate::capture_channel::SHM_NAME).ok()?;
         unsafe {
@@ -134,7 +135,25 @@ impl ShmFrameReader {
             }
             Some(ShmFrameReader {
                 ptr: ptr as *const u8,
-                size: DEFAULT_SHM_SIZE,
+                // Bound reads by the real mapping size — the creator may map
+                // fewer bytes than DEFAULT_SHM_SIZE.
+                size: {
+                    let mut info: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
+                    let queried = unsafe {
+                        VirtualQuery(
+                            ptr as *const _,
+                            &mut info,
+                            std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+                        )
+                    };
+                    if queried == 0 {
+                        unsafe {
+                            UnmapViewOfFile(ptr);
+                        }
+                        return None;
+                    }
+                    info.RegionSize
+                },
             })
         }
     }
@@ -147,10 +166,10 @@ impl ShmFrameReader {
             buf.copy_from_slice(header_bytes);
 
             let header = FrameHeader::from_bytes(&buf)?;
-            let data_size = header.data_size as usize;
-            if data_size > self.size - FrameHeader::SIZE {
+            if !header.is_plausible(self.size) {
                 return None;
             }
+            let data_size = header.data_size as usize;
 
             let pixels =
                 std::slice::from_raw_parts(self.ptr.add(FrameHeader::SIZE), data_size).to_vec();

@@ -1451,6 +1451,64 @@ fn fuzz_targets_cover_the_untrusted_input_parsers() {
 }
 
 #[test]
+fn shared_memory_frames_are_validated_before_read() {
+    // Shared memory is writable by every process in the session, and the
+    // writer runs inside the captured game — an untrusted host. The readers
+    // must therefore validate the frame header beyond the magic: geometry,
+    // pixel format, data/geometry agreement, an allocation cap and the true
+    // mapping size (never a compile-time constant).
+    let channel = read("rivulet-core/src/capture_channel.rs");
+    assert!(
+        channel.contains("pub fn is_plausible"),
+        "FrameHeader must expose the plausibility check"
+    );
+    assert!(
+        channel.contains("MAX_PIXEL_BYTES"),
+        "pixel payload must be capped before allocation"
+    );
+    assert!(
+        channel.contains("checked_mul"),
+        "geometry math must not overflow silently"
+    );
+    assert!(
+        channel.contains("mapped_region_size") && channel.contains("VirtualQuery"),
+        "the Windows reader must query the real mapping size"
+    );
+    assert!(
+        channel.contains("libc::fstat"),
+        "the Linux reader must bound the mapping by the object size"
+    );
+    assert!(
+        channel.contains("UnmapViewOfFile"),
+        "the Windows mapping must be released on drop"
+    );
+    assert!(
+        !channel.contains("data_offset + data_len > self.size"),
+        "the old constant-size bounds check must not return"
+    );
+
+    // Both readers go through the check.
+    let opengl = read("rivulet-core/src/opengl_hook.rs");
+    assert!(
+        opengl.contains("is_plausible"),
+        "the OpenGL hook reader must validate headers too"
+    );
+
+    // The writers must not emit headers whose data_size disagrees with the
+    // geometry (checked multiplication instead of release-mode wrapping).
+    let layer = read("rivulet-vulkan-layer/src/capture_channel.rs");
+    assert!(
+        layer.contains("checked_mul") && layer.contains("u32::try_from"),
+        "the Vulkan layer writer must compute data_size with checked math"
+    );
+    let dll = read("rivulet-opengl-hook-dll/src/lib.rs");
+    assert!(
+        dll.contains("checked_mul"),
+        "the OpenGL hook writer must refuse geometry/data disagreement"
+    );
+}
+
+#[test]
 fn updater_declares_sha2_dependency() {
     // sha2 is the only crypto the updater needs; pin it through the workspace
     // so cargo-deny and dependabot track a single version.

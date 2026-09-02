@@ -264,6 +264,30 @@ wiring in place. Transport security (HTTPS) plus this digest check protect
 the update path; artifact signing (Authenticode/codesign) is exercised by the
 signing E2E workflow and can be layered on top later.
 
+### Shared-memory capture channel hardening
+
+The game-capture shared-memory channel (`rivulet_capture_shm`) transfers
+frames from the injected Vulkan layer / OpenGL hook (inside the captured
+game — an untrusted host) to the Rivulet reader. Any process in the session
+can also write the region directly, so the readers treat the header as
+untrusted input:
+
+- `FrameHeader::is_plausible` validates, beyond the magic: non-zero geometry
+  (≤ 16384 px per axis), the single defined pixel format (RGBA8),
+  `data_size == width × height × 4` with checked math (no overflow), an
+  allocation cap (`MAX_PIXEL_BYTES`, 16 MiB), and that the data fits inside
+  the **actual mapping**.
+- Readers query the true mapping size (Windows `VirtualQuery`, Linux
+  `fstat` on the shm object clamped to the default size) instead of
+  trusting a compile-time constant; frames are copied out of shared memory
+  immediately so later writes cannot race the validated snapshot.
+- The writers compute `data_size` with checked multiplication and refuse
+  frames whose geometry and byte length disagree, so a broken swapchain
+  cannot produce a header the reader must reject.
+
+A ci_pinning guard keeps the validation, the mapping-size queries, and the
+writer-side checked math in place.
+
 ### Fuzzing the untrusted-input parsers
 
 Every parser that consumes remote-controlled bytes has a libFuzzer target in
