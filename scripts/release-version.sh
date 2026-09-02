@@ -38,7 +38,7 @@ while IFS= read -r line; do
     feat!*|feat\(*\)!*) HAS_BREAKING=true ;;
     feat:*|feat\(*\):*) HAS_FEATURE=true ;;
     fix:*|fix\(*\):*) HAS_FIX=true ;;
-    build:*|build\(*\):*|chore:*|chore\(*\):*) HAS_BUILD=true ;;
+    build:*|build\(*\):*|chore:*|chore\(*\):*|ci:*|ci\(*\):*) HAS_BUILD=true ;;
   esac
 done < <(git log "$LOG_RANGE" --pretty=format:'%s%n%b' 2>/dev/null || true)
 
@@ -64,7 +64,7 @@ elif [[ "$HAS_BUILD" == true ]]; then
 else
   # Only non-releasable commits (docs, test, style, ...) since the last
   # tag: stay on the current version (matches the workflow gate).
-  echo "No feat/fix/build/chore commits since $LAST_TAG - version stays $BASE_VERSION" >&2
+  echo "No feat/fix/build/chore/ci commits since $LAST_TAG - version stays $BASE_VERSION" >&2
   echo "$BASE_VERSION"
   exit 0
 fi

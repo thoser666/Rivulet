@@ -36,8 +36,8 @@ env:
 
 jobs:
   ################################################################
-  # CHECK: releasable commit? feat/fix always release; build/chore
-  # (packaging & housekeeping) release with a patch bump. Excludes
+  # CHECK: releasable commit? feat/fix always release; build/chore/ci
+  # (packaging, housekeeping & CI) release with a patch bump. Excludes
   # Dependabot.
   ################################################################
   check:
@@ -74,14 +74,14 @@ jobs:
             exit 0
           fi
 
-          # Releasable commit detection: feat (minor/major), fix (patch) or
-          # build/chore (patch) — packaging and housekeeping changes ship
-          # without needing a manual workflow dispatch afterwards.
-          if echo "$COMMITS" | jq -r '.[].message' | grep -qE '^(feat|fix|build|chore)(\(.*\))?!?:'; then
+          # Releasable commit detection: feat (minor/major), fix/build/chore/ci
+          # (patch) — packaging, housekeeping and CI changes ship without
+          # needing a manual workflow dispatch afterwards.
+          if echo "$COMMITS" | jq -r '.[].message' | grep -qE '^(feat|fix|build|chore|ci)(\(.*\))?!?:'; then
             SHOULD_RELEASE="true"
-            echo "Releasable commit found (feat/fix/build/chore) - release build will run."
+            echo "Releasable commit found (feat/fix/build/chore/ci) - release build will run."
           else
-            echo "No feat/fix/build/chore commit in the push - release build will be skipped."
+            echo "No feat/fix/build/chore/ci commit in the push - release build will be skipped."
           fi
 
           echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"

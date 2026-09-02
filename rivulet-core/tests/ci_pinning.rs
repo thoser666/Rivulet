@@ -1024,22 +1024,22 @@ fn release_workflow_publishes_current_source_onto_release_branch() {
 fn release_gate_includes_build_and_chore_commits() {
     let workflow = read(".github/workflows/release.yml");
     assert!(
-        workflow.contains("'^(feat|fix|build|chore)(\\(.*\\))?!?:'"),
-        "release.yml must treat build/chore commits as releasable so packaging \
-         and housekeeping changes ship without a manual workflow dispatch"
+        workflow.contains("'^(feat|fix|build|chore|ci)(\\(.*\\))?!?:'"),
+        "release.yml must treat build/chore/ci commits as releasable so packaging, \
+         housekeeping and CI changes ship without a manual workflow dispatch"
     );
 
     let script = read("scripts/release-version.sh");
     assert!(
-        script.contains("build:*|build\\(*\\):*|chore:*|chore\\(*\\):*) HAS_BUILD=true"),
-        "release-version.sh must classify build/chore commits as releasable"
+        script.contains("build:*|build\\(*\\):*|chore:*|chore\\(*\\):*|ci:*|ci\\(*\\):*) HAS_BUILD=true"),
+        "release-version.sh must classify build/chore/ci commits as releasable"
     );
     assert!(
         script.contains("HAS_BUILD\" == true"),
         "release-version.sh must bump the patch version for build/chore-only ranges"
     );
     assert!(
-        script.contains("No feat/fix/build/chore commits"),
+        script.contains("No feat/fix/build/chore/ci commits"),
         "release-version.sh must keep the version when only non-releasable \
          commits (docs/test/style) exist, matching the workflow gate"
     );
