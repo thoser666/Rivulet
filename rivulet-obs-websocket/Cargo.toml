@@ -1,0 +1,17 @@
+[package]
+name = "rivulet-obs-websocket"
+version.workspace = true
+edition = "2021"
+license.workspace = true
+description = "OBS WebSocket v5-compatible remote control server for Rivulet (Stream Deck / TouchPortal)"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = "1.0"
+base64 = { workspace = true }
+sha2 = { workspace = true }
+rand = "0.10"
+tracing = { workspace = true }
+tungstenite = "0.26"
+
+[dev-dependencies]

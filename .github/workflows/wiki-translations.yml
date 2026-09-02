@@ -1,0 +1,35 @@
+name: Wiki translations
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  sync-and-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Checkout wiki
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: .freebuff-rivulet-wiki
+          fetch-depth: 1
+      - name: Validate language pairs
+        run: python3 scripts/check-wiki-translations.py .freebuff-rivulet-wiki
+      - name: Check wiki links and translation drift
+        run: python3 scripts/sync-wiki-translations.py --check .freebuff-rivulet-wiki
+      - name: Publish synchronized wiki changes
+        if: github.event_name == 'schedule' && github.repository_owner == 'thoser666' && env.WIKI_SYNC_TOKEN != ''
+        env:
+          WIKI_SYNC_TOKEN: ${{ secrets.WIKI_SYNC_TOKEN }}
+        run: |
+          git -C .freebuff-rivulet-wiki remote set-url origin "https://x-access-token:${WIKI_SYNC_TOKEN}@github.com/${{ github.repository }}.wiki.git"
+          # --publish pushes, then fetches the remote and verifies the pushed
+          # hash was applied (exit 1 on any discrepancy).
+          python3 scripts/sync-wiki-translations.py --publish .freebuff-rivulet-wiki

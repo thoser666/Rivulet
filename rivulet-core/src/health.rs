@@ -49,6 +49,10 @@ pub struct StreamStats {
     pub sink_latency_ms: Option<f64>,
     /// Queue fill ratio reported by the transport, when available.
     pub queue_fill_ratio: Option<f64>,
+    /// Number of queue underflow events observed by the transport.
+    pub queue_underflows: u64,
+    /// Number of queue overflow events observed by the transport.
+    pub queue_overflows: u64,
 }
 
 impl StreamStats {
@@ -66,6 +70,8 @@ impl StreamStats {
             throughput_bps: 0.0,
             sink_latency_ms: None,
             queue_fill_ratio: None,
+            queue_underflows: 0,
+            queue_overflows: 0,
         }
     }
 }
@@ -85,6 +91,8 @@ pub struct StreamHealthMonitor {
     bytes_sent: u64,
     sink_latency_ms: Option<f64>,
     queue_fill_ratio: Option<f64>,
+    queue_underflows: u64,
+    queue_overflows: u64,
     /// Sliding window samples `(timestamp, bytes, frames)`.
     window: VecDeque<(Instant, u64, u64)>,
 }
@@ -110,6 +118,8 @@ impl StreamHealthMonitor {
             bytes_sent: 0,
             sink_latency_ms: None,
             queue_fill_ratio: None,
+            queue_underflows: 0,
+            queue_overflows: 0,
             window: VecDeque::new(),
         }
     }
@@ -135,7 +145,15 @@ impl StreamHealthMonitor {
     /// Record a frame that could not be pushed into the pipeline.
     pub fn record_frame_dropped(&mut self) {
         self.frames_dropped += 1;
+        self.queue_overflows = self.queue_overflows.saturating_add(1);
         self.prune_window();
+    }
+
+    /// Record queue-level transport events. Values are cumulative counters
+    /// reported by the active sink/queue.
+    pub fn record_queue_events(&mut self, underflows: u64, overflows: u64) {
+        self.queue_underflows = underflows;
+        self.queue_overflows = overflows.max(self.queue_overflows);
     }
 
     /// Reset all counters (e.g. when a new stream starts).
@@ -200,6 +218,8 @@ impl StreamHealthMonitor {
             throughput_bps: kbps * 1000.0,
             sink_latency_ms: self.sink_latency_ms,
             queue_fill_ratio: self.queue_fill_ratio,
+            queue_underflows: self.queue_underflows,
+            queue_overflows: self.queue_overflows,
         }
     }
 
@@ -371,5 +391,17 @@ mod tests {
         let stats = monitor.stats();
         assert_eq!(stats.sink_latency_ms, Some(0.0));
         assert_eq!(stats.queue_fill_ratio, Some(1.0));
+        assert_eq!(stats.queue_underflows, 0);
+        assert_eq!(stats.queue_overflows, 0);
+    }
+
+    #[test]
+    fn queue_events_are_exposed_and_dropped_frames_count_as_overflow() {
+        let mut monitor = StreamHealthMonitor::new(2_500.0, 30.0);
+        monitor.record_queue_events(3, 4);
+        monitor.record_frame_dropped();
+        let stats = monitor.stats();
+        assert_eq!(stats.queue_underflows, 3);
+        assert_eq!(stats.queue_overflows, 5);
     }
 }

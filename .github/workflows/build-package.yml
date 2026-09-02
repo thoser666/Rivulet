@@ -53,7 +53,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config \
             libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-            libxkbcommon-dev libssl-dev libdbus-1-dev \
+            libxkbcommon-dev libssl-dev libdbus-1-dev libasound2-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
             gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
@@ -142,7 +142,7 @@ jobs:
           brew install gstreamer
 
       - name: Build release binary
-        run: cargo build --release --package rivulet-gui --package rivulet-launcher --target ${{ inputs.target }}
+        run: cargo build --release --package rivulet-gui --package rivulet-launcher --package rivulet-updater --target ${{ inputs.target }}
 
       # ------------------------------------------------------------------
       # PACKAGING (per platform)
@@ -170,6 +170,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path staging | Out-Null
           Copy-Item "target/${{ inputs.target }}/release/rivulet-gui.exe" staging/rivulet-gui.exe -Force
           Copy-Item "target/${{ inputs.target }}/release/rivulet-launcher.exe" staging/rivulet.exe -Force
+          Copy-Item "target/${{ inputs.target }}/release/rivulet-updater.exe" staging/rivulet-updater.exe -Force
 
       - name: Check code signing secrets
         id: signing
@@ -201,7 +202,7 @@ jobs:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          pwsh packaging/windows/sign.ps1 -Paths "$(pwd)/staging/rivulet-gui.exe", "$(pwd)/staging/rivulet.exe"
+          pwsh packaging/windows/sign.ps1 -Paths "$(pwd)/staging/rivulet-gui.exe", "$(pwd)/staging/rivulet.exe", "$(pwd)/staging/rivulet-updater.exe"
 
       - name: Build AppImage (Linux)
         if: runner.os == 'Linux'

@@ -92,12 +92,26 @@ pub fn init(config: &LogConfig) -> io::Result<PathBuf> {
         .open(&path)?;
     let file = Mutex::new(file);
     let layer = fmt::layer().with_ansi(false).with_writer(file);
+    // Reading the env via `from_default_env` would filter out *everything*
+    // when `RUST_LOG` is unset, leaving the daily log file empty (not even
+    // startup messages). Default to `info` so the crash logs stay useful out
+    // of the box, while an explicit `RUST_LOG` still overrides it.
+    let filter = EnvFilter::new(resolve_filter_spec(std::env::var("RUST_LOG").ok()));
     tracing_subscriber::registry()
-        .with(EnvFilter::from_default_env())
+        .with(filter)
         .with(layer)
         .try_init()
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
     Ok(path)
+}
+
+/// Resolve the `RUST_LOG` value into the filter spec used by [`init`], with a
+/// user-friendly fallback: an unset or empty variable selects `info`, so the
+/// daily log always captures startup and Discord/engine diagnostics without
+/// requiring the user to configure anything.
+fn resolve_filter_spec(env: Option<String>) -> String {
+    env.filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "info".to_owned())
 }
 
 #[cfg(test)]
@@ -140,5 +154,24 @@ mod tests {
         assert!(marker.contains("RIVULET CRASH"));
         assert!(marker.contains("context: startup"));
         assert!(marker.contains("error: pipeline failed"));
+    }
+
+    #[test]
+    fn filter_spec_defaults_to_info_when_rust_log_unset() {
+        // Regression: EnvFilter::from_default_env() with RUST_LOG unset filters
+        // out everything, so the daily log stayed empty and Discord/engine
+        // diagnostics were invisible. The fallback must enable info level.
+        assert_eq!(resolve_filter_spec(None), "info");
+        assert_eq!(resolve_filter_spec(Some(String::new())), "info");
+        assert_eq!(resolve_filter_spec(Some("   ".to_owned())), "info");
+    }
+
+    #[test]
+    fn filter_spec_honors_explicit_rust_log() {
+        assert_eq!(resolve_filter_spec(Some("debug".to_owned())), "debug");
+        assert_eq!(
+            resolve_filter_spec(Some("rivulet=debug,info".to_owned())),
+            "rivulet=debug,info"
+        );
     }
 }
