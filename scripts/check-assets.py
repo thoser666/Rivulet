@@ -32,6 +32,7 @@ PNG_ASSETS = [
     "packaging/rivulet.png",
     "docs/assets/rivulet-rich-presence-1024.png",
     "docs/assets/rivulet-rich-presence-512.png",
+    "docs/assets/rivulet-app-icon-512.png",
 ]
 ICNS_ASSET = "packaging/rivulet.icns"
 

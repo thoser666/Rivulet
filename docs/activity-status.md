@@ -217,9 +217,10 @@ The repository ships a ready-to-upload artwork:
 
 | File | Size | Use |
 |------|------|-----|
-| `docs/assets/rivulet-rich-presence-1024.png` | 1024×1024 PNG | **Upload this one** to Discord |
+| `docs/assets/rivulet-rich-presence-1024.png` | 1024×1024 PNG | **Upload this one** to Rich Presence → Art Assets |
 | `docs/assets/rivulet-rich-presence-512.png` | 512×512 PNG | Documentation preview |
-| `rivulet-gui/assets/rivulet_logo.jpg` | 1024×1024 JPG | Source logo (app icon) |
+| `docs/assets/rivulet-app-icon-512.png` | 512×512 PNG | **Upload this one** as the **App Icon** (General Information) — replaces the game-controller icon in the server member list |
+| `rivulet-gui/assets/rivulet_logo.jpg` | 1024×1024 JPG | Source logo |
 
 **Discord's requirements and best practices:**
 
@@ -278,8 +279,10 @@ test and pinned by `ci_pinning.rs`.
 > in the member list — no API field changes this. To replace the game-
 > controller icon there, upload an **App Icon** in the Developer Portal
 > (General Information → App Icon, 512×512 PNG —
-> `docs/assets/rivulet-rich-presence-512.png`); the Rich-Presence art asset
-> alone does not affect the member-list icon.
+> `docs/assets/rivulet-app-icon-512.png`); the Rich-Presence art asset
+> alone does not affect the member-list icon. The app-icon file is a
+> punchier small-avatar variant (wave symbol only, dark brand gradient,
+> no padding) so it stays readable at the tiny round avatar size.
 
 > **Empty `state` is rejected by Discord (fixed):** Discord refuses a
 > `SET_ACTIVITY` that contains an empty string with

@@ -32,6 +32,7 @@ ICON="$REPO_ROOT/packaging/rivulet.png"
 ICNS="$REPO_ROOT/packaging/rivulet.icns"
 RICH_PRESENCE_1024="$REPO_ROOT/docs/assets/rivulet-rich-presence-1024.png"
 RICH_PRESENCE_512="$REPO_ROOT/docs/assets/rivulet-rich-presence-512.png"
+APP_ICON_512="$REPO_ROOT/docs/assets/rivulet-app-icon-512.png"
 
 # Brand palette, darkened for the hero thumbnail so the light-blue logo and
 # white wordmark read clearly. LIGHT_BLUE is the brand accent (from the logo).
@@ -161,6 +162,14 @@ RP_INNER=$((1024 - 2 * RP_PAD))
   -gravity center -background '#FAFAFA' -extent 1024x1024 "${STRIP[@]}" "$RICH_PRESENCE_1024"
 "$MAGICK" "$RICH_PRESENCE_1024" -filter Mitchell -resize '512x512' "${STRIP[@]}" "$RICH_PRESENCE_512"
 
+# 8. Discord App Icon (Developer Portal → General Information): a punchier
+#    small-avatar variant of the wave symbol only — no wordmark, no padding —
+#    centered on the dark brand gradient so it stays readable at the tiny
+#    member-list avatar size. 512x512 is Discord's recommended app-icon size.
+"$MAGICK" -size 512x512 "gradient:${NAVY}-${BLUE}" \
+  \( "$SYMBOL_LIGHT" -filter Mitchell -resize '400x400' \) -gravity center -composite \
+  "${STRIP[@]}" "$APP_ICON_512"
+
 echo "Generated:"
 echo "  $THUMBNAIL"
 echo "  $SOCIAL"
@@ -169,3 +178,4 @@ echo "  $ICON"
 echo "  $ICNS"
 echo "  $RICH_PRESENCE_1024"
 echo "  $RICH_PRESENCE_512"
+echo "  $APP_ICON_512"

@@ -124,6 +124,10 @@ fn generator_script_produces_all_assets() {
         script.contains("docs/opengraph.png"),
         "generate-assets.sh must emit the OpenGraph fallback"
     );
+    assert!(
+        script.contains("docs/assets/rivulet-app-icon-512.png"),
+        "generate-assets.sh must emit the Discord app icon"
+    );
 
     let packer = read("scripts/png2icns.py");
     assert!(
@@ -179,6 +183,19 @@ fn other_branding_assets_exist() {
 }
 
 #[test]
+fn discord_app_icon_contract_holds() {
+    let bytes = fs::read(repo_file("docs/assets/rivulet-app-icon-512.png"))
+        .expect("docs/assets/rivulet-app-icon-512.png must be committed");
+    assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "must be a PNG");
+    let (width, height) = png_dimensions(&bytes);
+    assert_eq!(
+        (width, height),
+        (512, 512),
+        "Discord app icons must be 512x512 (Discord's recommended size)"
+    );
+}
+
+#[test]
 fn social_preview_has_opengraph_dimensions() {
     let bytes = fs::read(repo_file("docs/social-preview.png"))
         .expect("docs/social-preview.png must be committed");
@@ -221,6 +238,12 @@ fn asset_drift_check_is_wired_up() {
     assert!(
         checker.contains("git show") && checker.contains("RGBA"),
         "check-assets.py must compare decoded pixels against HEAD"
+    );
+    // The Discord app icon must be part of the drift check so it is
+    // regenerated together with the rest of the brand assets.
+    assert!(
+        checker.contains("docs/assets/rivulet-app-icon-512.png"),
+        "check-assets.py must verify the Discord app icon against HEAD"
     );
     let ci = read(".github/workflows/ci.yml");
     assert!(

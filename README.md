@@ -749,8 +749,10 @@ Scene snapshots are exported from the Scenes view with **Save scene snapshot**. 
 
 The README thumbnail (`docs/thumbnail.png`), the GitHub social preview
 (`docs/social-preview.png`), the OpenGraph fallback (`docs/opengraph.png`), the
-Linux AppImage icon (`packaging/rivulet.png`) and the macOS app icon
-(`packaging/rivulet.icns`) are generated from the logo by
+Linux AppImage icon (`packaging/rivulet.png`), the macOS app icon
+(`packaging/rivulet.icns`) and the Discord Rich Presence artwork plus app icon
+(`docs/assets/rivulet-rich-presence-*.png`, `docs/assets/rivulet-app-icon-512.png`)
+are generated from the logo by
 `scripts/generate-assets.sh` (requires ImageMagick and Python 3). Text uses the
 committed DejaVu Sans fonts and the resize filter is pinned; because text
 rasterization depends on the FreeType version, the canonical output is produced
@@ -782,6 +784,13 @@ GitHub exposes no public API for that Settings upload, so the release workflow
 attaches both images to every release instead: they are then available at a
 stable URL (`releases/latest/download/opengraph.png`) that a website can
 reference from its `og:image` meta tag.
+
+For Discord, upload `docs/assets/rivulet-rich-presence-1024.png` under
+**Rich Presence → Art Assets** (asset name `rivulet_logo`) and
+`docs/assets/rivulet-app-icon-512.png` as the **App Icon** (General
+Information) — the artwork renders on the profile card and the app icon
+replaces the generic game-controller placeholder in the server member list
+(see `docs/activity-status.md` for details).
 
 > **Note:** On Linux, set `LIBCLANG_PATH` to your LLVM `lib` directory (e.g. `export LIBCLANG_PATH=/usr/lib/llvm-14/lib`) if the `clang-sys` build fails.
 
