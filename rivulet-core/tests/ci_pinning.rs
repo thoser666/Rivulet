@@ -582,6 +582,30 @@ fn discord_presence_tracks_record_state_from_every_view() {
 }
 
 #[test]
+fn discord_app_id_retirement_chain_is_guarded() {
+    // Rationiertes Update der offiziellen App-ID: die Retirement-Kette
+    // (konfigurierte ID → offizieller Default → Adapter aus) muss im Core
+    // als zentrale Helper existieren und von der GUI benutzt werden. Das
+    // Updater-Manifest ist die Release-Payload selbst — ein ID-Wechsel wird
+    // über einen DEFAULT_CLIENT_ID-Bump + Release-Notes-Eintrag ausgerollt.
+    let discord = read("rivulet-core/src/discord.rs");
+    let chain_helpers = discord.contains("pub fn effective_client_id")
+        && discord.contains("pub fn effective_large_image_key");
+    assert!(
+        chain_helpers,
+        "the fallback-chain helpers must exist in the core module"
+    );
+
+    let gui = read("rivulet-gui/src/app.rs");
+    let chain_wired = gui.contains("effective_client_id(Some(&client_id))")
+        && gui.contains("effective_large_image_key(Some(&large_image))");
+    assert!(
+        chain_wired,
+        "the adapter reconcile must resolve ids through the fallback chain"
+    );
+}
+
+#[test]
 fn discord_presence_ships_official_defaults_and_migrates_empty_ids() {
     // Zero-config Rich Presence: the core config must default to the official
     // application id (validated snowflake) plus the official logo asset key,

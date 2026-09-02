@@ -65,6 +65,15 @@ overrides the default, and an **empty value restores the official default**
 The value is persisted across sessions; changing it (via the Apply button)
 rebuilds the adapter on the next frame.
 
+The fallback chain (`effective_client_id`/`effective_large_image_key` in
+`rivulet-core::discord`) is: **configured id → official default → adapter
+off**. It is also the retirement path for the application id itself: if
+Discord ever forces a new id, a release bumps `DEFAULT_CLIENT_ID` (and ships
+the new artwork key), documents the change in its release notes and reaches
+every user through the regular updater — the release payload *is* the updater
+manifest, so no separate config rollout is needed. Users with a custom id in
+Settings keep it and must switch manually.
+
 The Apply button **validates the format immediately**: a Discord client id is a
 numeric snowflake of 17-20 digits. Pasting the application URL, a label
 prefix, spaces, or a too-short/too-long value shows a warning („Ungültige

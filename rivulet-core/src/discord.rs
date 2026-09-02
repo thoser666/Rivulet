@@ -41,6 +41,35 @@ pub const DEFAULT_CLIENT_ID: &str = "1544027006847680532";
 /// the presence card shows the Rivulet logo out of the box.
 pub const DEFAULT_LARGE_IMAGE_KEY: &str = "rivulet_logo";
 
+/// Resolve the effective Discord application id from an optional configured
+/// value. The fallback chain is:
+///
+/// 1. a non-empty configured id (Settings override for custom branding),
+/// 2. the official [`DEFAULT_CLIENT_ID`] (shipped default, kept alive by the
+///    updater: a release that must retire the current id ships the new id in
+///    its release notes and the default constant is bumped with it — the
+///    updater manifest *is* the release payload, so users pick the change up
+///    with the regular update),
+/// 3. empty (`None`): the adapter stays off.
+///
+/// Central helper so GUI, tests and future manifests all agree on one chain.
+pub fn effective_client_id(configured: Option<&str>) -> Option<String> {
+    match configured.map(str::trim) {
+        Some(id) if !id.is_empty() => Some(id.to_owned()),
+        _ => Some(DEFAULT_CLIENT_ID.to_owned()),
+    }
+}
+
+/// Resolve the effective art asset key (same chain as
+/// [`effective_client_id`], but `None` is allowed and means "no artwork" —
+/// Discord then renders the generic placeholder icon).
+pub fn effective_large_image_key(configured: Option<&str>) -> Option<String> {
+    match configured.map(str::trim) {
+        Some(key) if !key.is_empty() => Some(key.to_owned()),
+        _ => Some(DEFAULT_LARGE_IMAGE_KEY.to_owned()),
+    }
+}
+
 /// Discord Rich Presence configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscordPresenceConfig {
@@ -792,6 +821,41 @@ mod tests {
             Some(DEFAULT_LARGE_IMAGE_KEY)
         );
         assert!(cfg.ipc_socket_path.is_none());
+    }
+
+    #[test]
+    fn effective_id_chain_prefers_configured_then_official_default() {
+        // 1. A non-empty configured id always wins (custom branding).
+        assert_eq!(
+            effective_client_id(Some("9999999999999999999")).as_deref(),
+            Some("9999999999999999999")
+        );
+        assert_eq!(
+            effective_large_image_key(Some("my_brand")).as_deref(),
+            Some("my_brand")
+        );
+        // 2. Empty/whitespace/unconfigured falls back to the official default
+        //    (zero-config end users + retirement path for deprecated ids).
+        assert_eq!(
+            effective_client_id(Some("")).as_deref(),
+            Some(DEFAULT_CLIENT_ID)
+        );
+        assert_eq!(
+            effective_client_id(Some("   ")).as_deref(),
+            Some(DEFAULT_CLIENT_ID)
+        );
+        assert_eq!(
+            effective_client_id(None).as_deref(),
+            Some(DEFAULT_CLIENT_ID)
+        );
+        assert_eq!(
+            effective_large_image_key(Some("")).as_deref(),
+            Some(DEFAULT_LARGE_IMAGE_KEY)
+        );
+        assert_eq!(
+            effective_large_image_key(None).as_deref(),
+            Some(DEFAULT_LARGE_IMAGE_KEY)
+        );
     }
 
     #[test]

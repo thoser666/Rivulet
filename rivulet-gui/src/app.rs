@@ -4265,6 +4265,15 @@ impl RivuletApp {
 
         let client_id = self.discord_presence_client_id.trim().to_owned();
         let large_image = self.discord_presence_large_image.trim().to_owned();
+        // Fallback chain (see rivulet_core::discord::effective_client_id):
+        // configured id → official default → adapter off. The official
+        // default is the retirement path for a deprecated application id: a
+        // release bumps DEFAULT_CLIENT_ID and ships the change through the
+        // updater (the release payload is the updater manifest).
+        let client_id =
+            rivulet_core::discord::effective_client_id(Some(&client_id)).unwrap_or_default();
+        let large_image = rivulet_core::discord::effective_large_image_key(Some(&large_image))
+            .unwrap_or_default();
         let needs_create = self.discord_presence.is_none()
             || self.discord_presence_active_client_id.as_deref() != Some(client_id.as_str());
         if needs_create {
@@ -8092,16 +8101,23 @@ mod tests {
         );
         assert!(app.discord_presence_last.is_none());
 
-        // Enabled but no client id configured: still no adapter (opt-in until
-        // a real Discord application id is set).
+        // Enabled with no client id configured: the fallback chain resolves
+        // to the official default, so a real (valid) adapter spawns — the
+        // zero-config end-user path.
         app.discord_presence_enabled = true;
         app.discord_presence_client_id = String::new();
         app.sync_discord_presence();
-        assert!(
-            app.discord_presence.is_none(),
-            "empty client id must not spawn"
+        let presence = app
+            .discord_presence
+            .as_ref()
+            .expect("empty id must resolve to the official default");
+        assert!(presence.enabled());
+        assert_eq!(
+            app.discord_presence_active_client_id.as_deref(),
+            Some(rivulet_core::discord::DEFAULT_CLIENT_ID),
+            "empty client id must resolve through the fallback chain"
         );
-        assert!(app.discord_presence_last.is_none());
+        app.discord_presence = None;
 
         // Enabled with a client id: an active adapter is created and the
         // current status is pushed, so the cached status reflects the first
