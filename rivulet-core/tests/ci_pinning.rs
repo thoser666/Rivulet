@@ -1081,6 +1081,30 @@ fn rust_toolchain_is_pinned_for_local_and_ci_parity() {
 }
 
 #[test]
+fn wiki_repo_doc_link_audit_is_wired_up() {
+    // Wiki pages link into the versioned repo docs; GitHub renders those
+    // links as 200 even when the #anchor drifted. The auditor validates
+    // files + heading anchors, runs in the scheduled wiki workflow against
+    // origin/develop, and is part of the local sync smoke.
+    let auditor = read("scripts/audit-wiki-links.py");
+    assert!(
+        auditor.contains("github_slug") && auditor.contains("heading_anchors"),
+        "the auditor must reproduce GitHub's heading-anchor slugs"
+    );
+    let workflow = read(".github/workflows/wiki-translations.yml");
+    assert!(
+        workflow.contains("scripts/audit-wiki-links.py")
+            && workflow.contains("--develop-from-origin"),
+        "the wiki workflow must run the repo-doc link audit"
+    );
+    let smoke = read("scripts/wiki-sync-smoke.sh");
+    assert!(
+        smoke.contains("audit-wiki-links.py"),
+        "the local sync smoke must include the repo-doc link audit"
+    );
+}
+
+#[test]
 fn resource_efficiency_gate_is_wired_up() {
     let checker = read("scripts/resource-efficiency-check.py");
     let fixture = read("scripts/resource-efficiency-sample.json");
