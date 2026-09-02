@@ -74,6 +74,72 @@ every user through the regular updater — the release payload *is* the updater
 manifest, so no separate config rollout is needed. Users with a custom id in
 Settings keep it and must switch manually.
 
+## Runbook: rotating the official application id
+
+Use this when Discord disables the current application, the ownership of the
+app must move, or a deliberate re-branding replaces the artwork. The rollout
+rides entirely on the regular updater — no config migration, no manual user
+steps.
+
+### 1. Prepare the new application
+
+1. Create/verify the new Discord application in the
+   [Developer Portal](https://discord.com/developers/applications) and enable
+   **Rich Presence**.
+2. Upload the artwork: **Rich Presence → Art Assets** ←
+   `docs/assets/rivulet-rich-presence-1024.png` as asset key `rivulet_logo`
+   (or a new key, if the artwork changes too), plus **General Information →
+   App Icon** ← `docs/assets/rivulet-app-icon-512.png` for the member-list
+   icon.
+3. Copy the new **Application ID** (17–20 digit snowflake).
+
+### 2. Bump the code
+
+1. In `rivulet-core/src/discord.rs` update `DEFAULT_CLIENT_ID` (and
+   `DEFAULT_LARGE_IMAGE_KEY` when the asset key changes). Both constants are
+   pinned by the ci_pinning guard `discord_presence_ships_official_defaults_and_migrates_empty_ids`
+   — the guard fails until the test expectation is updated in the same
+   commit, which is intentional: it forces a conscious change.
+2. Update the constants referenced in `docs/activity-status.md`, the wiki
+   pages (`Discord-Setup`, `Discord-Setup-de`) and the
+   `default_config_ships_official_app_id_and_logo` / GUI
+   `default_app_ships_official_discord_id_and_logo` tests.
+3. Run `cargo test -p rivulet-core --lib discord && cargo test -p rivulet-gui
+   --bin rivulet-gui discord && cargo test -p rivulet-core --test ci_pinning`.
+
+### 3. Ship the release
+
+1. Commit as `feat(presence): rotate the official Discord application id …`
+   (a `feat:` commit guarantees the alpha release gate fires).
+2. Paste this release-notes block and fill in the new id:
+
+   > **Discord Rich Presence: new application id**
+   > Rivulet now ships the official Discord application id `<NEW_ID>`.
+   > The status/logo work exactly as before — nothing to configure. Only if
+   > you entered a **custom** application id in Settings → Discord Rich
+   > Presence, switch it to the new id manually (empty restores the official
+   > default).
+
+3. The updater delivers the new default with the regular update; the
+   release payload *is* the updater manifest, so no separate rollout exists.
+
+### 4. Verify after release
+
+1. **Install the new build** (or update an existing install) and start
+   Rivulet with Discord running.
+2. **Log check:** `%LOCALAPPDATA%\Rivulet\logs` (Linux/macOS:
+   `Rivulet/logs/`) must contain
+   `Discord Rich Presence SET_ACTIVITY delivered activity=… game=…` —
+   delivery proves the handshake with the new id works.
+3. **Live handshake probe (no install needed):**
+   `powershell -File scripts/test-discord-handshake.ps1` while Discord is
+   running must return `READY` and echo the resolved asset IDs.
+4. **Card check:** the Discord profile card shows the Rivulet logo and the
+   status lines; the member list shows the app icon (not the game
+   controller).
+5. **Custom-id users:** confirm in Settings that a previously configured id
+   is still present and was not overwritten by the update.
+
 The Apply button **validates the format immediately**: a Discord client id is a
 numeric snowflake of 17-20 digits. Pasting the application URL, a label
 prefix, spaces, or a too-short/too-long value shows a warning („Ungültige

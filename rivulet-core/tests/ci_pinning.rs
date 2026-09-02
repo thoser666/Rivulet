@@ -603,6 +603,17 @@ fn discord_app_id_retirement_chain_is_guarded() {
         chain_wired,
         "the adapter reconcile must resolve ids through the fallback chain"
     );
+
+    // The rotation procedure must stay documented in the versioned docs so
+    // the runbook travels with the code that implements it.
+    let docs = read("docs/activity-status.md");
+    assert!(
+        docs.contains("## Runbook: rotating the official application id")
+            && docs.contains("DEFAULT_CLIENT_ID")
+            && docs.contains("SET_ACTIVITY delivered"),
+        "activity-status.md must keep the id-rotation runbook (code bump, \
+         release-notes text, verification steps)"
+    );
 }
 
 #[test]
