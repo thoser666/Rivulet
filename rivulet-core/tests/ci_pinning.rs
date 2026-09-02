@@ -51,28 +51,28 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "stable",
     ),
     (
-        "softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228",
-        "v3.0.2",
+        "softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64",
+        "v3.0.3",
     ),
     (
-        "github/codeql-action/init@42947a340483f03ba47bb1a039b2c519aab3df85",
-        "v3.37.8",
+        "github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938",
+        "v4.37.9",
     ),
     (
-        "github/codeql-action/autobuild@42947a340483f03ba47bb1a039b2c519aab3df85",
-        "v3.37.8",
+        "github/codeql-action/autobuild@cdf488f595d80d6e07e03d4674febd5ab45fa938",
+        "v4.37.9",
     ),
     (
-        "github/codeql-action/analyze@42947a340483f03ba47bb1a039b2c519aab3df85",
-        "v3.37.8",
+        "github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938",
+        "v4.37.9",
     ),
     (
-        "github/codeql-action/upload-sarif@42947a340483f03ba47bb1a039b2c519aab3df85",
-        "v3.37.8",
+        "github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938",
+        "v4.37.9",
     ),
     (
-        "actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48",
-        "v4.9.0",
+        "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
+        "v5.0.0",
     ),
     (
         "actions-rust-lang/audit@72c09e02f132669d52284a3323acdb503cfc1a24",
@@ -90,6 +90,92 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
 
 fn is_full_sha(s: &str) -> bool {
     s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+#[test]
+fn wiki_policy_and_user_guide_are_linked() {
+    let readme = read("README.md");
+    let policy = read("docs/wiki-content-policy.md");
+    assert!(readme.contains("github.com/thoser666/Rivulet/wiki"));
+    assert!(readme.contains("docs/wiki-content-policy.md"));
+    for required in [
+        "## Zweck des Wikis",
+        "## Was im Repository bleiben muss",
+        "## Pflege-Regeln",
+        "## Aktivierung und initiale Einrichtung",
+        "Definition of Done",
+        "docs/user-guide.md",
+    ] {
+        assert!(
+            policy.contains(required),
+            "wiki policy must contain {required}"
+        );
+    }
+}
+
+#[test]
+fn user_guide_is_linked_and_covers_core_workflows() {
+    let readme = read("README.md");
+    let guide = read("docs/user-guide.md");
+    assert!(readme.contains("docs/user-guide.md"));
+    for required in [
+        "## 3. Eine Aufnahme erstellen",
+        "## 5. Szenen und Quellen",
+        "## 6. Live-Vorschau",
+        "## 7. Streaming einrichten",
+        "## 9. Updates",
+        "## 10. Logs und Fehler melden",
+        "Waiting",
+        "Fallback",
+        "3010",
+    ] {
+        assert!(guide.contains(required), "user guide must cover {required}");
+    }
+}
+
+#[test]
+fn m3_completion_report_is_linked_and_records_follow_ups() {
+    let readme = read("README.md");
+    let report = read("docs/m3-streaming-completion-report.md");
+    assert!(readme.contains("docs/m3-streaming-completion-report.md"));
+    for required in [
+        "## Summary",
+        "## Findings and explicit follow-ups",
+        "## Decision",
+        "CONDITIONAL PASS",
+        "F-M3-001",
+        "F-M3-002",
+        "F-M3-006",
+        "#70",
+        "#77",
+    ] {
+        assert!(
+            report.contains(required),
+            "M3 completion report must contain {required}"
+        );
+    }
+}
+
+#[test]
+fn security_policy_is_linked_from_readme_and_docs() {
+    let readme = read("README.md");
+    let policy = read("SECURITY.md");
+    let security_docs = read("docs/security.md");
+    assert!(readme.contains("SECURITY.md"));
+    assert!(security_docs.contains("SECURITY.md"));
+    for required in [
+        "## Reporting a Vulnerability",
+        "security/advisories/new",
+        "## Scope",
+        "## Supported Versions",
+        "## Coordinated Disclosure",
+        "docs/m3-streaming-completion-report.md",
+    ] {
+        assert!(
+            policy.contains(required),
+            "SECURITY.md must contain {required}"
+        );
+    }
 }
 
 #[test]
@@ -149,6 +235,23 @@ fn dependabot_updates_pinned_github_actions() {
     assert!(
         entry.contains("interval: \"weekly\""),
         "the github-actions entry must have a weekly schedule"
+    );
+    assert!(
+        !config.contains("package-ecosystem: \"cargo\""),
+        "Dependabot must not duplicate Renovate's Cargo update ownership"
+    );
+}
+
+#[test]
+fn renovate_owns_grouped_cargo_updates() {
+    let config = read("renovate.json");
+    assert!(config.contains("\"enabledManagers\": [\"cargo\"]"));
+    assert!(config.contains("\":dependencyDashboard\""));
+    assert!(config.contains("\"groupName\": \"Rust dependencies\""));
+    assert!(config.contains("\"dependencyDashboardApproval\": true"));
+    assert!(
+        !config.contains("github-actions"),
+        "Renovate must not compete with Dependabot for GitHub Actions pins"
     );
 }
 
@@ -232,6 +335,10 @@ fn stale_pin_checker_is_wired_up() {
         checker.contains("--comment") && checker.contains("render_comment"),
         "check-action-pins.py must offer a --comment Markdown notification mode"
     );
+    assert!(
+        checker.contains("timeout=30"),
+        "check-action-pins.py must bound upstream lookups"
+    );
     let nightly = read(".github/workflows/nightly.yml");
     assert!(
         nightly.contains("check-action-pins.py"),
@@ -240,6 +347,10 @@ fn stale_pin_checker_is_wired_up() {
     assert!(
         nightly.contains("GITHUB_STEP_SUMMARY"),
         "the nightly workflow must publish the comment to the step summary"
+    );
+    assert!(
+        nightly.contains("--fail-on-major"),
+        "the nightly workflow must treat newer-major gaps as fatal (--fail-on-major)"
     );
 }
 
@@ -343,16 +454,654 @@ fn rist_receiver_smoke_is_wired_up() {
         "the diagnostic image must be built before it is inspected"
     );
     assert!(workflow.contains("rist-receiver-smoke.sh"));
-    assert!(read("scripts/rist-receiver-smoke.sh").contains("ristsrc"));
-    assert!(read("scripts/rist-receiver-smoke.sh").contains("address="));
+    let smoke_script = read("scripts/rist-receiver-smoke.sh");
+    assert!(smoke_script.contains("ristsrc"));
+    assert!(smoke_script.contains("gst-launch-1.0 -e"));
+    assert!(smoke_script.contains("identity silent=false dump=true"));
+    assert!(smoke_script.contains("received_buffers"));
+    assert!(smoke_script.contains("[[:xdigit:]]{8}"));
+    assert!(smoke_script.contains("hexadecimal buffer dump"));
+    assert!(!smoke_script.contains("gst-launch-1.0.0"));
+    assert!(smoke_script.contains("address="));
+    assert!(smoke_script.contains("timeout --signal=TERM --kill-after=5s 30s"));
+    assert!(smoke_script.contains("did not remain running"));
     let smoke = read("scripts/rist-receiver-smoke.sh");
     assert!(!smoke.contains("ristsink uri="));
     assert!(smoke.contains("h264parse ! mpegtsmux alignment=7 !"));
     assert!(smoke.contains("rtpmp2tpay"));
     assert!(smoke.contains("ristsink"));
+    assert!(smoke.contains("sender_status"));
+    assert!(smoke.contains("-ne 124"));
     assert!(!smoke.contains("application/x-rtp"));
     let checker = read("scripts/check-rist-pipeline.py");
     assert!(checker.contains("RIST pipeline contract OK"));
+}
+
+#[test]
+fn obs_websocket_smoke_is_wired_up() {
+    let workflow = read(".github/workflows/ci.yml");
+    assert!(workflow.contains("name: OBS WebSocket Smoke"));
+    let smoke_job = workflow
+        .find("name: OBS WebSocket Smoke")
+        .expect("OBS WebSocket smoke job");
+    let aggregate = workflow.find("    name: CI").expect("CI aggregate job");
+    assert!(
+        smoke_job < aggregate,
+        "the OBS WebSocket smoke job must run before the CI aggregate"
+    );
+    assert!(
+        workflow.contains("cargo test -p rivulet-obs-websocket --test client_smoke -- --nocapture"),
+        "CI must run the real-client smoke test against the server"
+    );
+    assert!(
+        workflow.contains("needs.obs_websocket_smoke.result"),
+        "the CI aggregate must require the OBS WebSocket smoke result"
+    );
+    // The smoke must drive the server over a real loopback TCP connection.
+    let smoke = read("rivulet-obs-websocket/tests/client_smoke.rs");
+    assert!(smoke.contains("real (non-mock) WebSocket client"));
+    assert!(smoke.contains("ws://127.0.0.1:{port}"));
+    // Regression: the accept loop runs a non-blocking listener and accepted
+    // sockets on Windows inherit that mode, which made tungstenite's handshake
+    // read fail intermittently (`Protocol(HandshakeIncomplete)`) under
+    // parallel test load. Blocking must be restored **before** the handshake.
+    let server = read("rivulet-obs-websocket/src/server.rs");
+    let accept = server
+        .split_once("fn run_session")
+        .map(|(_, rest)| rest)
+        .expect("run_session must exist");
+    let handshake = accept
+        .find("tungstenite::accept_hdr")
+        .expect("accept_hdr call");
+    let blocking = accept
+        .find("set_nonblocking(false)")
+        .expect("set_nonblocking call");
+    assert!(
+        blocking < handshake,
+        "set_nonblocking(false) must come before accept_hdr"
+    );
+    // The auth-close smoke must use the same retry as TestClient::connect so a
+    // transient handshake drop cannot flake it.
+    assert!(smoke.contains("fn connect_with_retry"));
+    // Handshake-under-load must stay covered permanently: the parallel burst
+    // test connects many clients at once and requires every one plus a fresh
+    // client afterwards to complete Hello/Identify and a request round-trip.
+    assert!(smoke.contains("fn parallel_clients_all_complete_handshake_under_load"));
+    assert!(smoke.contains("const CLIENTS: usize = 24;"));
+    assert!(smoke.contains("std::sync::Barrier"));
+    assert!(smoke.contains("TestClient::connect(port, None)"));
+}
+
+#[test]
+fn responsive_layout_contract_is_pinned_in_the_gui() {
+    // Shrinking the window must never clip controls without a way to reach
+    // them: the central view content and the sidebar live in scroll areas and
+    // the window has a minimum inner size (guards in main.rs).
+    let app = read("rivulet-gui/src/app.rs");
+    let main = read("rivulet-gui/src/main.rs");
+    assert!(app.contains("egui::ScrollArea::vertical()"));
+    assert!(app.contains("auto_shrink([false, false])"));
+    assert!(app.contains("nav_panel"));
+    assert!(main.contains("with_min_inner_size"));
+    // The source-contract tests must stay wired to these guarantees.
+    let smoke = read("rivulet-gui/tests/ui_smoke.rs");
+    assert!(smoke.contains("responsive_contract_keeps_controls_reachable_on_narrow_windows"));
+    let accessibility = read("rivulet-gui/tests/ui_accessibility.rs");
+    assert!(accessibility.contains("fn narrow_layout_is_responsive"));
+    let regression = read("rivulet-gui/tests/ui_regression.rs");
+    assert!(regression.contains("640, 480"), "640x480 must be covered");
+    assert!(regression.contains("content=scrollable"));
+}
+
+#[test]
+fn discord_presence_tracks_record_state_from_every_view() {
+    // The Discord adapter must stay in sync with recording/streaming
+    // transitions regardless of which view is open: the per-frame reconcile
+    // call lives in the ui() entry next to the other reconcilers, NOT only
+    // inside the Stream view's draw code. Reverting this lets the presence
+    // freeze on "Ready" while the user records from the Record view.
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("fn sync_discord_presence"));
+    assert!(gui.contains("fn current_presence_status"));
+    // The frame-level call must sit INSIDE the ui() entry body, after the
+    // reconcile block anchor (fn ui( ... self.reconcile_midi();), NOT merely
+    // inside the Stream view's draw_presence_status. Both calls may coexist;
+    // the ui() one is what keeps Record-view toggles in sync.
+    let ui_fn = gui
+        .find("fn ui(&mut self, ui: &mut egui::Ui")
+        .expect("ui() entry");
+    let body: &str = &gui[ui_fn..];
+    assert!(
+        body.contains("self.reconcile_midi();"),
+        "reconcile block must exist in ui() as the anchor"
+    );
+    assert!(
+        body.contains("self.sync_discord_presence();"),
+        "per-frame presence sync must live in the ui() reconcile block"
+    );
+}
+
+#[test]
+fn discord_app_id_retirement_chain_is_guarded() {
+    // Rationiertes Update der offiziellen App-ID: die Retirement-Kette
+    // (konfigurierte ID → offizieller Default → Adapter aus) muss im Core
+    // als zentrale Helper existieren und von der GUI benutzt werden. Das
+    // Updater-Manifest ist die Release-Payload selbst — ein ID-Wechsel wird
+    // über einen DEFAULT_CLIENT_ID-Bump + Release-Notes-Eintrag ausgerollt.
+    let discord = read("rivulet-core/src/discord.rs");
+    let chain_helpers = discord.contains("pub fn effective_client_id")
+        && discord.contains("pub fn effective_large_image_key");
+    assert!(
+        chain_helpers,
+        "the fallback-chain helpers must exist in the core module"
+    );
+
+    let gui = read("rivulet-gui/src/app.rs");
+    let chain_wired = gui.contains("effective_client_id(Some(&client_id))")
+        && gui.contains("effective_large_image_key(Some(&large_image))");
+    assert!(
+        chain_wired,
+        "the adapter reconcile must resolve ids through the fallback chain"
+    );
+
+    // The rotation procedure must stay documented in the versioned docs so
+    // the runbook travels with the code that implements it.
+    let docs = read("docs/activity-status.md");
+    assert!(
+        docs.contains("## Runbook: rotating the official application id")
+            && docs.contains("DEFAULT_CLIENT_ID")
+            && docs.contains("SET_ACTIVITY delivered"),
+        "activity-status.md must keep the id-rotation runbook (code bump, \
+         release-notes text, verification steps)"
+    );
+}
+
+#[test]
+fn discord_presence_ships_official_defaults_and_migrates_empty_ids() {
+    // Zero-config Rich Presence: the core config must default to the official
+    // application id (validated snowflake) plus the official logo asset key,
+    // and the GUI must start with those defaults and migrate restores with an
+    // empty persisted id to them (custom ids stay untouched).
+    let discord = read("rivulet-core/src/discord.rs");
+    assert!(
+        discord.contains("pub const DEFAULT_CLIENT_ID: &str = \"1544027006847680532\";"),
+        "the official application id must be the shipped default"
+    );
+    assert!(
+        discord.contains("pub const DEFAULT_LARGE_IMAGE_KEY: &str = \"rivulet_logo\";"),
+        "the official logo asset key must be the shipped default"
+    );
+    assert!(
+        discord.contains("large_image_key: Some(DEFAULT_LARGE_IMAGE_KEY.to_owned())"),
+        "DiscordPresenceConfig::default must enable the logo"
+    );
+
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        gui.contains(
+            "discord_presence_client_id: rivulet_core::discord::DEFAULT_CLIENT_ID.to_owned()"
+        ),
+        "a fresh install must start with the official client id"
+    );
+    assert!(
+        gui.contains("fn restore_from_storage")
+            && gui.contains("Discord client id was empty - applying the official default"),
+        "the restore path must migrate empty persisted ids to the default"
+    );
+}
+
+#[test]
+fn discord_presence_error_state_is_wired_into_the_status_model() {
+    // PresenceActivity::Error must be produced by the presence status logic
+    // when the engine reported a failure (last_error set), take priority over
+    // the activity labels, and never leak the raw error text. Streaming starts
+    // must clear a stale error so the status recovers.
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("PresenceActivity::Error"));
+    assert!(
+        gui.contains("fn current_presence_activity"),
+        "error must have priority in current_presence_activity"
+    );
+    assert!(
+        gui.contains("// Clear a stale error so a new stream starts"),
+        "streaming starts must clear last_error"
+    );
+    // The privacy guarantee lives in the presence payload builder.
+    let presence = read("rivulet-core/src/presence.rs");
+    assert!(presence.contains("PresenceActivity::Error"));
+    assert!(presence.contains("Self::Error => \"presence_error\""));
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(i18n.matches("\"presence_error\"").count() >= 2);
+}
+
+#[test]
+fn discord_framing_uses_the_opcode_length_header() {
+    // Regression: the adapter framed every IPC message with only a 4-byte
+    // length prefix, but Discord v1 requires the 8-byte header
+    // `[opcode:u32][length:u32]` (op 0 = HANDSHAKE, op 1 = FRAME). Discord
+    // rejected the old framing with `{"code":1003,"message":"protocol
+    // error"}` and closed the connection, so the presence never appeared
+    // even though the client id and pipe were correct.
+    let discord = read("rivulet-core/src/discord.rs");
+    assert!(
+        discord.contains("pub const HANDSHAKE: u32 = 0;"),
+        "opcode table must define HANDSHAKE"
+    );
+    assert!(
+        discord.contains("pub const FRAME: u32 = 1;"),
+        "opcode table must define FRAME"
+    );
+    assert!(
+        discord.contains("write_frame(w, op::HANDSHAKE, &bytes)"),
+        "handshake must be sent with the HANDSHAKE opcode"
+    );
+    assert!(
+        discord.contains("write_frame(w, op::FRAME, &bytes)"),
+        "SET_ACTIVITY must be sent with the FRAME opcode"
+    );
+    // The writer must emit the 8-byte header (opcode first, then length).
+    let write = discord
+        .split_once("fn write_frame")
+        .map(|(_, rest)| rest)
+        .expect("write_frame must exist");
+    assert!(
+        write.contains("opcode.to_le_bytes()") && write.contains("len.to_le_bytes()"),
+        "write_frame must write opcode then length"
+    );
+    // The wire tests must assert the opcodes end to end.
+    assert!(discord.contains("handshake must use the HANDSHAKE opcode"));
+    assert!(discord.contains("SET_ACTIVITY must use the FRAME opcode"));
+}
+
+#[test]
+fn discord_payload_validation_contract_is_ci_enforced() {
+    // Regression: Discord rejected a SET_ACTIVITY containing an empty string
+    // with `4000: "..." is not allowed to be empty` (verified live), silently
+    // dropping the whole status update. The payload validator plus the
+    // exhaustive wire-contract test must stay wired so such 4000 rejections
+    // surface locally in CI instead of on a live Discord client.
+    let discord = read("rivulet-core/src/discord.rs");
+    // The reusable pre-wire validator encodes the documented rules.
+    assert!(discord.contains("pub enum PayloadIssue"));
+    assert!(discord.contains("pub fn validate_set_activity_payload"));
+    assert!(discord.contains("FieldTooLong"));
+    assert!(discord.contains("InvalidAssetKey"));
+    // The serializer must filter implausible asset keys, never send them
+    // verbatim (Discord silently drops the image, no error).
+    assert!(discord.contains("key.trim().len() <= 64"));
+    // The exhaustive contract test serializes every payload variant and
+    // asserts the wire output satisfies all three rules.
+    assert!(discord.contains("every_payload_variant_conforms_to_discord_rules_on_the_wire"));
+    assert!(discord.contains("empty state on the wire"));
+    assert!(discord.contains("text.len() <= 128"));
+    assert!(discord.contains("implausible large_image on the wire"));
+    // CI runs the contract check as a dedicated, named step.
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("Discord payload contract check")
+            && ci.contains("cargo test -p rivulet-core --lib payload"),
+        "CI must expose a dedicated Discord payload contract check"
+    );
+    // The Settings UI must warn immediately on Apply: the payload validator
+    // runs next to the client-id check and both warnings render with the
+    // error palette, in both locales.
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("fn apply_discord_payload_validation"));
+    assert!(gui.contains("discord_payload_warning"));
+    assert!(gui.contains("discord_payload_error_field_too_long"));
+    assert!(gui.contains("discord_payload_error_asset_key"));
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.matches("\"discord_payload_error_field_too_long\"")
+            .count()
+            >= 2
+    );
+    assert!(i18n.matches("\"discord_payload_error_asset_key\"").count() >= 2);
+    // The docs must describe the rules and the 4000 rejection.
+    let docs = read("docs/activity-status.md");
+    assert!(
+        docs.contains("128 characters") && docs.contains("4000"),
+        "activity-status.md must document the payload rules and the 4000 rejection"
+    );
+}
+
+#[test]
+fn discord_reconnect_button_rebuilds_the_adapter() {
+    // The Stream view must offer a one-click reconnect when the adapter is
+    // not connected, and the flag must force a fresh worker + handshake in
+    // the reconcile (no app restart needed).
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("discord_reconnect_requested: bool"));
+    assert!(
+        gui.contains("self.discord_client_id_dirty || self.discord_reconnect_requested"),
+        "reconnect must trigger the same rebuild path as a client-id change"
+    );
+    let draw = gui
+        .split_once("fn draw_presence_status")
+        .map(|(_, rest)| rest)
+        .expect("draw_presence_status must exist");
+    assert!(draw.contains("discord_reconnect"));
+    assert!(draw.contains("!is_connected"));
+    assert!(draw.contains("self.discord_reconnect_requested = true;"));
+    // The behavior test must stay wired.
+    assert!(gui.contains("discord_presence_reconnect_rebuilds_the_adapter"));
+    // The i18n key exists in both locales (parity test enforces agreement).
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(i18n.matches("\"discord_reconnect\"").count() >= 2);
+}
+
+#[test]
+fn discord_client_id_is_validated_on_apply() {
+    // Settings must validate the client id format on Apply and warn instead of
+    // silently accepting a mistyped id (which would keep the adapter off).
+    let discord = read("rivulet-core/src/discord.rs");
+    assert!(discord.contains("pub fn validate_client_id"));
+    assert!(discord.contains("pub enum ClientIdError"));
+    assert!(discord.contains("ClientIdError::NotNumeric"));
+    assert!(discord.contains("ClientIdError::Length"));
+    // The validator must be unit-tested in the core.
+    assert!(discord.contains("client_id_validation_accepts_realistic_snowflakes"));
+    assert!(discord.contains("client_id_validation_rejects_non_numeric_values"));
+
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("fn apply_discord_client_id"));
+    assert!(gui.contains("validate_client_id(self.discord_presence_client_id.trim())"));
+    assert!(gui.contains("discord_client_id_warning"));
+    // Behavior test must stay wired.
+    assert!(gui.contains("discord_client_id_validation_blocks_invalid_apply_and_warns"));
+    // Both locales must translate the two error messages.
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in [
+        "discord_client_id_error_not_numeric",
+        "discord_client_id_error_length",
+    ] {
+        let k = format!("\"{key}\"");
+        assert!(
+            i18n.matches(&k).count() >= 2,
+            "{key} must exist in EN and DE"
+        );
+    }
+}
+
+#[test]
+fn discord_client_id_is_restored_from_eframe_storage() {
+    // Bug regression: `save()` wrote the full app (including the Discord
+    // application id) under eframe::APP_KEY, but nothing ever read the value
+    // back — every launch started from Default and silently dropped ALL
+    // persisted settings. The startup path must restore from storage and
+    // re-attach the live engine/CLI values.
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        gui.contains("fn restore_from_storage"),
+        "a storage restore helper must exist"
+    );
+    assert!(
+        gui.contains("eframe::get_value::<RivuletApp>(storage?, eframe::APP_KEY)"),
+        "restore must read via eframe::get_value under APP_KEY"
+    );
+    // The constructor must actually wire the restore in (not just define it).
+    let new_fn = gui
+        .split_once("pub fn new(")
+        .map(|(_, rest)| rest)
+        .expect("RivuletApp::new must exist");
+    assert!(
+        new_fn.contains("Self::restore_from_storage(cc.storage)"),
+        "new() must call restore_from_storage with cc.storage"
+    );
+    assert!(
+        new_fn.contains("restored.engine = app.engine;"),
+        "restored state must keep the live engine"
+    );
+    assert!(
+        new_fn.contains("restored.no_frame_timeout"),
+        "restored state must keep the CLI no-frame timeout"
+    );
+    // The regression test that guarantees the round trip must stay wired.
+    assert!(gui.contains("discord_client_id_survives_eframe_storage_round_trip"));
+    assert!(gui.contains("impl eframe::Storage for MemoryStorage"));
+}
+
+#[test]
+fn discord_presence_uses_obs_style_assets_and_no_duplicate_name() {
+    // Like OBS, the activity card should render the app artwork (large image
+    // from the Discord Developer Portal) instead of the generic placeholder
+    // icon, and the payload must not duplicate the app name into state or
+    // details (Discord renders the name from the application registration).
+    let presence = read("rivulet-core/src/presence.rs");
+    assert!(
+        presence.contains("let state = match game"),
+        "the game name must live in state (details stays the plain label)"
+    );
+    assert!(
+        presence.contains("let details = label.to_owned()"),
+        "details must be the plain localized label without the app name"
+    );
+    let discord = read("rivulet-core/src/discord.rs");
+    assert!(discord.contains("large_image_key: Option<String>"));
+    assert!(discord.contains("struct ActivityAssets"));
+    assert!(discord.contains("#[serde(rename = \"large_image\")]"));
+    // The key is mirrored to small_image (member list) alongside large_image
+    // (profile card) so the same uploaded asset replaces the placeholder in
+    // both places; Discord renders small_image in the member list.
+    assert!(discord.contains("#[serde(rename = \"small_image\")]"));
+    assert!(discord.contains("small_image: key,"));
+    // Wire-level coverage: assets attached when configured, absent otherwise.
+    assert!(discord.contains("set_activity_attaches_large_image_when_configured"));
+    // Discord rejects an empty string field (4000: "..." is not allowed to be
+    // empty, verified live), so `state` must be omitted when there is no game
+    // name instead of being sent empty; `details` always carries the label.
+    assert!(
+        discord.contains("details: String") && discord.contains("!status.state.trim().is_empty()"),
+        "empty state must be omitted, never sent as an empty string"
+    );
+    assert!(discord.contains("empty_state_is_omitted_not_sent_empty"));
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("discord_presence_large_image"));
+    assert!(gui.contains("discord_large_image"));
+    // The artwork key must survive the eframe persistence round trip.
+    assert!(gui.contains("discord_presence_large_image, \"rivulet_logo\""));
+}
+
+#[test]
+fn discord_presence_errors_are_logged_and_connection_state_is_exposed() {
+    // Regression: the presence worker swallowed IPC failures silently, so the
+    // GUI showed the desired status while Discord displayed only the plain
+    // "Playing Rivulet" game card. The worker must log (crash-log feature)
+    // and expose a shared connection state that the Stream view renders.
+    let discord = read("rivulet-core/src/discord.rs");
+    assert!(discord.contains("pub enum DiscordConnState"));
+    assert!(discord.contains("pub fn connection_state"));
+    assert!(
+        discord.contains("tracing::warn!(")
+            && discord.contains("Discord Rich Presence IPC unavailable"),
+        "IPC failures must be logged for the crash logs"
+    );
+    assert!(
+        discord.contains("tracing::info!") && discord.contains("SET_ACTIVITY delivered"),
+        "successful delivery must be logged at info level (visible with the default RUST_LOG)"
+    );
+    assert!(
+        discord.contains("DiscordConnState::Connected"),
+        "worker must flip to Connected"
+    );
+
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        gui.contains("p.connection_state()"),
+        "Stream view must poll the real connection state"
+    );
+    assert!(gui.contains("discord_conn_off"));
+    assert!(gui.contains("discord_conn_connected"));
+    // Locales must translate every new key (parity test enforces agreement).
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in [
+        "discord_conn_off",
+        "discord_conn_connecting",
+        "discord_conn_connected",
+    ] {
+        let k = format!("\"{key}\"");
+        assert!(
+            i18n.matches(&k).count() >= 2,
+            "{key} must exist in EN and DE"
+        );
+    }
+}
+
+#[test]
+fn presence_legend_lists_every_state_with_a_tooltip() {
+    // The Stream view renders a legend: one row per state with an explanatory
+    // tooltip, highlighting the active row. The i18n tables must translate
+    // every tooltip key in both locales (parity test enforces key agreement).
+    let presence = read("rivulet-core/src/presence.rs");
+    assert!(presence.contains("pub const fn all() -> [PresenceActivity; 6]"));
+    assert!(presence.contains("pub const fn tooltip_i18n_key"));
+    let gui = read("rivulet-gui/src/app.rs");
+    let draw = gui
+        .split_once("fn draw_presence_status")
+        .map(|(_, rest)| rest)
+        .expect("draw_presence_status must exist");
+    assert!(draw.contains("presence_legend"));
+    assert!(draw.contains("for activity in PresenceActivity::all()"));
+    assert!(draw.contains("activity.tooltip_i18n_key()"));
+    assert!(draw.contains("response.on_hover_text(tip)"));
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in [
+        "presence_tooltip_ready",
+        "presence_tooltip_recording",
+        "presence_tooltip_streaming",
+        "presence_tooltip_recording_streaming",
+        "presence_tooltip_paused",
+        "presence_tooltip_error",
+    ] {
+        assert!(i18n.matches(key).count() >= 2, "{key} must be localized");
+    }
+    // The operator-facing docs must document all six states with their labels
+    // and transitions so the model cannot drift from the documented contract.
+    let docs = read("docs/activity-status.md");
+    assert!(
+        docs.contains("## State reference"),
+        "docs must have the state table"
+    );
+    for (de, en) in [
+        ("Bereit", "Ready"),
+        ("Aufnahme", "Recording"),
+        ("Streamt", "Streaming"),
+        ("Aufnahme + Stream", "Recording + streaming"),
+        ("Pausiert", "Paused"),
+        ("Fehler", "Error"),
+    ] {
+        assert!(
+            docs.contains(de) && docs.contains(en),
+            "docs must document both labels ({de}/{en})"
+        );
+    }
+    // The documented transition language (arrows) signals the table is alive.
+    assert!(docs.contains("Transitions out"));
+}
+
+#[test]
+fn midi_mapping_is_wired_into_gui_and_ci() {
+    // The hardware-free mapping/parse core lives in rivulet-core::midi.
+    let midi_core = read("rivulet-core/src/midi.rs");
+    assert!(midi_core.contains("pub struct MidiMapping"));
+    assert!(midi_core.contains("pub struct MidiPresetLibrary"));
+    assert!(midi_core.contains("pub fn parse_midi"));
+    assert!(midi_core.contains("pub enum MidiAction"));
+    // The GUI owns the midir device bridge.
+    let gui_cargo = read("rivulet-gui/Cargo.toml");
+    assert!(gui_cargo.contains("midir"), "GUI must depend on midir");
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("fn reconcile_midi"));
+    assert!(gui.contains("fn apply_midi_action"));
+    assert!(
+        gui.contains("midi_section"),
+        "Settings must expose the MIDI section"
+    );
+    // Learn mode + per-device presets are part of the MIDI configuration UI.
+    assert!(gui.contains("midi_learn"), "Learn mode must be wired up");
+    assert!(
+        gui.contains("midi_presets"),
+        "Device presets must be wired up"
+    );
+    // Linux needs the ALSA dev headers to build midir; CI must install them
+    // in both the test and the release package workflow.
+    let workflow = read(".github/workflows/ci.yml");
+    assert!(
+        workflow.contains("libasound2-dev"),
+        "CI must install libasound2-dev for the midir ALSA backend"
+    );
+    let release = read(".github/workflows/build-package.yml");
+    assert!(
+        release.contains("libasound2-dev"),
+        "Release builds must install libasound2-dev for the midir ALSA backend"
+    );
+    // The i18n catalogs must cover the MIDI section (incl. learn/presets) in
+    // both locales.
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(i18n.matches("midi_section").count() >= 2);
+    assert!(i18n.matches("midi_learn").count() >= 2);
+    assert!(i18n.matches("midi_presets").count() >= 2);
+}
+
+#[test]
+fn adaptive_bitrate_live_change_diagnostics_are_wired_up() {
+    let runtime = read("rivulet-core/src/stream_runtime.rs");
+    let engine = read("rivulet-core/src/lib.rs");
+    let docs = read("docs/m3-streaming-quality-gate.md");
+    assert!(runtime.contains("pub struct BitrateChange"));
+    assert!(runtime.contains("last_change_info"));
+    assert!(engine.contains("pub fn last_bitrate_change"));
+    assert!(docs.contains("last_bitrate_change()"));
+}
+
+#[test]
+fn rust_toolchain_is_pinned_for_local_and_ci_parity() {
+    // rustfmt output differs between compiler versions (the 0.65.0-alpha.100
+    // window failed CI because rustfmt 1.9.0 collapsed a long `contains()`
+    // line that the CI runner's older rustfmt wanted wrapped). A repo-root
+    // rust-toolchain.toml pins the toolchain for EVERY cargo invocation in
+    // any checkout, so local and CI formatting can never diverge again.
+    let pinned = read("rust-toolchain.toml");
+    assert!(
+        pinned.contains("channel = \"1.98.0\""),
+        "the toolchain channel must be pinned to an exact version"
+    );
+    assert!(
+        pinned.contains("components = [\"rustfmt\", \"clippy\"]"),
+        "rustfmt and clippy must ship with the pinned toolchain"
+    );
+    // CI installs the same toolchain through the pinned dtolnay action; the
+    // rust-toolchain.toml channel keeps `cargo fmt`/`clippy` on that exact
+    // version instead of whatever `stable` resolves to that day.
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("components: rustfmt, clippy"),
+        "CI must keep installing rustfmt + clippy for the lints job"
+    );
+}
+
+#[test]
+fn wiki_repo_doc_link_audit_is_wired_up() {
+    // Wiki pages link into the versioned repo docs; GitHub renders those
+    // links as 200 even when the #anchor drifted. The auditor validates
+    // files + heading anchors, runs in the scheduled wiki workflow against
+    // origin/develop, and is part of the local sync smoke.
+    let auditor = read("scripts/audit-wiki-links.py");
+    assert!(
+        auditor.contains("github_slug") && auditor.contains("heading_anchors"),
+        "the auditor must reproduce GitHub's heading-anchor slugs"
+    );
+    let workflow = read(".github/workflows/wiki-translations.yml");
+    assert!(
+        workflow.contains("scripts/audit-wiki-links.py")
+            && workflow.contains("--develop-from-origin"),
+        "the wiki workflow must run the repo-doc link audit"
+    );
+    let smoke = read("scripts/wiki-sync-smoke.sh");
+    assert!(
+        smoke.contains("audit-wiki-links.py"),
+        "the local sync smoke must include the repo-doc link audit"
+    );
 }
 
 #[test]
@@ -370,15 +1119,52 @@ fn resource_efficiency_gate_is_wired_up() {
 }
 
 #[test]
-fn release_workflow_reuses_existing_release_branches() {
+fn release_workflow_publishes_current_source_onto_release_branch() {
     let workflow = read(".github/workflows/release.yml");
     assert!(
-        workflow.contains("git fetch origin \"$RELEASE_BRANCH\"")
-            && workflow.contains("git show-ref --verify")
-            && workflow.contains("git push --set-upstream origin \"HEAD:$RELEASE_BRANCH\"")
-            && workflow.contains("git diff --cached --quiet")
-            && workflow.contains("git reset --hard \"$REMOTE_TIP\""),
-        "release workflow must handle retries on an existing release branch idempotently"
+        workflow.contains("bash scripts/release-branch.sh \"$RELEASE_BRANCH\""),
+        "release workflow must reconcile the release branch via scripts/release-branch.sh"
+    );
+
+    let script = read("scripts/release-branch.sh");
+    assert!(
+        script.contains("git fetch origin \"$BRANCH\"")
+            && script.contains("git show-ref --verify --quiet \"refs/remotes/origin/$BRANCH\"")
+            && script.contains("git merge-base --is-ancestor \"$REMOTE_TIP\" HEAD")
+            && script.contains("git push origin \"HEAD:$BRANCH\"")
+            && script.contains("git push --force-with-lease origin \"HEAD:$BRANCH\""),
+        "release-branch.sh must publish current HEAD onto the release branch, \
+         fast-forwarding when the remote is at/behind HEAD and force-with-lease \
+         overwriting a divergent/stale tip so a release always builds current source"
+    );
+}
+
+#[test]
+fn release_gate_includes_build_and_chore_commits() {
+    let workflow = read(".github/workflows/release.yml");
+    assert!(
+        workflow.contains("'^(feat|fix|build|chore|ci)(\\(.*\\))?!?:'"),
+        "release.yml must treat build/chore/ci commits as releasable so packaging, \
+         housekeeping and CI changes ship without a manual workflow dispatch"
+    );
+
+    let script = read("scripts/release-version.sh");
+    // Bound the needle so the assert line stays under rustfmt's max_width in
+    // every toolchain version (CI rustfmt and local rustfmt must agree).
+    let build_rule =
+        "build:*|build\\(*\\):*|chore:*|chore\\(*\\):*|ci:*|ci\\(*\\):*) HAS_BUILD=true";
+    assert!(
+        script.contains(build_rule),
+        "release-version.sh must classify build/chore/ci commits as releasable"
+    );
+    assert!(
+        script.contains("HAS_BUILD\" == true"),
+        "release-version.sh must bump the patch version for build/chore-only ranges"
+    );
+    assert!(
+        script.contains("No feat/fix/build/chore/ci commits"),
+        "release-version.sh must keep the version when only non-releasable \
+         commits (docs/test/style) exist, matching the workflow gate"
     );
 }
 
@@ -390,7 +1176,7 @@ fn develop_required_checks_have_stable_job_names() {
             && ci.contains("cargo test -p rivulet-core --test ci_pinning")
             && ci.contains("name: CI")
             && ci.contains(
-                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke]"
+                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke]"
             ),
         "CI must expose dedicated Pinning-Tests and aggregate CI checks"
     );
@@ -509,6 +1295,7 @@ fn workspace_manifests_declare_the_workspace_license() {
         "rivulet-gui/Cargo.toml",
         "rivulet-launcher/Cargo.toml",
         "rivulet-obs-compat/Cargo.toml",
+        "rivulet-obs-websocket/Cargo.toml",
         "rivulet-opengl-hook-dll/Cargo.toml",
         "rivulet-plugins/Cargo.toml",
         "rivulet-streaming/Cargo.toml",
@@ -642,4 +1429,147 @@ fn build_caches_do_not_restore_stale_target_artifacts() {
             "{workflow} must not restore an unrelated old Cargo cache"
         );
     }
+}
+
+#[test]
+fn daily_logging_defaults_to_info_not_empty_filter() {
+    // Regression: logging init used EnvFilter::from_default_env(), which with
+    // RUST_LOG unset filters out everything — the daily crash log stayed empty
+    // and Discord/engine diagnostics were invisible. The init must resolve a
+    // user-friendly default (info) and the fallback must be unit-tested.
+    let logging = read("rivulet-gui/src/logging.rs");
+    // Only the *production* init code must not use from_default_env; a doc
+    // comment mentioning the old bug is fine and expected.
+    let production = logging
+        .split_once("pub fn init(")
+        .map(|(_, rest)| {
+            rest.split_once("#[cfg(test)]")
+                .map(|(head, _)| head)
+                .unwrap_or(rest)
+        })
+        .expect("init() must exist");
+    assert!(
+        !production.contains("EnvFilter::from_default_env()"),
+        "unset RUST_LOG must not silently disable all logging"
+    );
+    assert!(
+        production.contains("resolve_filter_spec(std::env::var(\"RUST_LOG\").ok())"),
+        "init must resolve the filter from the env with an info fallback"
+    );
+    assert!(
+        logging.contains("filter_spec_defaults_to_info_when_rust_log_unset"),
+        "the fallback rule must be covered by a unit test"
+    );
+}
+
+#[test]
+fn cancelled_file_dialog_is_logged_at_info_level() {
+    // Regression: cancelling the recording save dialog was logged at debug
+    // level, which the daily log (default filter `info`) never showed. A user
+    // who pressed Record but cancelled the dialog saw nothing in the log and
+    // concluded the recording silently failed — while the real reason was a
+    // cancelled dialog. The cancellation must be visible in the daily log.
+    let app = read("rivulet-gui/src/app.rs");
+    let occurrences = app
+        .matches("tracing::info!(\"File selection cancelled\")")
+        .count();
+    assert!(
+        occurrences >= 3,
+        "every recording save-dialog path must log the cancellation at info \
+         level (found {occurrences}, expected >= 3)"
+    );
+    assert!(
+        !app.contains("tracing::debug!(\"File selection cancelled\")"),
+        "no recording save-dialog path may keep the debug-level cancellation log"
+    );
+}
+
+#[test]
+fn twitch_chat_dock_is_wired_and_covered() {
+    // M5 community dock: the Chat view must be a first-class sidebar entry
+    // (nav key + heading i18n), the core worker must keep its local-listener
+    // smoke test (deterministic in CI without real network), and the feature
+    // must be documented.
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(
+        app.contains("AppView::Chat") && app.contains("nav_chat"),
+        "the Chat view must be a first-class AppView with a nav key"
+    );
+    assert!(
+        app.contains("fn draw_chat_view") && app.contains("fn reconcile_twitch_chat"),
+        "the Chat view must have a draw + reconcile path"
+    );
+    let core = read("rivulet-core/src/twitch_chat.rs");
+    assert!(
+        core.contains("worker_connects_and_delivers_messages_to_local_listener"),
+        "the Twitch worker must keep its local-listener smoke test"
+    );
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.contains("(\"chat_title\", \"Twitch Chat\")")
+            && i18n.contains("(\"chat_title\", \"Twitch-Chat\")"),
+        "the chat view must be localized in DE and EN"
+    );
+    let docs = read("docs/twitch-chat.md");
+    assert!(
+        docs.contains("# Twitch Chat Dock") && docs.contains("parse_irc_line"),
+        "the chat dock must be documented with its architecture"
+    );
+    // Sending replies: the worker must expose a non-blocking send that is
+    // covered by the local-listener smoke, and the GUI must gate the input on
+    // an authenticated connection (OAuth token) because Twitch rejects
+    // PRIVMSG from the anonymous nick.
+    let core = read("rivulet-core/src/twitch_chat.rs");
+    assert!(
+        core.contains("pub fn send_message") && core.contains("Msg::SendMessage"),
+        "the worker must expose a non-blocking send_message"
+    );
+    assert!(
+        core.contains("PRIVMSG {channel} :{text}"),
+        "sending must write a PRIVMSG to the joined channel"
+    );
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(
+        app.contains("fn send_chat_message") && app.contains("ChatAction::Send"),
+        "the GUI must wire a send path into the chat worker"
+    );
+    assert!(
+        app.contains("chat_send_locked"),
+        "the UI must show a lock hint when sending is unavailable"
+    );
+}
+
+#[test]
+fn alert_overlay_import_is_wired_through_browser_source() {
+    // M5 community dock: alert overlays are imported as browser-source widget
+    // URLs (Streamlabs/StreamElements), exactly like OBS. The core must know
+    // the provider URL shapes and validate tokens, the GUI must offer the
+    // import (provider picker + token + custom URL) and keep it tested, and
+    // the feature must be documented.
+    let core = read("rivulet-core/src/alerts.rs");
+    assert!(core.contains("pub enum AlertProvider"));
+    assert!(core.contains("streamlabs.com/alert-box/v2/"));
+    assert!(core.contains("streamelements.com/overlay/"));
+    assert!(core.contains("pub fn build_overlay_url"));
+    assert!(core.contains("pub fn validate_overlay_url"));
+    // The generated URLs must keep being accepted by the browser source.
+    assert!(core.contains("browser_source_accepts_the_generated_url"));
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(gui.contains("fn import_alert_overlay"));
+    assert!(gui.contains("alert_provider"));
+    assert!(gui.contains("alert_overlay_title"));
+    assert!(gui.contains("alert_import_loads_provider_widget_url_into_browser_source"));
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in ["alert_import", "alert_token", "alert_overlay_title"] {
+        let k = format!("\"{key}\"");
+        assert!(
+            i18n.matches(&k).count() >= 2,
+            "{key} must exist in EN and DE"
+        );
+    }
+    let docs = read("docs/alerts.md");
+    assert!(
+        docs.contains("# Stream Alerts") && docs.contains("streamelements.com/overlay/"),
+        "alert import must be documented"
+    );
 }

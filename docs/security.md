@@ -4,6 +4,11 @@ Rivulet uses GitHub-native security controls plus repository-owned CI checks. Th
 controls are intentionally layered: repository settings prevent credential leaks,
 while workflows scan source and dependency changes.
 
+Public security reports are handled through [`SECURITY.md`](../SECURITY.md):
+support scope, the responsible-disclosure procedure, the private advisory
+channel, and the coordination timeline live there. This document records the
+enabled controls and the operational incident-response runbook.
+
 ## Enabled Repository Features
 
 The following settings are enabled for `thoser666/Rivulet`:
@@ -11,6 +16,8 @@ The following settings are enabled for `thoser666/Rivulet`:
 - **Secret Scanning** detects credentials in the repository and its history.
 - **Push Protection** blocks supported secrets before they are pushed.
 - **Dependabot Security Updates** is enabled for vulnerable dependency updates.
+- **Renovate** is configured for grouped Cargo version updates and its dependency dashboard;
+  Dependabot remains responsible for GitHub Actions SHA pins only.
 
 Secret Scanning and Push Protection are repository settings, not workflow files.
 They must therefore be checked through the GitHub UI or API after repository
@@ -58,9 +65,16 @@ these settings.
   and Cargo Deny to succeed and accepts the Dependency Review job as either
   successful or skipped when the event is not a pull request.
 
+Dependency update ownership is deliberately split: Renovate manages Cargo
+updates, while Dependabot manages GitHub Actions SHA pins. This prevents duplicate
+PRs and keeps action-pin review separate from Rust dependency upgrades.
+
 Every third-party action in the security workflows is pinned to a full commit
 SHA. The pins are listed in [`ci-action-pins.md`](ci-action-pins.md) and enforced
-by `rivulet-core/tests/ci_pinning.rs`.
+by `rivulet-core/tests/ci_pinning.rs`. The nightly checker resolves each
+pinned ref with `git ls-remote`; each request has a 30-second timeout so a
+GitHub/network outage cannot hang the workflow indefinitely. It reports a
+newer major separately from same-major staleness.
 
 ### Cargo dependency policy
 
@@ -106,6 +120,78 @@ The workflow sets `persist-credentials: false` during checkout and does not
 request write access to repository contents. Review the first score regularly;
 Scorecard findings are improvement signals, not a substitute for threat
 modeling or maintainer review.
+
+## GitHub App & External Check Enablement
+
+Rivulet uses a mix of GitHub-native automations and repository-owned workflows.
+This section records which GitHub Apps / external checks are active and which
+are recommended but not yet enabled, so the decision is traceable.
+
+### Active
+
+| Automation | Status | Notes |
+| --- | --- | --- |
+| Dependabot | Enabled | GitHub Actions SHA pins (see the ownership split above). |
+| Renovate | Enabled | Grouped Cargo updates + dependency dashboard. |
+| CodeQL | Enabled | Run by `security.yml` (workflow, not the GitHub App); SARIF uploaded to Code Scanning. |
+| OpenSSF Scorecard | Enabled | Run by `security.yml`; result published to the OpenSSF API. |
+| Secret Scanning + Push Protection | Enabled | Repository settings, not a workflow. |
+
+### Recommended but not yet enabled
+
+These are considered for future enablement. Enable each only after reviewing its
+permissions and data handling; GitHub Apps can request broad repository scopes.
+
+| App | Purpose | Decision / risk |
+| --- | --- | --- |
+| [github/accessibility-scanner](https://github.com/github/accessibility-scanner) (or **AccessLint**) | Post automated accessibility findings on pull requests, complementing the in-process `ui_accessibility` report. | Recommended. Needs a deployed/reachable app URL for full function; the in-process contract in `rivulet-gui/tests/ui_accessibility.rs` already covers the deterministic baseline while the app is not installed. Tracked as finding `ui-001` in `docs/ui-audit.md`. |
+| **rust-doctor** | Review Rust change risk and suggest targeted fixes on PRs. | Optional; Clippy + the workspace lints already run in CI (`-D warnings`), so value is advisory feedback, not a gate. |
+| **Conventional Commits** checkout bot | Enforce the Conventional Commits format used by `release.yml` versioning. | Nice-to-have; the release workflow already skips non-releasable commits (`feat`/`fix`/`build`/`chore`/`ci` release, everything else is ignored), so a breaking/malformed commit only delays a release rather than corrupting it. Prefer tightening the release check before adding a bot. |
+| **Clippy Review** bot | Surface clippy suggestions inline on PRs. | Redundant with the CI `Lints (Fmt & Clippy)` job; only adds ergonomics for reviewers. |
+
+### Enablement policy
+
+- An app must request the minimum permission scope and be documented here before
+  installation.
+- Any app that posts on pull requests must remain advisory and must never become
+  a blocking required check until its false-positive rate is reviewed across
+  several PRs.
+- Apps that require a deployed service (AccessLint/accessibility-scanner) are
+  deferred until there is an always-available deployment to point them at.
+
+### Removed / deactivated (2026-08-31)
+
+Several GitHub Apps were installed on the repository without ever being
+configured. Because the apps subscribe to `push` events and request the
+`checks: write` permission, every push created a check suite that stayed
+`queued` forever (no workflow/config in the repo ever completed it). These
+queued suites kept the combined commit status of every commit in `pending`
+indefinitely, even though all six required checks were green. The apps were
+deactivated via **Settings -> Applications -> GitHub Apps -> Configure ->
+Uninstall**:
+
+| App | Why it was removed |
+| --- | --- |
+| codecov | No `codecov.yml`/`codecov.yaml`, no coverage upload in any workflow. |
+| deepsource.io | No `deepsource.toml` or analyzer configuration. |
+| nx-cloud | No `nx.json` or Nx configuration anywhere in the repo. |
+| cypress | No `cypress.config.*` or `cypress/` directory; UI tests use `ui_smoke`/`ui_accessibility` instead. |
+| docker-scout | No Docker Scout configuration or workflow reference. |
+| mistralai | No Mistral configuration or workflow reference. |
+
+**Kept on purpose:**
+
+- **Renovate** stays enabled — it is actively configured (`renovate.json`) and
+  drives grouped Cargo updates next to Dependabot.
+- **freebuff-web** stays enabled — it is the GitHub integration used by the
+  Freebuff development session (commits/issues) and is not part of this cleanup.
+
+**Operational note:** uninstalling an app does **not** retroactively remove check
+suites that were already created. Historical commits (e.g. `0abb497`) keep their
+queued suites and their combined status therefore stays `pending`; only commits
+pushed after the uninstall are free of the removed apps' suites. When verifying
+an uninstall, push a throwaway commit and check its check suites rather than
+re-reading an old commit's status.
 
 ## Required Repository Settings
 

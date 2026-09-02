@@ -12,7 +12,7 @@
 
 *A Rust recording and streaming engine — built for performance, safety, reliability, and embeddability*
 
-[Features](#-features) • [Installation](#-installation) • [Roadmap](#-roadmap) • [Contributing](#-contributing)
+[Features](#-features) • [Installation](#-installation) • [Bedienungsanleitung](https://github.com/thoser666/Rivulet/blob/develop/docs/user-guide.md) • [Hilfe](https://github.com/thoser666/Rivulet/blob/develop/docs/user-guide.md#hilfe-menü) • [Erster Stream](docs/first-stream-checklist.md) • [Roadmap](#-roadmap) • [Contributing](#-contributing)
 
 ![Rivulet](docs/thumbnail.png)
 
@@ -76,7 +76,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Recording Presets** - Resolution and FPS presets (Original, 1080p60, 1080p30, 720p60, 720p30, 480p30) with automatic videoscale/videorate insertion, per-preset bitrate defaults, and encoder-aware caps; engine API `set_preset(RecordingPreset)`, selectable in the GUI
 - **Recording Overlay** - Burn-in timer (HH:MM:SS) and live FPS counter onto the recorded video via GStreamer `textoverlay`; toggle in the GUI, engine API `set_overlay_enabled(bool)` + `update_overlay_text(&str)`
 - **Replay Buffer / Instant Replay** - Ring buffer of the last N seconds (H.264+AAC, keyframe-aligned) kept while recording; save the clip as a standalone MP4 via the F12 hotkey or the GUI button; engine API `set_replay_duration()` / `save_replay()`
-- **Auto-Update** - Checks the GitHub Releases API on startup and manually for newer versions, downloads the matching platform package (MSI / AppImage / DMG) with a live progress bar and launches the installer; the alpha channel keeps up with every feature push
+- **Auto-Update** - Checks the GitHub Releases API on startup and manually for newer versions, downloads the matching platform package (MSI / AppImage / DMG) with a live progress bar and launches the installer; Windows upgrades retain one Control Panel entry and update the launcher target; the alpha channel keeps up with every feature push. On Windows a detached `rivulet-updater` watchdog takes over the install: it waits for the running GUI (and launcher) to fully terminate — so the executing files are no longer locked — and only then runs `msiexec` to completion. This prevents the classic "only the registry is updated but the old files stay" failure.
 - **Recording Live Preview** - The Record view shows a throttled thumbnail of the selected monitor or window before recording and continues with the actual encoder-bound frames while recording; the panel reports whether it is ready, waiting for the first frame, or active
 - **Sidebar Navigation** - Clean, DaVinci Resolve-style UI with a collapsible left sidebar (see [docs/ui-design.md](docs/ui-design.md))
   - Record - Main recording controls and preview
@@ -93,8 +93,30 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 - **Cross-Platform** - Windows, macOS, and Linux support (via xcap)
 - **Modern UI** - Clean interface built with egui
 - **Internationalized UI** - All visible strings are driven by locale files (English by default, German included)
+- **Activity status & Discord Rich Presence** - The UI exposes a privacy-safe “Rivulet nimmt auf / streamt” activity model and an opt-out, non-blocking Discord Rich Presence adapter (see [`docs/activity-status.md`](docs/activity-status.md)); stream keys, URLs, paths, and window titles are never included
 
 ---
+
+## 📖 Bedienungsanleitung und Wiki
+
+Der zentrale [Rivulet User Guide](docs/user-guide.md) erklärt Installation, Navigation,
+Aufnahme, Quellen, Live-Vorschau, Szenen, Streaming, Updates und Fehlerdiagnose.
+
+Für den praktischen Einstieg gibt es die [Checkliste für den ersten Twitch-, YouTube-
+oder Kick-Stream](docs/first-stream-checklist.md) sowie die technische [Stream-Setup-
+Dokumentation](docs/stream-setup.md
+- [UI-Smoke-Tests und Secret-Redaction](docs/ui-smoke-testing.md)). Dort ist auch der lokale RTMPS-Smoke-Test
+mit seinen Grenzen beschrieben.
+
+Für Einsteiger-How-tos, Plattformtipps, FAQ und Community-Workarounds ist das
+[GitHub Wiki](https://github.com/thoser666/Rivulet/wiki) vorgesehen. Das Wiki ist
+bilingual (English/Deutsch) und bietet auf jeder Kernseite einen Sprachumschalter.
+Fehlende Sprachpaare werden automatisch durch den Workflow geprüft; der Ablauf ist in
+[docs/wiki-translation-workflow.md](docs/wiki-translation-workflow.md) beschrieben. Die Grenzen
+zwischen versionierter Repository-Doku und Wiki sind in
+[`docs/wiki-content-policy.md`](docs/wiki-content-policy.md) beschrieben. Das
+Wiki muss in den GitHub-Repository-Settings durch einen Administrator aktiviert
+werden.
 
 ## 🚀 Roadmap
 
@@ -108,6 +130,8 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 > egui conventions in [`docs/ui-design.md`](docs/ui-design.md). Every milestone
 > also uses the reusable [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md)
 > for UI, usability, accessibility, reliability, platform, and resource-efficiency review.
+> The ongoing UI audit, its CI-gated accessibility/screenshot contracts, and the
+> accessibility-scanning backlog are tracked in [`docs/ui-audit.md`](docs/ui-audit.md).
 > The cross-cutting resource goal and measurement method are documented in
 > [`docs/resource-efficiency-goal.md`](docs/resource-efficiency-goal.md).
 
@@ -118,13 +142,14 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 | M0 – Recording Foundation | Capture, Encoding, Audio, GUI | ✅ Done | — | [![M0](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F3&query=open_issues&label=M0&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/3) |
 | M1 – Solid Recording | Audio tracks, Hardware encoding, QoL, Overlay | ✅ Done (milestone closed) | — | [![M1](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F4&query=open_issues&label=M1&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/4) |
 | M2 – Scenes & Composition | Scenes, Sources, Game Capture, Scene Organisation, Transitions, Studio Mode | ✅ Complete (conditional UI/UX gate; milestone closed) | — | [![M2](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F1&query=open_issues&label=M2&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/1) |
-| M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | 🚧 In progress | — | [![M3](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F5&query=open_issues&label=M3&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/5) |
-| M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | 🚧 Replay Buffer done | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
+| M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | ✅ Complete (conditional: live interop follow-ups) | — | [![M3](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F5&query=open_issues&label=M3&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/5) |
+| M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | ✅ Complete (conditional: integration follow-ups; milestone closed) | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 🚧 In progress (installers, signing, i18n done) | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
 | M6 – Automation & Determinism | Headless CLI, CI Rendering, Reproducible Pipelines | 📅 Planned | — | [![M6](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F7&query=open_issues&label=M6&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/7) |
 | M7 – Embeddable Engine | Stable `rivulet-core` API, Docs, Tooling | 📅 Planned | — | [![M7](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F8&query=open_issues&label=M7&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/8) |
 | M8 – Modern Architecture | WebGPU, Zero-copy, Compute Filters | 📅 Planned | — | [![M8](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F9&query=open_issues&label=M8&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/9) |
 | M9 – AI Chat Assistant | Local-first LLM Chat Bot for Streamers | 📅 Planned | — | [![M9](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F10&query=open_issues&label=M9&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/10) |
+| M10 – Extensible UI & Plugins | Persisted layouts, view registry, declarative/WASM plugins, permissions | 📅 Planned | — | [![M10](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F11&query=open_issues&label=M10&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/11) |
 
 ---
 
@@ -179,7 +204,7 @@ release channel only describes *how* the tag is built and published.
 - [x] Performance metrics (FPS, encode load, file size)
 
 **Updates**
-- [x] Auto-update (update check, download & install via GitHub Releases)
+- **Auto-update (update check, download & install via GitHub Releases)** — Windows installs run through a detached `rivulet-updater` watchdog that waits for the app to exit before invoking `msiexec`, so updated files replace the locked executables instead of leaving the old build behind.
 - [x] Code signing (signing automation present, secrets needed)
 
 **Quality of Life**
@@ -255,7 +280,14 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 
 ### 📡 M3 – Streaming
 
-**Status: In progress**
+**Status: Complete (conditional)**
+
+M3 is functionally complete: the roadmap checklist is 15/15, and the completion
+gate is recorded in [`docs/m3-streaming-completion-report.md`](docs/m3-streaming-completion-report.md).
+Remaining live-integration evidence (real SFU WHIP handshake, SRT/RIST receiver
+interop, multitrack transport, VOD routing, NDI LAN, production resource baselines,
+and OS-backed credential storage) is explicitly assigned to follow-up milestones and
+must not be implied by beta parity.
 
 - [x] RTMP/RTMPS client implementation (H.264+AAC, FLV muxing)
 - [x] TLS-encrypted streaming (RTMPS) with certificate validation
@@ -267,11 +299,11 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] **Adaptive bitrate** — bounded policy applies changed values to the active GStreamer encoder, reducing bitrate on Poor health and recovering on Good health; network monitoring and cooldown remain follow-up
 - [x] **Stream delay** — configurable, bounded per-target packet delay integrated into fan-out branches; reconnect-aware buffering and backoff remain follow-up
 - [x] **Multitrack Video** — bounded multi-representation configuration (1–4 tracks) and pipeline metadata; per-track encoder/transport negotiation remains a follow-up
-- [ ] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible) — SDP offer/answer signaling with secure endpoint validation is implemented via `WhipSettings::post_offer`; media transport still requires `webrtcbin`, ICE lifecycle, and SFU smoke tests. See [`docs/whip-strategy-spike.md`](docs/whip-strategy-spike.md).; vision-approved in [`docs/obs-vision-roadmap.md`](docs/obs-vision-roadmap.md)
+- [x] **WebRTC/WHIP** as a first-class protocol (ultra-low-latency, SFU-compatible) — SDP offer/answer signaling with secure endpoint validation; `WhipMediaSession` now owns the deterministic session lifecycle (`SdpOffer` H.264/Opus offer generation, `post_offer` exchange, answer application, `Idle→Negotiating→Live/Failed` state tracking, and HTTP `DELETE` teardown on the resource URL), fully covered by offline unit and local-HTTP-mock tests. The live SFU/ICE/DTLS/SRTP media handshake remains the final integration evidence. See [`docs/whip-strategy-spike.md`](docs/whip-strategy-spike.md).; vision-approved in [`docs/obs-vision-roadmap.md`](docs/obs-vision-roadmap.md)
 - [x] **SRT/RIST configuration contract** — validated protocol-specific endpoints, bounded latency, passphrase validation/redaction, and sink-fragment generation; live GStreamer transport/interoperability remains open
 - [x] **Multistreaming** — GStreamer fan-out with one named branch/sink per validated RTMP/RTMPS target, up to four named destinations, independent target states, retry-target selection, duplicate-name protection, and secret masking; production bus monitoring/retry scheduling remains follow-up work. *Tracked in [#70](https://github.com/thoser666/Rivulet/issues/70).*
-- [ ] **NDI output** — LAN contribution/monitoring for production setups
-- [ ] **VOD track** — separate copyright-safe audio track for the VOD recording while streaming (Twitch VOD workflow)
+- [x] **NDI output** — LAN contribution/monitoring configuration contract (`NdiOutput` on `rivulet-core`): validated source name/group, quote-escaping so a hostile name cannot break the pipeline string, an `ndisink` availability probe, and a deterministic GStreamer fragment. Off by default so a feed is never published unintentionally. Real NewTek NDI runtime/LAN interoperability remains an integration follow-up.
+- [x] **VOD track** — separate copyright-safe audio track (`VodTrack` on `StreamSettings`) for the Twitch VOD workflow while streaming: deterministic `enabled`/`recorded` model that is only ever active when both are set, so it can never silently leak into the live ingest; unit tests confirm the `ivod` flag signal and off-by-default behavior. Actual per-track GStreamer routing into the muxed output remains an integration follow-up.
 
 **Goal:** Live streaming to the common platforms *and* low-latency protocols as native citizens instead of RTMP legacy.
 
@@ -279,21 +311,23 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 
 ### 🎥 M4 – Advanced Output & Capture
 
-**Status: In progress**
+**Status: 🚧 Done — milestone closed** (all M4 roadmap bullets implemented, tested and documented). Integration follow-ups remain open and are tracked openly: VST3 hosting (loading a plugin into the audio graph — [issue #96](https://github.com/thoser666/Rivulet/issues/96)), multipart cloud upload + cloud GUI settings, NDI/VOD-track GStreamer routing, and Windows/macOS platform parity (a release blocker, not an afterthought).
+
+**M4 completion gate:** ✅ Complete (conditional). The output quality gate was recorded in [`docs/m4-output-quality-gate.md`](docs/m4-output-quality-gate.md) using the criteria in [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md): zero Blocker/Critical findings; hardware-dependent resource-efficiency measurements are explicitly marked `BLOCKED`/`N/A` rather than hidden. The milestone [M4 on GitHub](https://github.com/thoser666/Rivulet/milestone/2) is `closed`.
 
 - [x] **Replay buffer / instant replay** — *essential for gaming streamers (clip moments without recording the whole session); ring buffer (H.264+AAC) with instant replay save via F12 hotkey or GUI button*
-- [ ] Virtual camera output
-- [ ] Video filters & effects (color correction, LUT, blur, sharpen, chroma key refinement); basic chroma-key configuration is available per source
-- [ ] **Audio filters** (noise suppression RNNoise/NVIDIA, noise gate, compressor, limiter, expander, gain, 10-band EQ)
-- [ ] **Audio ducking** (sidechain compression — lower music/crowd while the mic speaks)
-- [ ] **VST 3.x support** — *231 votes on OBS Ideas, $3000 bounty; most modern plugins are VST3-only*
-- [ ] **Master audio mix** (output VU meter, master volume control, monitoring) — *highly requested, PR rejected in OBS due to complexity*
-- [ ] Additional recording formats (MKV, MOV, TS — crash-safe alternatives to MP4)
-- [ ] **Remux recordings** (MKV/MOV → MP4 remux after stop, automatic or manual). *Tracked in [#71](https://github.com/thoser666/Rivulet/issues/71).*
-- [ ] **Recording file management** (split by time/size, filename patterns, auto-record alongside stream)
-- [ ] Advanced rate control (VBR, CQ, CQVBR, custom encoder options)
-- [ ] Multi-track audio export
-- [ ] Cloud integration (cloud recordings)
+- [x] **Virtual camera output — platform-neutral contract** — validated format/resolution/FPS configuration and explicit Starting/Running/Stopping/Unavailable/Error lifecycle; platform driver integration and consumer smoke tests remain open
+- [x] **Video filters & effects** (color correction, blur, sharpen) — *`VideoEffects` (brightness/contrast/saturation/hue via `videobalance`, `gaussianblur`, `cas` sharpen) inserted between `videoconvert` and the encoder caps; availability-gated like the audio filters. LUT colour-grading and chroma-key refinement remain open (no portable `.cube`/`lut3d` path in core plugins; chroma key is available per source). Engine `set_video_effects()` + GUI section in the recording settings*
+- [x] **Audio filters** (noise gate, compressor, limiter, expander, gain, 10-band EQ; noise suppression via webrtcdsp) — *`AudioFilters` extended with noise gate + expander (`audiodynamic mode=expander`), makeup gain (`audioamplify`, dB→linear) and a 10-band EQ (`equalizer-10bands`), on top of the existing `webrtcdsp` noise suppression, compressor and limiter; all availability-gated so a missing optional element is skipped instead of failing capture; per-source GUI toggles + sliders in the Mixer view*
+- [x] **Audio ducking** (sidechain compression — lower music/crowd while the mic speaks) — *sidechain policy model with threshold/attenuation/attack/release + hysteresis (issue #79)*
+- [x] **VST 3.x support** — *`VstPlugin`/`VstChain` config contract plus deterministic bundle discovery from the platform-standard VST3 search directories (Windows Program Files/AppData, macOS /Library + ~/Library, Linux /usr/lib + ~/.vst3): validated `.vst3` bundle paths, ordered per-track chain, availability probe — all testable without a plugin binary. Hosting (loading a VST3 module into the audio graph) is a documented integration follow-up*
+- [x] **Master audio mix** (output VU meter, master volume control, monitoring) — *master volume applied to the whole mix after the sources are summed (a single output level on top of the per-source volumes), a labelled master-output VU meter showing the mixed level in dB, and per-source monitoring with its own volume; `AudioConfig::master_volume` + `set_master_volume()` on `rivulet-audio`, i18n EN/DE keys, GUI wiring on the Mixer view (Linux)*
+- [x] **Additional recording formats (MKV, MOV, TS — crash-safe alternatives to MP4)** — *container selection on the recording pipeline (MP4 default preserves the codec-native muxer; MKV/MOV/TS opt into a crash-safe intermediate), GUI container picker, `RecordingContainer`/`RemuxPlan` on `rivulet-core`*
+- [x] **Remux recordings** (MKV/MOV → MP4 remux after stop, automatic or manual). *Tracked in [#71](https://github.com/thoser666/Rivulet/issues/71).* — *validated `RemuxPlan`, `RemuxSettings` with `auto_remux_after_stop`, and GStreamer remux execution via `remux_to_mp4` after stop (element-availability gating); GUI toggle next to the container picker. See [docs/recording-formats.md](docs/recording-formats.md).*
+- [x] **Recording file management** (split by time/size, filename patterns, auto-record alongside stream) — *`FileNamePattern` with validated `{name}/{date}/{time}/{seq}/{stream}` tokens, `SplitBy` time/size rules with `RecordingSession` part sequencing and `auto_record_with_stream`; GUI split/auto-record toggles and pattern-driven default filenames. Live splitting maps `SplitBy` onto `splitmuxsink` (`max-size-time`/`max-size-bytes`, `%02d` part numbering, crash-safe containers only). See [docs/recording-files.md](docs/recording-files.md).*
+- [x] **Advanced rate control** (VBR, CQ, CQVBR, custom encoder options) — *`RateControl`/`RateControlMode` (CBR default, VBR, constant-quality CQ, CQ-VBR with a bitrate cap) plus free-form extra encoder options folded into the encoder `parse_launch` fragment; full property mapping for software x264 (`pass`/`quantizer`/`vbv-buf-capacity`) and NVENC (`rc-mode`/`max-bitrate`/`qp-const`/`const-quality`), graceful fallback to average bitrate for QSV/AMF/VP9/software x265; `engine.set_rate_control()` and a GUI section in the recording settings*
+- [x] **Multi-track audio export** (system + microphone stored on separate tracks) — *`engine.set_separate_audio_tracks`/`set_audio_track_enabled` build one `avenc_aac` branch per enabled source into the shared muxer; per-track export toggles in the Mixer view that are decoupled from the live mix and gated on capture; `AudioTrack::label`/`i18n_key` for display*
+- [x] **Cloud integration (cloud recordings)** — *S3-compatible `CloudRecording` contract (endpoint/bucket/region/prefix + credentials) with validation, deterministic object-key builder, secret masking (custom `Debug` never prints the access key) and a working S3 `PUT` uploader (AWS Signature V4 via `ureq`) that uploads the finished recording after `stop_recording` when enabled. SigV4 verified against AWS test vectors; multipart + GUI settings remain follow-ups*
 
 **Goal:** The advanced output and production features of OBS.
 
@@ -307,14 +341,15 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [ ] **WASM plugin runtime** (stable ABI, sandboxed: plugins can never crash the app; long-term target plugin model)
 - [ ] **OBS plugin compatibility layer** — *temporary bridge*: opt-in "Compatibility Mode" (explicitly marked as unsafe), loads native libobs plugins (encoders/filters/sources without UI); UI plugins (Qt) are out of scope; the goal is migration to the WASM plugin system
 - [ ] Mobile companion app (remote control)
-- [ ] **obs-websocket compatibility** — Streamdeck/TouchPortal ecosystem remote control (bridge to the mobile companion API). *Tracked in [#72](https://github.com/thoser666/Rivulet/issues/72).*
+- [x] **obs-websocket compatibility** — OBS WebSocket v5 server (JSON) for Streamdeck/TouchPortal ecosystem remote control: scene list/switch, source listing, recording/streaming start/stop/toggle/status, optional password authentication and event subscriptions, verified end-to-end with a real WebSocket client (see [`docs/obs-websocket.md`](docs/obs-websocket.md)). [#72](https://github.com/thoser666/Rivulet/issues/72)
 - [ ] **Windows/macOS feature parity** (currently Linux-first; window capture on Windows exists, macOS still open) — as a release blocker, not an afterthought
 - [x] Installers (Windows MSI, macOS DMG, Linux AppImage) — automated in CI
 - [x] Code signing (signing automation present, secrets needed)
 - [ ] Telemetry (opt-in, privacy-friendly)
+- [x] **Discord Rich Presence adapter** — non-blocking activity updates using the Rivulet status model; explicit opt-out (persisted Settings toggle), no stream keys/URLs/paths/window titles, and graceful operation when Discord is unavailable (see [`docs/activity-status.md`](docs/activity-status.md)).
 - [ ] Multi-language support (locale files fully wired)
-- [ ] **MIDI device support** (map controllers like Korg NanoKontrol to scene switches, volume faders, filter toggles) — *frequently requested for live production and music streams*
-- [ ] **Global hotkeys & remapping UI** — OBS-style hotkey settings: per-action rebinding, global hotkeys that work while the app is unfocused
+- [x] **MIDI device support** — map controllers like the Korg NanoKontrol to scene switches, master-volume faders (CC 0-127), mute, and chroma-key toggles, with **learn mode** (capture the next moved control) and **per-device presets** (see [`docs/midi.md`](docs/midi.md)); the mapping/parse core is hardware-free and unit-tested, the GUI owns the `midir` device bridge
+- [x] **Global hotkeys & remapping UI** — OBS-style hotkey settings: per-action rebinding (Settings → Hotkeys), OS-level registration that keeps working while the app is unfocused on Windows, with an honest platform matrix (see [`docs/hotkeys.md`](docs/hotkeys.md)) *[#80](https://github.com/thoser666/Rivulet/issues/80)*
 - [ ] **Multi-channel distribution rollout** — tracked in [`docs/release-platforms.md`](docs/release-platforms.md):
   - [x] **Stage 1 – GitHub Releases:** canonical artifacts, checksums, changelog, and updater source (already active; signing is enabled when release secrets are configured).
   - [ ] **Stage 2 – WinGet + Flathub:** first external channels after stable package identity, signing, Flatpak metadata, and review are complete.
@@ -401,6 +436,23 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 
 > ⚠️ **Coexistence with Vivid:** Rivulet (desktop) and Vivid (Android) can be used at the same time — e.g. Vivid streaming from the phone while Rivulet runs on the PC. The Rivulet bot must therefore never fight with the Vivid bot for the same chat: no duplicate replies, coordinated `!`-commands, and a per-channel configurable bot identity.
 
+### 🧩 M10 – Extensible UI & Plugin Platform
+
+Details, guardrails, and the completion gate: [`docs/extensible-ui-roadmap.md`](docs/extensible-ui-roadmap.md) and [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md).
+
+The UI extensibility work is intentionally isolated from the streaming and capture
+milestones. It starts with a versioned, persistable layout and view registry,
+then adds declarative plugins before considering sandboxed WASM execution.
+
+- [ ] **P1 – Persistable UI layout** — versioned workspace/layout state, safe defaults, migrations, and no secrets or runtime handles.
+- [ ] **P2 – View registry** — stable view IDs for built-in and optional views; navigation, Help, and accessibility derive from the registry.
+- [ ] **P3 – Declarative UI plugins** — manifest-defined panels, menu items, help pages, enable/disable state, and API compatibility.
+- [ ] **P4 – Permission model** — explicit UI/network/filesystem/capture/audio/secrets capabilities; sensitive permissions denied by default.
+- [ ] **P5 – Isolated plugin execution** — preferably WASM, with timeouts, resource limits, and crash isolation.
+- [ ] **P6 – Plugin quality gate** — compatibility, migration, accessibility, UX, performance, security, and example-plugin checks.
+
+**Definition of Done:** The versioned layout survives restart, built-in and plugin views use one stable registry, plugins cannot access secrets without explicit capability approval, and a failing plugin cannot terminate the GUI.
+
 ---
 
 ### 🎯 Feature-Parity Checklist (vs. OBS)
@@ -420,24 +472,26 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 | Hotkeys (incl. remapping, global) | Partial (record/pause/mute/save-replay; remapping planned M5) |
 | Undo/Redo | Done (M2) |
 | Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks, filters) |
-| Video filters (color correction, LUT, blur, sharpen, chroma key) | Open (M4) |
-| Audio filters (noise gate, compressor, limiter, expander, gain, EQ) | Partial (M1 basics; gate/EQ/ducking planned M4) |
-| Audio ducking (sidechain) | Open (M4) |
-| VST 3.x support | Open (M4) |
+| Video filters (color correction, LUT, blur, sharpen, chroma key) | Partial (M4: color correction/blur/sharpen done; LUT grading + chroma-key refinement open) |
+| Audio filters (noise gate, compressor, limiter, expander, gain, EQ) | Done (M4: gate, compressor, limiter, expander, gain, 10-band EQ, NS) |
+| Audio ducking (sidechain) | Done (M4 sidechain policy with hysteresis) |
+| VST 3.x support | Partial (M4 config contract + bundle discovery; hosting open) |
 | Recording & encoding | Partial (H.264/H.265/VP9, HW + SW) |
 | Replay buffer | Done (ring buffer, F12 hotkey, save-to-MP4) |
-| Remux & file management | Open (M4) |
-| Virtual camera | Open (M4) |
+| Remux & file management | Done (M4: remux after stop, split, patterns, auto-record) |
+| Virtual camera | Partial (M4 platform-neutral contract + lifecycle; driver integration open) |
 | Streaming (RTMP/RTMPS, platforms) | Partial (RTMPS Twitch/Kick/YouTube; validated presets and key handling) |
 | Multistreaming | Partial (multi-target fan-out wired; per-target reconnect supervisor and UI remain open) |
 | Adaptive bitrate | Partial (bounded policy implemented; live encoder reconfiguration remains open) |
-| WebRTC/WHIP, SRT/RIST, NDI | WHIP signaling + SRT/RIST configuration contracts; live media transports open (M3) |
-| VOD track | Open (M3) |
-| Multi-track audio | Partial (2 tracks; VOD track planned M3) |
+| WebRTC/WHIP, SRT/RIST, NDI | WHIP session/lifecycle+DELETE; SRT/RIST + NDI config contracts done; live SFU/ICE/DTLS handshake + real NDI LAN interop open (M3) |
+| VOD track | Done (config model clean; per-track mux routing follow-up, M3) |
+| Multi-track audio | Partial (2 local tracks; VOD-track model in M3) |
 | Plugin ecosystem & OBS compatibility | Open |
-| obs-websocket / Streamdeck | Open (M5) |
+| obs-websocket / Streamdeck | Implemented (M5) |
 | Mobile remote & MIDI | Open (M5) |
-| Cloud & telemetry | Open (M4/M5) |
+| Cloud & telemetry | Partial (M4 S3 SigV4 PUT upload after stop; multipart + GUI settings open) |
+| Discord Rich Presence | Implemented (optional, privacy-safe activity status; M5, see docs/activity-status.md) |
+| Chat dock & alerts | Open (M5: Twitch IRC chat view + follow/sub/donation alerts, see docs/obs-vision-roadmap.md) |
 | Multi-language support | Partial (DE/EN wired) |
 | Platform parity (Windows/macOS) | Open |
 | AI chat assistant | Open (M9) |
@@ -461,7 +515,7 @@ The cross-platform headless UI smoke contract runs on Linux, Windows, and macOS 
 cargo test -p rivulet-gui --test ui_smoke
 ```
 
-See [`docs/ui-smoke-testing.md`](docs/ui-smoke-testing.md) for the evidence workflow and the limitations of deterministic headless checks versus native visual/accessibility review.
+See [`docs/ui-smoke-testing.md`](docs/ui-smoke-testing.md) for the evidence workflow and the limitations of deterministic headless checks versus native visual/accessibility review. The optional activity-status contract is documented in [`docs/activity-status.md`](docs/activity-status.md).
 
 ## 📺 Streaming Example
 
@@ -523,6 +577,14 @@ prerequisites and activation checklists.
 ---
 
 ## 🛠 Development
+
+### Repository hygiene
+
+Which file types and directories are handled exclusively via `.gitattributes`
+and `.gitignore` (line endings, binary markers, tool caches, nested repos) is
+normative in [`docs/repo-hygiene.md`](docs/repo-hygiene.md). Keep the working
+tree clean before committing: never `git add -A`, stage only the files that
+belong to a work package, and mark new binary assets in `.gitattributes`.
 
 ### Diagnostics and crash logs
 
@@ -594,6 +656,11 @@ repointed tag or branch cannot swap in a malicious commit;
 upstream version for reviewing Dependabot updates (its table is generated
 from the workflows by `scripts/generate-action-pins.py`). Dependabot PRs are
 approved and auto-merged via `.github/workflows/dependabot-auto-merge.yml`
+
+Dependency update ownership is split intentionally: Renovate handles grouped
+Cargo updates and the dependency dashboard (`renovate.json`), while Dependabot
+handles GitHub Actions SHA pins. This avoids duplicate update PRs; all updates
+remain subject to the required CI, security, and pinning checks.
 once the required checks (including the pinning tests) pass; this needs
 "Allow auto-merge" and branch protection enabled in the repo settings. A
 daily nightly job (`scripts/check-action-pins.py`) also compares every pinned
@@ -633,6 +700,10 @@ The expected state is `secret_scanning.status=enabled` and
 `secret_scanning_push_protection.status=enabled`. These settings are managed by
 GitHub and cannot be represented fully in a repository file. See
 [`docs/security.md`](docs/security.md) for incident handling and plan limitations.
+
+Security vulnerabilities are handled via responsible disclosure, outlined in
+[`SECURITY.md`](SECURITY.md): report privately through a security advisory,
+never in a public issue.
 
 The `develop` branch ruleset requires `CI`, `Security`, `OpenSSF Scorecard`,
 `CodeQL (rust)`, `Dependency Review`, and `Pinning-Tests` before merge and blocks
@@ -678,8 +749,10 @@ Scene snapshots are exported from the Scenes view with **Save scene snapshot**. 
 
 The README thumbnail (`docs/thumbnail.png`), the GitHub social preview
 (`docs/social-preview.png`), the OpenGraph fallback (`docs/opengraph.png`), the
-Linux AppImage icon (`packaging/rivulet.png`) and the macOS app icon
-(`packaging/rivulet.icns`) are generated from the logo by
+Linux AppImage icon (`packaging/rivulet.png`), the macOS app icon
+(`packaging/rivulet.icns`) and the Discord Rich Presence artwork plus app icon
+(`docs/assets/rivulet-rich-presence-*.png`, `docs/assets/rivulet-app-icon-512.png`)
+are generated from the logo by
 `scripts/generate-assets.sh` (requires ImageMagick and Python 3). Text uses the
 committed DejaVu Sans fonts and the resize filter is pinned; because text
 rasterization depends on the FreeType version, the canonical output is produced
@@ -711,6 +784,17 @@ GitHub exposes no public API for that Settings upload, so the release workflow
 attaches both images to every release instead: they are then available at a
 stable URL (`releases/latest/download/opengraph.png`) that a website can
 reference from its `og:image` meta tag.
+
+For Discord, upload `docs/assets/rivulet-rich-presence-1024.png` under
+**Rich Presence → Art Assets** (asset name `rivulet_logo`) and
+`docs/assets/rivulet-app-icon-512.png` as the **App Icon** (General
+Information) — the artwork renders on the profile card and the app icon
+replaces the generic game-controller placeholder in the server member list
+(see `docs/activity-status.md` for details). The installers ship both
+files together with the setup documentation inside the package (Windows:
+`discord\` in the install folder; Linux: `usr/share/doc/rivulet/discord/`
+in the AppImage; macOS: `Contents/Resources/discord/` in the app bundle),
+and the GitHub release attaches them as standalone downloads.
 
 > **Note:** On Linux, set `LIBCLANG_PATH` to your LLVM `lib` directory (e.g. `export LIBCLANG_PATH=/usr/lib/llvm-14/lib`) if the `clang-sys` build fails.
 
@@ -880,3 +964,10 @@ real certificates exist.
   of the Beta-Gate.
 - With all secrets present, the next release build signs the packages; without
   them, unsigned packages are produced (the default).
+
+
+## Updater troubleshooting
+
+See [docs/updater-troubleshooting.md](docs/updater-troubleshooting.md) for Windows installer exit codes, update crash diagnostics, and recovery steps.
+
+During a Windows update, the app spawns the detached `rivulet-updater` watchdog (`rivulet-updater/src/bin/rivulet-updater.rs`), passing the running process IDs with `--wait-pid` and the downloaded MSI with `--install`. The watchdog copies itself to the temp directory (so the launcher's file lock never blocks it), waits up to 60s for each PID to exit, then runs `msiexec /i <msi>` and waits for it to finish. Because the old executables have fully exited before the WiX `MajorUpgrade` runs `RemoveExistingProducts`, the new files replace the old ones instead of the installer bailing on locked in-use files.

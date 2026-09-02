@@ -10,12 +10,13 @@ members = [
     "rivulet-updater",
     "rivulet-vulkan-layer",
     "rivulet-opengl-hook-dll",
-    "rivulet-launcher"
+    "rivulet-launcher",
+    "rivulet-obs-websocket"
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.64.0-alpha.1"
+version = "0.65.0-alpha.55"
 authors = ["thoser666"]
 edition = "2021"
 repository = "https://github.com/thoser666/rivulet"
@@ -29,6 +30,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dirs = "6.0"
 xcap = "=0.9.8"
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
 
 [profile.release]
 opt-level = 3

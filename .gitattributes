@@ -1,0 +1,16 @@
+# Line-ending policy
+# Markdown sources are normalized to LF in the repository regardless of the
+# platform checkout. Binary assets are left untouched.
+*.md text eol=lf
+
+# Binary assets must never be line-ending normalized.
+packaging/rivulet.icns binary
+packaging/rivulet.png binary
+packaging/windows/test-cert.cer binary
+packaging/windows/test-cert.pfx binary
+docs/opengraph.png binary
+docs/social-preview.png binary
+docs/thumbnail.png binary
+rivulet-gui/assets/rivulet_logo.ico binary
+rivulet-gui/assets/rivulet_logo.jpg binary
+rivulet-gui/assets/fonts/*.ttf binary

@@ -1,6 +1,6 @@
 use std::fs;
 
-const VIEWPORTS: &[(u32, u32)] = &[(1280, 800), (1024, 768), (800, 600)];
+const VIEWPORTS: &[(u32, u32)] = &[(1280, 800), (1024, 768), (800, 600), (640, 480)];
 
 #[test]
 fn viewport_snapshot_contract_is_stable() {
@@ -10,6 +10,7 @@ fn viewport_snapshot_contract_is_stable() {
         assert!(snapshot.contains("navigation=6"));
         assert!(snapshot.contains("diagnostics=visible"));
         assert!(snapshot.contains("keyboard=guarded"));
+        assert!(snapshot.contains("content=scrollable"));
     }
 }
 
@@ -35,7 +36,11 @@ fn viewport_snapshot(width: u32, height: u32, source: &str) -> String {
     assert!(source.contains("AppView::all"));
     assert!(source.contains("last_error"));
     assert!(source.contains("egui_wants_keyboard_input"));
-    format!("viewport={width}x{height};navigation=6;diagnostics=visible;keyboard=guarded")
+    assert!(
+        source.contains("egui::ScrollArea::vertical()"),
+        "narrow layouts must keep controls reachable"
+    );
+    format!("viewport={width}x{height};navigation=6;diagnostics=visible;keyboard=guarded;content=scrollable")
 }
 
 fn interaction_snapshot(source: &str) -> &'static str {
