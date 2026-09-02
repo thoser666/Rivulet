@@ -1064,10 +1064,12 @@ fn release_gate_includes_build_and_chore_commits() {
     );
 
     let script = read("scripts/release-version.sh");
+    // Bound the needle so the assert line stays under rustfmt's max_width in
+    // every toolchain version (CI rustfmt and local rustfmt must agree).
+    let build_rule =
+        "build:*|build\\(*\\):*|chore:*|chore\\(*\\):*|ci:*|ci\\(*\\):*) HAS_BUILD=true";
     assert!(
-        script.contains(
-            "build:*|build\\(*\\):*|chore:*|chore\\(*\\):*|ci:*|ci\\(*\\):*) HAS_BUILD=true"
-        ),
+        script.contains(build_rule),
         "release-version.sh must classify build/chore/ci commits as releasable"
     );
     assert!(
