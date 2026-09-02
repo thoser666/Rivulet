@@ -270,6 +270,17 @@ game-controller placeholder there). Both reference the same uploaded asset,
 so no second upload is needed; the mirroring is covered by the wire-contract
 test and pinned by `ci_pinning.rs`.
 
+> **Platform limit — what the member list can show (by Discord's design):**
+> the compact member-list row renders **only** the application icon and the
+> text "Spielt/Rivulet" — the app name from the Discord registration.
+> The payload lines (`details` = status label, `state` = game name) are
+> rendered **exclusively** in the detail view (profile card / hover), never
+> in the member list — no API field changes this. To replace the game-
+> controller icon there, upload an **App Icon** in the Developer Portal
+> (General Information → App Icon, 512×512 PNG —
+> `docs/assets/rivulet-rich-presence-512.png`); the Rich-Presence art asset
+> alone does not affect the member-list icon.
+
 > **Empty `state` is rejected by Discord (fixed):** Discord refuses a
 > `SET_ACTIVITY` that contains an empty string with
 > `4000: "..." is not allowed to be empty` (verified live against a
