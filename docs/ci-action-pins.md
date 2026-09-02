@@ -38,6 +38,15 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 > tag): the SHA pins the action *code*, while the action's default
 > `toolchain: stable` input still installs the latest stable Rust. It therefore
 > has no semver comment.
+>
+> The **compiler version itself is pinned by `rust-toolchain.toml`** (repo
+> root, channel `1.98.0`, components rustfmt + clippy): every `cargo`
+> invocation in any checkout resolves to that exact toolchain, so local and CI
+> `cargo fmt --check` can never diverge the way they did in the 0.65.0-alpha.100
+> window (rustfmt 1.9.0 vs the runner's older rustfmt flip-flopped on a long
+> `contains()` line). Bump the channel deliberately — a new compiler version
+> can change rustfmt output and redden the Lints job until the tree is
+> reformatted with the same version.
 
 ## Reviewing a Dependabot update
 

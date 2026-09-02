@@ -1020,6 +1020,32 @@ fn adaptive_bitrate_live_change_diagnostics_are_wired_up() {
 }
 
 #[test]
+fn rust_toolchain_is_pinned_for_local_and_ci_parity() {
+    // rustfmt output differs between compiler versions (the 0.65.0-alpha.100
+    // window failed CI because rustfmt 1.9.0 collapsed a long `contains()`
+    // line that the CI runner's older rustfmt wanted wrapped). A repo-root
+    // rust-toolchain.toml pins the toolchain for EVERY cargo invocation in
+    // any checkout, so local and CI formatting can never diverge again.
+    let pinned = read("rust-toolchain.toml");
+    assert!(
+        pinned.contains("channel = \"1.98.0\""),
+        "the toolchain channel must be pinned to an exact version"
+    );
+    assert!(
+        pinned.contains("components = [\"rustfmt\", \"clippy\"]"),
+        "rustfmt and clippy must ship with the pinned toolchain"
+    );
+    // CI installs the same toolchain through the pinned dtolnay action; the
+    // rust-toolchain.toml channel keeps `cargo fmt`/`clippy` on that exact
+    // version instead of whatever `stable` resolves to that day.
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("components: rustfmt, clippy"),
+        "CI must keep installing rustfmt + clippy for the lints job"
+    );
+}
+
+#[test]
 fn resource_efficiency_gate_is_wired_up() {
     let checker = read("scripts/resource-efficiency-check.py");
     let fixture = read("scripts/resource-efficiency-sample.json");
