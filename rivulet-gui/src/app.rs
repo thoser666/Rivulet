@@ -3889,11 +3889,15 @@ impl RivuletApp {
         });
     }
 
-    /// Download the update asset in the background.
+    /// Download the update asset in the background and verify its SHA-256
+    /// digest against the release's `SHA256SUMS` manifest before the file is
+    /// ever offered for installation. A failed verification surfaces as an
+    /// error and the installer is never started.
     fn spawn_update_download(
         &mut self,
         ctx: egui::Context,
         asset: rivulet_updater::Asset,
+        tag: String,
         version: String,
     ) {
         let shared = std::sync::Arc::clone(&self.update_ui);
@@ -3906,7 +3910,8 @@ impl RivuletApp {
         let progress = Arc::clone(&self.download_progress);
         std::thread::spawn(move || {
             let dest = std::env::temp_dir().join(&asset.name);
-            let result = rivulet_updater::download_asset_with_progress(&asset, &dest, progress);
+            let result = rivulet_updater::download_asset_with_progress(&asset, &dest, progress)
+                .and_then(|()| rivulet_updater::verify_downloaded_asset(&dest, &tag, &asset.name));
             let state = match result {
                 Ok(()) => UpdateUi::Downloaded {
                     path: dest,
@@ -5530,7 +5535,7 @@ impl RivuletApp {
             self.update_download_clicked = false;
             if let UpdateUi::Available(info) = self.update_ui_snapshot() {
                 if let Some(asset) = info.asset {
-                    self.spawn_update_download(ctx.clone(), asset, info.version);
+                    self.spawn_update_download(ctx.clone(), asset, info.tag, info.version);
                 }
             }
         }

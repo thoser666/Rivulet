@@ -1349,6 +1349,62 @@ fn lockfile_does_not_reintroduce_yanked_core2() {
 }
 
 #[test]
+fn updater_verifies_release_checksums_before_install() {
+    // The release workflow must attach a SHA256SUMS manifest covering the
+    // installer assets, and the updater must verify a downloaded installer
+    // against it BEFORE the install path can be reached. This closes the
+    // gap where a tampered release asset would be launched unchecked.
+    let updater = read("rivulet-updater/src/lib.rs");
+    assert!(
+        updater.contains("pub fn verify_downloaded_asset"),
+        "the updater must expose the manifest-based verification entry point"
+    );
+    assert!(
+        updater.contains("pub fn verify_checksum"),
+        "the updater must verify digests fail-closed (malformed digest = reject)"
+    );
+    assert!(
+        updater.contains("SHA256SUMS"),
+        "the manifest asset name is part of the public contract"
+    );
+    assert!(
+        updater.contains("checksum mismatch"),
+        "digest mismatches must produce an actionable error"
+    );
+
+    let workflow = read(".github/workflows/release.yml");
+    assert!(
+        workflow.contains("Generate SHA256SUMS manifest"),
+        "the release workflow must generate the checksum manifest"
+    );
+    assert!(
+        workflow.contains("xargs -0 -r sha256sum > SHA256SUMS"),
+        "the manifest must cover every attached asset (relative paths, sorted)"
+    );
+    assert!(
+        workflow.contains("release-assets/SHA256SUMS"),
+        "the generated manifest must be attached to the release"
+    );
+
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        gui.contains("verify_downloaded_asset"),
+        "the GUI download flow must verify the installer before Downloaded"
+    );
+}
+
+#[test]
+fn updater_declares_sha2_dependency() {
+    // sha2 is the only crypto the updater needs; pin it through the workspace
+    // so cargo-deny and dependabot track a single version.
+    let manifest = read("rivulet-updater/Cargo.toml");
+    assert!(
+        manifest.contains("sha2 = { workspace = true }"),
+        "the updater must hash with the workspace sha2 crate"
+    );
+}
+
+#[test]
 fn cargo_dependency_security_gates_are_wired_up() {
     let deny = read("deny.toml");
     assert!(

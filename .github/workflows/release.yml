@@ -220,6 +220,19 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Generate SHA256SUMS manifest
+        run: |
+          # The updater refuses to run any installer that is not listed in
+          # SHA256SUMS (or whose digest differs), so the manifest must cover
+          # exactly the files attached to the release. docs/opengraph.png is
+          # used as the release card image by softprops and must NOT be part
+          # of the manifest (see the files list below).
+          cd release-assets
+          find . -type f ! -name opengraph.png ! -name SHA256SUMS -printf '%P\0' \
+            | sort -z \
+            | xargs -0 -r sha256sum > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
@@ -227,6 +240,7 @@ jobs:
           name: Rivulet ${{ needs.version.outputs.version }}
           files: |
             release-assets/*
+            release-assets/SHA256SUMS
             docs/opengraph.png
             docs/social-preview.png
             docs/assets/rivulet-app-icon-512.png
