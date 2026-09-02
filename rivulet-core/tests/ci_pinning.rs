@@ -1112,6 +1112,26 @@ fn wiki_repo_doc_link_audit_is_wired_up() {
         smoke.contains("audit-wiki-links.py") && smoke.contains("WIKI_LINK_AUDIT_EXTRA"),
         "the local sync smoke must include the full link audit (offline override)"
     );
+    // The audit runs in both directions: wiki -> repo docs (forward) and
+    // repo docs -> wiki (backwards). Deep wiki links from repo docs must
+    // resolve to real pages + heading anchors, and backticked page
+    // references must not drift from the canonical page names.
+    assert!(
+        auditor.contains("--check-repo-docs"),
+        "the auditor must support the backwards repo-docs audit mode"
+    );
+    assert!(
+        auditor.contains("WIKI_LINK_RE") && auditor.contains("page_key"),
+        "the auditor must validate deep wiki links and fuzzy page-name drift"
+    );
+    assert!(
+        workflow.contains("--check-repo-docs"),
+        "the wiki workflow must also audit repo docs for wiki references"
+    );
+    assert!(
+        smoke.contains("--check-repo-docs"),
+        "the local sync smoke must include the backwards repo-docs audit"
+    );
 }
 
 #[test]
@@ -1325,6 +1345,63 @@ fn lockfile_does_not_reintroduce_yanked_core2() {
     assert!(
         !lock.contains("name = \"core2\""),
         "the yanked core2 crate must not return through optional image codecs"
+    );
+}
+
+#[test]
+fn updater_verifies_release_checksums_before_install() {
+    // The release workflow must attach a SHA256SUMS manifest covering the
+    // installer assets, and the updater must verify a downloaded installer
+    // against it BEFORE the install path can be reached. This closes the
+    // gap where a tampered release asset would be launched unchecked.
+    let updater = read("rivulet-updater/src/lib.rs");
+    assert!(
+        updater.contains("pub fn verify_downloaded_asset"),
+        "the updater must expose the manifest-based verification entry point"
+    );
+    assert!(
+        updater.contains("pub fn verify_checksum"),
+        "the updater must verify digests fail-closed (malformed digest = reject)"
+    );
+    assert!(
+        updater.contains("SHA256SUMS"),
+        "the manifest asset name is part of the public contract"
+    );
+    assert!(
+        updater.contains("checksum mismatch"),
+        "digest mismatches must produce an actionable error"
+    );
+
+    let workflow = read(".github/workflows/release.yml");
+    assert!(
+        workflow.contains("Generate SHA256SUMS manifest"),
+        "the release workflow must generate the checksum manifest"
+    );
+    assert!(
+        workflow.contains("sha256sum) > SHA256SUMS.tmp"),
+        "the manifest must cover every attached asset (relative paths, sorted) \
+         and be written outside the scanned directory (shellcheck SC2094)"
+    );
+    assert!(
+        workflow.contains("release-assets/SHA256SUMS"),
+        "the generated manifest must be attached to the release"
+    );
+
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        gui.contains("verify_downloaded_asset"),
+        "the GUI download flow must verify the installer before Downloaded"
+    );
+}
+
+#[test]
+fn updater_declares_sha2_dependency() {
+    // sha2 is the only crypto the updater needs; pin it through the workspace
+    // so cargo-deny and dependabot track a single version.
+    let manifest = read("rivulet-updater/Cargo.toml");
+    assert!(
+        manifest.contains("sha2 = { workspace = true }"),
+        "the updater must hash with the workspace sha2 crate"
     );
 }
 

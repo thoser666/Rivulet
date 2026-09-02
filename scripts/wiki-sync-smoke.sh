@@ -98,8 +98,8 @@ fi
 echo
 
 # --- 4. full wiki link audit (audit-wiki-links.py) -------------------------
-echo "-- 4. wiki link audit (interwiki + repo-docs + external)"
-if python3 scripts/audit-wiki-links.py "$CLONE" ${WIKI_LINK_AUDIT_EXTRA:-}; then
+echo "-- 4. wiki link audit (interwiki + repo-docs + external + repo-doc wiki refs)"
+if python3 scripts/audit-wiki-links.py "$CLONE" --check-repo-docs ${WIKI_LINK_AUDIT_EXTRA:-}; then
   echo "ok: all wiki links resolve (pages, anchors, URLs)"
 else
   fail "audit-wiki-links.py found broken wiki links"

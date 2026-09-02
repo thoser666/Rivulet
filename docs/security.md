@@ -251,6 +251,19 @@ Push Protection does not replace credential rotation, least-privilege tokens, or
 review of external release assets. It also cannot detect every proprietary or
 newly issued credential format.
 
+### Release asset integrity (updater)
+
+The release workflow generates a `SHA256SUMS` manifest over every attached
+release asset and attaches it to the release. The updater downloads the
+manifest for the release tag and verifies the installer's SHA-256 digest
+before the install can start; missing entries, unreachable manifests, and
+digest mismatches all fail closed (see
+[`docs/update-troubleshooting.md`](update-troubleshooting.md)). A ci_pinning
+guard keeps the manifest generation, the attachment, and the verification
+wiring in place. Transport security (HTTPS) plus this digest check protect
+the update path; artifact signing (Authenticode/codesign) is exercised by the
+signing E2E workflow and can be layered on top later.
+
 ## Incident Response
 
 1. Stop the affected workflow or release if a credential may be exposed.

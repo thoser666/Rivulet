@@ -86,8 +86,8 @@ automatisierte Prüf- und Synchronisierungsprozess ist in
 ## Aktivierung und initiale Einrichtung
 
 Das Wiki wird in den GitHub-Repository-Settings unter **Features → Wikis**
-aktiviert. Danach werden die Seiten `Home`, `Getting Started`, `Streaming`,
-`Fehlerbehebung und FAQ` sowie die drei Plattformseiten angelegt. Die Wiki-URL
+aktiviert. Danach werden die Seiten `Home`, `Getting-Started`, `Streaming`,
+`Troubleshooting-und-FAQ` sowie die drei Plattformseiten angelegt. Die Wiki-URL
 lautet anschließend:
 
 ```text
