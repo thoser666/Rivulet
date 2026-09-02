@@ -1,5 +1,12 @@
 # Rivulet UI / Design Guide
 
+## Theme persistence
+
+The selected `System`, `Dark`, or `Light` theme is persisted with the eframe
+application state. Normal eframe saves and the native exit callback both cover
+window-close flows, so a theme selected immediately before clicking the window
+close button is restored on the next launch before the first rendered frame.
+
 This document describes the GUI's structure and the egui conventions new
 features must follow. It is the single reference for *where* UI code lives and
 *how* it is written, so the growing feature set (M1 recording, M2 scenes,
@@ -35,7 +42,7 @@ sidebar may be added once iconography and keyboard navigation are specified.
 | Record | `Record` | M0/M1 | capture source (screen/window/camera/game), region, codec, preset, timer/FPS overlay |
 | Mixer | `Mixer` | M1 | audio filters, monitoring, levels |
 | Scenes | `Scenes` | M2 | scenes, named collections/profiles, duplication, sources, composition, transitions |
-| Stream | `Stream` | M3 | placeholder (RTMP, stream keys, dual output) |
+| Stream | `Stream` | M3 | Streaming targets, health, queue telemetry, reconnect and delay diagnostics |
 | Assistant | `Assistant` | M9 | placeholder (local LLM chat) |
 | Settings | `Settings` | — | hotkeys, updates, language, general |
 

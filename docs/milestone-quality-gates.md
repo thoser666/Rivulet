@@ -80,7 +80,7 @@ GPU, WebView, and display-server checks must be marked `PASS`, `BLOCKED`, or
 
 ## Cross-cutting resource-efficiency gate
 
-This gate applies to **every milestone M0–M9**, in addition to the milestone-specific checks below. It is scaled to the feature: a CLI or API feature may use process CPU/RAM and determinism measurements, while capture/rendering features must also measure frame time, GPU, queues, and power where available.
+This gate applies to **every milestone M0–M10**, in addition to the milestone-specific checks below. It is scaled to the feature: a CLI or API feature may use process CPU/RAM and determinism measurements, while capture/rendering features must also measure frame time, GPU, queues, and power where available.
 
 Use [`resource-efficiency-goal.md`](resource-efficiency-goal.md) as the source of thresholds and methodology. Every milestone report must record:
 
@@ -103,6 +103,7 @@ Use [`resource-efficiency-goal.md`](resource-efficiency-goal.md) as the source o
 | M7 | Host-application overhead, lifecycle, and bounded background work |
 | M8 | GPU-direct, zero-copy, renderer, thermal, and battery measurements |
 | M9 | Local model CPU/RAM/VRAM budget, responsiveness, and graceful degradation |
+| M10 | Layout persistence, registry/plugin overhead, sandbox limits, and failure isolation |
 
 A milestone cannot claim resource efficiency from compilation or unit tests alone. Attach the report or mark the measurement `BLOCKED`/`N/A`; never silently omit it.
 
@@ -243,6 +244,33 @@ Review perceived performance and hardware fallback behavior:
 
 Exit evidence: representative performance report, backend matrix, and screenshots
 or recordings at the minimum and recommended hardware profiles.
+
+### M10: Extensible UI and Plugin Platform
+
+Review customization without sacrificing safety, accessibility, or responsiveness:
+
+- A clean profile opens with a safe default layout; persisted layout state survives
+  restart and is migrated from every supported schema version.
+- Layout persistence stores only versioned, non-sensitive preferences; secrets,
+  tokens, private endpoints, runtime handles, and process state are excluded.
+- Built-in and optional views use one stable registry with deterministic ordering,
+  collision handling, localization, keyboard focus, and accessible labels.
+- Plugin manifests declare API version, publisher/integrity information, requested
+  capabilities, and compatibility before activation.
+- UI-only plugins receive no network, filesystem, capture, audio, or secrets access
+  unless explicitly granted; denied capabilities produce actionable feedback.
+- A plugin cannot freeze or terminate the GUI: timeouts, resource limits, cancellation,
+  and crash isolation are observable and tested.
+- Disabled, incompatible, corrupted, and removed plugins leave the core navigation
+  and persisted layout usable.
+- Plugin panels remain readable at supported DPI scales, in both themes and locales,
+  and do not obscure primary recording/streaming controls.
+- The plugin registry and runtime stay within the documented CPU, memory, startup,
+  and frame-time budgets; idle plugins do not force continuous repainting.
+
+Exit evidence: layout round-trip and migration tests, registry collision/accessibility
+checks, permission-denial tests, malformed-manifest tests, plugin timeout/crash
+isolation evidence, and a resource-efficiency report for an enabled/disabled plugin set.
 
 ### M9: AI Chat Assistant
 

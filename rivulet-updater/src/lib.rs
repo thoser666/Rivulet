@@ -171,35 +171,93 @@ pub fn download_asset_with_progress(
     Ok(())
 }
 
+/// Windows Installer exit status indicating success with a reboot required.
+pub const WINDOWS_INSTALLER_REBOOT_REQUIRED: i32 = 3010;
+
+/// Classify a Windows Installer exit code. MSI 3010 is a successful install;
+/// it only indicates that Windows recommends a reboot to finish applying it.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub fn windows_installer_exit_success(code: i32) -> bool {
+    code == 0 || code == WINDOWS_INSTALLER_REBOOT_REQUIRED
+}
+
 /// Launch the platform installer for a downloaded package.
 ///
 /// Returns `Ok(true)` when the application should quit right afterwards (the
 /// installer replaces the running files) and `Ok(false)` when it can stay open
 /// (the macOS DMG is only opened).
+///
+/// On Windows this launches the [`rivulet-updater`] watchdog binary detached.
+/// The watchdog waits for the watched process ids (the running GUI and its
+/// launcher) to fully terminate, then runs `msiexec` to completion. Because
+/// the executing files are locked by Windows while they run, installation must
+/// not start until every Rivulet process has exited — launching msiexec
+/// directly from the still-running GUI leaves the old files in place (only the
+/// registry/shortcuts are updated), which is the exact bug this design fixes.
 pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
+    install_asset_with_watch(path, None, &[])
+}
+
+/// Install the downloaded asset, delegating to a watchdog binary that waits for
+/// the given process ids to exit before starting the platform installer.
+///
+/// `watchdog` overrides the path to the watchdog executable (used in tests);
+/// when `None` it is resolved next to the running executable.
+pub fn install_asset_with_watch(
+    path: &Path,
+    #[cfg_attr(not(target_os = "windows"), allow(unused_variables))] watchdog: Option<&Path>,
+    #[cfg_attr(not(target_os = "windows"), allow(unused_variables))] wait_pids: &[u32],
+) -> anyhow::Result<bool> {
+    if !path.exists() {
+        anyhow::bail!("installer file does not exist: {}", path.display());
+    }
+
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+
         let path_str = path.to_string_lossy().to_string();
-        let mut child = std::process::Command::new("msiexec")
-            .args([
-                "/i",
-                &path_str,
-                "/passive",
-                "/norestart",
-                "REBOOT=ReallySuppress",
-            ])
-            .spawn()?;
-        // Wait for the installer to finish so the file is not deleted
-        // while msiexec is still reading it.
-        let status = child.wait()?;
-        if !status.success() {
-            anyhow::bail!("msiexec exited with {status} — is the MSI file valid and accessible?");
+
+        // The caller (GUI) must quit AFTER this returns, so the watchdog takes
+        // over the install. If no watchdog binary is available we fall back to
+        // starting msiexec detached (the previous, fragile behaviour).
+        let watchdog_path = watchdog.map(ToOwned::to_owned).or_else(resolve_watchdog);
+        let Some(watchdog_path) = watchdog_path else {
+            // Fallback: launch msiexec directly, detached. Not ideal (see above)
+            // but keeps the flow functional if the watchdog is missing.
+            std::process::Command::new("msiexec.exe")
+                .args([
+                    "/i",
+                    &path_str,
+                    "/passive",
+                    "/norestart",
+                    "REBOOT=ReallySuppress",
+                ])
+                .creation_flags(0x08000000)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()?;
+            return Ok(true);
+        };
+
+        let mut cmd = std::process::Command::new(&watchdog_path);
+        cmd.arg("--install").arg(&path_str);
+        for pid in wait_pids {
+            cmd.arg("--wait-pid").arg(pid.to_string());
         }
+        cmd.creation_flags(0x08000000);
+        cmd.stdin(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+        cmd.spawn()?;
         Ok(true)
     }
 
     #[cfg(target_os = "linux")]
     {
+        let _ = watchdog;
+        let _ = wait_pids;
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))?;
         let mut child = std::process::Command::new(path).spawn()?;
@@ -214,6 +272,8 @@ pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
 
     #[cfg(target_os = "macos")]
     {
+        let _ = watchdog;
+        let _ = wait_pids;
         let mut child = std::process::Command::new("open").arg(path).spawn()?;
         let status = child.wait()?;
         if !status.success() {
@@ -224,8 +284,33 @@ pub fn install_asset(path: &Path) -> anyhow::Result<bool> {
 
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
+        let _ = watchdog;
+        let _ = wait_pids;
         anyhow::bail!("automatic updates are not supported on this platform")
     }
+}
+
+/// Resolve the path to the `rivulet-updater` watchdog binary, preferring the
+/// directory of the running executable (the install folder / dev target dir).
+/// An explicit `RIVULET_UPDATER_PATH` environment variable takes precedence.
+#[cfg(target_os = "windows")]
+fn resolve_watchdog() -> Option<std::path::PathBuf> {
+    let exe_dir = std::env::current_exe()
+        .ok()?
+        .parent()
+        .map(ToOwned::to_owned)?;
+    std::env::var_os("RIVULET_UPDATER_PATH")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            let candidate = exe_dir.join("rivulet-updater.exe");
+            candidate.exists().then_some(candidate)
+        })
+}
+
+#[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
+fn resolve_watchdog() -> Option<std::path::PathBuf> {
+    None
 }
 
 #[cfg(test)]
@@ -427,6 +512,38 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "windows")]
+    fn windows_install_delegates_to_watchdog() {
+        // The Windows implementation must launch the detached watchdog binary
+        // (not msiexec directly), pass the MSI path and the watched pids, and
+        // return immediately so the GUI can close cleanly.
+        let source = include_str!("lib.rs");
+        assert!(source.contains("resolve_watchdog"));
+        assert!(source.contains("--install"));
+        assert!(source.contains("--wait-pid"));
+        assert!(source.contains("creation_flags(0x08000000)"));
+        assert!(source.contains("Stdio::null()"));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn watchdog_delegates_to_msiexec_instead_of_lib() {
+        // The watchdog binary itself (not the library) is what ultimately runs
+        // msiexec, and it does so with a blocking wait. Verify the watchdog's
+        // own sources by checking the bin file's contents.
+        let bin = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/bin/rivulet-updater.rs"
+        ));
+        assert!(bin.contains("msiexec.exe"));
+        assert!(
+            bin.contains("child.wait()"),
+            "watchdog must block until msiexec exits"
+        );
+        assert!(bin.contains("std::process::exit(code)"));
+    }
+
+    #[test]
     fn install_asset_returns_error_for_nonexistent_file() {
         let fake = std::env::temp_dir().join("rivulet_test_nonexistent.msi");
         let result = install_asset(&fake);
@@ -434,6 +551,14 @@ mod tests {
             result.is_err(),
             "install_asset must fail for nonexistent file"
         );
+    }
+
+    #[test]
+    fn windows_installer_success_includes_reboot_required() {
+        assert!(windows_installer_exit_success(0));
+        assert!(windows_installer_exit_success(3010));
+        assert!(!windows_installer_exit_success(1603));
+        assert!(!windows_installer_exit_success(1));
     }
 
     #[test]

@@ -72,6 +72,25 @@ fi
 mkdir -p "$APPDIR/usr/share/applications"
 cp "$APPDIR/rivulet.desktop" "$APPDIR/usr/share/applications/rivulet.desktop"
 
+# Ship the Discord Rich Presence setup assets (app icon for the member list,
+# Rich Presence artwork for the profile card) and the setup documentation so
+# users can complete the Discord configuration without the repository.
+DOCDIR="$APPDIR/usr/share/doc/rivulet/discord"
+mkdir -p "$DOCDIR/assets"
+for pair in \
+  "docs/assets/rivulet-app-icon-512.png:rivulet-app-icon-512.png" \
+  "docs/assets/rivulet-rich-presence-1024.png:rivulet-rich-presence-1024.png" \
+  "docs/assets/rivulet-rich-presence-512.png:assets/rivulet-rich-presence-512.png" \
+  "docs/activity-status.md:activity-status.md"; do
+  src="${pair%%:*}"
+  dst="${pair##*:}"
+  if [[ -f "$src" ]]; then
+    cp "$src" "$DOCDIR/$dst"
+  else
+    echo "warning: Discord asset missing, skipped: $src" >&2
+  fi
+done
+
 export ARCH="$APPIMAGE_ARCH"
 # appimagetool itself is an AppImage and needs FUSE; in CI/containers
 # libfuse2 is usually not installed -> always use --appimage-extract-and-run.

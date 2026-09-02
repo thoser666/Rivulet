@@ -36,7 +36,9 @@ env:
 
 jobs:
   ################################################################
-  # CHECK: feature or fix commit? (excludes Dependabot)
+  # CHECK: releasable commit? feat/fix always release; build/chore/ci
+  # (packaging, housekeeping & CI) release with a patch bump. Excludes
+  # Dependabot.
   ################################################################
   check:
     name: Check for releasable commit
@@ -72,13 +74,14 @@ jobs:
             exit 0
           fi
 
-          # Releasable commit detection: feat (minor/major) or fix (patch).
-          # Both trigger an alpha release with the appropriate SemVer bump.
-          if echo "$COMMITS" | jq -r '.[].message' | grep -qE '^(feat|fix)(\(.*\))?!?:'; then
+          # Releasable commit detection: feat (minor/major), fix/build/chore/ci
+          # (patch) — packaging, housekeeping and CI changes ship without
+          # needing a manual workflow dispatch afterwards.
+          if echo "$COMMITS" | jq -r '.[].message' | grep -qE '^(feat|fix|build|chore|ci)(\(.*\))?!?:'; then
             SHOULD_RELEASE="true"
-            echo "Releasable commit found (feat/fix) - release build will run."
+            echo "Releasable commit found (feat/fix/build/chore/ci) - release build will run."
           else
-            echo "No feat/fix commit in the push - release build will be skipped."
+            echo "No feat/fix/build/chore/ci commit in the push - release build will be skipped."
           fi
 
           echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
@@ -133,8 +136,10 @@ jobs:
 
           RELEASE_BRANCH="release/$TAG"
           # Multiple workflow runs can target the same release branch. Never
-          # derive a new commit from a stale remote tip: fetch first, then
-          # create a temporary commit and publish it with an atomic retry.
+          # derive a new commit from a stale remote tip: the release branch must
+          # always carry the CURRENT source (see scripts/release-branch.sh), so
+          # it publishes the freshly-committed version bump on top of the
+          # latest develop HEAD and overwrites any divergent/stale tip.
           git add Cargo.toml rivulet-*/Cargo.toml CHANGELOG.md
           if git diff --cached --quiet; then
             echo "No version changes to publish."
@@ -142,21 +147,7 @@ jobs:
             git commit -m "chore(release): prepare $TAG"
           fi
 
-          git fetch origin "$RELEASE_BRANCH" 2>/dev/null || true
-          if git show-ref --verify --quiet "refs/remotes/origin/$RELEASE_BRANCH"; then
-            REMOTE_TIP="$(git rev-parse "origin/$RELEASE_BRANCH")"
-            if git merge-base --is-ancestor "$REMOTE_TIP" HEAD; then
-              git push --set-upstream origin "HEAD:$RELEASE_BRANCH"
-            elif git merge-base --is-ancestor HEAD "$REMOTE_TIP"; then
-              git reset --hard "$REMOTE_TIP"
-              echo "Release branch already contains a newer version bump."
-            else
-              echo "Release branch has diverged; using its tip to avoid a non-fast-forward push."
-              git reset --hard "$REMOTE_TIP"
-            fi
-          else
-            git push --set-upstream origin "HEAD:$RELEASE_BRANCH"
-          fi
+          bash scripts/release-branch.sh "$RELEASE_BRANCH"
 
           echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
 
@@ -230,7 +221,7 @@ jobs:
           merge-multiple: true
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           name: Rivulet ${{ needs.version.outputs.version }}
@@ -238,6 +229,9 @@ jobs:
             release-assets/*
             docs/opengraph.png
             docs/social-preview.png
+            docs/assets/rivulet-app-icon-512.png
+            docs/assets/rivulet-rich-presence-1024.png
+            docs/activity-status.md
           generate_release_notes: true
           prerelease: true
           draft: false

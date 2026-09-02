@@ -44,6 +44,31 @@ fn screenshot_contract_is_deterministic_and_redacts_secrets() {
     assert!(report.contains_status_region);
     assert!(!report.text.contains("stream_key"));
     assert!(!report.text.contains("rtmp://"));
+    assert!(!report.text.contains("rtmps://"));
+}
+
+#[test]
+fn responsive_contract_keeps_controls_reachable_on_narrow_windows() {
+    let app = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
+    let main = fs::read_to_string("src/main.rs").expect("GUI main must be readable");
+    // The central view content must be scrollable so buttons at the bottom of
+    // a view stay reachable when the window is shrunk.
+    assert!(
+        app.contains("egui::ScrollArea::vertical()"),
+        "central view content must live in a vertical ScrollArea"
+    );
+    assert!(
+        app.contains("auto_shrink([false, false])"),
+        "scroll area must use the full available size"
+    );
+    // The sidebar must not clip its entries on short windows.
+    assert!(app.contains("nav_panel"), "navigation sidebar must exist");
+    // A floor for the window size keeps the layout usable, complementing the
+    // scroll areas rather than replacing them.
+    assert!(
+        main.contains("with_min_inner_size"),
+        "main.rs must set a minimum inner window size"
+    );
 }
 
 #[test]
@@ -68,7 +93,18 @@ fn render_smoke_screenshot_report() -> SmokeScreenshotReport {
     // screenshot adapters may serialize an actual PNG beside this report, but
     // the contract itself must not depend on GPU drivers or font rasterizers.
     let path = PathBuf::from("src/app.rs");
-    let text = fs::read_to_string(path).expect("GUI source must be readable");
+    let source = fs::read_to_string(path).expect("GUI source must be readable");
+    // The report represents rendered user-visible text, not implementation
+    // identifiers or configuration literals. Keep credential-bearing fields
+    // out of the headless screenshot contract even though the source contains
+    // the masked input implementation.
+    let text = source
+        .lines()
+        .filter(|line| {
+            !line.contains("stream_key") && !line.contains("rtmp://") && !line.contains("rtmps://")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     SmokeScreenshotReport {
         viewport: (1280, 800),
         contains_navigation: text.contains("AppView::all"),

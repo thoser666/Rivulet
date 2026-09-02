@@ -1,0 +1,26 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticPrefixFixDepsChoreOthers"
+  ],
+  "enabledManagers": ["cargo"],
+  "rangeStrategy": "pin",
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "matchManagers": ["cargo"],
+      "groupName": "Rust dependencies",
+      "schedule": ["before 5am on monday"],
+      "automerge": false
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true,
+      "automerge": false
+    }
+  ],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2
+}

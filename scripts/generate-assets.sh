@@ -30,6 +30,9 @@ SOCIAL="$REPO_ROOT/docs/social-preview.png"
 OPENGRAPH="$REPO_ROOT/docs/opengraph.png"
 ICON="$REPO_ROOT/packaging/rivulet.png"
 ICNS="$REPO_ROOT/packaging/rivulet.icns"
+RICH_PRESENCE_1024="$REPO_ROOT/docs/assets/rivulet-rich-presence-1024.png"
+RICH_PRESENCE_512="$REPO_ROOT/docs/assets/rivulet-rich-presence-512.png"
+APP_ICON_512="$REPO_ROOT/docs/assets/rivulet-app-icon-512.png"
 
 # Brand palette, darkened for the hero thumbnail so the light-blue logo and
 # white wordmark read clearly. LIGHT_BLUE is the brand accent (from the logo).
@@ -149,9 +152,30 @@ done
   -gravity north "${REGULAR_ARGS[@]}" -fill "$LIGHT_BLUE" -pointsize 38 -annotate +0+445 'Modern Screen Recording & Streaming' \
   "${STRIP[@]}" "$OPENGRAPH"
 
+# 7. Discord Rich Presence artwork: the full logo (including the wordmark)
+#    centered on a soft off-white square at Discord's recommended 1024x1024,
+#    with ~8% padding so the rounded card does not clip the motif. The 512px
+#    variant is a plain downscale of the 1024px card for the docs page.
+RP_PAD=$((1024 * 8 / 100))
+RP_INNER=$((1024 - 2 * RP_PAD))
+"$MAGICK" "$LOGO" -filter Mitchell -resize "${RP_INNER}x${RP_INNER}" \
+  -gravity center -background '#FAFAFA' -extent 1024x1024 "${STRIP[@]}" "$RICH_PRESENCE_1024"
+"$MAGICK" "$RICH_PRESENCE_1024" -filter Mitchell -resize '512x512' "${STRIP[@]}" "$RICH_PRESENCE_512"
+
+# 8. Discord App Icon (Developer Portal → General Information): a punchier
+#    small-avatar variant of the wave symbol only — no wordmark, no padding —
+#    centered on the dark brand gradient so it stays readable at the tiny
+#    member-list avatar size. 512x512 is Discord's recommended app-icon size.
+"$MAGICK" -size 512x512 "gradient:${NAVY}-${BLUE}" \
+  \( "$SYMBOL_LIGHT" -filter Mitchell -resize '400x400' \) -gravity center -composite \
+  "${STRIP[@]}" "$APP_ICON_512"
+
 echo "Generated:"
 echo "  $THUMBNAIL"
 echo "  $SOCIAL"
 echo "  $OPENGRAPH"
 echo "  $ICON"
 echo "  $ICNS"
+echo "  $RICH_PRESENCE_1024"
+echo "  $RICH_PRESENCE_512"
+echo "  $APP_ICON_512"

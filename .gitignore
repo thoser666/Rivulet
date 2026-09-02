@@ -18,6 +18,13 @@ rivulet-gui/assets/fonts/*.zip
 # Freebuff tool artifacts
 .freebuff/
 
+# Freebuff wiki working clone (nested repo, not part of the codebase)
+.freebuff-rivulet-wiki/
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
 # IDE / Editors
 .idea/
 .vscode/
