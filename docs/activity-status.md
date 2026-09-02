@@ -327,11 +327,17 @@ configured in Rivulet. There are two complementary checks:
    echoed `assets` object contains only the keys Discord accepted. When the
    `large_image` key is missing from the reply (only `large_text` echoes),
    the asset has not been uploaded yet — Discord silently drops image keys
-   that do not exist in the application. The same can be checked without a
-   client by fetching the public CDN URL: `curl -I
-   https://cdn.discordapp.com/app-assets/<client-id>/<asset-name>.png`
-   returns `200` for an uploaded asset and `404` when it is missing (for the
-   Rivulet app: `.../1544027006847680532/rivulet_logo.png`).
+   that do not exist in the application. Once uploaded, Discord resolves the
+   key to a **numeric asset id** in the reply (e.g.
+   `"large_image":"1544569244803538964"` for `rivulet_logo`).
+
+   The public CDN URL is served under that numeric asset id, **not** the key
+   name — `curl -I https://cdn.discordapp.com/app-assets/<client-id>/<asset-id>.png`
+   returns `200` for an uploaded asset, while the
+   `.../app-assets/<client-id>/<asset-name>.png` form always returns `404`
+   (for the Rivulet app the checked key is `rivulet_logo`, resolved asset id
+   `1544569244803538964`). If only the key name is known, the live handshake
+   reply is the reliable way to obtain the id.
 
 > **Why the public API is not the check:** `GET
 > https://discord.com/api/v10/applications/<id>` returns `401 Unauthorized`
