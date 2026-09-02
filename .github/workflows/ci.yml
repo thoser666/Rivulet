@@ -215,12 +215,15 @@ jobs:
 
       - name: Run fuzz smoke (256 runs per target)
         run: |
-          # rivulet-core links glib via gstreamer-rs; the -sys crates need
-          # the headers at build time even though the fuzz targets never
-          # touch GStreamer themselves.
+          # rivulet-core links glib and gstreamer via gstreamer-rs; the -sys
+          # crates need the pkg-config files at build time even though the
+          # fuzz targets never touch GStreamer themselves.
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
-            pkg-config libglib2.0-dev
+            pkg-config \
+            libglib2.0-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev
           bash scripts/fuzz-smoke.sh
 
       - name: Upload crash artifacts

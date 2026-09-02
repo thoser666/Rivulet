@@ -1448,6 +1448,14 @@ fn fuzz_targets_cover_the_untrusted_input_parsers() {
             && ci.contains("fuzz-crashes"),
         "CI must run the fuzz smoke and upload crash artifacts"
     );
+    assert!(
+        ci.contains("libglib2.0-dev") && ci.contains("libgstreamer1.0-dev"),
+        "the fuzz job must install the glib/gstreamer pkg-config files rivulet-core's -sys crates need"
+    );
+    assert!(
+        !ci.contains("# nightly"),
+        "toolchain selection must use the action input, not a ref comment the pin generator misreads"
+    );
 }
 
 #[test]
@@ -1505,6 +1513,20 @@ fn shared_memory_frames_are_validated_before_read() {
     assert!(
         dll.contains("checked_mul"),
         "the OpenGL hook writer must refuse geometry/data disagreement"
+    );
+}
+
+#[test]
+fn alpha_release_runs_are_serialized() {
+    // Two pushes in quick succession used to race for the same next version
+    // number, release branch and GitHub release object (tag-push rejections,
+    // asset-upload Not Found). The workflow must serialize itself.
+    let workflow = read(".github/workflows/release.yml");
+    assert!(
+        workflow.contains("concurrency:")
+            && workflow.contains("group: release-alpha")
+            && workflow.contains("cancel-in-progress: false"),
+        "release.yml must serialize runs via a concurrency group"
     );
 }
 
