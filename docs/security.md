@@ -146,7 +146,7 @@ permissions and data handling; GitHub Apps can request broad repository scopes.
 | --- | --- | --- |
 | [github/accessibility-scanner](https://github.com/github/accessibility-scanner) (or **AccessLint**) | Post automated accessibility findings on pull requests, complementing the in-process `ui_accessibility` report. | Recommended. Needs a deployed/reachable app URL for full function; the in-process contract in `rivulet-gui/tests/ui_accessibility.rs` already covers the deterministic baseline while the app is not installed. Tracked as finding `ui-001` in `docs/ui-audit.md`. |
 | **rust-doctor** | Review Rust change risk and suggest targeted fixes on PRs. | Optional; Clippy + the workspace lints already run in CI (`-D warnings`), so value is advisory feedback, not a gate. |
-| **Conventional Commits** checkout bot | Enforce the Conventional Commits format used by `release.yml` versioning. | Nice-to-have; the release workflow already skips non-`feat`/`fix` commits, so a breaking/malformed commit only delays a release rather than corrupting it. Prefer tightening the release check before adding a bot. |
+| **Conventional Commits** checkout bot | Enforce the Conventional Commits format used by `release.yml` versioning. | Nice-to-have; the release workflow already skips non-releasable commits (`feat`/`fix`/`build`/`chore` release, everything else is ignored), so a breaking/malformed commit only delays a release rather than corrupting it. Prefer tightening the release check before adding a bot. |
 | **Clippy Review** bot | Surface clippy suggestions inline on PRs. | Redundant with the CI `Lints (Fmt & Clippy)` job; only adds ergonomics for reviewers. |
 
 ### Enablement policy

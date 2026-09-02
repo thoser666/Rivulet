@@ -27,7 +27,7 @@ Rivulet uses a **two-channel** release model:
 
 | Channel | Tag format | Trigger | Example |
 | --- | --- | --- | --- |
-| **Alpha** | `v0.X.Y-alpha.N` | Every `feat:` or `fix:` push to `develop` | `v0.21.0-alpha.1` |
+| **Alpha** | `v0.X.Y-alpha.N` | Every `feat:`, `fix:`, `build:` or `chore:` push to `develop` | `v0.21.0-alpha.1` |
 | **Beta / RC / Stable** | `vX.Y.Z` | Manually set tag (no suffix) | `v1.0.0` |
 
 ### Alpha Channel (Automatic)
@@ -39,14 +39,21 @@ Every releasable commit pushed to `develop` automatically produces an alpha rele
 | `fix(...)` | Patch | `0.20.0` → `0.20.1-alpha.1` |
 | `feat(...)` | Minor | `0.20.0` → `0.21.0-alpha.1` |
 | `feat!(...)` or `BREAKING CHANGE` | Major | `0.x.y` → `1.0.0-alpha.1` |
+| `build(...)` or `chore(...)` | Patch | `0.20.0` → `0.20.1-alpha.1` |
 
 The workflow (`release.yml`) handles everything:
-1. Detects `feat:` or `fix:` commits (skips Dependabot)
+1. Detects `feat:`, `fix:`, `build:` or `chore:` commits (skips Dependabot)
 2. Computes the next SemVer version from commit history
 3. Bumps `Cargo.toml` and `CHANGELOG.md`
 4. Commits, tags, and pushes
 5. Builds platform binaries (Linux, Windows, macOS)
 6. Creates a GitHub pre-release
+
+`build:`/`chore:` commits release with a patch bump so packaging and
+housekeeping changes (installer layouts, CI fixes, dependency housekeeping)
+ship automatically instead of needing a manual *Actions → Release (Alpha) →
+Run workflow* dispatch afterwards. Purely editorial commits (`docs:`, `test:`,
+`style:`) do not trigger a release.
 
 ### Beta / RC / Stable Channel (Manual)
 

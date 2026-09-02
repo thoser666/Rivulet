@@ -29,6 +29,7 @@ MAJOR="${MAJOR:-0}"; MINOR="${MINOR:-0}"; PATCH="${PATCH:-0}"
 HAS_BREAKING=false
 HAS_FEATURE=false
 HAS_FIX=false
+HAS_BUILD=false
 while IFS= read -r line; do
   case "$line" in
     *'!!'*|*'BREAKING CHANGE'*) HAS_BREAKING=true ;;
@@ -37,6 +38,7 @@ while IFS= read -r line; do
     feat!*|feat\(*\)!*) HAS_BREAKING=true ;;
     feat:*|feat\(*\):*) HAS_FEATURE=true ;;
     fix:*|fix\(*\):*) HAS_FIX=true ;;
+    build:*|build\(*\):*|chore:*|chore\(*\):*) HAS_BUILD=true ;;
   esac
 done < <(git log "$LOG_RANGE" --pretty=format:'%s%n%b' 2>/dev/null || true)
 
@@ -53,9 +55,18 @@ if [[ "$HAS_BREAKING" == true ]]; then
 elif [[ "$HAS_FEATURE" == true ]]; then
   MINOR=$((MINOR + 1)); PATCH=0
   REASON="feature commits"
-else
+elif [[ "$HAS_FIX" == true ]]; then
   PATCH=$((PATCH + 1))
   REASON="fix commits"
+elif [[ "$HAS_BUILD" == true ]]; then
+  PATCH=$((PATCH + 1))
+  REASON="build/chore commits"
+else
+  # Only non-releasable commits (docs, test, style, ...) since the last
+  # tag: stay on the current version (matches the workflow gate).
+  echo "No feat/fix/build/chore commits since $LAST_TAG - version stays $BASE_VERSION" >&2
+  echo "$BASE_VERSION"
+  exit 0
 fi
 
 NEXT="$MAJOR.$MINOR.$PATCH"
