@@ -29,9 +29,17 @@ use serde::Serialize;
 
 use crate::presence::PresenceStatus;
 
-/// Placeholder application id. Replace with the real Rivulet Discord Developer
-/// Application id before shipping to end users.
-pub const DEFAULT_CLIENT_ID: &str = "0000000000000000000";
+/// Official Rivulet Discord application id (Developer Portal). Shipped as the
+/// default so end users get the branded presence card (logo, status) without
+/// creating their own Discord application. The id is not a secret: it rides
+/// along in every SET_ACTIVITY payload anyway. Users who want their own
+/// branding can override it in Settings; an empty value keeps the adapter off.
+pub const DEFAULT_CLIENT_ID: &str = "1544027006847680532";
+
+/// Asset key of the Rivulet artwork uploaded in the official application's
+/// Rich Presence → Art Assets tab. Shipped as the default art asset key so
+/// the presence card shows the Rivulet logo out of the box.
+pub const DEFAULT_LARGE_IMAGE_KEY: &str = "rivulet_logo";
 
 /// Discord Rich Presence configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,7 +70,7 @@ impl Default for DiscordPresenceConfig {
             enabled: true,
             client_id: DEFAULT_CLIENT_ID.to_owned(),
             ipc_socket_path: None,
-            large_image_key: None,
+            large_image_key: Some(DEFAULT_LARGE_IMAGE_KEY.to_owned()),
             large_image_text: None,
         }
     }
@@ -767,10 +775,22 @@ mod tests {
     }
 
     #[test]
-    fn default_config_is_opt_out_with_placeholder_client_id() {
+    fn default_config_ships_official_app_id_and_logo() {
         let cfg = DiscordPresenceConfig::default();
         assert!(cfg.enabled);
+        // The default must be the official, 17-20 digit application id (not
+        // the old all-zeros placeholder) so the branded presence works
+        // without any user setup.
         assert_eq!(cfg.client_id, DEFAULT_CLIENT_ID);
+        assert!(
+            validate_client_id(&cfg.client_id).is_ok(),
+            "default client id must pass Discord snowflake validation"
+        );
+        // The artwork defaults to the official logo asset key.
+        assert_eq!(
+            cfg.large_image_key.as_deref(),
+            Some(DEFAULT_LARGE_IMAGE_KEY)
+        );
         assert!(cfg.ipc_socket_path.is_none());
     }
 

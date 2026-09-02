@@ -582,6 +582,40 @@ fn discord_presence_tracks_record_state_from_every_view() {
 }
 
 #[test]
+fn discord_presence_ships_official_defaults_and_migrates_empty_ids() {
+    // Zero-config Rich Presence: the core config must default to the official
+    // application id (validated snowflake) plus the official logo asset key,
+    // and the GUI must start with those defaults and migrate restores with an
+    // empty persisted id to them (custom ids stay untouched).
+    let discord = read("rivulet-core/src/discord.rs");
+    assert!(
+        discord.contains("pub const DEFAULT_CLIENT_ID: &str = \"1544027006847680532\";"),
+        "the official application id must be the shipped default"
+    );
+    assert!(
+        discord.contains("pub const DEFAULT_LARGE_IMAGE_KEY: &str = \"rivulet_logo\";"),
+        "the official logo asset key must be the shipped default"
+    );
+    assert!(
+        discord.contains("large_image_key: Some(DEFAULT_LARGE_IMAGE_KEY.to_owned())"),
+        "DiscordPresenceConfig::default must enable the logo"
+    );
+
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        gui.contains(
+            "discord_presence_client_id: rivulet_core::discord::DEFAULT_CLIENT_ID.to_owned()"
+        ),
+        "a fresh install must start with the official client id"
+    );
+    assert!(
+        gui.contains("fn restore_from_storage")
+            && gui.contains("Discord client id was empty - applying the official default"),
+        "the restore path must migrate empty persisted ids to the default"
+    );
+}
+
+#[test]
 fn discord_presence_error_state_is_wired_into_the_status_model() {
     // PresenceActivity::Error must be produced by the presence status logic
     // when the engine reported a failure (last_error set), take priority over
@@ -1031,7 +1065,9 @@ fn release_gate_includes_build_and_chore_commits() {
 
     let script = read("scripts/release-version.sh");
     assert!(
-        script.contains("build:*|build\\(*\\):*|chore:*|chore\\(*\\):*|ci:*|ci\\(*\\):*) HAS_BUILD=true"),
+        script.contains(
+            "build:*|build\\(*\\):*|chore:*|chore\\(*\\):*|ci:*|ci\\(*\\):*) HAS_BUILD=true"
+        ),
         "release-version.sh must classify build/chore/ci commits as releasable"
     );
     assert!(

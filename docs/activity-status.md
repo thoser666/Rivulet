@@ -54,11 +54,16 @@ The opt-out toggle is persisted. When disabled, no worker thread is spawned at
 all and `PresenceStatus::set_activity` is a no-op.
 
 The **Discord Developer Application client id is configurable** in Settings →
-Discord Rich Presence. Set it to the Client ID of a Discord application created
-at <https://discord.com/developers/applications> with "Rich Presence" enabled.
-Until a non-empty client id is entered and applied, the adapter stays off. The
-value is persisted across sessions; changing it (via the Apply button) rebuilds
-the adapter on the next frame.
+Discord Rich Presence. Rivulet **ships the official application id and the
+official `rivulet_logo` artwork as defaults**, so the branded presence card
+works out of the box — end users do not need to create their own Discord
+application. The fields remain in Settings for custom branding: entering the
+Client ID of a different Discord application (created at
+<https://discord.com/developers/applications> with "Rich Presence" enabled)
+overrides the default, and an **empty value restores the official default**
+(installs configured before the default existed are migrated on restore).
+The value is persisted across sessions; changing it (via the Apply button)
+rebuilds the adapter on the next frame.
 
 The Apply button **validates the format immediately**: a Discord client id is a
 numeric snowflake of 17-20 digits. Pasting the application URL, a label

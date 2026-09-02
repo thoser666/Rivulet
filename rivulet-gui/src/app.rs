@@ -1170,8 +1170,11 @@ impl Default for RivuletApp {
             theme: theme::ThemePreference::default(),
             theme_applied: None,
             discord_presence_enabled: true,
-            discord_presence_client_id: String::new(),
-            discord_presence_large_image: String::new(),
+            // Official Rivulet application id + artwork: zero-config Rich
+            // Presence for end users (both fields remain overridable in
+            // Settings; empty client id still keeps the adapter off).
+            discord_presence_client_id: rivulet_core::discord::DEFAULT_CLIENT_ID.to_owned(),
+            discord_presence_large_image: rivulet_core::discord::DEFAULT_LARGE_IMAGE_KEY.to_owned(),
             discord_presence: None,
             discord_presence_active_client_id: None,
             discord_client_id_dirty: false,
@@ -5536,7 +5539,20 @@ impl RivuletApp {
     /// `#[serde(skip)]` and therefore stay at their defaults here; the caller
     /// re-attaches the live engine and CLI parameters.
     fn restore_from_storage(storage: Option<&dyn eframe::Storage>) -> Option<Self> {
-        eframe::get_value::<RivuletApp>(storage?, eframe::APP_KEY)
+        let mut restored: Self = eframe::get_value::<RivuletApp>(storage?, eframe::APP_KEY)?;
+        // Migration: installs configured before the official application id
+        // became the default saved an empty client id (adapter off). Those
+        // users get the zero-config branded presence now; an explicitly
+        // configured id is never overwritten. Lives on every restore path,
+        // not only new_from_cc, so tests and future callers stay covered.
+        if restored.discord_presence_client_id.trim().is_empty() {
+            restored.discord_presence_client_id =
+                rivulet_core::discord::DEFAULT_CLIENT_ID.to_owned();
+            restored.discord_presence_large_image =
+                rivulet_core::discord::DEFAULT_LARGE_IMAGE_KEY.to_owned();
+            tracing::info!("Discord client id was empty - applying the official default");
+        }
+        Some(restored)
     }
 
     pub fn new(
@@ -8478,6 +8494,64 @@ mod tests {
         let storage = MemoryStorage::default();
         assert!(RivuletApp::restore_from_storage(Some(&storage)).is_none());
         assert!(RivuletApp::restore_from_storage(None).is_none());
+    }
+
+    #[test]
+    fn default_app_ships_official_discord_id_and_logo() {
+        // Zero-config Rich Presence: a fresh install (and the Default impl
+        // behind every test) must carry the official application id and the
+        // official logo asset key, not empty strings.
+        let app = RivuletApp::default();
+        assert_eq!(
+            app.discord_presence_client_id,
+            rivulet_core::discord::DEFAULT_CLIENT_ID
+        );
+        assert_eq!(
+            app.discord_presence_large_image,
+            rivulet_core::discord::DEFAULT_LARGE_IMAGE_KEY
+        );
+    }
+
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn empty_saved_client_id_migrates_to_the_official_default() {
+        // Installs from before the official default existed persisted an
+        // empty client id (adapter off). The restore path must migrate them
+        // to the official id + logo, while an explicitly configured id is
+        // kept untouched.
+        let mut app = RivuletApp {
+            discord_presence_enabled: true,
+            discord_presence_client_id: String::new(),
+            discord_presence_large_image: String::new(),
+            ..Default::default()
+        };
+        let mut storage = MemoryStorage::default();
+        eframe::App::save(&mut app, &mut storage);
+
+        let restored = RivuletApp::restore_from_storage(Some(&storage))
+            .expect("persisted app state must be restored");
+        assert_eq!(
+            restored.discord_presence_client_id,
+            rivulet_core::discord::DEFAULT_CLIENT_ID,
+            "empty persisted id must migrate to the official default"
+        );
+        assert_eq!(
+            restored.discord_presence_large_image,
+            rivulet_core::discord::DEFAULT_LARGE_IMAGE_KEY
+        );
+
+        // An explicitly configured id must survive restore unchanged.
+        let mut custom = RivuletApp {
+            discord_presence_client_id: "9999999999999999999".to_owned(),
+            discord_presence_large_image: "my_brand".to_owned(),
+            ..Default::default()
+        };
+        let mut storage2 = MemoryStorage::default();
+        eframe::App::save(&mut custom, &mut storage2);
+        let restored2 = RivuletApp::restore_from_storage(Some(&storage2))
+            .expect("persisted app state must be restored");
+        assert_eq!(restored2.discord_presence_client_id, "9999999999999999999");
+        assert_eq!(restored2.discord_presence_large_image, "my_brand");
     }
 
     #[test]
