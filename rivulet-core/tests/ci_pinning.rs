@@ -1112,6 +1112,26 @@ fn wiki_repo_doc_link_audit_is_wired_up() {
         smoke.contains("audit-wiki-links.py") && smoke.contains("WIKI_LINK_AUDIT_EXTRA"),
         "the local sync smoke must include the full link audit (offline override)"
     );
+    // The audit runs in both directions: wiki -> repo docs (forward) and
+    // repo docs -> wiki (backwards). Deep wiki links from repo docs must
+    // resolve to real pages + heading anchors, and backticked page
+    // references must not drift from the canonical page names.
+    assert!(
+        auditor.contains("--check-repo-docs"),
+        "the auditor must support the backwards repo-docs audit mode"
+    );
+    assert!(
+        auditor.contains("WIKI_LINK_RE") && auditor.contains("page_key"),
+        "the auditor must validate deep wiki links and fuzzy page-name drift"
+    );
+    assert!(
+        workflow.contains("--check-repo-docs"),
+        "the wiki workflow must also audit repo docs for wiki references"
+    );
+    assert!(
+        smoke.contains("--check-repo-docs"),
+        "the local sync smoke must include the backwards repo-docs audit"
+    );
 }
 
 #[test]

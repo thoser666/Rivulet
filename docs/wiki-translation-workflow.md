@@ -56,7 +56,7 @@ Prüf-Sync lokal gegen den Wiki-Arbeits-Clone verifizieren:
 scripts/wiki-sync-smoke.sh
 ```
 
-Der Smoke-Test prüft drei Dinge in einem Lauf:
+Der Smoke-Test prüft vier Dinge in einem Lauf:
 
 1. **Remote-Sync** – der Wiki-Clone existiert, `HEAD` stimmt mit dem Upstream
    überein und der Working Tree ist sauber (keine uncommitteten Änderungen).
@@ -64,6 +64,12 @@ Der Smoke-Test prüft drei Dinge in einem Lauf:
    Seite besitzt eine `*-de`-Partnerseite und den Sprachumschalter.
 3. **i18n-Drift** – führt `sync-wiki-translations.py --check` aus: keine
    fehlenden Navigationsmetadaten.
+4. **Link-Audit** – führt `audit-wiki-links.py --check-repo-docs` aus:
+   Interwiki-Links (Seite + Anker), Repo-Dok-Links (Datei + GitHub-Anker),
+   externe URLs (Erreichbarkeit, offline per `WIKI_LINK_AUDIT_EXTRA=--skip-external`)
+   sowie rückwärts alle Wiki-Referenzen in `docs/*.md`, `README.md` und
+   `CONTRIBUTING.md` (Deep-Links müssen auflösen, Backtick-Referenzen dürfen
+   nicht vom kanonischen Seitennamen abweichen).
 
 Ausstiegscodes: `0` = alle Checks grün, `1` = ein Check fehlgeschlagen,
 `2` = Umgebungs-/Clone-Fehler (fehlender Clone, fehlendes Python, fehlender

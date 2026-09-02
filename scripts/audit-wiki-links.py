@@ -16,6 +16,17 @@ Wiki pages link to three kinds of targets, and all of them drift:
    offline skip; GitHub-blob links are handled by rule 2 and never hit the
    network twice.
 
+With `--check-repo-docs` the audit also runs **backwards**: repo docs
+(`docs/*.md`, `README.md`, `CONTRIBUTING.md`) must only reference wiki pages
+that actually exist. Two reference shapes are validated there:
+
+1. Deep links `…/wiki/Page` / `…/wiki/Page#anchor` — page + heading anchor.
+2. Backticked page references like `` `Discord-Setup` `` — exact matches are
+   valid; references that only match after collapsing spaces/hyphens/case
+   (e.g. `` `Getting Started` `` instead of `Getting-Started`) are reported
+   as naming drift. Anything else is treated as a code identifier and left
+   alone.
+
 Exit codes: 0 = all links valid; 1 = broken links found; 2 = usage error.
 """
 from __future__ import annotations
@@ -30,7 +41,13 @@ from pathlib import Path
 REPO_LINK_RE = re.compile(
     r"https://github\.com/thoser666/Rivulet/blob/develop/([^\)#\s]+)(?:#([^\)\s]+))?"
 )
+WIKI_LINK_RE = re.compile(
+    r"https://github\.com/thoser666/Rivulet/wiki/([^\)#\s]+)"
+    r"(?:#([^\)\s]+))?"
+)
 MD_LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
+BACKTICK_RE = re.compile(r"`([^`\n]+)`")
+REPO_DOC_FILES = ["README.md", "CONTRIBUTING.md"]
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 USER_AGENT = "rivulet-wiki-link-audit"
 REQUEST_TIMEOUT = 15.0
@@ -104,6 +121,11 @@ def normalize_target(target: str) -> tuple[str, str]:
     return page.removesuffix(".md"), anchor
 
 
+def page_key(name: str) -> str:
+    """Collapse case, spaces, hyphens and underscores for fuzzy page matching."""
+    return re.sub(r"[\s_\-]+", "", name).lower()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("wiki", nargs="?", default=".", help="wiki checkout dir")
@@ -122,6 +144,12 @@ def main() -> int:
         "--skip-external",
         action="store_true",
         help="do not hit the network for external URLs (offline runs)",
+    )
+    parser.add_argument(
+        "--check-repo-docs",
+        action="store_true",
+        help="also audit repo docs (docs/*.md, README, CONTRIBUTING) for "
+        "references to wiki pages that do not exist",
     )
     args = parser.parse_args()
 
@@ -206,12 +234,62 @@ def main() -> int:
                 if not ok:
                     broken.append(f"{page.name}: unreachable external URL {url} ({reason})")
 
+    if args.check_repo_docs:
+        page_keys = {page_key(name): name for name in pages}
+        scan_files = sorted(repo_root.glob("docs/*.md")) + [
+            repo_root / name for name in REPO_DOC_FILES if (repo_root / name).is_file()
+        ]
+        wiki_refs = 0
+        for doc in scan_files:
+            text = load_repo_file(repo_root, str(doc.relative_to(repo_root)).replace("\\", "/"), args.develop_from_origin)
+            if text is None:
+                broken.append(f"{doc.name}: unreadable repo doc")
+                continue
+            lines = text.splitlines()
+
+            def doc_line_of(match: re.Match) -> int:
+                return text.count("\n", 0, match.start())
+
+            # 4. Deep wiki links from repo docs: page + heading anchor.
+            for match in WIKI_LINK_RE.finditer(text):
+                if in_code_fence(doc_line_of(match), lines):
+                    continue
+                wiki_refs += 1
+                name, anchor = match.group(1), match.group(2)
+                name = name.removesuffix(".md")
+                if name not in pages:
+                    broken.append(f"{doc.name}: wiki page not found: {name}")
+                    continue
+                if anchor:
+                    anchors = heading_anchors(pages[name].read_text(encoding="utf-8"))
+                    if anchor not in anchors:
+                        broken.append(
+                            f"{doc.name}: anchor #{anchor} not found in wiki page {name}"
+                        )
+
+            # 5. Backticked page references: exact = valid, normalized match
+            #    = naming drift, everything else = code identifier (ignored).
+            #    Drift is only reported for separator-containing tokens
+            #    ("Getting Started", "troubleshooting_und_faq"); single-word
+            #    case collisions ("streaming" vs the Streaming page) are
+            #    legitimate identifiers such as commit scopes.
+            for token in BACKTICK_RE.findall(text):
+                if token not in pages and re.search(r"[\s_\-]", token):
+                    canonical = page_keys.get(page_key(token))
+                    if canonical is not None:
+                        broken.append(
+                            f"{doc.name}: naming drift `{token}` -> use `{canonical}`"
+                        )
+
     total_external = len(external_checked)
-    print(
+    summary = (
         f"checked {interwiki} interwiki link(s), {repo_docs} repo-doc link(s), "
         f"{total_external} external URL(s) "
         f"across {len(list(wiki.glob('*.md')))} wiki page(s)"
     )
+    if args.check_repo_docs:
+        summary += f", {wiki_refs} wiki reference(s) in repo docs"
+    print(summary)
     if broken:
         print("wiki link audit FAILED:")
         for item in broken:
