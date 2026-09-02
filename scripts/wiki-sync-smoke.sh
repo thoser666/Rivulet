@@ -10,9 +10,9 @@ set -euo pipefail
 #   2. every English page has a -de pair and the language-switch links are
 #      present (check-wiki-translations.py);
 #   3. the i18n drift check of sync-wiki-translations.py passes in --check mode.
-#   4. every wiki link into the repo docs exists and its #anchor matches a
-#      real heading (audit-wiki-links.py) — catches anchor drift that plain
-#      HTTP checks cannot see.
+#   4. every wiki link resolves: interwiki pages + anchors, repo-doc files
+#      + heading anchors, and external URLs are reachable (network required;
+#      export WIKI_LINK_AUDIT_EXTRA=--skip-external for offline runs).
 #
 # Unlike the scheduled CI job it never fetches or pushes; it only inspects the
 # clone you already have. Clone it once with:
@@ -97,12 +97,12 @@ else
 fi
 echo
 
-# --- 4. repo-doc link audit (audit-wiki-links.py) --------------------------
-echo "-- 4. repo-doc link audit"
-if python3 scripts/audit-wiki-links.py "$CLONE"; then
-  echo "ok: all repo-doc links resolve (files + anchors)"
+# --- 4. full wiki link audit (audit-wiki-links.py) -------------------------
+echo "-- 4. wiki link audit (interwiki + repo-docs + external)"
+if python3 scripts/audit-wiki-links.py "$CLONE" ${WIKI_LINK_AUDIT_EXTRA:-}; then
+  echo "ok: all wiki links resolve (pages, anchors, URLs)"
 else
-  fail "audit-wiki-links.py found broken repo-doc links"
+  fail "audit-wiki-links.py found broken wiki links"
 fi
 echo
 

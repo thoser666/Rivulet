@@ -24,7 +24,7 @@ jobs:
         run: python3 scripts/check-wiki-translations.py .freebuff-rivulet-wiki
       - name: Check wiki links and translation drift
         run: python3 scripts/sync-wiki-translations.py --check .freebuff-rivulet-wiki
-      - name: Audit repo-doc links (files + heading anchors)
+      - name: Audit wiki links (interwiki, repo-docs, external URLs)
         run: python3 scripts/audit-wiki-links.py .freebuff-rivulet-wiki --develop-from-origin
       - name: Publish synchronized wiki changes
         if: github.event_name == 'schedule' && github.repository_owner == 'thoser666' && env.WIKI_SYNC_TOKEN != ''

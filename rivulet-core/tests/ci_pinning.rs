@@ -1082,25 +1082,35 @@ fn rust_toolchain_is_pinned_for_local_and_ci_parity() {
 
 #[test]
 fn wiki_repo_doc_link_audit_is_wired_up() {
-    // Wiki pages link into the versioned repo docs; GitHub renders those
-    // links as 200 even when the #anchor drifted. The auditor validates
-    // files + heading anchors, runs in the scheduled wiki workflow against
-    // origin/develop, and is part of the local sync smoke.
+    // Wiki pages link to three drifting kinds of targets: other wiki pages,
+    // the versioned repo docs (GitHub serves them with HTTP 200 even when
+    // the #anchor is gone), and external URLs. The auditor validates all
+    // three — interwiki pages + anchors, repo-doc files + GitHub heading
+    // slugs, external URL reachability — runs in the scheduled wiki workflow
+    // against origin/develop, and is part of the local sync smoke.
     let auditor = read("scripts/audit-wiki-links.py");
     assert!(
         auditor.contains("github_slug") && auditor.contains("heading_anchors"),
         "the auditor must reproduce GitHub's heading-anchor slugs"
     );
+    assert!(
+        auditor.contains("url_reachable") && auditor.contains("--skip-external"),
+        "the auditor must check external URL reachability with an offline skip"
+    );
+    assert!(
+        auditor.contains("in_code_fence"),
+        "template/example links inside code fences must be ignored"
+    );
     let workflow = read(".github/workflows/wiki-translations.yml");
     assert!(
         workflow.contains("scripts/audit-wiki-links.py")
             && workflow.contains("--develop-from-origin"),
-        "the wiki workflow must run the repo-doc link audit"
+        "the wiki workflow must run the full link audit"
     );
     let smoke = read("scripts/wiki-sync-smoke.sh");
     assert!(
-        smoke.contains("audit-wiki-links.py"),
-        "the local sync smoke must include the repo-doc link audit"
+        smoke.contains("audit-wiki-links.py") && smoke.contains("WIKI_LINK_AUDIT_EXTRA"),
+        "the local sync smoke must include the full link audit (offline override)"
     );
 }
 
