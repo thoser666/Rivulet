@@ -1180,7 +1180,10 @@ mod tests {
         assert_eq!(set["cmd"], "SET_ACTIVITY");
         assert_eq!(set["args"]["pid"], std::process::id());
         assert_eq!(set["args"]["activity"]["type"], 0);
-        assert_eq!(set["args"]["activity"]["state"], "Recording");
+        // First card line carries the status label; the game name lives in
+        // `state` and is omitted when no game is selected.
+        assert_eq!(set["args"]["activity"]["details"], "Recording");
+        assert!(set["args"]["activity"]["state"].is_null());
 
         // The shared connection state must reflect the successful handshake so
         // the GUI can show "connected" instead of only the plain game card.
