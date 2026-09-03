@@ -95,3 +95,6 @@ bench/
 fuzz/target/
 fuzz/artifacts/
 fuzz/coverage/
+
+# OBS upstream check: last-checked release tag (runtime artifact, persisted via actions cache)
+/scripts/.obs-upstream-state.json

@@ -1627,6 +1627,36 @@ fn obs_upstream_candidates_doc_keeps_both_generation_markers() {
 }
 
 #[test]
+fn obs_upstream_check_persists_checked_release_tag_across_runs() {
+    // Delta tracking needs the last-checked release to survive between
+    // weekly runs. The checker records it in a gitignored state file
+    // (scripts/.obs-upstream-state.json) that the workflow restores from
+    // and saves back to the actions cache — never a repo commit, so the
+    // workflow keeps its contents:read-only permission.
+    let workflow = read(".github/workflows/obs-upstream.yml");
+    assert!(
+        workflow.contains("actions/cache@")
+            && workflow.contains("scripts/.obs-upstream-state.json")
+            && workflow.contains("obs-upstream-state-${{ github.run_id }}")
+            && workflow.contains("restore-keys")
+            && workflow.contains("obs-upstream-state-"),
+        "the OBS workflow must persist the checked-release state via the actions cache"
+    );
+    let script = read("scripts/check-obs-upstream.py");
+    assert!(
+        script.contains("def persist_state(")
+            && script.contains("def previous_tag_from(")
+            && script.contains("persist_state(release)"),
+        "the checker must write the checked tag and read it back on the next run"
+    );
+    let gitignore = read(".gitignore");
+    assert!(
+        gitignore.contains("/scripts/.obs-upstream-state.json"),
+        "the state file must stay a gitignored runtime artifact"
+    );
+}
+
+#[test]
 fn tag_based_release_attaches_checksums_and_generated_notes() {
     // The beta/rc/stable tag path must ship the same release hygiene as the
     // alpha channel: a SHA256SUMS manifest over the attached assets (the

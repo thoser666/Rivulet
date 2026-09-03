@@ -30,6 +30,16 @@ The workflow does not modify `develop`, create issues, or automatically change
 the parity checklist: release notes are editorial and need human classification.
 The generated candidate document is a review queue, not product approval.
 
+### Delta tracking across runs
+
+The report shows `Previous checked release:` — the tag the checker verified on
+the run before. That tag is recorded in `scripts/.obs-upstream-state.json`, a
+gitignored runtime artifact the workflow restores from and saves back to the
+**actions cache** (`obs-upstream-state-*`, same pattern as the fuzz corpus). No
+repo write is involved, so the workflow keeps `contents: read` only. On the
+first run (no cache entry yet) the previous tag reads as `none`; a corrupt
+state file degrades to `none` as well instead of failing the run.
+
 ## Local usage
 
 ```bash

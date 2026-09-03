@@ -5,8 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import sys
+import tempfile
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +27,38 @@ def load_catalog() -> list[dict]:
 
 def load_vision() -> dict:
     return json.loads(VISION.read_text(encoding="utf-8"))
+
+
+def previous_tag_from(path: Path) -> str | None:
+    """Read the last checked release tag from a state file, if any.
+
+    The state file is a runtime artifact (restored from the actions cache in
+    CI, never committed), so a missing or corrupt file simply means "no
+    previous check" — never a hard failure.
+    """
+    if not path.exists():
+        return None
+    try:
+        tag = json.loads(path.read_text(encoding="utf-8")).get("tag_name")
+    except (json.JSONDecodeError, OSError):
+        return None
+    return tag or None
+
+
+def persist_state(release: dict, path: Path = STATE) -> None:
+    """Remember the checked release so the next run can report the delta.
+
+    Written atomically (temp file + rename) so a crash mid-write cannot
+    corrupt the state the next run reads back. The workflow persists this
+    file across runs through the actions cache.
+    """
+    payload = {
+        "tag_name": release.get("tag_name", "unknown"),
+        "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
 
 
 def fetch_release() -> dict:
@@ -96,7 +131,7 @@ def report(release: dict, fixture: bool = False) -> str:
     vision = load_vision()
     lines = candidate_lines(release.get("body", ""))
     covered, review = classify(lines, load_catalog())
-    previous = json.loads(STATE.read_text(encoding="utf-8")).get("tag_name") if STATE.exists() else None
+    previous = previous_tag_from(STATE)
     result = [f"## OBS upstream check — {release.get('tag_name', 'unknown')}", "", f"Source: {'fixture' if fixture else 'GitHub API'}", f"Previous checked release: {previous or 'none'}", f"Feature-note candidates: {len(lines)}", ""]
     if review:
         result += ["### Needs review — vision fit", "", "| Candidate | Vision decision | Matching pillars |", "| --- | --- | --- |"]
@@ -118,6 +153,19 @@ def self_test() -> None:
     assert strong_fit_rows(candidate_lines(fixture["body"]), vision)
     label, matches = vision_fit("New deterministic WebGPU stream API", vision)
     assert label == "strong-fit" and {"deterministic", "modern-rendering", "streamer-value"}.issubset(matches)
+    # State round-trip: persist a checked release, then the delta tracking
+    # must report it as the previous tag on the next run, and a corrupt or
+    # missing state file must degrade to "none" instead of crashing.
+    tmp_dir = tempfile.mkdtemp(prefix="obs-state-test-")
+    try:
+        state = Path(tmp_dir) / "state.json"
+        assert previous_tag_from(state) is None, "missing state must read as no previous tag"
+        persist_state(fixture, state)
+        assert previous_tag_from(state) == "30.0.0", "persisted tag must be read back"
+        state.write_text("{ not json", encoding="utf-8")
+        assert previous_tag_from(state) is None, "corrupt state must degrade to none"
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
     print("OK: OBS upstream checker self-test")
 
 
@@ -135,6 +183,10 @@ def main() -> int:
         if args.update_doc:
             rows = strong_fit_rows(candidate_lines(release.get("body", "")), load_vision())
             update_candidate_doc(release, rows)
+        if not args.fixture:
+            # Persist the tag so the next run can show the delta; fixture
+            # runs (tests/demos) must never touch the real state file.
+            persist_state(release)
         print(report(release, fixture=bool(args.fixture)))
         return 0
     except Exception as exc:

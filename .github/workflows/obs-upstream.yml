@@ -16,6 +16,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Restore last-checked release state from cache
+        # Delta tracking: the checker records the tag it verified last run
+        # in scripts/.obs-upstream-state.json. That file is a runtime
+        # artifact (gitignored, never committed) and is carried across runs
+        # through the actions cache — the unique run-id key never hits, so
+        # restore-keys falls back to the previous run's save.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: scripts/.obs-upstream-state.json
+          key: obs-upstream-state-${{ github.run_id }}
+          restore-keys: |
+            obs-upstream-state-
+
       - name: Validate vision criteria and run deterministic self-test
         run: |
           python3 -m json.tool scripts/vision-criteria.json >/dev/null
@@ -31,6 +44,18 @@ jobs:
       - name: Publish report
         if: always()
         run: cat "$RUNNER_TEMP/obs-upstream-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save last-checked release state to cache
+        # Saved on every run (also on failure): on a failed fetch the script
+        # never wrote the state, so the restored previous value is simply
+        # carried forward unchanged.
+        if: always()
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: scripts/.obs-upstream-state.json
+          key: obs-upstream-state-${{ github.run_id }}
+          restore-keys: |
+            obs-upstream-state-
 
       - name: Upload report artifact
         if: always()

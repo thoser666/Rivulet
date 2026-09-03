@@ -20,7 +20,7 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | --- | --- | --- | --- |
 | `EmbarkStudios/cargo-deny-action` | `v2.1.1` | `3c6349835b2b7b196a839186cb8b78e02f7b5f25` | security.yml |
 | `actions-rust-lang/audit` | `v1.2.7` | `72c09e02f132669d52284a3323acdb503cfc1a24` | security.yml |
-| `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml |
+| `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, obs-upstream.yml |
 | `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | build-package.yml, ci.yml, distribution-readiness.yml, fuzz-deep.yml, nightly.yml, obs-upstream.yml, release.yml, scorecard.yml, security.yml, signing-e2e.yml, wiki-translations.yml |
 | `actions/dependency-review-action` | `v5.0.0` | `a1d282b36b6f3519aa1f3fc636f609c47dddb294` | security.yml |
 | `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | ci.yml, release.yml |
