@@ -495,7 +495,7 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Mobile remote & MIDI | Open (M5) |
 | Cloud & telemetry | Partial (M4 S3 SigV4 PUT upload after stop; multipart + GUI settings open) |
 | Discord Rich Presence | Implemented (optional, privacy-safe activity status; M5, see docs/activity-status.md) |
-| Chat dock & alerts | Open (M5: Twitch IRC chat view + follow/sub/donation alerts, see docs/obs-vision-roadmap.md) |
+| Chat dock & alerts | Partial (M5: Twitch IRC + Kick WebSocket + YouTube polling chat in the Stream workspace, see docs/twitch-chat.md; follow/sub/donation alerts open, see docs/obs-vision-roadmap.md) |
 | Multi-language support | Partial (DE/EN wired) |
 | Platform parity (Windows/macOS) | Open |
 | AI chat assistant | Open (M9) |

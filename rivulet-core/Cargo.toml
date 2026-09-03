@@ -26,6 +26,10 @@ sha2 = { workspace = true }
 hmac = { workspace = true }
 base64 = { workspace = true }
 keyring = { version = "3.6", default-features = false }
+# Kick chat dock: Pusher WebSocket client (same crate/version as the
+# obs-websocket server, already in the lock file).
+tungstenite = "0.26"
+
 
 gstreamer = "0.25"
 gstreamer-app = "0.25"

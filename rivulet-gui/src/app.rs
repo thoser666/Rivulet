@@ -673,28 +673,31 @@ pub struct RivuletApp {
     #[serde(skip)]
     discord_payload_warning: Option<rivulet_core::discord::PayloadIssue>,
 
-    /// Twitch chat dock: channel to join (persisted).
+    /// Chat dock: selected platform (Twitch, Kick or YouTube). Persisted;
+    /// defaults to Twitch for existing configs.
+    #[serde(default)]
+    chat_platform: rivulet_core::ChatPlatform,
+    /// Chat dock: channel to join — Twitch channel / Kick slug / YouTube
+    /// video id (persisted).
     chat_channel: String,
-    /// Twitch chat dock: OAuth token for authenticated reads (persisted, but
-    /// never shown in logs/UI). Empty connects anonymously.
+    /// Chat dock: token — Twitch OAuth (`oauth:...`) or Kick session token
+    /// (persisted, but never shown in logs/UI). Empty connects anonymously.
     chat_oauth_token: String,
-    /// Twitch chat dock: pending message text to send on Enter. Not
-    /// persisted.
+    /// Chat dock: pending message text to send on Enter. Not persisted.
     #[serde(skip)]
     chat_input: String,
-    /// Twitch chat dock: running worker handle. Not persisted.
+    /// Chat dock: running worker handle. Not persisted.
     #[serde(skip)]
-    chat_worker: Option<rivulet_core::TwitchChat>,
-    /// Twitch chat dock: messages collected from the worker since connect.
-    /// Not persisted. Bounded to the newest entries (oldest dropped).
+    chat_worker: Option<rivulet_core::Chat>,
+    /// Chat dock: messages collected from the worker since connect. Not
+    /// persisted. Bounded to the newest entries (oldest dropped).
     #[serde(skip)]
     chat_messages: Vec<rivulet_core::ChatMessage>,
-    /// Twitch chat dock: pending connect/disconnect action (processed once
-    /// per frame). Not persisted.
+    /// Chat dock: pending connect/disconnect action (processed once per
+    /// frame). Not persisted.
     #[serde(skip)]
     chat_action_pending: Option<ChatAction>,
-    /// Twitch chat dock: last connection state shown to the user. Not
-    /// persisted.
+    /// Chat dock: last connection state shown to the user. Not persisted.
     #[serde(skip)]
     chat_state: rivulet_core::ChatConnState,
 
@@ -1191,6 +1194,7 @@ impl Default for RivuletApp {
             chat_worker: None,
             chat_messages: Vec::new(),
             chat_action_pending: None,
+            chat_platform: rivulet_core::ChatPlatform::default(),
             chat_state: rivulet_core::ChatConnState::Off,
             global_hotkeys_dirty: false,
             global_hotkeys: None,
@@ -4317,21 +4321,23 @@ impl RivuletApp {
         }
     }
 
-    /// Process pending Twitch-chat actions and drain the worker's message
+    /// Process pending chat-dock actions and drain the worker's message
     /// channel into the bounded list. Non-blocking: called once per frame.
-    fn reconcile_twitch_chat(&mut self) {
+    /// The worker is rebuilt for the currently selected platform (Twitch
+    /// IRC, Kick WebSocket or YouTube polling).
+    fn reconcile_chat(&mut self) {
         match self.chat_action_pending.take() {
             Some(ChatAction::Connect) => {
                 if let Some(mut worker) = self.chat_worker.take() {
                     worker.disconnect();
                 }
                 self.chat_messages.clear();
-                let cfg = rivulet_core::TwitchChatConfig {
-                    channel: self.chat_channel.trim().to_owned(),
-                    oauth_token: self.chat_oauth_token.clone(),
-                    ..Default::default()
-                };
-                self.chat_worker = Some(rivulet_core::TwitchChat::new(&cfg));
+                let cfg = rivulet_core::ChatConfig::new(
+                    self.chat_platform,
+                    self.chat_channel.trim().to_owned(),
+                    self.chat_oauth_token.clone(),
+                );
+                self.chat_worker = Some(rivulet_core::Chat::new(&cfg));
                 self.chat_state = self
                     .chat_worker
                     .as_ref()
@@ -4367,10 +4373,11 @@ impl RivuletApp {
     }
 
     /// Send a chat message through the running worker. Twitch rejects
-    /// PRIVMSG from the anonymous `justinfan` nick, so sending requires an
-    /// authenticated connection (a configured OAuth token with `chat:send`);
-    /// the UI only enables the input under that condition. Returns whether the
-    /// message was handed to the worker (non-blocking enqueue).
+    /// PRIVMSG from the anonymous `justinfan` nick and Kick rejects
+    /// anonymous sends, so both require a token; YouTube chat is read-only
+    /// (anonymous clients cannot send). The UI only enables the input under
+    /// those conditions. Returns whether the message was handed to the
+    /// worker (non-blocking enqueue).
     fn send_chat_message(&mut self, text: String) -> bool {
         let text = text.trim().to_owned();
         if text.is_empty() || self.chat_oauth_token.trim().is_empty() {
@@ -5063,10 +5070,37 @@ impl RivuletApp {
         ui.label(egui::RichText::new(self.tr("chat_title")).strong());
         ui.separator();
 
+        // Platform selector: Twitch (IRC), Kick (WebSocket), YouTube
+        // (polling). Switching disconnects the running worker on the next
+        // reconcile (the pending connect uses the new platform).
+        ui.horizontal_wrapped(|ui| {
+            ui.label(self.tr("chat_platform"));
+            egui::ComboBox::from_id_salt("chat_platform")
+                .selected_text(self.chat_platform.label())
+                .show_ui(ui, |ui| {
+                    for candidate in rivulet_core::ChatPlatform::all() {
+                        if ui
+                            .selectable_value(&mut self.chat_platform, candidate, candidate.label())
+                            .clicked()
+                        {
+                            self.chat_action_pending = Some(ChatAction::Disconnect);
+                        }
+                    }
+                });
+        });
+
         // Connection controls. Wrapped so the connect/disconnect button and
         // status stay reachable in a narrow Stream workspace.
-        let channel_hint = self.tr("chat_channel_hint");
-        let oauth_hint = self.tr("chat_oauth_hint");
+        let channel_hint = match self.chat_platform {
+            rivulet_core::ChatPlatform::Twitch => self.tr("chat_channel_hint"),
+            rivulet_core::ChatPlatform::Kick => self.tr("chat_channel_hint_kick"),
+            rivulet_core::ChatPlatform::YouTube => self.tr("chat_channel_hint_youtube"),
+        };
+        let oauth_hint = match self.chat_platform {
+            rivulet_core::ChatPlatform::Twitch => self.tr("chat_oauth_hint"),
+            rivulet_core::ChatPlatform::Kick => self.tr("chat_token_hint_kick"),
+            rivulet_core::ChatPlatform::YouTube => self.tr("chat_token_hint_youtube"),
+        };
         ui.horizontal_wrapped(|ui| {
             ui.label(self.tr("chat_channel_label"));
             ui.add(
@@ -5098,17 +5132,25 @@ impl RivuletApp {
             );
         });
 
-        // Optional authenticated read (privacy-safe: never echoed back).
-        ui.horizontal_wrapped(|ui| {
-            ui.label(self.tr("chat_oauth_label"));
-            ui.add(
-                egui::TextEdit::singleline(&mut self.chat_oauth_token)
-                    .password(true)
-                    .hint_text(oauth_hint)
-                    .desired_width(220.0),
-            );
-        });
-        ui.small(self.tr("chat_note"));
+        // Optional token for authenticated reads/sends (privacy-safe: never
+        // echoed back). YouTube has no token field — anonymous polling only.
+        if self.chat_platform != rivulet_core::ChatPlatform::YouTube {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(self.tr("chat_oauth_label"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.chat_oauth_token)
+                        .password(true)
+                        .hint_text(oauth_hint)
+                        .desired_width(220.0),
+                );
+            });
+        }
+        let note = match self.chat_platform {
+            rivulet_core::ChatPlatform::Twitch => self.tr("chat_note"),
+            rivulet_core::ChatPlatform::Kick => self.tr("chat_note_kick"),
+            rivulet_core::ChatPlatform::YouTube => self.tr("chat_note_youtube"),
+        };
+        ui.small(note);
         ui.add_space(4.0);
 
         // Message list (newest at the bottom, autoscroll to the last message).
@@ -5151,11 +5193,14 @@ impl RivuletApp {
         }
 
         // Reply input: sending requires an authenticated connection (Twitch
-        // rejects PRIVMSG from the anonymous nick), so the field is only
-        // enabled when connected and an OAuth token is configured. Enter
-        // sends; the input is cleared immediately after the enqueue.
+        // rejects PRIVMSG from the anonymous nick, Kick rejects anonymous
+        // sends), so the field is only enabled when connected and a token is
+        // configured. YouTube chat is read-only without an authenticated
+        // browser session, so the input is replaced by a hint. Enter sends;
+        // the input is cleared immediately after the enqueue.
         let can_send = self.chat_state == rivulet_core::ChatConnState::Connected
-            && !self.chat_oauth_token.trim().is_empty();
+            && !self.chat_oauth_token.trim().is_empty()
+            && self.chat_platform != rivulet_core::ChatPlatform::YouTube;
         if can_send {
             let send_hint = self.tr("chat_send_hint");
             let send_button = self.tr("chat_send");
@@ -5172,6 +5217,8 @@ impl RivuletApp {
                     self.chat_action_pending = Some(ChatAction::Send(text));
                 }
             });
+        } else if self.chat_platform == rivulet_core::ChatPlatform::YouTube {
+            ui.small(self.tr("chat_read_only"));
         } else {
             ui.small(self.tr("chat_send_locked"));
         }
@@ -5794,7 +5841,7 @@ impl eframe::App for RivuletApp {
 
         // Reconcile the Twitch chat dock: process connect/disconnect actions
         // and drain incoming chat messages (non-blocking).
-        self.reconcile_twitch_chat();
+        self.reconcile_chat();
 
         // Apply the color scheme (fonts + palette + preference) on startup
         // and whenever the user changes it in Settings.
@@ -10201,14 +10248,13 @@ mod tests {
         let mut app = RivuletApp {
             chat_oauth_token: "oauth:abc123".to_owned(),
             chat_channel: "rivulet".to_owned(),
-            chat_worker: Some(rivulet_core::TwitchChat::new(
-                &rivulet_core::TwitchChatConfig {
-                    endpoint: "127.0.0.1:1".to_owned(),
-                    channel: "rivulet".to_owned(),
-                    oauth_token: "oauth:abc123".to_owned(),
-                    ..Default::default()
-                },
-            )),
+            chat_worker: Some(rivulet_core::Chat::new(&rivulet_core::ChatConfig {
+                platform: rivulet_core::ChatPlatform::Twitch,
+                twitch_endpoint: "127.0.0.1:1".to_owned(),
+                channel: "rivulet".to_owned(),
+                token: "oauth:abc123".to_owned(),
+                ..Default::default()
+            })),
             chat_state: rivulet_core::ChatConnState::Connected,
             ..Default::default()
         };
@@ -10251,8 +10297,9 @@ mod tests {
     #[test]
     fn chat_send_input_is_gated_on_connected_and_token_in_source() {
         // Source contract: the reply input must only render when connected and
-        // an OAuth token is configured; otherwise a lock hint is shown. This
-        // keeps the UI from offering an input that Twitch would reject.
+        // a token is configured; otherwise a lock hint is shown (YouTube shows
+        // a read-only hint instead). This keeps the UI from offering an input
+        // that Twitch/Kick would reject or YouTube cannot accept.
         let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
         let draw = source
             .split_once("fn draw_chat_dock")
@@ -10262,8 +10309,18 @@ mod tests {
         assert!(draw.contains("chat_state == rivulet_core::ChatConnState::Connected"));
         assert!(draw.contains("chat_oauth_token.trim().is_empty()"));
         assert!(draw.contains("ChatAction::Send"));
+        assert!(draw.contains("chat_read_only"));
+        assert!(draw.contains("self.chat_platform != rivulet_core::ChatPlatform::YouTube"));
+        assert!(draw.contains("ChatPlatform::all()"));
         let i18n = std::fs::read_to_string("../rivulet-core/src/i18n.rs").expect("i18n readable");
-        for key in ["chat_send", "chat_send_hint", "chat_send_locked"] {
+        for key in [
+            "chat_send",
+            "chat_send_hint",
+            "chat_send_locked",
+            "chat_read_only",
+            "chat_note_kick",
+            "chat_note_youtube",
+        ] {
             let k = format!("\"{key}\"");
             assert!(
                 i18n.matches(&k).count() >= 2,

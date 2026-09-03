@@ -1916,7 +1916,7 @@ fn twitch_chat_dock_is_wired_and_covered() {
         "the chat must be part of the Stream workspace, not a sidebar view"
     );
     assert!(
-        app.contains("fn draw_chat_dock") && app.contains("fn reconcile_twitch_chat"),
+        app.contains("fn draw_chat_dock") && app.contains("fn reconcile_chat"),
         "the chat dock must have a draw + reconcile path"
     );
     assert!(
@@ -1930,13 +1930,13 @@ fn twitch_chat_dock_is_wired_and_covered() {
     );
     let i18n = read("rivulet-core/src/i18n.rs");
     assert!(
-        i18n.contains("(\"chat_title\", \"Twitch Chat\")")
-            && i18n.contains("(\"chat_title\", \"Twitch-Chat\")"),
+        i18n.contains("(\"chat_title\", \"Chat dock\")")
+            && i18n.contains("(\"chat_title\", \"Chat-Dock\")"),
         "the chat view must be localized in DE and EN"
     );
     let docs = read("docs/twitch-chat.md");
     assert!(
-        docs.contains("# Twitch Chat Dock") && docs.contains("parse_irc_line"),
+        docs.contains("# Chat Dock") && docs.contains("parse_irc_line"),
         "the chat dock must be documented with its architecture"
     );
     // Sending replies: the worker must expose a non-blocking send that is
@@ -1960,6 +1960,68 @@ fn twitch_chat_dock_is_wired_and_covered() {
     assert!(
         app.contains("chat_send_locked"),
         "the UI must show a lock hint when sending is unavailable"
+    );
+}
+
+#[test]
+fn chat_dock_supports_kick_and_youtube() {
+    // M5 community dock: besides Twitch IRC the chat dock can connect to
+    // Kick (Pusher WebSocket) and YouTube (Innertube polling). Each platform
+    // worker must keep a deterministic local-listener smoke test, the GUI
+    // must offer a platform selector and gate sending correctly (YouTube is
+    // read-only), and the feature must be localized and documented.
+    let core = read("rivulet-core/src/lib.rs");
+    assert!(
+        core.contains("pub mod kick_chat") && core.contains("pub mod youtube_chat"),
+        "the chat modules must be exported from core"
+    );
+    let kick = read("rivulet-core/src/kick_chat.rs");
+    assert!(
+        kick.contains("pub fn parse_kick_event")
+            && kick.contains("pub fn kick_chatroom_id")
+            && kick.contains("worker_connects_and_delivers_messages_to_local_ws_server"),
+        "the Kick worker must have a pure parser, chatroom resolution and a local WS smoke test"
+    );
+    let youtube = read("rivulet-core/src/youtube_chat.rs");
+    assert!(
+        youtube.contains("pub fn parse_youtube_payload")
+            && youtube.contains("pub fn youtube_initial_continuation")
+            && youtube.contains("worker_connects_and_delivers_messages_to_local_http_listener"),
+        "the YouTube worker must have pure parsers and a local HTTP smoke test"
+    );
+    let chat = read("rivulet-core/src/chat.rs");
+    assert!(
+        chat.contains("pub enum ChatPlatform")
+            && chat.contains("pub struct ChatConfig")
+            && chat.contains("pub fn can_send"),
+        "the chat facade must expose a platform enum, config and send capability"
+    );
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(
+        app.contains("chat_platform") && app.contains("ChatPlatform::all()"),
+        "the GUI must offer a chat platform selector"
+    );
+    assert!(
+        app.contains("rivulet_core::Chat::new(&cfg)")
+            && app.contains("rivulet_core::ChatConfig::new"),
+        "the GUI reconcile must build the platform dispatch config"
+    );
+    assert!(
+        app.contains("chat_read_only") && app.contains("ChatPlatform::YouTube"),
+        "YouTube chat must be marked read-only in the GUI"
+    );
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.contains("(\"chat_note_kick\", ")
+            && i18n.contains("(\"chat_note_youtube\", ")
+            && i18n.contains("(\"chat_channel_hint_kick\", ")
+            && i18n.contains("(\"chat_channel_hint_youtube\", "),
+        "Kick/YouTube chat keys must exist in both locales"
+    );
+    let docs = read("docs/twitch-chat.md");
+    assert!(
+        docs.contains("Kick") && docs.contains("YouTube"),
+        "the chat dock documentation must cover Kick and YouTube"
     );
 }
 

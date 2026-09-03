@@ -1,91 +1,119 @@
-# Twitch Chat Dock
+# Chat Dock (Twitch / Kick / YouTube)
 
-Rivulet can display the Twitch chat of a channel directly in the app — no
-browser source or overlay needed for monitoring chat while streaming.
+Rivulet can display the live chat of a streaming platform directly in the
+app — no browser source or overlay needed for monitoring chat while
+streaming. The dock supports **Twitch** (IRC), **Kick** (Pusher WebSocket)
+and **YouTube** (Innertube polling) from one unified UI.
 
 ## Features
 
-- **Native IRC client** (`rivulet-core::twitch_chat`): connects to
+- **Platform selector**: the dock header picks the platform — Twitch, Kick
+  or YouTube. Switching disconnects the running worker; the channel/token
+  fields and hints adapt to the selected platform.
+- **Native Twitch IRC client** (`rivulet-core::twitch_chat`): connects to
   `irc.chat.twitch.tv`, handles the CAP/PASS/NICK/JOIN handshake, answers
   PING/PONG keepalives and parses IRCv3 tags (display name, color, badges,
   broadcaster marker) plus `/me` actions.
+- **Kick WebSocket client** (`rivulet-core::kick_chat`): resolves the
+  channel slug to its chatroom id via the Kick API, connects to the Pusher
+  WebSocket, subscribes to the chatroom channel and parses
+  `App\Events\ChatMessageEvent` payloads (username, color, badges).
+- **YouTube polling client** (`rivulet-core::youtube_chat`): fetches the
+  live-chat page to extract the continuation token, then polls the Innertube
+  `get_live_chat` endpoint for new messages (author, color, badges). Best
+  effort: YouTube's endpoints are not a stable public API, so a failure
+  surfaces as a connection error instead of pretending chat works.
 - **Chat dock on the Stream page**: the chat is embedded in the **Stream**
   workspace (Meld-style single broadcast page) — left column next to the
   stream status/health, above the compact audio section. Channel input,
-  connect/disconnect, optional OAuth token, and a bounded, auto-scrolling
-  message list render in the dock; the chat no longer has its own sidebar
-  entry.
-- **Anonymous by default**: read-only chat works without any token (Twitch
-  allows anonymous IRC reads). With an OAuth token (`chat:read`) you get
-  colors and badges for your own messages.
-- **Reply in chat**: with an OAuth token that has the **`chat:send`** scope,
-  a message input appears under the chat list — type a message and press
-  Enter (or click **Send**) and it is written to the joined channel via
-  `PRIVMSG`. Sending is **non-blocking** (enqueued to the worker thread) and
-  the input is only enabled while connected **and** a token is configured,
-  because Twitch rejects messages from the anonymous read-only nick.
+  connect/disconnect, optional token, and a bounded, auto-scrolling message
+  list render in the dock; the chat no longer has its own sidebar entry.
+- **Anonymous by default**: read-only chat works without any token on
+  Twitch and Kick. With a token you get colors and badges for your own
+  messages.
+- **Reply in chat**: Twitch and Kick show a message input under the chat
+  list when connected and a token is configured (Twitch OAuth `chat:send`,
+  Kick session token) — type and press Enter (or click **Send**). Sending
+  is **non-blocking** (enqueued to the worker thread). **YouTube is
+  read-only** (anonymous clients cannot send); a hint replaces the input.
 - **Privacy-safe**: tokens are never written to logs or the message model;
   the message serialization is covered by a dedicated test.
 
 ## Setup
 
 1. Open the **Stream** tab — the chat dock sits in the left column.
-2. Enter the channel name (without `#`), e.g. `yourtwitchname`.
-3. Click **Connect**. The status line shows `Connected` / `Disconnected —
+2. Pick the platform (default: Twitch).
+3. Enter the target:
+   - **Twitch**: channel name without `#`, e.g. `yourtwitchname`.
+   - **Kick**: channel slug, e.g. `forsen`.
+   - **YouTube**: live video id, e.g. the `v=` value of the live stream URL.
+4. Click **Connect**. The status line shows `Connected` / `Disconnected —
    retrying` / `Off`.
-4. Optional: paste an OAuth token (`oauth:...`) with the `chat:read` scope
-   into the token field **before** connecting. To **reply** in the chat, the
-   token needs the additional **`chat:send`** scope (generate one at
-   https://twitchtokengenerator.com or in your Twitch developer console);
-   without it the message input stays disabled with a hint.
+5. Optional: paste a token into the token field **before** connecting —
+   Twitch OAuth (`oauth:...`, `chat:read` to read with colors, `chat:send`
+   to reply) or a Kick session token (`x-sess-token`, required to send).
+   YouTube needs no token.
 
 ## Configuration notes
 
-- The channel is lowercased on connect (Twitch channel names are
-  case-insensitive).
-- If the worker cannot reach Twitch (offline, no network), it retries with
-  backoff and the view keeps showing the last messages.
+- The Twitch channel is lowercased on connect (case-insensitive).
+- Kick chatroom ids are resolved once per connect and re-resolved on
+  reconnect; the WebSocket URL and API base are overridable (used by the
+  tests against local listeners).
+- If the worker cannot reach the platform (offline, no network, stream
+  ended), it retries with backoff and the view keeps showing the last
+  messages.
 - The message list is bounded to a fixed maximum (`MAX_CHAT_MESSAGES`) so a
   long stream does not grow memory unboundedly.
 
 ## Architecture
 
 ```
-rivulet-core::twitch_chat
-  ├─ parse_irc_line(line) -> Option<ChatMessage>   # pure, deterministic
-  ├─ TwitchChatConfig / ChatConnState / ChatMessage (serde)
-  └─ worker_loop(rx, cfg, stop)                    # dedicated thread, I/O here
+rivulet-core::chat                         # unified facade
+  ├─ ChatPlatform (Twitch / Kick / YouTube) / ChatConfig / Chat
+  ├─ twitch_chat  parse_irc_line -> Option<ChatMessage>   # pure, deterministic
+  ├─ kick_chat    parse_kick_event / kick_chatroom_id     # pure + API resolution
+  └─ youtube_chat parse_youtube_payload / youtube_initial_continuation
+  └─ worker_loop(rx, cfg, stop)            # dedicated thread per platform, I/O here
 
 rivulet-gui::app
   ├─ chat_action_pending / ChatAction               # Connect/Disconnect/Send
-  ├─ reconcile_twitch_chat()                        # one action per frame
-  ├─ send_chat_message(text)                        # token + worker gate
-  ├─ draw_chat_dock(ui, max_list_height)            # inputs + message list + reply,
-  │                                                 #   embedded in the Stream workspace
+  ├─ reconcile_chat()                               # one action per frame
+  ├─ send_chat_message(text)                        # token + platform gate
+  ├─ draw_chat_dock(ui, max_list_height)            # platform selector + inputs
+  │                                                 #   + message list, embedded in
+  │                                                 #   the Stream workspace
   └─ i18n keys: chat_* (DE/EN)
 ```
 
 ## Tests
 
-- `rivulet-core`: parser unit tests (tags, colors, badges, `/me` actions,
-  missing-tag fallback), privacy-safe serialization, disabled-state behavior
-  and an end-to-end smoke test that runs the worker against a **local TCP
-  listener** (deterministic in CI, no real network) — including sending:
-  the listener asserts the worker writes `PRIVMSG #channel :text` back on
-  the same socket after `send_message`.
-- `rivulet-gui`: navigation contract (no standalone chat sidebar entry;
-  chat is part of the Stream workspace), view coverage and i18n parity, plus
+- `rivulet-core`: parser unit tests for all three platforms (Twitch IRC
+  tags/colors/badges/`/me`, Kick chat events, YouTube Innertube payloads +
+  continuation extraction), privacy-safe serialization, disabled-state
+  behavior and end-to-end smoke tests that run the **real workers** against
+  local listeners (deterministic in CI, no real network):
+  - Twitch: local TCP listener asserts CAP/NICK/JOIN, PING→PONG and
+    `PRIVMSG #channel :text` after `send_message`.
+  - Kick: local HTTP listener serves the chatroom resolution and a local
+    WebSocket server (`tungstenite::accept`) delivers a parsed chat event.
+  - YouTube: a local HTTP listener serves the initial page (continuation)
+    and one `get_live_chat` poll response.
+- `rivulet-gui`: navigation contract (no standalone chat sidebar entry; chat
+  is part of the Stream workspace), view coverage and i18n parity, plus
   behavior tests for the send gate (no token / no worker / whitespace are
-  rejected) and a source-contract test that the reply input only renders when
-  connected and a token is configured.
-- `ci_pinning.rs`: guard that the chat dock stays embedded in the Stream
-  workspace (and does not reappear as its own sidebar view), the worker keeps
-  its local-listener smoke test, and the send path
-  (`send_message` / `ChatAction::Send` / `PRIVMSG`) stays covered.
+  rejected, YouTube read-only) and a source-contract test that the reply
+  input only renders when connected, a token is configured and the platform
+  can send.
+- `ci_pinning.rs`: guards that the chat dock stays embedded in the Stream
+  workspace, each platform worker keeps its local-listener smoke test, the
+  send path (`send_message` / `ChatAction::Send` / `PRIVMSG`) stays covered,
+  and Kick/YouTube wiring (platform selector, read-only gate, i18n keys,
+  docs) cannot silently regress.
 
 ## Roadmap
 
 Chat and alerts are tracked in `docs/obs-vision-roadmap.md` (M5
-"Community-Dock": Twitch chat + alert import via the existing browser
-source). Alert overlays (Streamlabs/StreamElements or own EventSub → overlay)
-are a follow-up item.
+"Community-Dock": chat for Twitch/Kick/YouTube + alert import via the
+existing browser source). Alert overlays (Streamlabs/StreamElements or own
+EventSub → overlay) are a follow-up item.
