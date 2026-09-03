@@ -20,12 +20,12 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | --- | --- | --- | --- |
 | `EmbarkStudios/cargo-deny-action` | `v2.1.1` | `3c6349835b2b7b196a839186cb8b78e02f7b5f25` | security.yml |
 | `actions-rust-lang/audit` | `v1.2.7` | `72c09e02f132669d52284a3323acdb503cfc1a24` | security.yml |
-| `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | build-package.yml, ci.yml, nightly.yml |
-| `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | build-package.yml, ci.yml, distribution-readiness.yml, nightly.yml, obs-upstream.yml, release.yml, scorecard.yml, security.yml, signing-e2e.yml, wiki-translations.yml |
+| `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml |
+| `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | build-package.yml, ci.yml, distribution-readiness.yml, fuzz-deep.yml, nightly.yml, obs-upstream.yml, release.yml, scorecard.yml, security.yml, signing-e2e.yml, wiki-translations.yml |
 | `actions/dependency-review-action` | `v5.0.0` | `a1d282b36b6f3519aa1f3fc636f609c47dddb294` | security.yml |
 | `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | ci.yml, release.yml |
-| `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | build-package.yml, ci.yml, obs-upstream.yml, scorecard.yml |
-| `dtolnay/rust-toolchain` | `stable` | `4360b52568e2003a75bf9bc1d59f33a8e3fc893c` | build-package.yml, ci.yml, nightly.yml, security.yml |
+| `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | build-package.yml, ci.yml, fuzz-deep.yml, obs-upstream.yml, scorecard.yml |
+| `dtolnay/rust-toolchain` | `stable` | `4360b52568e2003a75bf9bc1d59f33a8e3fc893c` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, security.yml |
 | `github/codeql-action/analyze` | `v4.37.9` | `cdf488f595d80d6e07e03d4674febd5ab45fa938` | security.yml |
 | `github/codeql-action/autobuild` | `v4.37.9` | `cdf488f595d80d6e07e03d4674febd5ab45fa938` | security.yml |
 | `github/codeql-action/init` | `v4.37.9` | `cdf488f595d80d6e07e03d4674febd5ab45fa938` | security.yml |

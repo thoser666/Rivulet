@@ -1459,6 +1459,40 @@ fn fuzz_targets_cover_the_untrusted_input_parsers() {
 }
 
 #[test]
+fn deep_fuzz_campaign_is_scheduled_with_corpus_persistence() {
+    // The weekly deep campaign is the complement to the push-time smoke: it
+    // must exist, give each target a 10-minute budget, persist the corpus
+    // through the actions cache so coverage accumulates, and stay
+    // triggerable on demand. Without it, the smoke-only gate is the only
+    // fuzzing the project ever does.
+    let deep = read(".github/workflows/fuzz-deep.yml");
+    assert!(
+        deep.contains("schedule:") && deep.contains("0 2 * * 1"),
+        "the deep fuzz workflow must run on a weekly schedule"
+    );
+    assert!(
+        deep.contains("workflow_dispatch:"),
+        "the deep fuzz workflow must be triggerable manually"
+    );
+    assert!(
+        deep.contains("FUZZ_MAX_TOTAL_TIME") && deep.contains("\"600\""),
+        "the deep campaign must budget 10 minutes (600s) per target"
+    );
+    assert!(
+        deep.contains("actions/cache@")
+            && deep.contains("fuzz/corpus/")
+            && deep.contains("restore-keys")
+            && deep.contains("fuzz-corpus-"),
+        "the deep fuzz workflow must persist the corpus via the actions cache"
+    );
+    let smoke = read("scripts/fuzz-smoke.sh");
+    assert!(
+        smoke.contains("FUZZ_MAX_TOTAL_TIME") && smoke.contains("-max_total_time=$MAX_TIME"),
+        "fuzz-smoke.sh must support the deep time-budgeted campaign mode"
+    );
+}
+
+#[test]
 fn shared_memory_frames_are_validated_before_read() {
     // Shared memory is writable by every process in the session, and the
     // writer runs inside the captured game — an untrusted host. The readers
@@ -1527,6 +1561,42 @@ fn alpha_release_runs_are_serialized() {
             && workflow.contains("group: release-alpha")
             && workflow.contains("cancel-in-progress: false"),
         "release.yml must serialize runs via a concurrency group"
+    );
+}
+
+#[test]
+fn alpha_release_notes_are_generated_from_commits_since_last_tag() {
+    // The GitHub release body must be derived from the ACTUAL commits since
+    // the previous tag (grouped by conventional-commit type) rather than
+    // GitHub's PR-based auto-notes, which are sparse for a workflow that
+    // pushes commits directly to develop.
+    let release = read(".github/workflows/release.yml");
+    assert!(
+        release.contains("Generate release notes from commits since last tag")
+            && release.contains("scripts/generate-release-notes.sh")
+            && release.contains("body_path: release-notes.md"),
+        "the release workflow must generate its notes body from the commits since the last tag"
+    );
+    assert!(
+        !release.contains("generate_release_notes: true"),
+        "GitHub's PR-based auto-notes must be replaced by the commit-derived body"
+    );
+    assert!(
+        release.contains("fetch-depth: 0"),
+        "the release checkout must fetch full history + tags for the notes generator"
+    );
+
+    let notes = read("scripts/generate-release-notes.sh");
+    assert!(
+        notes.contains("--self-test")
+            && notes.contains("describe --tags --abbrev=0")
+            && notes.contains("chore(release): prepare "),
+        "the notes generator must ship a self-test and exclude release-prep commits"
+    );
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("generate-release-notes.sh --self-test"),
+        "the notes generator self-test must run in CI"
     );
 }
 

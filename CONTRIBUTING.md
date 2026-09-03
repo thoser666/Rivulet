@@ -47,7 +47,10 @@ The workflow (`release.yml`) handles everything:
 3. Bumps `Cargo.toml` and `CHANGELOG.md`
 4. Commits, tags, and pushes
 5. Builds platform binaries (Linux, Windows, macOS)
-6. Creates a GitHub pre-release
+6. Creates a GitHub pre-release whose notes are generated automatically from
+the commits since the previous tag (grouped by conventional-commit type,
+release-prep commits excluded) and whose assets include the `SHA256SUMS`
+checksum manifest the updater verifies against
 
 `build:`, `chore:` and `ci:` commits release with a patch bump so packaging,
 housekeeping and CI changes (installer layouts, workflow fixes, dependency

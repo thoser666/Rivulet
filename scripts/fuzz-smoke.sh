@@ -5,9 +5,10 @@
 # This is NOT an acceptance fuzzing campaign: it builds each target with
 # libFuzzer (nightly toolchain, as cargo-fuzz requires) and runs a fixed,
 # short number of executions per target so parser regressions surface in
-# minutes, not hours. Full campaigns stay a manual task:
+# minutes, not hours. Set FUZZ_MAX_TOTAL_TIME (e.g. 600) for the deep,
+# time-budgeted campaign mode that the weekly workflow uses:
 #
-#   cargo +nightly fuzz run parse_irc_line -- -max_total_time=600
+#   FUZZ_MAX_TOTAL_TIME=600 bash scripts/fuzz-smoke.sh
 #
 # Requires: rustup nightly + cargo-fuzz (cargo install cargo-fuzz --locked).
 #
@@ -21,6 +22,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 FUZZ_DIR="fuzz"
 RUNS="${FUZZ_SMOKE_RUNS:-256}"
+# Deep-campaign mode: when FUZZ_MAX_TOTAL_TIME is set, each target runs for
+# that many seconds instead of a fixed number of executions. The scheduled
+# "Deep fuzz (weekly)" workflow uses this with the corpus persisted via the
+# actions cache, so coverage accumulates across runs.
+MAX_TIME="${FUZZ_MAX_TOTAL_TIME:-}"
 
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
@@ -44,15 +50,25 @@ fi
 
 status=0
 for target in parse_irc_line sdp_offer_endpoint parse_latest_release parse_checksums; do
-  echo "-- fuzz smoke: $target ($RUNS runs)"
+  if [ -n "$MAX_TIME" ]; then
+    echo "-- fuzz deep: $target (max ${MAX_TIME}s)"
+    budget_args="-max_total_time=$MAX_TIME"
+  else
+    echo "-- fuzz smoke: $target ($RUNS runs)"
+    budget_args="-runs=$RUNS"
+  fi
   if ! (cd "$FUZZ_DIR" && cargo +nightly fuzz run --sanitizer address "$target" \
-        -- -runs="$RUNS" -max_len=4096); then
+        -- "$budget_args" -max_len=4096); then
     echo "FAIL: fuzz target $target found a crash" >&2
     status=1
   fi
 done
 
 if [ "$status" -eq 0 ]; then
-  echo "fuzz smoke passed (${RUNS} runs per target)"
+  if [ -n "$MAX_TIME" ]; then
+    echo "fuzz deep passed (${MAX_TIME}s per target)"
+  else
+    echo "fuzz smoke passed (${RUNS} runs per target)"
+  fi
 fi
 exit "$status"

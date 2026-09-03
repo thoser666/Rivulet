@@ -139,17 +139,16 @@ impl ShmFrameReader {
                 // fewer bytes than DEFAULT_SHM_SIZE.
                 size: {
                     let mut info: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
-                    let queried = unsafe {
-                        VirtualQuery(
-                            ptr as *const _,
-                            &mut info,
-                            std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
-                        )
-                    };
+                    // Inside the enclosing unsafe block; no nested `unsafe`
+                    // (clippy::unused_unsafe) — the outer block already
+                    // covers both calls.
+                    let queried = VirtualQuery(
+                        ptr as *const _,
+                        &mut info,
+                        std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+                    );
                     if queried == 0 {
-                        unsafe {
-                            UnmapViewOfFile(ptr);
-                        }
+                        UnmapViewOfFile(ptr);
                         return None;
                     }
                     info.RegionSize

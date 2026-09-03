@@ -207,6 +207,9 @@ jobs:
         with:
           ref: ${{ needs.version.outputs.release_branch }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Full history + tags so the release notes can be generated from
+          # the commits since the previous tag (git describe/log).
+          fetch-depth: 0
 
       - name: Configure git
         run: |
@@ -247,11 +250,21 @@ jobs:
           mv SHA256SUMS.tmp release-assets/SHA256SUMS
           cat release-assets/SHA256SUMS
 
+      - name: Generate release notes from commits since last tag
+        run: |
+          # The notes body is derived from the actual commits between the
+          # previous tag and this release (the "chore(release): prepare" bump
+          # commit sits at HEAD and is excluded), grouped by Conventional
+          # Commit type. This beats GitHub's PR-based auto-notes for a
+          # workflow that pushes commits directly to develop.
+          bash scripts/generate-release-notes.sh > release-notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           name: Rivulet ${{ needs.version.outputs.version }}
+          body_path: release-notes.md
           files: |
             release-assets/*
             release-assets/SHA256SUMS
@@ -260,7 +273,6 @@ jobs:
             docs/assets/rivulet-app-icon-512.png
             docs/assets/rivulet-rich-presence-1024.png
             docs/activity-status.md
-          generate_release_notes: true
           prerelease: true
           draft: false
           fail_on_unmatched_files: true

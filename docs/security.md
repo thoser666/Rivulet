@@ -297,9 +297,13 @@ the SDP generator, the GitHub Releases JSON behind the update check, and the
 builds the targets with cargo-fuzz (nightly toolchain) and runs a fixed,
 short number of executions each; a crash fails the build and the offending
 input is uploaded as an artifact. The smoke guards against parser
-regressions (panics on crafted input); long-running campaigns before parser
-dependency upgrades stay a manual task. A ci_pinning guard keeps the
-targets, the workspace exclusion, and the CI wiring in place.
+regressions (panics on crafted input). Beyond it, the scheduled **Deep fuzz
+(weekly)** workflow runs every Monday with a 10-minute budget per target
+(`FUZZ_MAX_TOTAL_TIME=600`, also triggerable manually) and persists the
+grown corpus between runs via the actions cache, so coverage accumulates
+instead of restarting from zero. A ci_pinning guard keeps the targets, the
+workspace exclusion, and the CI wiring (including the deep campaign) in
+place.
 
 ## Incident Response
 

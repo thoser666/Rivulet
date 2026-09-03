@@ -82,6 +82,9 @@ jobs:
       - name: Test release-branch reconciliation
         run: bash scripts/test-release-branch.sh
 
+      - name: Test release-notes generation
+        run: bash scripts/generate-release-notes.sh --self-test
+
       - name: Check action pin table is up to date
         run: python3 scripts/generate-action-pins.py --check
 
