@@ -278,6 +278,9 @@ enum ChatAction {
     Connect,
     Disconnect,
     Send(String),
+    /// Threaded reply `(text, parent Twitch message id)`, sent via
+    /// `@reply-parent-msg-id`.
+    SendReply(String, String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -686,6 +689,12 @@ pub struct RivuletApp {
     /// Chat dock: pending message text to send on Enter. Not persisted.
     #[serde(skip)]
     chat_input: String,
+    /// Chat dock: threaded reply target `(display name, Twitch message id)`.
+    /// Armed by the reply affordance on a message; cleared on send, cancel,
+    /// connect and disconnect. Not persisted. Only Twitch messages carry an
+    /// IRC id, so this stays `None` on Kick/YouTube.
+    #[serde(skip)]
+    chat_reply_target: Option<(String, String)>,
     /// Chat dock: running worker handle. Not persisted.
     #[serde(skip)]
     chat_worker: Option<rivulet_core::Chat>,
@@ -1191,6 +1200,7 @@ impl Default for RivuletApp {
             chat_channel: String::new(),
             chat_oauth_token: String::new(),
             chat_input: String::new(),
+            chat_reply_target: None,
             chat_worker: None,
             chat_messages: Vec::new(),
             chat_action_pending: None,
@@ -4332,6 +4342,7 @@ impl RivuletApp {
                     worker.disconnect();
                 }
                 self.chat_messages.clear();
+                self.chat_reply_target = None;
                 let cfg = rivulet_core::ChatConfig::new(
                     self.chat_platform,
                     self.chat_channel.trim().to_owned(),
@@ -4349,10 +4360,14 @@ impl RivuletApp {
                     worker.disconnect();
                 }
                 self.chat_messages.clear();
+                self.chat_reply_target = None;
                 self.chat_state = rivulet_core::ChatConnState::Off;
             }
             Some(ChatAction::Send(text)) => {
                 self.send_chat_message(text);
+            }
+            Some(ChatAction::SendReply(text, parent)) => {
+                self.send_chat_reply(text, parent);
             }
             None => {}
         }
@@ -4387,6 +4402,21 @@ impl RivuletApp {
             return false;
         };
         worker.send_message(&text)
+    }
+
+    /// Send a threaded reply through the running worker. Only Twitch
+    /// supports replies (`@reply-parent-msg-id`); the worker enqueues the
+    /// reply non-blocking and the shared per-platform rate limiter applies.
+    fn send_chat_reply(&mut self, text: String, parent_id: String) -> bool {
+        let text = text.trim().to_owned();
+        if text.is_empty() || parent_id.trim().is_empty() || self.chat_oauth_token.trim().is_empty()
+        {
+            return false;
+        }
+        let Some(worker) = &self.chat_worker else {
+            return false;
+        };
+        worker.send_reply(&text, &parent_id)
     }
 
     /// Handle the Settings "Apply" action for the Discord client id: validate
@@ -5153,7 +5183,22 @@ impl RivuletApp {
         ui.small(note);
         ui.add_space(4.0);
 
+        // Twitch-only server requirement surfaced as soon as the worker sees
+        // the notice: the bot account must be phone-verified before it can
+        // send. Shown until reconnect so the streamer fixes the account.
+        if self.chat_platform == rivulet_core::ChatPlatform::Twitch
+            && self
+                .chat_worker
+                .as_ref()
+                .is_some_and(|w| w.phone_verification_required())
+        {
+            let colors = theme::StatusColors::for_ui(ui);
+            ui.colored_label(colors.warning, self.tr("chat_phone_verification"));
+        }
+
         // Message list (newest at the bottom, autoscroll to the last message).
+        let reply_arrow = "↩";
+        let reply_tooltip = self.tr("chat_reply_tooltip").to_owned();
         let messages = std::mem::take(&mut self.chat_messages);
         let total = messages.len();
         let mut scroll_to_bottom = false;
@@ -5176,6 +5221,18 @@ impl RivuletApp {
                             ui.label(egui::RichText::new(format!("*{}", message.text)).italics());
                         } else {
                             ui.label(&message.text);
+                        }
+                        // Twitch messages carry an `id=...` tag; offer a
+                        // threaded reply so the bot answers that exact line.
+                        if let Some(msg_id) = &message.id {
+                            if ui
+                                .small_button(reply_arrow)
+                                .on_hover_text(&reply_tooltip)
+                                .clicked()
+                            {
+                                self.chat_reply_target =
+                                    Some((message.user.clone(), msg_id.clone()));
+                            }
                         }
                     });
                 }
@@ -5202,6 +5259,23 @@ impl RivuletApp {
             && !self.chat_oauth_token.trim().is_empty()
             && self.chat_platform != rivulet_core::ChatPlatform::YouTube;
         if can_send {
+            // When a reply target is armed, a banner names the message being
+            // answered and the Send button enqueues a threaded reply instead
+            // of a plain chat message.
+            let reply_user = self
+                .chat_reply_target
+                .as_ref()
+                .map(|(user, _)| user.clone());
+            if let Some(user) = reply_user {
+                let reply_label = self.tr_fmt("chat_reply_to", &[user]);
+                let reply_cancel = self.tr("chat_reply_cancel").to_owned();
+                ui.horizontal_wrapped(|ui| {
+                    ui.small(egui::RichText::new(format!("↩ {reply_label}")).italics());
+                    if ui.small_button("✕").on_hover_text(reply_cancel).clicked() {
+                        self.chat_reply_target = None;
+                    }
+                });
+            }
             let send_hint = self.tr("chat_send_hint");
             let send_button = self.tr("chat_send");
             ui.horizontal_wrapped(|ui| {
@@ -5214,7 +5288,12 @@ impl RivuletApp {
                     input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if enter_pressed || theme::accent_button(ui, send_button).clicked() {
                     let text = std::mem::take(&mut self.chat_input);
-                    self.chat_action_pending = Some(ChatAction::Send(text));
+                    match self.chat_reply_target.take() {
+                        Some((_, parent)) => {
+                            self.chat_action_pending = Some(ChatAction::SendReply(text, parent));
+                        }
+                        None => self.chat_action_pending = Some(ChatAction::Send(text)),
+                    }
                 }
             });
         } else if self.chat_platform == rivulet_core::ChatPlatform::YouTube {
@@ -10309,6 +10388,10 @@ mod tests {
         assert!(draw.contains("chat_read_only"));
         assert!(draw.contains("self.chat_platform != rivulet_core::ChatPlatform::YouTube"));
         assert!(draw.contains("ChatPlatform::all()"));
+        assert!(draw.contains("chat_reply_target"));
+        assert!(draw.contains("ChatAction::SendReply"));
+        assert!(draw.contains("phone_verification_required()"));
+        assert!(draw.contains("chat_reply_to"));
         let i18n = std::fs::read_to_string("../rivulet-core/src/i18n.rs").expect("i18n readable");
         for key in [
             "chat_send",
@@ -10317,6 +10400,10 @@ mod tests {
             "chat_read_only",
             "chat_note_kick",
             "chat_note_youtube",
+            "chat_reply_tooltip",
+            "chat_reply_to",
+            "chat_reply_cancel",
+            "chat_phone_verification",
         ] {
             let k = format!("\"{key}\"");
             assert!(

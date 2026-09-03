@@ -230,6 +230,43 @@ impl Chat {
         }
     }
 
+    /// Reply to a specific chat line. Only Twitch supports threading via
+    /// `reply-parent-msg-id`; Kick has no IRC-style parent ids and YouTube is
+    /// read-only, so both return `false`. Subject to the same shared rate
+    /// limiter as plain sends.
+    pub fn send_reply(&self, text: &str, reply_to_id: &str) -> bool {
+        if !matches!(self.inner, ChatInner::Twitch(_)) {
+            return false;
+        }
+        if reply_to_id.trim().is_empty() {
+            return false;
+        }
+        {
+            let mut limiter = self.limiter.lock().unwrap_or_else(|e| e.into_inner());
+            if !limiter.try_acquire() {
+                tracing::warn!(
+                    platform = ?self.platform(),
+                    "chat reply dropped: platform rate limit exhausted"
+                );
+                return false;
+            }
+        }
+        match &self.inner {
+            ChatInner::Twitch(c) => c.send_reply(text, reply_to_id),
+            ChatInner::Kick(_) | ChatInner::YouTube(_) => false,
+        }
+    }
+
+    /// Whether the active platform's bot account was told by the server that
+    /// it must be phone-verified before it can send (Twitch only; the other
+    /// platforms have no such requirement).
+    pub fn phone_verification_required(&self) -> bool {
+        match &self.inner {
+            ChatInner::Twitch(c) => c.phone_verification_required(),
+            ChatInner::Kick(_) | ChatInner::YouTube(_) => false,
+        }
+    }
+
     /// Current outbound rate-limit config for the settings UI.
     pub fn rate_limit_config(&self) -> RateLimitConfig {
         self.limiter
@@ -353,6 +390,43 @@ mod tests {
             !chat.send_message("second"),
             "second send within the window must be rate-limited"
         );
+    }
+
+    #[test]
+    fn send_reply_is_twitch_only_and_requires_a_parent_id() {
+        // YouTube is read-only: replies are rejected before the limiter.
+        let youtube = Chat::new(&ChatConfig::new(
+            ChatPlatform::YouTube,
+            "abc123".to_owned(),
+            String::new(),
+        ));
+        assert!(!youtube.send_reply("hi", "parent-1"));
+        assert!(!youtube.phone_verification_required());
+
+        // Kick has no IRC-style threading: replies are rejected too.
+        let kick = Chat::new(&ChatConfig {
+            platform: ChatPlatform::Kick,
+            channel: "rivulet".to_owned(),
+            token: "session".to_owned(),
+            ..Default::default()
+        });
+        assert!(!kick.send_reply("hi", "parent-1"));
+        assert!(!kick.phone_verification_required());
+
+        // Twitch: a parent id is mandatory; a valid one is enqueued.
+        let mut twitch = Chat::new(&ChatConfig {
+            platform: ChatPlatform::Twitch,
+            twitch_endpoint: "127.0.0.1:1".to_owned(), // worker backs off
+            channel: "rivulet".to_owned(),
+            token: "oauth:x".to_owned(),
+            ..Default::default()
+        });
+        assert!(twitch.enabled());
+        assert!(!twitch.send_reply("hi", "   "));
+        assert!(!twitch.send_reply("   ", "parent-1"));
+        assert!(twitch.send_reply("hi", "parent-1"));
+        assert!(!twitch.phone_verification_required());
+        twitch.disconnect();
     }
 
     #[test]

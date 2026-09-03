@@ -2136,6 +2136,56 @@ fn chat_outbound_is_rate_limited_per_platform() {
 }
 
 #[test]
+fn twitch_replies_thread_the_parent_message_id_and_surface_phone_verification() {
+    // Twitch replies must use the IRCv3 `@reply-parent-msg-id` tag so the bot
+    // answers the exact line a viewer asked about, and the worker must turn
+    // the `msg_requires_verified_phone_number` NOTICE into a visible flag so
+    // the streamer learns why sending fails (M10 issue #100 reply/phone part).
+    let twitch = read("rivulet-core/src/twitch_chat.rs");
+    for marker in [
+        "pub id: Option<String>",
+        "pub fn send_reply",
+        "Msg::SendReply",
+        "@reply-parent-msg-id=",
+        "pub enum TwitchNotice",
+        "pub fn parse_notice",
+        "msg_requires_verified_phone_number",
+        "pub fn phone_verification_required",
+    ] {
+        assert!(
+            twitch.contains(marker),
+            "twitch_chat.rs must provide {marker}"
+        );
+    }
+    assert!(
+        twitch.contains("CAP REQ :twitch.tv/tags"),
+        "replies require the tags capability"
+    );
+    // The facade must forward replies (rate-limited like plain sends) and
+    // expose the phone-verification flag; the GUI dock must arm a reply target
+    // per message and surface the server notice.
+    let chat = read("rivulet-core/src/chat.rs");
+    assert!(
+        chat.contains("pub fn send_reply") && chat.contains("pub fn phone_verification_required"),
+        "the chat facade must forward replies and the phone flag"
+    );
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        gui.contains("chat_reply_target") && gui.contains("ChatAction::SendReply"),
+        "the chat dock must arm threaded replies"
+    );
+    assert!(
+        gui.contains("phone_verification_required()") && gui.contains("chat_phone_verification"),
+        "the chat dock must surface the phone-verification requirement"
+    );
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.contains("chat_reply_to") && i18n.contains("chat_phone_verification"),
+        "reply/notice UI strings must be translated"
+    );
+}
+
+#[test]
 fn m10_platform_compliance_bullets_are_pinned_in_docs() {
     // M10 issue #100 (platform-compliance baseline): the bot must satisfy
     // each platform's hard constraints, and that contract is specified in

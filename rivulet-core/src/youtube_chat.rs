@@ -154,6 +154,8 @@ pub fn parse_youtube_payload(payload: &str) -> (Vec<ChatMessage>, Option<String>
             color,
             badges,
             broadcaster,
+            // YouTube chat is read-only; no IRC-style message id.
+            id: None,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())

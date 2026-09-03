@@ -36,6 +36,10 @@ pub struct ChatMessage {
     pub badges: Vec<String>,
     /// Whether the sender is the channel broadcaster.
     pub broadcaster: bool,
+    /// Twitch message id (`id=` tag) so the bot can answer a specific chat
+    /// line with `reply-parent-msg-id`. Kick/YouTube have no IRC id and stay
+    /// `None`.
+    pub id: Option<String>,
     /// Unix timestamp (seconds) of the message.
     pub timestamp: u64,
 }
@@ -93,6 +97,9 @@ pub struct TwitchChat {
     messages: Option<Receiver<ChatMessage>>,
     stop: Arc<AtomicBool>,
     conn: Arc<std::sync::atomic::AtomicU8>,
+    /// Set when the server sent `msg_requires_verified_phone_number`: the
+    /// configured account cannot send until it is phone-verified.
+    phone: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl TwitchChat {
@@ -105,12 +112,14 @@ impl TwitchChat {
         let (msg_tx, msg_rx) = unbounded();
         let stop = Arc::new(AtomicBool::new(false));
         let conn = Arc::new(std::sync::atomic::AtomicU8::new(0));
+        let phone = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker_conn = Arc::clone(&conn);
         let worker_stop = Arc::clone(&stop);
+        let worker_phone = Arc::clone(&phone);
         let cfg = config.clone();
         let spawned = std::thread::Builder::new()
             .name("rivulet-twitch-chat".to_owned())
-            .spawn(move || worker_loop(rx, cfg, worker_stop, worker_conn, msg_tx))
+            .spawn(move || worker_loop(rx, cfg, worker_stop, worker_conn, worker_phone, msg_tx))
             .is_ok();
         if !spawned {
             return Self::disabled();
@@ -120,6 +129,7 @@ impl TwitchChat {
             messages: Some(msg_rx),
             stop,
             conn,
+            phone,
         }
     }
 
@@ -129,6 +139,7 @@ impl TwitchChat {
             messages: None,
             stop: Arc::new(AtomicBool::new(true)),
             conn: Arc::new(std::sync::atomic::AtomicU8::new(0)),
+            phone: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -172,6 +183,34 @@ impl TwitchChat {
         }
     }
 
+    /// Reply to a specific chat line using Twitch's `reply-parent-msg-id`
+    /// mechanism (requires the `twitch.tv/tags` capability, which the worker
+    /// always requests). Returns `false` when the worker is disabled, the
+    /// text is empty, or no parent message id is given. Never blocks.
+    pub fn send_reply(&self, text: &str, reply_to_id: &str) -> bool {
+        let reply_to = reply_to_id.trim();
+        match &self.tx {
+            Some(tx) => {
+                let text = text.trim();
+                if text.is_empty() || reply_to.is_empty() {
+                    return false;
+                }
+                let _ = tx.try_send(Msg::SendReply {
+                    text: text.to_owned(),
+                    reply_to: reply_to.to_owned(),
+                });
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Whether the server told us the bot account must be phone-verified
+    /// before it can send chat (`msg_requires_verified_phone_number`).
+    pub fn phone_verification_required(&self) -> bool {
+        self.phone.load(Ordering::SeqCst)
+    }
+
     /// Stop the worker. Safe to call repeatedly.
     pub fn disconnect(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
@@ -194,6 +233,11 @@ impl Drop for TwitchChat {
 enum Msg {
     Disconnect,
     SendMessage(String),
+    /// Reply to a specific chat line via `@reply-parent-msg-id`.
+    SendReply {
+        text: String,
+        reply_to: String,
+    },
 }
 
 fn worker_loop(
@@ -201,12 +245,13 @@ fn worker_loop(
     cfg: TwitchChatConfig,
     stop: Arc<AtomicBool>,
     conn: Arc<std::sync::atomic::AtomicU8>,
+    phone: Arc<std::sync::atomic::AtomicBool>,
     msg_tx: Sender<ChatMessage>,
 ) {
     let mut backoff = 1u64;
     while !stop.load(Ordering::SeqCst) {
         conn.store(1, Ordering::SeqCst);
-        match run_session(&cfg, &msg_tx, &rx) {
+        match run_session(&cfg, &msg_tx, &rx, &phone) {
             Ok(()) => {
                 if stop.load(Ordering::SeqCst) {
                     break;
@@ -233,6 +278,7 @@ fn run_session(
     cfg: &TwitchChatConfig,
     msg_tx: &Sender<ChatMessage>,
     rx: &Receiver<Msg>,
+    phone: &Arc<std::sync::atomic::AtomicBool>,
 ) -> anyhow::Result<()> {
     let stream = TcpStream::connect(&cfg.endpoint)?;
     // Short timeout so outbound messages are handled promptly between reads;
@@ -275,6 +321,16 @@ fn run_session(
                         writer.flush()?;
                     }
                 }
+                Msg::SendReply { text, reply_to } => {
+                    let text = text.trim();
+                    if !text.is_empty() && !reply_to.is_empty() {
+                        writeln!(
+                            writer,
+                            "@reply-parent-msg-id={reply_to} PRIVMSG {channel} :{text}"
+                        )?;
+                        writer.flush()?;
+                    }
+                }
             }
         }
         line.clear();
@@ -305,12 +361,66 @@ fn run_session(
             writer.flush()?;
             continue;
         }
+        // Surface server notices that need streamer action (e.g. the bot
+        // account must be phone-verified before it can send).
+        if let Some(notice) = parse_notice(trimmed) {
+            match notice {
+                TwitchNotice::PhoneVerificationRequired => {
+                    phone.store(true, Ordering::SeqCst);
+                    tracing::warn!(
+                        "Twitch requires a phone-verified bot account before it can send chat"
+                    );
+                }
+            }
+            continue;
+        }
         // Deliver parsed chat messages to the GUI-facing channel.
         if let Some(message) = parse_irc_line(trimmed) {
             if !message.is_empty_artifact() {
                 let _ = msg_tx.send(message);
             }
         }
+    }
+}
+
+/// Server notices that need streamer action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TwitchNotice {
+    /// The account must be phone-verified before it can send chat messages
+    /// (Twitch `msg_id=msg_requires_verified_phone_number`).
+    PhoneVerificationRequired,
+}
+
+/// Parse an IRC NOTICE line. Returns `Some(notice)` only for notices that
+/// require streamer action; all other notices (join confirmations, slow-mode
+/// hints, moderation messages, ...) return `None` and are ignored. Pure and
+/// deterministic — no I/O.
+pub fn parse_notice(line: &str) -> Option<TwitchNotice> {
+    let trimmed = line.trim_end_matches(['\r', '\n']);
+    // Twitch tags a NOTICE with `@msg-id=...`. Without tags there is nothing
+    // to classify.
+    let after_tags = trimmed.strip_prefix('@')?;
+    let (tags, remainder) = after_tags.split_once(' ')?;
+    // Skip the optional `:nick!user@host` sender prefix, then read the IRC
+    // command word (e.g. `:tmi.twitch.tv NOTICE #channel :text`).
+    let mut rest = remainder.trim_start();
+    if let Some(r) = rest.strip_prefix(':') {
+        let (_, rem) = r.split_once(' ')?;
+        rest = rem.trim_start();
+    }
+    if rest.split(' ').next().unwrap_or("") != "NOTICE" {
+        return None;
+    }
+    let mut msg_id: Option<&str> = None;
+    for tag in tags.split(';') {
+        let (key, value) = tag.split_once('=').unwrap_or((tag, ""));
+        if key == "msg-id" {
+            msg_id = Some(value);
+        }
+    }
+    match msg_id {
+        Some("msg_requires_verified_phone_number") => Some(TwitchNotice::PhoneVerificationRequired),
+        _ => None,
     }
 }
 
@@ -385,6 +495,17 @@ pub fn parse_irc_line(line: &str) -> Option<ChatMessage> {
         }
 
         let broadcaster = badges.iter().any(|b| b == "broadcaster");
+        let mut msg_id: Option<String> = None;
+        if let Some(after_tags) = trimmed.strip_prefix('@') {
+            if let Some((tags, _)) = after_tags.split_once(' ') {
+                for tag in tags.split(';') {
+                    let (key, value) = tag.split_once('=').unwrap_or((tag, ""));
+                    if key == "id" && !value.is_empty() {
+                        msg_id = Some(value.to_owned());
+                    }
+                }
+            }
+        }
         Some(ChatMessage {
             user: display_name.unwrap_or(user),
             text,
@@ -392,6 +513,7 @@ pub fn parse_irc_line(line: &str) -> Option<ChatMessage> {
             color,
             badges,
             broadcaster,
+            id: msg_id,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -419,7 +541,32 @@ mod tests {
         assert_eq!(msg.color.as_deref(), Some("#FF0000"));
         assert!(msg.badges.contains(&"broadcaster".to_owned()));
         assert!(msg.broadcaster);
+        assert_eq!(msg.id.as_deref(), Some("1"), "id= tag must be kept");
         assert!(msg.timestamp > 0);
+    }
+
+    #[test]
+    fn parse_notice_recognizes_phone_verification_requirement() {
+        let l = "@msg-id=msg_requires_verified_phone_number :tmi.twitch.tv NOTICE #rivulet :Your account must be phone verified in order to chat.";
+        assert_eq!(
+            parse_notice(l),
+            Some(TwitchNotice::PhoneVerificationRequired)
+        );
+        // Other notices and non-NOTICE lines are deliberately ignored.
+        assert_eq!(
+            parse_notice("@msg-id=host_on :tmi.twitch.tv NOTICE #rivulet :host is on"),
+            None
+        );
+        assert_eq!(parse_notice("PING :tmi.twitch.tv"), None);
+        assert_eq!(
+            parse_notice(":a!b@c.tmi.twitch.tv PRIVMSG #rivulet :hello"),
+            None
+        );
+        assert_eq!(
+            parse_notice("@msg-id=subs_on :tmi.twitch.tv NOTICE #rivulet :subs on"),
+            None
+        );
+        assert_eq!(parse_notice("not even irc"), None);
     }
 
     #[test]
@@ -582,6 +729,35 @@ mod tests {
         );
         assert!(!line.contains("oauth"), "PRIVMSG must not leak the token");
 
+        // Replying: `send_reply` must thread the parent message id through
+        // the IRCv3 `@reply-parent-msg-id` tag.
+        assert!(chat.send_reply("thanks!", "abc123"));
+        line.clear();
+        let read = reader.read_line(&mut line).expect("read reply");
+        assert!(read > 0, "expected a reply PRIVMSG");
+        assert_eq!(
+            line.trim_end_matches(['\r', '\n']),
+            "@reply-parent-msg-id=abc123 PRIVMSG #rivulet :thanks!"
+        );
+
+        // Phone verification: the server rejects the account for sending; the
+        // handle flag must flip so the GUI can warn the streamer.
+        assert!(!chat.phone_verification_required(), "flag must start clear");
+        writeln!(
+            conn,
+            "@msg-id=msg_requires_verified_phone_number :tmi.twitch.tv NOTICE #rivulet :Your account must be phone verified in order to chat."
+        )
+        .expect("notice");
+        conn.flush().expect("flush");
+        let notice_deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !chat.phone_verification_required() && std::time::Instant::now() < notice_deadline {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(
+            chat.phone_verification_required(),
+            "phone-verification notice must set the handle flag"
+        );
+
         chat.disconnect();
     }
 
@@ -610,6 +786,39 @@ mod tests {
         assert!(
             chat.send_message("hello"),
             "non-empty text must be enqueued"
+        );
+        chat.disconnect();
+    }
+
+    #[test]
+    fn send_reply_requires_an_enabled_worker_parent_id_and_text() {
+        let chat = TwitchChat::new(&TwitchChatConfig {
+            channel: String::new(),
+            ..Default::default()
+        });
+        assert!(
+            !chat.send_reply("hello", "abc"),
+            "disabled worker must reject replies"
+        );
+        assert!(!chat.phone_verification_required());
+
+        let mut chat = TwitchChat::new(&TwitchChatConfig {
+            channel: "rivulet".to_owned(),
+            endpoint: "127.0.0.1:1".to_owned(), // unreachable, worker backs off
+            ..Default::default()
+        });
+        assert!(chat.enabled());
+        assert!(
+            !chat.send_reply("   ", "abc"),
+            "whitespace-only text must be rejected"
+        );
+        assert!(
+            !chat.send_reply("hello", "  "),
+            "missing parent id must be rejected"
+        );
+        assert!(
+            chat.send_reply("hello", "abc"),
+            "non-empty text and parent id must be enqueued"
         );
         chat.disconnect();
     }

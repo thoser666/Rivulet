@@ -36,6 +36,16 @@ and **YouTube** (Innertube polling) from one unified UI.
   Kick session token) — type and press Enter (or click **Send**). Sending
   is **non-blocking** (enqueued to the worker thread). **YouTube is
   read-only** (anonymous clients cannot send); a hint replaces the input.
+- **Threaded replies (Twitch)**: every Twitch message keeps its IRCv3
+  `id=` tag; clicking the **↩** affordance on a message arms a reply
+  target (banner: “Replying to <user>”, cancel with ✕) and the next Send
+  goes out as `@reply-parent-msg-id=<id> PRIVMSG`, so the bot answers the
+  exact line a viewer asked about. Kick/YouTube messages carry no IRC id
+  and stay plain sends.
+- **Phone-verification notice (Twitch)**: when the server rejects sending
+  with `msg_id=msg_requires_verified_phone_number`, the worker sets a flag
+  and the dock shows a warning that the bot account must be phone-verified
+  before it can chat (cleared on reconnect).
 - **Privacy-safe**: tokens are never written to logs or the message model;
   the message serialization is covered by a dedicated test.
 
@@ -86,6 +96,21 @@ can never burst against a platform limit:
 - The bucket is clock-injectable (`RateLimiter::with_clock`) so the unit
   tests are deterministic; the production clock is monotonic.
 
+### Threaded replies and phone verification (Twitch)
+
+- `ChatMessage.id` carries the Twitch `id=` tag (`None` on Kick/YouTube).
+  `TwitchChat::send_reply(text, reply_to_id)` enqueues a
+  `Msg::SendReply`; the worker writes
+  `@reply-parent-msg-id=<id> PRIVMSG #channel :text` (the tags capability
+  is always requested on connect). `Chat::send_reply` forwards it through
+  the same shared rate limiter as plain sends and rejects non-Twitch
+  platforms.
+- `parse_notice(line) -> Option<TwitchNotice>` classifies IRC NOTICE lines
+  by their `msg-id` tag. `msg_requires_verified_phone_number` flips
+  `TwitchChat::phone_verification_required()` (also forwarded on the
+  facade); the dock renders a translated warning while the flag is set.
+  Other notices are deliberately ignored.
+
 ## Architecture
 
 ```
@@ -99,12 +124,13 @@ rivulet-core::chat                         # unified facade
   └─ worker_loop(rx, cfg, stop)            # dedicated thread per platform, I/O here
 
 rivulet-gui::app
-  ├─ chat_action_pending / ChatAction               # Connect/Disconnect/Send
-  ├─ reconcile_chat()                               # one action per frame
-  ├─ send_chat_message(text)                        # token + platform gate
-  ├─ draw_chat_dock(ui, max_list_height)            # platform selector + inputs
-  │                                                 #   + message list, embedded in
-  │                                                 #   the Stream workspace
+  ├─ chat_action_pending / ChatAction          # Connect/Disconnect/Send/SendReply
+  ├─ reconcile_chat()                          # one action per frame
+  ├─ send_chat_message(text)                   # token + platform gate
+  ├─ send_chat_reply(text, parent_id)          # threaded reply (Twitch)
+  ├─ draw_chat_dock(ui, max_list_height)       # platform selector + inputs + reply
+  │                                            #   affordance + phone warning,
+  │                                            #   embedded in the Stream workspace
   └─ i18n keys: chat_* (DE/EN)
 ```
 
@@ -119,8 +145,12 @@ rivulet-gui::app
   capacity, refill over the window, capacity cap, reset, fractional
   accumulation) and facade tests (platform defaults, drop on exhausted
   limit, read-only platforms do not consume tokens):
-  - Twitch: local TCP listener asserts CAP/NICK/JOIN, PING→PONG and
-    `PRIVMSG #channel :text` after `send_message`.
+  - Twitch: local TCP listener asserts CAP/NICK/JOIN, PING→PONG,
+    `PRIVMSG #channel :text` after `send_message`, the threaded
+    `@reply-parent-msg-id=<id> PRIVMSG` after `send_reply`, and that a
+    `msg_requires_verified_phone_number` NOTICE flips the
+    `phone_verification_required()` flag. `parse_notice` is covered by
+    unit tests (recognized notice vs. ignored notices/PRIVMSG/PING).
   - Kick: local HTTP listener serves the chatroom resolution and a local
     WebSocket server (`tungstenite::accept`) delivers a parsed chat event.
   - YouTube: a local HTTP listener serves the initial page (continuation)
@@ -134,8 +164,10 @@ rivulet-gui::app
 - `ci_pinning.rs`: guards that the chat dock stays embedded in the Stream
   workspace, each platform worker keeps its local-listener smoke test, the
   send path (`send_message` / `ChatAction::Send` / `PRIVMSG`) stays covered,
-  and Kick/YouTube wiring (platform selector, read-only gate, i18n keys,
-  docs) cannot silently regress.
+  Twitch replies stay threaded (`send_reply` / `@reply-parent-msg-id` /
+  `chat_reply_target` / `ChatAction::SendReply`) with the phone-verification
+  flag surfaced in the dock and i18n, and Kick/YouTube wiring (platform
+  selector, read-only gate, i18n keys, docs) cannot silently regress.
 
 ## Roadmap
 

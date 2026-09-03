@@ -126,6 +126,8 @@ pub fn parse_kick_event(payload: &str) -> Option<ChatMessage> {
         color,
         badges,
         broadcaster,
+        // Kick chat has no IRC-style message id; replies are not supported.
+        id: None,
         timestamp: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
