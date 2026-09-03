@@ -3,7 +3,9 @@
 ## What is an orphaned release?
 
 The alpha release pipeline ([`release.yml`](../.github/workflows/release.yml))
-runs on every `feat:` push to `develop` and consists of two independent steps:
+runs when the CI workflow of a `feat:` (or `fix:`/`build:`/`chore:`/`ci:`)
+push to `develop` concluded successfully and consists of two independent
+steps:
 
 1. **Determine version & tag** — computes the next version, bumps
    `Cargo.toml`/`CHANGELOG.md`, commits `chore(release): prepare vX.Y.Z-alpha.N`

@@ -13,6 +13,14 @@ pub struct AdaptiveBitrateController {
     pub required_samples: u8,
     pending: Option<(StreamHealthStatus, u8)>,
     last_change: Option<Duration>,
+    last_change_info: Option<BitrateChange>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BitrateChange {
+    pub from_kbps: u32,
+    pub to_kbps: u32,
+    pub status: StreamHealthStatus,
 }
 
 impl Default for AdaptiveBitrateController {
@@ -22,6 +30,7 @@ impl Default for AdaptiveBitrateController {
             required_samples: 2,
             pending: None,
             last_change: None,
+            last_change_info: None,
         }
     }
 }
@@ -31,8 +40,13 @@ impl AdaptiveBitrateController {
         Self {
             cooldown,
             required_samples: required_samples.max(1),
+            last_change_info: None,
             ..Self::default()
         }
+    }
+
+    pub fn last_change(&self) -> Option<BitrateChange> {
+        self.last_change_info
     }
 
     pub fn update_from_telemetry(
@@ -69,13 +83,19 @@ impl AdaptiveBitrateController {
         {
             return false;
         }
-        let next = policy.next_bitrate(*current_kbps, status);
+        let previous = *current_kbps;
+        let next = policy.next_bitrate(previous, status);
         self.pending = None;
-        if next == *current_kbps {
+        if next == previous {
             return false;
         }
         *current_kbps = next;
         self.last_change = Some(now);
+        self.last_change_info = Some(BitrateChange {
+            from_kbps: previous,
+            to_kbps: next,
+            status,
+        });
         true
     }
 }
@@ -87,6 +107,7 @@ pub struct DelaySupervisor {
     buffered: Duration,
     max_buffer: Duration,
     dropped: u64,
+    underflows: u64,
 }
 
 impl DelaySupervisor {
@@ -97,6 +118,7 @@ impl DelaySupervisor {
             buffered: Duration::ZERO,
             max_buffer,
             dropped: 0,
+            underflows: 0,
         }
     }
 
@@ -111,6 +133,23 @@ impl DelaySupervisor {
         self.dropped
     }
 
+    pub fn underflows(&self) -> u64 {
+        self.underflows
+    }
+
+    pub fn fill_ratio(&self) -> f64 {
+        if self.max_buffer.is_zero() {
+            0.0
+        } else {
+            (self.buffered.as_secs_f64() / self.max_buffer.as_secs_f64()).clamp(0.0, 1.0)
+        }
+    }
+
+    /// Record an underflow when a delayed branch has no media available.
+    pub fn record_underflow(&mut self) {
+        self.underflows = self.underflows.saturating_add(1);
+    }
+
     pub fn push(&mut self, amount: Duration) {
         let next = self.buffered.saturating_add(amount);
         if next > self.max_buffer {
@@ -120,6 +159,9 @@ impl DelaySupervisor {
     }
 
     pub fn consume(&mut self, amount: Duration) {
+        if amount > self.buffered {
+            self.record_underflow();
+        }
         self.buffered = self.buffered.saturating_sub(amount);
     }
 
@@ -154,6 +196,28 @@ mod tests {
             Duration::from_secs(1)
         ));
         assert_eq!(bitrate, 1500);
+        assert_eq!(
+            controller.last_change(),
+            Some(BitrateChange {
+                from_kbps: 2000,
+                to_kbps: 1500,
+                status: StreamHealthStatus::Poor,
+            })
+        );
+    }
+
+    #[test]
+    fn bitrate_change_diagnostics_are_empty_until_a_change() {
+        let mut controller = AdaptiveBitrateController::new(Duration::ZERO, 1);
+        let policy = AdaptiveBitrate::new(1000, 3000, 500);
+        let mut bitrate = 2000;
+        assert!(!controller.update(
+            policy,
+            &mut bitrate,
+            StreamHealthStatus::Warning,
+            Duration::ZERO
+        ));
+        assert_eq!(controller.last_change(), None);
     }
 
     #[test]
@@ -199,5 +263,8 @@ mod tests {
         assert_eq!(delay.on_reconnect(), Duration::from_secs(10));
         delay.consume(Duration::from_secs(4));
         assert_eq!(delay.buffered(), Duration::from_secs(6));
+        assert!(delay.fill_ratio() > 0.0);
+        delay.consume(Duration::from_secs(10));
+        assert_eq!(delay.underflows(), 1);
     }
 }

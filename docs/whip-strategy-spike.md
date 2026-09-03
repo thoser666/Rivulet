@@ -57,14 +57,18 @@ whether the session is local or remote, but never display bearer tokens.
 
 ## Explicit non-goals of this spike
 
-The signaling slice now provides `WhipSettings::post_offer`, which sends an SDP
+The signaling slice provides `WhipSettings::post_offer`, which sends an SDP
 offer with the required `application/sdp` headers, parses the SDP answer and
 resource `Location`, and maps authentication, server, HTTP, content-type, and
-empty-answer failures to deterministic errors. It is deliberately synchronous
-so callers can place it on a worker thread; it does not claim to be the media
-transport. The implementation now exposes a deterministic `webrtcbin` pipeline contract
-and runtime availability probe. The remaining evidence is the real SFU
-offer/answer, ICE/DTLS media handshake, cleanup, and platform smoke run.
+empty-answer failures to deterministic errors. `WhipMediaSession` now owns the
+session lifecycle on top of it: it generates a stable H.264/Opus offer via
+`SdpOffer`, exchanges it, applies the remote answer, tracks `Idle`/`Negotiating`/
+`Live`/`Failed`, and issues the HTTP `DELETE` on the resource URL during
+shutdown. This lifecycle, offer determinism, redaction safety, and teardown are
+fully unit-tested offline (including a local HTTP mock for the DELETE path); the
+remaining implementation-phase evidence is the live SFU offer/answer,
+ICE/DTLS/SRTP media handshake, and per-platform smoke run against a real WHIP
+endpoint.
 
 ## Definition of done for the implementation phase
 

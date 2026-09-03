@@ -235,6 +235,9 @@ fn windows_release_packages_use_the_pre_rust_launcher() {
     );
 
     let wix = read("packaging/windows/rivulet.wxs");
+    assert!(wix.contains("UpgradeCode=\"A5C1E5E8-7A3B-4C9D-B6E2-9F1D4C7A8B90\""));
+    assert!(wix.contains("Schedule=\"afterInstallInitialize\""));
+    assert!(wix.contains("Target=\"[INSTALLFOLDER]rivulet-launcher.exe\""));
     assert!(
         wix.contains("Target=\"[INSTALLFOLDER]rivulet.exe\""),
         "MSI shortcuts must target the launcher"

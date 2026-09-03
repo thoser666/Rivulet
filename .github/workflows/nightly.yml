@@ -31,9 +31,12 @@ jobs:
       - name: Compare pinned SHAs against upstream tags/branches
         run: |
           # Write a compact Markdown notification to the run's step summary so
-          # stale pins are visible even when the job only "fails red".
+          # stale pins are visible even when the job only "fails red", and
+          # make newer-major gaps fatal too (--fail-on-major), not just
+          # same-major updates. The comment mode still prints the summary;
+          # the exit code turns major gaps into a failed job.
           set -o pipefail
-          python3 scripts/check-action-pins.py --comment | tee -a "$GITHUB_STEP_SUMMARY"
+          python3 scripts/check-action-pins.py --fail-on-major --comment | tee -a "$GITHUB_STEP_SUMMARY"
 
   ################################################################
   # LINTS & FORMATTING (runs only on Linux)

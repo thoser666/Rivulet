@@ -8,7 +8,9 @@
 pub mod capture_channel;
 
 use ash::vk;
-use capture_channel::{next_sequence, FrameHeader, DEFAULT_SHM_SIZE, SHM_NAME};
+use capture_channel::{next_sequence, FrameHeader};
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use capture_channel::{DEFAULT_SHM_SIZE, SHM_NAME};
 use std::collections::HashMap;
 use std::ffi::{c_void, CStr, CString};
 use std::os::raw::c_char;

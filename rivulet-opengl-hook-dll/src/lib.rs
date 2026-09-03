@@ -110,6 +110,21 @@ mod imp {
             return;
         }
 
+        // The reader validates data_size == width × height × 4; refuse to
+        // write a header that would disagree (or overflow) rather than let
+        // the frame be dropped by the reader's plausibility check.
+        let expected = match (width as u64)
+            .checked_mul(height as u64)
+            .and_then(|px| px.checked_mul(4))
+            .and_then(|bytes| u32::try_from(bytes).ok())
+        {
+            Some(expected) => expected,
+            None => return,
+        };
+        if expected != bgra.len() as u32 {
+            return;
+        }
+
         let seq = SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let header = FrameHeader {
             magic: SHM_MAGIC,

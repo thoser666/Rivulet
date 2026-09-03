@@ -14,6 +14,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 
 # Other core dependencies (unchanged)
+chrono = { version = "0.4.35", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 crossbeam-channel = "0.5"
 parking_lot = "0.12"
@@ -21,6 +22,14 @@ dirs = "6.0"
 toml = "1.1"
 async-trait = "0.1"
 ureq = { version = "3.4", default-features = false, features = ["json", "rustls"] }
+sha2 = { workspace = true }
+hmac = { workspace = true }
+base64 = { workspace = true }
+keyring = { version = "3.6", default-features = false }
+# Kick chat dock: Pusher WebSocket client (same crate/version as the
+# obs-websocket server, already in the lock file).
+tungstenite = "0.26"
+
 
 gstreamer = "0.25"
 gstreamer-app = "0.25"
@@ -44,7 +53,17 @@ xcap = "=0.9.8"
 libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-winapi = { version = "0.3", features = ["memoryapi", "winbase", "winnt", "handleapi"] }
+# winapi modules are enabled per consumer to keep the attack surface minimal:
+#  - memoryapi / winbase / handleapi: shared-memory capture channel + OpenGL
+#    hook (capture_channel.rs, opengl_hook.rs) and the adapter's CloseHandle.# -  fileapi / namedpipeapi / winnt: Discord Rich Presence named-pipe client
+#    (discord.rs — CreateFileW/WriteFile and WaitNamedPipeW). winapi features
+#    are module-granular; only modules whose functions are actually called are
+#    enabled. winapi (MIT/Apache-2.0) is already allowed by deny.toml and pinned
+#    as winapi 0.3.9 in Cargo.lock (adding these features does not change the
+#    locked version or the Cargo.lock checksum).
+# -  winuser: global hotkeys (global_hotkey.rs — RegisterHotKey/UnregisterHotKey
+#    behind a message pump).
+winapi = { version = "0.3", features = ["memoryapi", "winbase", "winnt", "handleapi", "fileapi", "namedpipeapi", "winuser"] }
 
 [dev-dependencies]
 tempfile = "3"

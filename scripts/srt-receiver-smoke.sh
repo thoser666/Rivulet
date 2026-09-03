@@ -14,15 +14,25 @@ trap cleanup EXIT
 
 docker network create "$NETWORK" >/dev/null
 docker run -d --name "$RECEIVER" --network "$NETWORK" "$IMAGE" \
-  sh -ceu 'gst-launch-1.0 -q -e srtsrc uri="srt://:10080?mode=listener" ! fakesink sync=false' >/dev/null
+  sh -ceu 'timeout --signal=TERM --kill-after=5s 30s gst-launch-1.0 -q -e srtsrc uri="srt://:10080?mode=listener" ! fakesink sync=false' >/dev/null
 
+receiver_ready=false
 for _ in $(seq 1 30); do
-  if docker exec "$RECEIVER" sh -c 'pgrep -f gst-launch-1.0 >/dev/null' 2>/dev/null; then break; fi
+  if docker inspect -f '{{.State.Running}}' "$RECEIVER" 2>/dev/null | grep -q true; then
+    receiver_ready=true
+    break
+  fi
   sleep 0.5
 done
+if [ "$receiver_ready" != true ]; then
+  echo "SRT receiver did not become ready" >&2
+  docker logs "$RECEIVER" >&2 || true
+  exit 1
+fi
 
 docker run --rm --name "$SENDER" --network "$NETWORK" "$IMAGE" \
-  gst-launch-1.0 -e videotestsrc num-buffers=30 ! videoconvert ! x264enc tune=zerolatency ! mpegtsmux ! \
-  srtsink uri="srt://$RECEIVER:$PORT?mode=caller" wait-for-connection=false
+  timeout --signal=TERM --kill-after=5s 10s \
+  gst-launch-1.0 -e videotestsrc num-buffers=30 ! videoconvert ! x264enc tune=zerolatency ! \
+  mpegtsmux ! srtsink uri="srt://$RECEIVER:$PORT?mode=caller" wait-for-connection=false
 
 echo "SRT receiver smoke test passed (image: $IMAGE)"
