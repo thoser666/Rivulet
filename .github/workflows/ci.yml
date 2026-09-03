@@ -614,6 +614,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history + tags so the release notes can be generated from
+          # the commits since the previous tag (git describe/log).
+          fetch-depth: 0
 
       - name: Download all release artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -621,14 +625,46 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Generate SHA256SUMS manifest
+        run: |
+          # Same contract as the alpha channel (release.yml): the manifest
+          # must cover exactly the files attached to the release, because the
+          # updater refuses any installer that is not listed (or whose digest
+          # differs). docs/opengraph.png is the release card image and must
+          # NOT be part of the manifest. The pipeline writes to a temp file
+          # OUTSIDE the scanned directory (shellcheck SC2094).
+          (cd release-assets \
+            && find . -type f ! -name opengraph.png ! -name SHA256SUMS -printf '%P\0' \
+            | sort -z \
+            | xargs -0 -r sha256sum) > SHA256SUMS.tmp
+          mv SHA256SUMS.tmp release-assets/SHA256SUMS
+          cat release-assets/SHA256SUMS
+
+      - name: Generate release notes from commits since last tag
+        run: |
+          # Same commit-derived body as the alpha channel, grouped by
+          # conventional-commit type; release-prep commits are excluded.
+          bash scripts/generate-release-notes.sh > release-notes.md
+
+      - name: Verify release notes completeness
+        run: |
+          # Every non-prepare commit since the previous tag must appear in
+          # the body before the release is created.
+          python3 scripts/check-release-notes.py --notes-file release-notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
+          body_path: release-notes.md
           files: |
             release-assets/*
+            release-assets/SHA256SUMS
             docs/opengraph.png
             docs/social-preview.png
-          generate_release_notes: true
+            docs/assets/rivulet-app-icon-512.png
+            docs/assets/rivulet-rich-presence-1024.png
+            docs/activity-status.md
+          fail_on_unmatched_files: true
           # Mark beta/rc tags (and alpha tags) as pre-release,
           # stable tags (e.g. v1.0.0) as a full release.
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}

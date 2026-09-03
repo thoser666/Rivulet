@@ -71,7 +71,7 @@ git tag -a v0.3.0 -m "Release v0.3.0"
 git push origin v0.3.0
 ```
 
-The CI workflow (`ci.yml`) picks up the tag, runs the full test suite, builds binaries, and creates a GitHub release. Beta and RC tags are marked as pre-releases; stable tags are full releases.
+The CI workflow (`ci.yml`) picks up the tag, runs the full test suite, builds binaries, and creates a GitHub release — with the same release hygiene as the alpha channel: the notes body is generated from the commits since the previous tag (grouped by conventional-commit type, release-prep commits excluded), verified for completeness, and a `SHA256SUMS` manifest over all attached assets is published so the updater can verify stable installers too. Beta and RC tags are marked as pre-releases; stable tags are full releases.
 
 **Prerequisites for beta/stable** (checked by `scripts/check-beta-gate.py`):
 - All M1 checklist items verified

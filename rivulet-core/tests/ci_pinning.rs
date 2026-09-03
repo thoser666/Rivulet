@@ -1601,6 +1601,40 @@ fn alpha_release_notes_are_generated_from_commits_since_last_tag() {
 }
 
 #[test]
+fn tag_based_release_attaches_checksums_and_generated_notes() {
+    // The beta/rc/stable tag path must ship the same release hygiene as the
+    // alpha channel: a SHA256SUMS manifest over the attached assets (the
+    // updater fails closed on releases without one) and the commit-derived
+    // notes body instead of GitHub's PR-based auto-notes, verified for
+    // completeness before the release is created.
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("Generate SHA256SUMS manifest")
+            && ci.contains("sha256sum) > SHA256SUMS.tmp")
+            && ci.contains("release-assets/SHA256SUMS"),
+        "the tag-based release path must generate and attach SHA256SUMS"
+    );
+    assert!(
+        ci.contains("Generate release notes from commits since last tag")
+            && ci.contains("scripts/generate-release-notes.sh")
+            && ci.contains("body_path: release-notes.md"),
+        "the tag-based release path must use the commit-derived notes generator"
+    );
+    assert!(
+        ci.contains("check-release-notes.py --notes-file release-notes.md"),
+        "the tag-based release path must verify notes completeness before publishing"
+    );
+    assert!(
+        !ci.contains("generate_release_notes: true"),
+        "GitHub's PR-based auto-notes must be gone from ci.yml"
+    );
+    assert!(
+        ci.contains("fetch-depth: 0"),
+        "the tag-based release checkout must fetch full history + tags for the notes generator"
+    );
+}
+
+#[test]
 fn release_notes_completeness_is_checked_in_ci() {
     // The generated notes must cover every non-prepare commit since the
     // previous tag and contain no release-prep commits. The checker runs in
