@@ -24,6 +24,8 @@ pub mod youtube_chat;
 pub use youtube_chat::{YouTubeChat, YouTubeChatConfig};
 pub mod chat;
 pub use chat::{Chat, ChatConfig, ChatPlatform};
+pub mod rate_limit;
+pub use rate_limit::{RateLimitConfig, RateLimiter};
 pub mod global_hotkey;
 pub mod midi;
 pub use global_hotkey::{GlobalBinding, GlobalHotkey, KeyCode, ModMask};

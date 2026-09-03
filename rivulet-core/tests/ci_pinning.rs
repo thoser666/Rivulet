@@ -2077,6 +2077,65 @@ fn chat_dock_supports_kick_and_youtube() {
 }
 
 #[test]
+fn chat_outbound_is_rate_limited_per_platform() {
+    // The bot must never burst against a platform limit: every outbound chat
+    // send passes through a shared token-bucket limiter in core. Twitch's
+    // documented global ceiling is 20 messages / 30 s for non-privileged
+    // accounts; Kick has no published limits (undocumented API) so its default
+    // throttles harder; YouTube's official insert costs ~200 quota units, so
+    // its default is quota-bounded (1/day burst). All defaults are
+    // configurable per platform.
+    let limiter = read("rivulet-core/src/rate_limit.rs");
+    for marker in [
+        "pub struct RateLimitConfig",
+        "pub struct RateLimiter",
+        "pub fn try_acquire",
+        "pub fn with_clock",
+        "pub const fn twitch_default",
+        "pub const fn kick_default",
+        "pub const fn youtube_default",
+        "burst_is_limited_to_capacity",
+        "tokens_refill_over_the_window",
+    ] {
+        assert!(
+            limiter.contains(marker),
+            "rate_limit.rs must provide {marker}"
+        );
+    }
+    // The defaults must encode the documented/conservative ceilings: Twitch
+    // 20/30s, Kick lower than Twitch, YouTube capacity 1 (serialized sends).
+    assert!(limiter.contains("capacity: 20") && limiter.contains("window_secs: 30"));
+    assert!(limiter.contains("capacity: 10") && limiter.contains("window_secs: 30"));
+    assert!(limiter.contains("capacity: 1") && limiter.contains("window_secs: 86_400"));
+    // The chat facade must apply the limiter before enqueueing and expose the
+    // remaining budget for the status line.
+    let chat = read("rivulet-core/src/chat.rs");
+    assert!(
+        chat.contains("limiter: Mutex<RateLimiter>")
+            && chat.contains("pub fn send_message")
+            && chat.contains("pub fn rate_limit_config")
+            && chat.contains("pub fn rate_limit_remaining")
+            && chat.contains("platform rate limit exhausted"),
+        "the chat facade must gate sends through the limiter and expose the budget"
+    );
+    assert!(
+        chat.contains("ChatPlatform::Twitch => RateLimitConfig::twitch_default()")
+            && chat.contains("ChatPlatform::Kick => RateLimitConfig::kick_default()")
+            && chat.contains("ChatPlatform::YouTube => RateLimitConfig::youtube_default()"),
+        "the facade must pick the platform default when no explicit limit is set"
+    );
+    assert!(
+        chat.contains("send_message_drops_when_custom_rate_limit_is_exhausted"),
+        "the facade-level rate-limit rejection must be covered by a test"
+    );
+    // The platform compliance contract (M10 issue #100) stays documented.
+    let readme = read("README.md");
+    assert!(readme.contains("20 messages/30 s"));
+    let gates = read("docs/milestone-quality-gates.md");
+    assert!(gates.contains("20-messages/30-s"));
+}
+
+#[test]
 fn stream_workspace_controls_stay_reachable_on_narrow_windows() {
     // Responsive contract of the Meld-style Stream page: below the narrow
     // width threshold the action bar and every control row wrap and the

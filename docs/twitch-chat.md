@@ -66,11 +66,33 @@ and **YouTube** (Innertube polling) from one unified UI.
 - The message list is bounded to a fixed maximum (`MAX_CHAT_MESSAGES`) so a
   long stream does not grow memory unboundedly.
 
+### Outbound rate limiting
+
+Every outbound bot message passes through a shared token-bucket limiter
+(`rivulet-core::rate_limit`) before it reaches a worker channel, so the bot
+can never burst against a platform limit:
+
+| Platform | Default | Rationale |
+| --- | --- | --- |
+| Twitch | 20 msgs / 30 s | documented global ceiling for non-broadcaster/mod/VIP accounts |
+| Kick | 10 msgs / 30 s | undocumented API — deliberately more conservative than Twitch |
+| YouTube | 1 msg / day (burst 1) | official `insert` costs ~200 quota units; serialized sends never overdraw |
+
+- The default applies when `ChatConfig::rate_limit` is `None`; a custom
+  `RateLimitConfig { capacity, window_secs }` overrides it per platform.
+- `Chat::send_message` drops (and logs) a send when the bucket is empty;
+  `Chat::rate_limit_remaining()` exposes the current budget for a status
+  line, and `Chat::rate_limit_config()` for the settings UI.
+- The bucket is clock-injectable (`RateLimiter::with_clock`) so the unit
+  tests are deterministic; the production clock is monotonic.
+
 ## Architecture
 
 ```
 rivulet-core::chat                         # unified facade
   ├─ ChatPlatform (Twitch / Kick / YouTube) / ChatConfig / Chat
+  ├─ rate_limit  RateLimiter / RateLimitConfig             # token bucket,
+  │                                                         #   per-platform defaults
   ├─ twitch_chat  parse_irc_line -> Option<ChatMessage>   # pure, deterministic
   ├─ kick_chat    parse_kick_event / kick_chatroom_id     # pure + API resolution
   └─ youtube_chat parse_youtube_payload / youtube_initial_continuation
@@ -92,7 +114,11 @@ rivulet-gui::app
   tags/colors/badges/`/me`, Kick chat events, YouTube Innertube payloads +
   continuation extraction), privacy-safe serialization, disabled-state
   behavior and end-to-end smoke tests that run the **real workers** against
-  local listeners (deterministic in CI, no real network):
+  local listeners (deterministic in CI, no real network); the token-bucket
+  rate limiter is covered by deterministic clock-injected unit tests (burst
+  capacity, refill over the window, capacity cap, reset, fractional
+  accumulation) and facade tests (platform defaults, drop on exhausted
+  limit, read-only platforms do not consume tokens):
   - Twitch: local TCP listener asserts CAP/NICK/JOIN, PING→PONG and
     `PRIVMSG #channel :text` after `send_message`.
   - Kick: local HTTP listener serves the chatroom resolution and a local

@@ -9,9 +9,12 @@
 //! The endpoint fields default to the real public endpoints; tests override
 //! them with local listeners.
 
+use std::sync::Mutex;
+
 use crossbeam_channel::Receiver;
 
 use crate::kick_chat::{KickChat, KickChatConfig};
+use crate::rate_limit::{RateLimitConfig, RateLimiter};
 use crate::twitch_chat::{ChatConnState, ChatMessage, TwitchChat, TwitchChatConfig};
 use crate::youtube_chat::{YouTubeChat, YouTubeChatConfig};
 
@@ -65,6 +68,9 @@ pub struct ChatConfig {
     /// Token: Twitch OAuth (`oauth:...`) or Kick session token. Sending is
     /// gated on this; YouTube is read-only.
     pub token: String,
+    /// Outbound rate limit. `None` → the platform default (Twitch 20/30 s,
+    /// Kick 10/30 s, YouTube quota-bounded 1/day).
+    pub rate_limit: Option<RateLimitConfig>,
 }
 
 impl ChatConfig {
@@ -78,6 +84,7 @@ impl ChatConfig {
             youtube_poll_endpoint: String::new(),
             channel,
             token,
+            rate_limit: None,
         }
     }
 }
@@ -89,9 +96,12 @@ impl Default for ChatConfig {
 }
 
 /// Handle to the running chat worker for the selected platform. Non-blocking
-/// by construction; mirrors the platform workers.
+/// by construction; mirrors the platform workers. Outbound messages pass
+/// through a shared per-platform [`RateLimiter`] so the bot can never burst
+/// against a platform limit (Twitch 20/30 s default).
 pub struct Chat {
     inner: ChatInner,
+    limiter: Mutex<RateLimiter>,
 }
 
 enum ChatInner {
@@ -143,7 +153,24 @@ impl Chat {
                 channel: config.channel.clone(),
             })),
         };
-        Self { inner }
+        let limit = config.rate_limit.unwrap_or_else(|| match config.platform {
+            ChatPlatform::Twitch => RateLimitConfig::twitch_default(),
+            ChatPlatform::Kick => RateLimitConfig::kick_default(),
+            ChatPlatform::YouTube => RateLimitConfig::youtube_default(),
+        });
+        Self {
+            inner,
+            limiter: Mutex::new(RateLimiter::new(limit)),
+        }
+    }
+
+    /// Selected platform (for diagnostics and rate-limit reporting).
+    pub fn platform(&self) -> ChatPlatform {
+        match &self.inner {
+            ChatInner::Twitch(_) => ChatPlatform::Twitch,
+            ChatInner::Kick(_) => ChatPlatform::Kick,
+            ChatInner::YouTube(_) => ChatPlatform::YouTube,
+        }
     }
 
     /// Whether a worker is actually running.
@@ -180,13 +207,43 @@ impl Chat {
     }
 
     /// Enqueue a chat message to send. Returns `false` when the worker is
-    /// disabled, the platform is read-only, or the text is empty.
+    /// disabled, the platform is read-only, the text is empty, or the
+    /// platform rate limit is exhausted.
     pub fn send_message(&self, text: &str) -> bool {
+        if !self.can_send() {
+            return false;
+        }
+        {
+            let mut limiter = self.limiter.lock().unwrap_or_else(|e| e.into_inner());
+            if !limiter.try_acquire() {
+                tracing::warn!(
+                    platform = ?self.platform(),
+                    "chat send dropped: platform rate limit exhausted"
+                );
+                return false;
+            }
+        }
         match &self.inner {
             ChatInner::Twitch(c) => c.send_message(text),
             ChatInner::Kick(c) => c.send_message(text),
             ChatInner::YouTube(c) => c.send_message(text),
         }
+    }
+
+    /// Current outbound rate-limit config for the settings UI.
+    pub fn rate_limit_config(&self) -> RateLimitConfig {
+        self.limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .config()
+    }
+
+    /// Sends still possible right now without waiting (status line).
+    pub fn rate_limit_remaining(&self) -> f64 {
+        self.limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .tokens_available()
     }
 
     /// Stop the worker. Safe to call repeatedly.
@@ -229,5 +286,91 @@ mod tests {
         ));
         assert!(!chat.can_send(), "YouTube must be read-only");
         assert!(!chat.send_message("hello"));
+    }
+
+    #[test]
+    fn platform_default_rate_limits_are_applied() {
+        // Twitch: 20/30 s. Kick: 10/30 s (conservative, undocumented API).
+        // YouTube: quota-bounded 1/day.
+        let twitch = Chat::new(&ChatConfig::new(
+            ChatPlatform::Twitch,
+            "rivulet".to_owned(),
+            "oauth:x".to_owned(),
+        ));
+        assert_eq!(
+            twitch.rate_limit_config(),
+            crate::rate_limit::RateLimitConfig::twitch_default()
+        );
+        assert_eq!(twitch.rate_limit_remaining(), 20.0);
+
+        let kick = Chat::new(&ChatConfig::new(
+            ChatPlatform::Kick,
+            "rivulet".to_owned(),
+            "session".to_owned(),
+        ));
+        assert_eq!(
+            kick.rate_limit_config(),
+            crate::rate_limit::RateLimitConfig::kick_default()
+        );
+
+        let youtube = Chat::new(&ChatConfig::new(
+            ChatPlatform::YouTube,
+            "abc123".to_owned(),
+            String::new(),
+        ));
+        assert_eq!(
+            youtube.rate_limit_config(),
+            crate::rate_limit::RateLimitConfig::youtube_default()
+        );
+    }
+
+    #[test]
+    fn send_message_drops_when_custom_rate_limit_is_exhausted() {
+        // A real worker would dial irc.chat.twitch.tv; point it at an
+        // unreachable loopback so the worker just backs off. The facade-level
+        // limiter with capacity 1 must reject the second send before it ever
+        // reaches the worker channel.
+        let chat = Chat::new(&ChatConfig {
+            platform: ChatPlatform::Twitch,
+            twitch_endpoint: "127.0.0.1:1".to_owned(),
+            channel: "rivulet".to_owned(),
+            token: "oauth:x".to_owned(),
+            rate_limit: Some(crate::rate_limit::RateLimitConfig {
+                capacity: 1,
+                window_secs: 30,
+            }),
+            ..Default::default()
+        });
+        assert!(chat.enabled());
+        assert!(chat.send_message("first"), "burst send must pass");
+        // A tiny real-clock refill (< 1 token) is fine; the important part is
+        // that the second send is rejected because a full token is missing.
+        assert!(
+            chat.rate_limit_remaining() < 1.0,
+            "bucket must be exhausted after the capacity-1 burst"
+        );
+        assert!(
+            !chat.send_message("second"),
+            "second send within the window must be rate-limited"
+        );
+    }
+
+    #[test]
+    fn read_only_platform_does_not_consume_tokens() {
+        let chat = Chat::new(&ChatConfig {
+            platform: ChatPlatform::YouTube,
+            channel: "abc123".to_owned(),
+            rate_limit: Some(crate::rate_limit::RateLimitConfig {
+                capacity: 1,
+                window_secs: 30,
+            }),
+            ..Default::default()
+        });
+        assert!(!chat.send_message("hello"));
+        assert_eq!(
+            chat.rate_limit_remaining(),
+            1.0,
+            "read-only rejects must not consume limiter tokens"
+        );
     }
 }
