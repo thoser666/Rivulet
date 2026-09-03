@@ -4404,6 +4404,27 @@ impl RivuletApp {
         worker.send_message(&text)
     }
 
+    /// Consume the pending chat input on Send/Enter: clear the text field
+    /// and arm either a threaded reply (`ChatAction::SendReply`, when a
+    /// reply target is armed) or a plain send (`ChatAction::Send`). Returns
+    /// `false` when the input was empty — in that case nothing is armed and
+    /// an armed reply target is kept (the streamer may still type). The
+    /// action is executed exactly once per frame by `reconcile_chat`.
+    fn submit_chat_input(&mut self) -> bool {
+        let text = std::mem::take(&mut self.chat_input);
+        let text = text.trim();
+        if text.is_empty() {
+            return false;
+        }
+        match self.chat_reply_target.take() {
+            Some((_, parent)) => {
+                self.chat_action_pending = Some(ChatAction::SendReply(text.to_owned(), parent));
+            }
+            None => self.chat_action_pending = Some(ChatAction::Send(text.to_owned())),
+        }
+        true
+    }
+
     /// Send a threaded reply through the running worker. Only Twitch
     /// supports replies (`@reply-parent-msg-id`); the worker enqueues the
     /// reply non-blocking and the shared per-platform rate limiter applies.
@@ -5287,13 +5308,7 @@ impl RivuletApp {
                 let enter_pressed =
                     input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if enter_pressed || theme::accent_button(ui, send_button).clicked() {
-                    let text = std::mem::take(&mut self.chat_input);
-                    match self.chat_reply_target.take() {
-                        Some((_, parent)) => {
-                            self.chat_action_pending = Some(ChatAction::SendReply(text, parent));
-                        }
-                        None => self.chat_action_pending = Some(ChatAction::Send(text)),
-                    }
+                    self.submit_chat_input();
                 }
             });
         } else if self.chat_platform == rivulet_core::ChatPlatform::YouTube {
@@ -10337,6 +10352,106 @@ mod tests {
         assert!(app.send_chat_message(" hello there ".to_owned()));
         // The trimmed message goes through the worker channel (best effort;
         // the worker is not reachable here), so the app reports success.
+    }
+
+    #[test]
+    fn chat_send_reply_requires_token_parent_id_and_worker() {
+        // Threaded replies need the same authenticated connection as plain
+        // sends plus a parent Twitch message id.
+        let mut app = RivuletApp::default();
+        assert!(
+            !app.send_chat_reply("hello".to_owned(), "parent-1".to_owned()),
+            "no token must block replies"
+        );
+        assert!(
+            !app.send_chat_reply("   ".to_owned(), "parent-1".to_owned()),
+            "whitespace text must be rejected"
+        );
+        assert!(
+            !app.send_chat_reply("hello".to_owned(), "   ".to_owned()),
+            "missing parent id must be rejected"
+        );
+
+        // Token configured but no worker connected yet: still rejected.
+        app.chat_oauth_token = "oauth:abc123".to_owned();
+        assert!(
+            !app.send_chat_reply("hello".to_owned(), "parent-1".to_owned()),
+            "no worker must block replies"
+        );
+    }
+
+    #[test]
+    fn chat_send_reply_enqueues_with_a_running_worker() {
+        // Mirror of the plain-send enqueue test: with a token, a worker and a
+        // parent id the reply is handed to the worker non-blocking.
+        let mut app = RivuletApp {
+            chat_oauth_token: "oauth:abc123".to_owned(),
+            chat_channel: "rivulet".to_owned(),
+            chat_worker: Some(rivulet_core::Chat::new(&rivulet_core::ChatConfig {
+                platform: rivulet_core::ChatPlatform::Twitch,
+                twitch_endpoint: "127.0.0.1:1".to_owned(),
+                channel: "rivulet".to_owned(),
+                token: "oauth:abc123".to_owned(),
+                ..Default::default()
+            })),
+            chat_state: rivulet_core::ChatConnState::Connected,
+            ..Default::default()
+        };
+        assert!(
+            app.send_chat_reply(" thanks! ".to_owned(), "parent-1".to_owned()),
+            "a trimmed reply with a parent id must be enqueued"
+        );
+        // Dropping the app disconnects the worker (Chat::drop stops the
+        // thread); nothing else is observable against the unreachable
+        // endpoint.
+    }
+
+    #[test]
+    fn chat_submit_arms_plain_send_when_no_reply_target() {
+        let mut app = RivuletApp::default();
+        app.chat_input = " hello chat ".to_owned();
+        assert!(app.submit_chat_input());
+        assert!(app.chat_input.is_empty(), "input must be cleared");
+        assert_eq!(
+            app.chat_action_pending,
+            Some(ChatAction::Send("hello chat".to_owned()))
+        );
+    }
+
+    #[test]
+    fn chat_submit_arms_threaded_reply_and_clears_reply_target() {
+        let mut app = RivuletApp::default();
+        app.chat_input = "thanks!".to_owned();
+        app.chat_reply_target = Some(("ViewerOne".to_owned(), "msg-1".to_owned()));
+        assert!(app.submit_chat_input());
+        assert!(app.chat_input.is_empty(), "input must be cleared");
+        assert!(
+            app.chat_reply_target.is_none(),
+            "the armed reply target must be consumed by the send"
+        );
+        assert_eq!(
+            app.chat_action_pending,
+            Some(ChatAction::SendReply(
+                "thanks!".to_owned(),
+                "msg-1".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn chat_submit_rejects_whitespace_and_keeps_reply_target() {
+        let mut app = RivuletApp::default();
+        app.chat_reply_target = Some(("ViewerOne".to_owned(), "msg-1".to_owned()));
+        app.chat_input = "   ".to_owned();
+        assert!(!app.submit_chat_input());
+        assert!(
+            app.chat_reply_target.is_some(),
+            "an empty submit must not drop the armed reply target"
+        );
+        assert!(
+            app.chat_action_pending.is_none(),
+            "nothing may be armed for an empty submit"
+        );
     }
 
     #[test]

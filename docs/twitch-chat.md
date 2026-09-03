@@ -157,17 +157,20 @@ rivulet-gui::app
     and one `get_live_chat` poll response.
 - `rivulet-gui`: navigation contract (no standalone chat sidebar entry; chat
   is part of the Stream workspace), view coverage and i18n parity, plus
-  behavior tests for the send gate (no token / no worker / whitespace are
-  rejected, YouTube read-only) and a source-contract test that the reply
-  input only renders when connected, a token is configured and the platform
-  can send.
+  behavior tests for the send and threaded-reply paths (no token / no
+  worker / whitespace / missing parent id rejected, YouTube read-only;
+  `submit_chat_input` arms `Send` vs. `SendReply`, clears the input and
+  consumes the armed reply target, and an empty submit keeps the target)
+  and a source-contract test that the reply input only renders when
+  connected, a token is configured and the platform can send.
 - `ci_pinning.rs`: guards that the chat dock stays embedded in the Stream
   workspace, each platform worker keeps its local-listener smoke test, the
   send path (`send_message` / `ChatAction::Send` / `PRIVMSG`) stays covered,
   Twitch replies stay threaded (`send_reply` / `@reply-parent-msg-id` /
-  `chat_reply_target` / `ChatAction::SendReply`) with the phone-verification
-  flag surfaced in the dock and i18n, and Kick/YouTube wiring (platform
-  selector, read-only gate, i18n keys, docs) cannot silently regress.
+  `chat_reply_target` / `submit_chat_input` / `ChatAction::SendReply`) with
+  the phone-verification flag surfaced in the dock and i18n, and
+  Kick/YouTube wiring (platform selector, read-only gate, i18n keys, docs)
+  cannot silently regress.
 
 ## Roadmap
 
