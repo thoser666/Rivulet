@@ -50,7 +50,9 @@ The workflow (`release.yml`) handles everything:
 6. Creates a GitHub pre-release whose notes are generated automatically from
 the commits since the previous tag (grouped by conventional-commit type,
 release-prep commits excluded) and whose assets include the `SHA256SUMS`
-checksum manifest the updater verifies against
+checksum manifest the updater verifies against — the notes body is
+additionally verified for completeness before publishing (every non-prepare
+commit since the previous tag must appear, see `scripts/check-release-notes.py`)
 
 `build:`, `chore:` and `ci:` commits release with a patch bump so packaging,
 housekeeping and CI changes (installer layouts, workflow fixes, dependency

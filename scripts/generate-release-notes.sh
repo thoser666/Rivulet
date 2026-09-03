@@ -166,6 +166,8 @@ if [[ "${1:-}" == "--self-test" ]]; then
   exit $?
 fi
 
-# Normal mode: print the notes for the current repository.
-cd "$(dirname "$0")/.."
-generate_notes "$PWD"
+# Normal mode: print the notes for the given repository (default: the
+# checkout that contains this script). An explicit argument lets other tools
+# (e.g. scripts/check-release-notes.py) generate for a fixture repository.
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+generate_notes "${1:-$ROOT}"

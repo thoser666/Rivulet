@@ -259,6 +259,14 @@ jobs:
           # workflow that pushes commits directly to develop.
           bash scripts/generate-release-notes.sh > release-notes.md
 
+      - name: Verify release notes completeness
+        run: |
+          # Fails the release if any non-prepare commit since the previous
+          # tag is missing from the body (or a prepare commit leaked in).
+          # Runs after the notes are generated and before the release is
+          # created, with the full history + tags the checkout fetched.
+          python3 scripts/check-release-notes.py --notes-file release-notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:

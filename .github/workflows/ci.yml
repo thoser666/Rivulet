@@ -85,6 +85,9 @@ jobs:
       - name: Test release-notes generation
         run: bash scripts/generate-release-notes.sh --self-test
 
+      - name: Check release-notes completeness checker
+        run: python3 scripts/check-release-notes.py --self-test
+
       - name: Check action pin table is up to date
         run: python3 scripts/generate-action-pins.py --check
 

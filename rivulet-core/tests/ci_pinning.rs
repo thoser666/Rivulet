@@ -1601,6 +1601,33 @@ fn alpha_release_notes_are_generated_from_commits_since_last_tag() {
 }
 
 #[test]
+fn release_notes_completeness_is_checked_in_ci() {
+    // The generated notes must cover every non-prepare commit since the
+    // previous tag and contain no release-prep commits. The checker runs in
+    // two places: as a regression self-test in the Lints job (every push)
+    // and — decisively — in the release workflow against the exact body that
+    // is about to be published, before the release is created.
+    let checker = read("scripts/check-release-notes.py");
+    assert!(
+        checker.contains("--self-test")
+            && checker.contains("--notes-file")
+            && checker.contains("chore(release): prepare "),
+        "the completeness checker must ship a self-test and detect prepare-commit leaks"
+    );
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("check-release-notes.py --self-test"),
+        "the completeness checker self-test must run in the Lints job"
+    );
+    let release = read(".github/workflows/release.yml");
+    assert!(
+        release.contains("Verify release notes completeness")
+            && release.contains("check-release-notes.py --notes-file release-notes.md"),
+        "the release workflow must verify the published notes body for completeness"
+    );
+}
+
+#[test]
 fn updater_declares_sha2_dependency() {
     // sha2 is the only crypto the updater needs; pin it through the workspace
     // so cargo-deny and dependabot track a single version.
