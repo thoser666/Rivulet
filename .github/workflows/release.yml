@@ -1,24 +1,39 @@
 name: Release (Alpha)
 
 # ALPHA CHANNEL: Builds release binaries as soon as a releasable Conventional
-# Commit is pushed to the develop branch:
+# Commit on develop has passed CI:
 #
 #   feat(...)   → minor bump   (e.g. 0.20 → 0.21)
 #   fix(...)    → patch bump    (e.g. 0.20.0 → 0.20.1)
 #   feat!(...)  → major bump    (e.g. 0.x → 1.0)
 #
-# Every qualifying push produces a versioned alpha release (tag vX.Y.Z-alpha.N)
-# including installable packages (portable/MSI, AppImage, DMG) and a formal
-# GitHub release. Merged Dependabot pull requests do not trigger the build.
-# Version preparation is deliberately performed on a temporary release branch;
-# develop is protected and must only be changed through a pull request.
+# The workflow is triggered by the CI workflow completing (workflow_run),
+# NOT by the push itself. That is the gate: the release only starts once
+# CI has concluded, and only when it concluded SUCCESS. A failed or
+# cancelled CI run (e.g. a transient runner flake) skips the release here;
+# rerunning CI green fires this workflow again automatically, so a flaky
+# CI run never leaves a cancelled release behind and needs no manual
+# release rerun.
+#
+# Every qualifying CI-green push produces a versioned alpha release (tag
+# vX.Y.Z-alpha.N) including installable packages (portable/MSI, AppImage,
+# DMG) and a formal GitHub release. Merged Dependabot pull requests do not
+# trigger the build. Version preparation is deliberately performed on a
+# temporary release branch; develop is protected and must only be changed
+# through a pull request.
 #
 # For the higher maturity levels (beta/rc/stable) see the tag-based release
 # path in ci.yml ("refs/tags/v*").
 
 on:
-  push:
-    branches: [ develop ]
+  # Only CI completions on develop trigger an alpha release; the conclusion
+  # is evaluated in the check job (must be 'success'). Reruns of CI fire
+  # this trigger again (run_attempt in the payload), which is the
+  # auto-resume mechanism.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [develop]
   # Manually trigger an alpha release (e.g. after CI repairs, when
   # no new feature commit is pending).
   workflow_dispatch:
@@ -57,42 +72,72 @@ jobs:
     outputs:
       should_release: ${{ steps.detect.outputs.should_release }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # workflow_run payloads carry the triggering run's head_sha; the
+          # generic github.sha points at the default branch and must not be
+          # used for the release decision.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          # Full history so the releasable-commit detection below can compute
+          # the range since the last tag exactly like scripts/release-version.sh.
+          fetch-depth: 0
+
       - name: Detect releasable commit
         id: detect
         env:
-          ACTOR: ${{ github.actor }}
-          COMMITS: ${{ toJson(github.event.commits) }}
+          ACTOR: ${{ github.event.workflow_run.actor.login || github.actor }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          EVENT: ${{ github.event_name }}
         run: |
           SHOULD_RELEASE="false"
 
           # Manual trigger (workflow_dispatch): always build.
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          if [[ "$EVENT" == "workflow_dispatch" ]]; then
             echo "Manual trigger - release build will run."
             echo "should_release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # CI GATE: only a SUCCESSFUL CI run may release. A failed or
+          # cancelled CI run (e.g. a transient runner flake) skips the
+          # release here; rerunning CI green fires this workflow again
+          # (auto-resume), so no manual release rerun is ever needed.
+          if [[ "$CONCLUSION" != "success" ]]; then
+            echo "CI concluded '$CONCLUSION' - release skipped (rerun CI green to auto-resume)."
+            echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # Never build merged Dependabot PRs (neither by actor nor by
           # the author of the pushed commits).
           if [[ "$ACTOR" == "dependabot[bot]" || "$ACTOR" == "dependabot-preview[bot]" ]]; then
-            echo "Push comes from Dependabot - release build will be skipped."
+            echo "CI was triggered by Dependabot - release build will be skipped."
             echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if echo "$COMMITS" | jq -r '.[] | .author.name' | grep -q "dependabot"; then
-            echo "Push contains Dependabot commits - release build will be skipped."
+          if git log -1 --format='%an' HEAD | grep -q "dependabot"; then
+            echo "Head commit comes from Dependabot - release build will be skipped."
             echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # Releasable commit detection: feat (minor/major), fix/build/chore/ci
           # (patch) — packaging, housekeeping and CI changes ship without
-          # needing a manual workflow dispatch afterwards.
-          if echo "$COMMITS" | jq -r '.[].message' | grep -qE '^(feat|fix|build|chore|ci)(\(.*\))?!?:'; then
+          # needing a manual workflow dispatch afterwards. Uses the same
+          # range as scripts/release-version.sh (commits since the last tag,
+          # or full history when no tag exists yet).
+          LAST_TAG="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          if [[ -n "$LAST_TAG" ]]; then
+            LOG_RANGE="$LAST_TAG..HEAD"
+          else
+            LOG_RANGE="HEAD"
+          fi
+          if git log "$LOG_RANGE" --pretty=format:'%s' | grep -qE '^(feat|fix|build|chore|ci)(\(.*\))?!?:'; then
             SHOULD_RELEASE="true"
             echo "Releasable commit found (feat/fix/build/chore/ci) - release build will run."
           else
-            echo "No feat/fix/build/chore/ci commit in the push - release build will be skipped."
+            echo "No feat/fix/build/chore/ci commit in the range - release build will be skipped."
           fi
 
           echo "should_release=$SHOULD_RELEASE" >> "$GITHUB_OUTPUT"
@@ -116,6 +161,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Release the CI-verified commit, not the current default-branch
+          # head (for workflow_run events github.sha points at develop's tip,
+          # which may have moved past the tested commit).
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 

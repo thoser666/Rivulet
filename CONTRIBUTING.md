@@ -27,12 +27,18 @@ Rivulet uses a **two-channel** release model:
 
 | Channel | Tag format | Trigger | Example |
 | --- | --- | --- | --- |
-| **Alpha** | `v0.X.Y-alpha.N` | Every `feat:`, `fix:`, `build:`, `chore:` or `ci:` push to `develop` | `v0.21.0-alpha.1` |
+| **Alpha** | `v0.X.Y-alpha.N` | Every `feat:`, `fix:`, `build:`, `chore:` or `ci:` push to `develop` **whose CI run concludes successfully** | `v0.21.0-alpha.1` |
 | **Beta / RC / Stable** | `vX.Y.Z` | Manually set tag (no suffix) | `v1.0.0` |
 
-### Alpha Channel (Automatic)
+### Alpha Channel (Automatic, CI-gated)
 
-Every releasable commit pushed to `develop` automatically produces an alpha release:
+Every releasable commit pushed to `develop` automatically produces an alpha
+release — **after the CI workflow for that commit concluded successfully**.
+The release workflow is triggered by `workflow_run` on the CI workflow
+(`types: [completed]`, branch `develop`), so a failed or cancelled CI run
+simply skips the release instead of starting one. Rerunning CI green fires
+the release workflow again automatically, so a transient runner flake never
+requires a manual release rerun.
 
 | Commit type | SemVer bump | Example |
 | --- | --- | --- |
@@ -42,6 +48,7 @@ Every releasable commit pushed to `develop` automatically produces an alpha rele
 | `build(...)`, `chore(...)` or `ci(...)` | Patch | `0.20.0` → `0.20.1-alpha.1` |
 
 The workflow (`release.yml`) handles everything:
+0. Waits for the CI workflow of the commit to complete; only proceeds when it concluded `success` (failed/cancelled CI skips; rerun CI green to auto-resume)
 1. Detects `feat:`, `fix:`, `build:`, `chore:` or `ci:` commits (skips Dependabot)
 2. Computes the next SemVer version from commit history
 3. Bumps `Cargo.toml` and `CHANGELOG.md`

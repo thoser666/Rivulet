@@ -1616,6 +1616,38 @@ fn alpha_release_runs_are_serialized() {
 }
 
 #[test]
+fn alpha_release_gates_on_ci_conclusion_and_auto_resumes() {
+    // The alpha release must be triggered by the CI workflow completing, not
+    // by the push itself: a flaky/failed CI run must leave the release
+    // skipped (not cancelled), and rerunning CI green must fire this
+    // workflow again automatically — no manual release rerun after flakes.
+    let workflow = read(".github/workflows/release.yml");
+    assert!(
+        workflow.contains("workflow_run:")
+            && workflow.contains("workflows: [CI]")
+            && workflow.contains("types: [completed]")
+            && workflow.contains("branches: [develop]"),
+        "release.yml must trigger on CI completion on develop (workflow_run)"
+    );
+    assert!(
+        workflow.contains("CONCLUSION")
+            && workflow.contains("!= \"success\"")
+            && workflow.contains("rerun CI green to auto-resume"),
+        "release.yml must gate on the CI conclusion (success only) and \
+         document the rerun-green auto-resume path"
+    );
+    assert!(
+        workflow.contains("github.event.workflow_run.head_sha"),
+        "release.yml must checkout the CI-tested commit (workflow_run.head_sha), \
+         not the default-branch tip, so a release always builds the tested SHA"
+    );
+    assert!(
+        !workflow.contains("on:\n  push:\n    branches: [ develop ]"),
+        "release.yml must no longer run on push directly — it must wait for CI"
+    );
+}
+
+#[test]
 fn alpha_release_notes_are_generated_from_commits_since_last_tag() {
     // The GitHub release body must be derived from the ACTUAL commits since
     // the previous tag (grouped by conventional-commit type) rather than

@@ -143,11 +143,17 @@ follow-up.
 
 ## Release verification
 
-The alpha release workflow is intentionally two-phase: it first prepares a
-release branch, then builds all platform packages, and only after the matrix
-succeeds creates or reuses the tag and publishes the GitHub Release. A tag
-without a release is considered a failed run and must be repaired with
-`scripts/backfill-releases.sh --check` followed by the targeted backfill.
+The alpha release workflow is intentionally CI-gated and two-phase: it is
+triggered by the CI workflow completing (`workflow_run`, branch `develop`)
+rather than by the push itself, and only proceeds when that CI run concluded
+`success`. A failed or cancelled CI run (e.g. a transient runner flake)
+leaves the release skipped; rerunning CI green fires the workflow again
+automatically, so no manual release rerun is needed after a flake. It then
+first prepares a release branch, builds all platform packages, and only after
+the matrix succeeds creates or reuses the tag and publishes the GitHub
+Release. A tag without a release is considered a failed run and must be
+repaired with `scripts/backfill-releases.sh --check` followed by the
+targeted backfill.
 Retries for the same alpha version reuse the existing `release/<tag>` branch.
 The workflow resets the generated version/changelog changes before switching to
 that branch and skips an empty version-bump commit, preventing checkout and
