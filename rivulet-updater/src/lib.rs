@@ -188,7 +188,14 @@ pub fn parse_checksums(manifest: &str) -> Vec<(String, String)> {
                 .trim_start_matches('*')
                 .trim()
                 .to_string();
-            if digest.is_empty() || name.is_empty() {
+            // NUL bytes cannot appear in a real manifest (the digest is hex
+            // and the name is a release asset path); a hostile manifest that
+            // smuggles one in is malformed and must be skipped, not emitted.
+            if digest.is_empty()
+                || name.is_empty()
+                || digest.contains('\u{0}')
+                || name.contains('\u{0}')
+            {
                 return None;
             }
             Some((name, digest))
@@ -752,6 +759,22 @@ garbage-without-digest\n\
                 ("rivulet-windows-x86_64.msi".into(), "abc123".into()),
                 ("rivulet-linux-x86_64.AppImage".into(), "def456".into()),
             ]
+        );
+    }
+
+    #[test]
+    fn parse_checksums_skips_nul_poisoned_entries() {
+        // libFuzzer regression: a manifest with NUL bytes must never emit
+        // entries containing NUL (the fuzz contract rejects them).
+        let manifest = "abc123  \u{0}evil-name\n\u{0}digest  rivulet.msi\n\
+def456  valid-name\n";
+        let parsed = parse_checksums(manifest);
+        assert_eq!(parsed, vec![("valid-name".into(), "def456".into())]);
+        assert!(
+            parsed
+                .iter()
+                .all(|(n, d)| !n.contains('\u{0}') && !d.contains('\u{0}')),
+            "no parsed entry may carry a NUL byte"
         );
     }
 
