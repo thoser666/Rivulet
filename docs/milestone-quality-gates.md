@@ -74,7 +74,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 Also run the applicable CI checks: workflow linting, ShellCheck, action-pin
-validation, asset drift, signing/packaging tests, and parity checks. Hardware,
+validation, asset drift, signing/packaging tests, parity checks, and the
+roadmap-sync check (README overview table + gates doc vs the GitHub
+milestones — see [`roadmap-sync-check.md`](roadmap-sync-check.md)). Hardware,
 GPU, WebView, and display-server checks must be marked `PASS`, `BLOCKED`, or
 `N/A` with a reason; they must not be silently omitted.
 

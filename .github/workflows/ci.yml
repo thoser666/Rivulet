@@ -243,12 +243,38 @@ jobs:
           if-no-files-found: ignore
 
   ################################################################
+  # ROADMAP-SYNC CHECK (README milestone table + gates doc vs GitHub)
+  # The milestone sequence is owned by GitHub (canonical `M<n> – Title`
+  # names). This job verifies the README "Milestone overview" table and
+  # docs/milestone-quality-gates.md mirror the live milestone titles,
+  # ordering, and badge ids, so a milestone rename/reorder must touch all
+  # three places or CI fails. Pure Python: no Rust build needed.
+  ################################################################
+  roadmap_sync:
+    name: Roadmap-Sync Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run roadmap-sync checker self-test
+        run: python3 scripts/check-roadmap-sync.py --self-test
+
+      - name: Validate roadmap sync against GitHub milestones
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/check-roadmap-sync.py
+
+  ################################################################
   # REQUIRED CI AGGREGATE (stable check name for the develop ruleset)
   ################################################################
   ci:
     name: CI
     if: ${{ always() }}
-    needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke]
+    needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke, roadmap_sync]
     runs-on: ubuntu-latest
     steps:
       - name: Require all CI jobs to pass
@@ -263,7 +289,8 @@ jobs:
             "${{ needs.srt_receiver_smoke.result }}" \
             "${{ needs.rist_receiver_smoke.result }}" \
             "${{ needs.obs_websocket_smoke.result }}" \
-            "${{ needs.fuzz_smoke.result }}"; do
+            "${{ needs.fuzz_smoke.result }}" \
+            "${{ needs.roadmap_sync.result }}"; do
             if [[ "$result" != "success" ]]; then
               echo "A required CI job finished with: $result" >&2
               exit 1

@@ -1208,7 +1208,7 @@ fn develop_required_checks_have_stable_job_names() {
             && ci.contains("cargo test -p rivulet-core --test ci_pinning")
             && ci.contains("name: CI")
             && ci.contains(
-                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke]"
+                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke, roadmap_sync]"
             ),
         "CI must expose dedicated Pinning-Tests and aggregate CI checks"
     );
@@ -1225,6 +1225,55 @@ fn develop_required_checks_have_stable_job_names() {
     assert!(
         scorecard.contains("name: OpenSSF Scorecard"),
         "scorecard.yml must expose a stable OpenSSF Scorecard check name"
+    );
+}
+
+#[test]
+fn roadmap_sync_check_keeps_docs_and_milestones_aligned() {
+    // The milestone sequence is owned by GitHub (canonical `M<n> – Title`
+    // names). The checker must (1) compare the README overview table, the
+    // gates-doc resource rows/sections, and the live GitHub milestones, and
+    // (2) be wired into CI as its own stable check with issues read access.
+    let checker = read("scripts/check-roadmap-sync.py");
+    for marker in [
+        "def parse_readme_table",
+        "def parse_gates",
+        "def local_checks",
+        "def github_checks",
+        "def fetch_milestones",
+        "milestones?state=all&per_page=100",
+        "--self-test",
+        "--fixture",
+    ] {
+        assert!(checker.contains(marker), "checker must expose {marker}");
+    }
+    // The checker must know the structural contracts it validates: README
+    // rows carry a badge id that must point at the GitHub milestone with the
+    // same title, and gates sections are required from M2 onward (M0/M1
+    // predate the gates document).
+    assert!(checker.contains("FIRST_GATE_SECTION = 2"));
+    assert!(checker.contains("no GitHub milestone is titled"));
+    assert!(checker.contains("badge points at"));
+    assert!(checker.contains("missing a `### M<n>:` quality-gate section"));
+
+    let readme = read("README.md");
+    // Overview table rows must use the full canonical milestone names so the
+    // live GitHub title comparison cannot silently pass on shortened labels.
+    assert!(readme.contains("M4 – Advanced Output & Capture"));
+    assert!(readme.contains("M8 – Embeddable Engine & API"));
+    assert!(readme.contains("M11 – Extensible UI & Plugin Platform"));
+    let gates = read("docs/milestone-quality-gates.md");
+    assert!(gates.contains("### M11: Extensible UI and Plugin Platform"));
+
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("name: Roadmap-Sync Check")
+            && ci.contains("scripts/check-roadmap-sync.py --self-test")
+            && ci.contains("python3 scripts/check-roadmap-sync.py")
+            && ci.contains("issues: read")
+            && ci.contains("needs.roadmap_sync.result"),
+        "CI must run the roadmap-sync checker with issues read access and \
+         require it in the aggregate"
     );
 }
 
