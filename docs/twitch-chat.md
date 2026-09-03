@@ -41,6 +41,9 @@ and **YouTube** (Innertube polling) from one unified UI.
   budget: 17/20 messages”). The line turns warning-colored at ≤ ¼ capacity
   and is replaced by a pause notice while the bucket is empty, so the
   platform rate limit is visible *before* a send is silently dropped.
+  Hovering the line shows which platform limit applies and over what
+  window (e.g. “Rate limit for Twitch: 20 messages per 30 s”), so the
+  numbers stay compact without hiding the window.
 - **Threaded replies (Twitch)**: every Twitch message keeps its IRCv3
   `id=` tag; clicking the **↩** affordance on a message arms a reply
   target (banner: “Replying to <user>”, cancel with ✕) and the next Send
@@ -101,9 +104,11 @@ can never burst against a platform limit:
 - The bucket is clock-injectable (`RateLimiter::with_clock`) so the unit
   tests are deterministic; the production clock is monotonic.
 - The dock reads the live budget through `Chat::rate_limit_remaining()`
-  and `Chat::rate_limit_config()` (helper `chat_rate_budget()` in the
-  app) and renders it above the input — warning at ≤ ¼ capacity, pause
-  notice while empty.
+  and `Chat::rate_limit_config()` (helpers `chat_rate_limit_detail()` /
+  `chat_rate_budget()` in the app) and renders it above the input —
+  warning at ≤ ¼ capacity, pause notice while empty. The tooltip
+  (`chat_rate_window`) names the platform and the window the limit
+  applies over.
 
 ### Threaded replies and phone verification (Twitch)
 
@@ -162,18 +167,33 @@ rivulet-gui::app
     `msg_requires_verified_phone_number` NOTICE flips the
     `phone_verification_required()` flag. `parse_notice` is covered by
     unit tests (recognized notice vs. ignored notices/PRIVMSG/PING).
+    IRC is line-based and every worker reply is read before the fixture
+    closes, so no HTTP-style request draining is needed (documented in
+    the fixture).
   - Kick: local HTTP listener serves the chatroom resolution and a local
     WebSocket server (`tungstenite::accept`) delivers a parsed chat event.
   - YouTube: a local HTTP listener serves the initial page (continuation)
     and one `get_live_chat` poll response.
+- **Windows RST hygiene**: every local HTTP fixture (YouTube page +
+  `get_live_chat` poll, Kick chatroom-resolution endpoints) fully drains
+  the incoming request — headers plus any `Content-Length` body
+  (`drain_request` / `drain_http_request`) — before answering. Answering
+  while request bytes are still unread makes Windows close the socket
+  with `WSAECONNRESET` (os error 10054) instead of a clean FIN, which
+  intermittently failed the YouTube worker smoke on windows-latest until
+  fixed; the Kick WebSocket fixture is unaffected (tungstenite performs
+  the full HTTP upgrade read itself).
 - `rivulet-gui`: navigation contract (no standalone chat sidebar entry; chat
   is part of the Stream workspace), view coverage and i18n parity, plus
   behavior tests for the send and threaded-reply paths (no token / no
   worker / whitespace / missing parent id rejected, YouTube read-only;
   `submit_chat_input` arms `Send` vs. `SendReply`, clears the input and
-  consumes the armed reply target, and an empty submit keeps the target)
-  and a source-contract test that the reply input only renders when
-  connected, a token is configured and the platform can send.
+  consumes the armed reply target, an empty submit keeps the target, and
+  `cancel_chat_reply` (banner ✕) disarms without touching the draft) and
+  source-contract tests that the reply input only renders when connected,
+  a token is configured and the platform can send, and that the
+  “Replying to <user>” banner (translated, above the input) keeps its ✕
+  cancel affordance wired to the testable cancel helper.
 - `ci_pinning.rs`: guards that the chat dock stays embedded in the Stream
   workspace, each platform worker keeps its local-listener smoke test, the
   send path (`send_message` / `ChatAction::Send` / `PRIVMSG`) stays covered,

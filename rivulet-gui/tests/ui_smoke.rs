@@ -95,6 +95,28 @@ fn responsive_contract_keeps_controls_reachable_on_narrow_windows() {
             && chat.contains("available_width() - 70.0).max(120.0)"),
         "the chat dock rows must wrap and the send input must keep a sane width"
     );
+    // The send-budget line above the input must stay inside the dock column
+    // on narrow windows: it renders as an explicitly wrapping label, so a
+    // long (German) notice can never be clipped at the right edge, and the
+    // dock lives in the page's vertical scroll area for short windows.
+    assert!(
+        chat.contains("chat_rate_budget")
+            && chat.contains("chat_rate_limited")
+            && chat.contains("Label::new")
+            && chat.contains(".wrap()"),
+        "the send-budget indicator must wrap inside the dock on narrow windows"
+    );
+    let banner_pos = chat.find("chat_reply_to").expect("banner marker in dock");
+    let budget_pos = chat
+        .find("chat_rate_budget")
+        .expect("budget marker in dock");
+    let input_pos = chat
+        .find("submit_chat_input")
+        .expect("input marker in dock");
+    assert!(
+        banner_pos < budget_pos && budget_pos < input_pos,
+        "reply banner and send budget must stack above the chat input"
+    );
 }
 
 #[test]

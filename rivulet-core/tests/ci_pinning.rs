@@ -2138,13 +2138,25 @@ fn chat_outbound_is_rate_limited_per_platform() {
             && gui.contains("chat_rate_limited"),
         "the chat dock must read and render the send budget"
     );
+    // The budget line carries a tooltip with the platform + window the limit
+    // applies over (e.g. “20 messages per 30 s on Twitch”), so the bare
+    // numbers stay compact but nothing is hidden.
     assert!(
-        gui.contains("chat_rate_budget_reports_limiter_state"),
-        "the budget accessor must be covered by a GUI behavior test"
+        gui.contains("fn chat_rate_limit_detail")
+            && gui.contains("chat_rate_window")
+            && gui.contains("on_hover_text(tooltip)"),
+        "the budget tooltip must expose platform and window"
+    );
+    assert!(
+        gui.contains("chat_rate_budget_reports_limiter_state")
+            && gui.contains("chat_rate_limit_detail_reports_platform_and_window"),
+        "the budget accessors must be covered by GUI behavior tests"
     );
     let i18n = read("rivulet-core/src/i18n.rs");
     assert!(
-        i18n.contains("chat_rate_budget") && i18n.contains("chat_rate_limited"),
+        i18n.contains("chat_rate_budget")
+            && i18n.contains("chat_rate_limited")
+            && i18n.contains("chat_rate_window"),
         "the budget strings must be translated"
     );
     // The platform compliance contract (M10 issue #100) stays documented.
@@ -2306,6 +2318,32 @@ fn stream_workspace_controls_stay_reachable_on_narrow_windows() {
     assert!(
         app.contains("available_width() - 70.0).max(120.0)"),
         "the chat send input must never get a negative width"
+    );
+    // The send-budget indicator above the chat input must survive narrow
+    // windows too: it renders as an explicitly wrapping Label (.wrap(), never
+    // clipped at the right edge of the dock column) and stacks between the
+    // reply banner and the input row; the dock itself lives in the page's
+    // vertical scroll area (auto_shrink false), so short windows scroll to it.
+    let chat = app
+        .split_once("fn draw_chat_dock")
+        .map(|(_, rest)| rest)
+        .expect("draw_chat_dock must exist");
+    assert!(
+        chat.contains("chat_rate_budget")
+            && chat.contains("chat_rate_limited")
+            && chat.contains("Label::new")
+            && chat.contains(".wrap()"),
+        "the send-budget indicator must wrap inside the dock on narrow windows"
+    );
+    let budget_pos = chat
+        .find("chat_rate_budget")
+        .expect("budget marker in dock");
+    let input_pos = chat
+        .find("submit_chat_input")
+        .expect("input marker in dock");
+    assert!(
+        budget_pos < input_pos,
+        "the send budget must render above the chat input"
     );
 }
 

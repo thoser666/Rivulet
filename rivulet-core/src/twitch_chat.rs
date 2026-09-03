@@ -758,6 +758,15 @@ mod tests {
             "phone-verification notice must set the handle flag"
         );
 
+        // The IRC fixture needs no request draining (unlike the HTTP fixtures
+        // in youtube_chat.rs/kick_chat.rs): IRC is line-based, the worker only
+        // writes after a server line and every such reply (PONG after PING,
+        // PRIVMSG after send_message/send_reply) is read by this side before
+        // the next server write, and the worker never writes after the final
+        // NOTICE. Dropping the socket therefore carries no unread inbound
+        // bytes, so Windows closes cleanly instead of resetting (os error
+        // 10054). Keep it that way: any new worker -> fixture traffic must be
+        // read before disconnect.
         chat.disconnect();
     }
 

@@ -4425,6 +4425,13 @@ impl RivuletApp {
         true
     }
 
+    /// Cancel the armed threaded reply (banner ✕ button): clears the target
+    /// so the next Send is a plain chat message again. Never enqueues
+    /// anything and never touches the input text.
+    fn cancel_chat_reply(&mut self) {
+        self.chat_reply_target = None;
+    }
+
     /// Send a threaded reply through the running worker. Only Twitch
     /// supports replies (`@reply-parent-msg-id`); the worker enqueues the
     /// reply non-blocking and the shared per-platform rate limiter applies.
@@ -4440,16 +4447,28 @@ impl RivuletApp {
         worker.send_reply(&text, &parent_id)
     }
 
-    /// Remaining outbound chat budget `(available, capacity)` of the running
-    /// worker's shared rate limiter, for the budget line above the input.
-    /// `None` while no worker is running. `available` is fractional (tokens
-    /// refill continuously over the window); the UI floors it.
-    fn chat_rate_budget(&self) -> Option<(f64, f64)> {
+    /// Live rate-limit detail `(remaining, capacity, window_secs, platform
+    /// label)` of the running worker's shared limiter, for the budget line
+    /// and its tooltip (“20 messages per 30 s on Twitch”). `None` while no
+    /// worker is running. `remaining` is fractional (tokens refill
+    /// continuously over the window); the UI floors it.
+    fn chat_rate_limit_detail(&self) -> Option<(f64, u32, u64, &'static str)> {
         let worker = self.chat_worker.as_ref()?;
+        let cfg = worker.rate_limit_config();
         Some((
             worker.rate_limit_remaining(),
-            worker.rate_limit_config().capacity as f64,
+            cfg.capacity,
+            cfg.window_secs,
+            worker.platform().label(),
         ))
+    }
+
+    /// Remaining outbound chat budget `(available, capacity)` of the running
+    /// worker's shared rate limiter. Thin wrapper over
+    /// [`Self::chat_rate_limit_detail`]; kept for tests and status lines.
+    fn chat_rate_budget(&self) -> Option<(f64, f64)> {
+        self.chat_rate_limit_detail()
+            .map(|(remaining, capacity, _, _)| (remaining, capacity as f64))
     }
 
     /// Handle the Settings "Apply" action for the Discord client id: validate
@@ -5305,7 +5324,7 @@ impl RivuletApp {
                 ui.horizontal_wrapped(|ui| {
                     ui.small(egui::RichText::new(format!("↩ {reply_label}")).italics());
                     if ui.small_button("✕").on_hover_text(reply_cancel).clicked() {
-                        self.chat_reply_target = None;
+                        self.cancel_chat_reply();
                     }
                 });
             }
@@ -5314,14 +5333,39 @@ impl RivuletApp {
             // visible *before* a send is silently dropped. The line turns
             // warning-colored when the bucket is near-empty and is replaced
             // by a pause notice while the bucket is empty.
-            if let Some((remaining, capacity)) = self.chat_rate_budget() {
+            //
+            // Both texts render as explicitly wrapping labels (.wrap()) so a
+            // long German notice (or a future theme default that disables
+            // wrapping) can never be clipped at the right edge of a narrow
+            // dock column; the whole Stream view lives in a vertical scroll
+            // area, so the line is also reachable on short windows.
+            if let Some((remaining, capacity, window_secs, platform)) =
+                self.chat_rate_limit_detail()
+            {
                 let colors = theme::StatusColors::for_ui(ui);
                 let budget = remaining.floor().max(0.0) as u64;
-                let cap = capacity.max(0.0) as u64;
+                let cap = capacity as u64;
+                // Tooltip: which platform limit applies and over what window
+                // (e.g. “20 messages per 30 s on Twitch”), so the bare budget
+                // numbers above the input stay compact.
+                let tooltip = self.tr_fmt(
+                    "chat_rate_window",
+                    &[
+                        capacity.to_string(),
+                        window_secs.to_string(),
+                        platform.to_owned(),
+                    ],
+                );
                 if remaining < 1.0 {
-                    ui.small(
-                        egui::RichText::new(self.tr("chat_rate_limited")).color(colors.warning),
-                    );
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(self.tr("chat_rate_limited"))
+                                .small()
+                                .color(colors.warning),
+                        )
+                        .wrap(),
+                    )
+                    .on_hover_text(tooltip);
                 } else {
                     let low = budget <= cap.saturating_div(4);
                     let color = if low {
@@ -5331,7 +5375,10 @@ impl RivuletApp {
                     };
                     let label =
                         self.tr_fmt("chat_rate_budget", &[budget.to_string(), cap.to_string()]);
-                    ui.small(egui::RichText::new(label).color(color));
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(label).small().color(color)).wrap(),
+                    )
+                    .on_hover_text(tooltip);
                 }
             }
             let send_hint = self.tr("chat_send_hint");
@@ -10445,8 +10492,10 @@ mod tests {
 
     #[test]
     fn chat_submit_arms_plain_send_when_no_reply_target() {
-        let mut app = RivuletApp::default();
-        app.chat_input = " hello chat ".to_owned();
+        let mut app = RivuletApp {
+            chat_input: " hello chat ".to_owned(),
+            ..Default::default()
+        };
         assert!(app.submit_chat_input());
         assert!(app.chat_input.is_empty(), "input must be cleared");
         assert_eq!(
@@ -10457,9 +10506,11 @@ mod tests {
 
     #[test]
     fn chat_submit_arms_threaded_reply_and_clears_reply_target() {
-        let mut app = RivuletApp::default();
-        app.chat_input = "thanks!".to_owned();
-        app.chat_reply_target = Some(("ViewerOne".to_owned(), "msg-1".to_owned()));
+        let mut app = RivuletApp {
+            chat_input: "thanks!".to_owned(),
+            chat_reply_target: Some(("ViewerOne".to_owned(), "msg-1".to_owned())),
+            ..Default::default()
+        };
         assert!(app.submit_chat_input());
         assert!(app.chat_input.is_empty(), "input must be cleared");
         assert!(
@@ -10477,9 +10528,11 @@ mod tests {
 
     #[test]
     fn chat_submit_rejects_whitespace_and_keeps_reply_target() {
-        let mut app = RivuletApp::default();
-        app.chat_reply_target = Some(("ViewerOne".to_owned(), "msg-1".to_owned()));
-        app.chat_input = "   ".to_owned();
+        let mut app = RivuletApp {
+            chat_reply_target: Some(("ViewerOne".to_owned(), "msg-1".to_owned())),
+            chat_input: "   ".to_owned(),
+            ..Default::default()
+        };
         assert!(!app.submit_chat_input());
         assert!(
             app.chat_reply_target.is_some(),
@@ -10519,6 +10572,114 @@ mod tests {
     }
 
     #[test]
+    fn chat_rate_limit_detail_reports_platform_and_window() {
+        // The budget tooltip needs the platform and the window the limit
+        // applies over, not just the remaining budget. A fresh Twitch worker
+        // must report its documented default (20 msgs / 30 s).
+        let app = RivuletApp {
+            chat_worker: Some(rivulet_core::Chat::new(&rivulet_core::ChatConfig {
+                platform: rivulet_core::ChatPlatform::Twitch,
+                twitch_endpoint: "127.0.0.1:1".to_owned(), // worker backs off
+                channel: "rivulet".to_owned(),
+                token: "oauth:abc123".to_owned(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let (remaining, capacity, window_secs, platform) =
+            app.chat_rate_limit_detail().expect("detail with a worker");
+        assert_eq!(capacity, 20);
+        assert_eq!(window_secs, 30);
+        assert_eq!(platform, "Twitch");
+        assert!(
+            (remaining - 20.0).abs() < f64::EPSILON * 64.0,
+            "a fresh bucket must be full, got {remaining}"
+        );
+        // The budget wrapper stays consistent with the detail.
+        let (budget_remaining, budget_capacity) =
+            app.chat_rate_budget().expect("budget with a worker");
+        assert_eq!(budget_capacity, 20.0);
+        assert_eq!(budget_remaining, remaining);
+    }
+
+    #[test]
+    fn chat_reply_cancel_clears_the_armed_target() {
+        // The banner ✕ button must disarm the reply: afterwards the next Send
+        // is a plain message again. Cancelling never enqueues anything and
+        // never touches the draft text.
+        let mut app = RivuletApp {
+            chat_reply_target: Some(("ViewerOne".to_owned(), "msg-1".to_owned())),
+            chat_input: "draft that stays".to_owned(),
+            ..Default::default()
+        };
+        app.cancel_chat_reply();
+        assert!(
+            app.chat_reply_target.is_none(),
+            "cancel must clear the armed reply target"
+        );
+        assert!(
+            app.chat_action_pending.is_none(),
+            "cancel must not enqueue anything"
+        );
+        assert_eq!(
+            app.chat_input, "draft that stays",
+            "cancel must not touch the input text"
+        );
+    }
+
+    #[test]
+    fn chat_reply_banner_with_cancel_is_part_of_the_dock_contract() {
+        // Source contract: the "Replying to <user>" banner (translated via
+        // `chat_reply_to` with the user placeholder) must render directly
+        // above the chat input — only while a reply target is armed — and its
+        // ✕ button must disarm through `cancel_chat_reply()`, so the cancel
+        // path stays testable and the banner cannot silently lose its
+        // translated label or its cancel affordance.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let draw = source
+            .split_once("fn draw_chat_dock")
+            .map(|(_, rest)| rest)
+            .expect("draw_chat_dock must exist in the Stream workspace");
+        assert!(
+            draw.contains("chat_reply_target.as_ref()"),
+            "banner must be gated on an armed target"
+        );
+        assert!(
+            draw.contains("chat_reply_to"),
+            "banner label must come from i18n"
+        );
+        assert!(
+            draw.contains("chat_reply_cancel"),
+            "cancel affordance must carry a translated hover text"
+        );
+        assert!(
+            draw.contains("self.cancel_chat_reply()"),
+            "the ✕ button must call the testable cancel helper"
+        );
+        // The banner sits above the input row (before the send hint / text
+        // field are set up) inside the can-send section.
+        let banner = draw.find("chat_reply_to").expect("banner in dock");
+        let input = draw.find("submit_chat_input").expect("input in dock");
+        assert!(banner < input, "banner must render above the chat input");
+        assert!(
+            source.contains("fn cancel_chat_reply"),
+            "cancel helper must exist"
+        );
+        assert!(
+            source.contains("chat_reply_cancel_clears_the_armed_target"),
+            "cancel behavior must be covered by a unit test"
+        );
+        let i18n = std::fs::read_to_string("../rivulet-core/src/i18n.rs").expect("i18n readable");
+        for key in ["chat_reply_to", "chat_reply_cancel"] {
+            let k = format!("\"{key}\"");
+            assert!(
+                i18n.matches(&k).count() >= 2,
+                "{key} must exist in EN and DE"
+            );
+        }
+    }
+
+    #[test]
     fn stream_workspace_stays_reachable_on_narrow_windows_in_source() {
         // Responsive contract for the Meld-style Stream page: below the
         // narrow-width threshold the action bar and every control row wrap
@@ -10542,6 +10703,16 @@ mod tests {
             .expect("draw_chat_dock must exist");
         assert!(chat.contains("ui.horizontal_wrapped"));
         assert!(chat.contains("available_width() - 70.0).max(120.0)"));
+        // The send-budget indicator above the input must also survive narrow
+        // windows: it is an explicitly wrapping label (never clipped at the
+        // right edge of the dock column) and stacks above the input row.
+        assert!(chat.contains("chat_rate_budget"));
+        assert!(chat.contains("Label::new") && chat.contains(".wrap()"));
+        assert!(
+            chat.find("chat_rate_budget").expect("budget marker")
+                < chat.find("submit_chat_input").expect("input marker"),
+            "the send budget must render above the chat input"
+        );
         let audio = source
             .split_once("fn draw_stream_audio_compact")
             .map(|(_, rest)| rest)
@@ -10577,6 +10748,11 @@ mod tests {
         assert!(draw.contains("chat_rate_limited"));
         assert!(draw.contains("chat_rate_budget()"));
         assert!(draw.contains("rate_limit_remaining()"));
+        // The line must expose the platform + window through a tooltip (e.g.
+        // “20 messages per 30 s on Twitch”), keeping the line itself compact.
+        assert!(draw.contains("chat_rate_limit_detail()"));
+        assert!(draw.contains("chat_rate_window"));
+        assert!(draw.contains("on_hover_text(tooltip)"));
         let i18n = std::fs::read_to_string("../rivulet-core/src/i18n.rs").expect("i18n readable");
         for key in [
             "chat_send",
@@ -10591,6 +10767,7 @@ mod tests {
             "chat_phone_verification",
             "chat_rate_budget",
             "chat_rate_limited",
+            "chat_rate_window",
         ] {
             let k = format!("\"{key}\"");
             assert!(

@@ -414,6 +414,49 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
+    /// Read one complete HTTP request (headers plus any body announced via
+    /// `Content-Length`) from the socket. The fixture must fully drain the
+    /// request before answering: responding (and dropping the socket) while
+    /// the client is still sending unread bytes makes Windows close with
+    /// `WSAECONNRESET` (os error 10054) instead of a clean FIN, which failed
+    /// the YouTube worker smoke intermittently until it was fixed there; the
+    /// same fixture pattern is used for the Kick chatroom-resolution HTTP
+    /// endpoints (see also youtube_chat.rs::drain_request).
+    fn drain_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<()> {
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let header_end = loop {
+            if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                break pos + 4;
+            }
+            let n = stream.read(&mut chunk)?;
+            if n == 0 {
+                return Ok(()); // client closed; nothing more to expect
+            }
+            buf.extend_from_slice(&chunk[..n]);
+        };
+        // Drain a request body announced via Content-Length (POST send).
+        let headers = String::from_utf8_lossy(&buf[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length:")
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+            })
+            .unwrap_or(0);
+        let mut received = buf.len();
+        let needed = header_end + content_length;
+        while received < needed {
+            let n = stream.read(&mut chunk)?;
+            if n == 0 {
+                break;
+            }
+            received += n;
+        }
+        Ok(())
+    }
+
     #[test]
     fn parses_chat_message_event() {
         // r##"…"## because the JSON contains a "# sequence ("#00FF00").
@@ -462,8 +505,7 @@ mod tests {
         let addr = listener.local_addr().expect("addr");
         std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept");
-            let mut buf = [0u8; 4096];
-            let _ = stream.read(&mut buf);
+            let _ = drain_http_request(&mut stream);
             let body = r#"{"chatroom":{"id":42},"id":1}"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -510,8 +552,7 @@ mod tests {
         let api_addr = api_listener.local_addr().expect("api addr");
         std::thread::spawn(move || {
             let (mut stream, _) = api_listener.accept().expect("accept api");
-            let mut buf = [0u8; 4096];
-            let _ = stream.read(&mut buf);
+            let _ = drain_http_request(&mut stream);
             let body = r#"{"chatroom":{"id":7}}"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",

@@ -341,6 +341,48 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
+    /// Read one complete HTTP request (headers plus any body announced via
+    /// `Content-Length`) from the socket. The fixture must fully drain the
+    /// request before answering: responding (and dropping the socket) while
+    /// the client is still sending unread bytes makes Windows close with
+    /// `WSAECONNRESET` (os error 10054) instead of a clean FIN, which failed
+    /// the worker intermittently (observed ~1-in-8 locally and on
+    /// windows-latest).
+    fn drain_request(stream: &mut std::net::TcpStream) -> std::io::Result<()> {
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let header_end = loop {
+            if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                break pos + 4;
+            }
+            let n = stream.read(&mut chunk)?;
+            if n == 0 {
+                return Ok(()); // client closed; nothing more to expect
+            }
+            buf.extend_from_slice(&chunk[..n]);
+        };
+        // Drain a POST body announced via Content-Length (the poll request).
+        let headers = String::from_utf8_lossy(&buf[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.to_ascii_lowercase()
+                    .strip_prefix("content-length:")
+                    .and_then(|value| value.trim().parse::<usize>().ok())
+            })
+            .unwrap_or(0);
+        let mut received = buf.len();
+        let needed = header_end + content_length;
+        while received < needed {
+            let n = stream.read(&mut chunk)?;
+            if n == 0 {
+                break;
+            }
+            received += n;
+        }
+        Ok(())
+    }
+
     fn payload_fixture() -> &'static str {
         // r##"…"## because the JSON contains a "# sequence ("#FF9900").
         r##"{
@@ -445,8 +487,7 @@ mod tests {
         std::thread::spawn(move || {
             // Connection 1: the initial live-chat page GET.
             let (mut stream, _) = listener.accept().expect("accept page");
-            let mut buf = [0u8; 8192];
-            let _ = stream.read(&mut buf);
+            let _ = drain_request(&mut stream);
             let page = r#"<script>var ytInitialData={"continuation":"TOKEN_1"};</script>"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -457,8 +498,7 @@ mod tests {
 
             // Connection 2: the get_live_chat poll POST.
             let (mut stream2, _) = listener.accept().expect("accept poll");
-            let mut buf2 = [0u8; 8192];
-            let _ = stream2.read(&mut buf2);
+            let _ = drain_request(&mut stream2);
             let body = payload_fixture();
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -476,12 +516,26 @@ mod tests {
         let mut chat = YouTubeChat::new(&cfg);
         assert!(chat.enabled());
 
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        // The worker performs two sequential HTTP round trips (page fetch +
+        // first poll) before the message is delivered. The fixture drains
+        // each request completely before answering (see drain_request): on
+        // Windows, answering while request bytes are still unread makes the
+        // socket close with WSAECONNRESET instead of a clean FIN, which
+        // failed this smoke intermittently (~1-in-8 locally and on
+        // windows-latest) until fixed. The generous deadline below and the
+        // fail-fast on Disconnected are defense-in-depth: after a session
+        // error the worker retries against the already-exhausted local
+        // listener, which can never succeed, so waiting out the deadline
+        // would only slow the failure down.
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
         let delivered = loop {
             if let Some(rx) = chat.messages() {
                 if let Ok(msg) = rx.try_recv() {
                     break Some(msg);
                 }
+            }
+            if chat.connection_state() == ChatConnState::Disconnected {
+                break None;
             }
             if std::time::Instant::now() > deadline {
                 break None;

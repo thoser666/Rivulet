@@ -61,6 +61,11 @@ fn narrow_layout_is_responsive() -> bool {
         && stream.contains("available_width() >= STREAM_WORKSPACE_NARROW_WIDTH")
         && chat.contains("horizontal_wrapped")
         && chat.contains("available_width() - 70.0).max(120.0)")
+        && chat.contains("chat_rate_budget")
+        && chat.contains(".wrap()")
+        && chat
+            .find("chat_rate_budget")
+            .is_some_and(|p| chat.find("submit_chat_input").is_some_and(|q| p < q))
 }
 
 fn accessibility_report() -> AccessibilityReport {
