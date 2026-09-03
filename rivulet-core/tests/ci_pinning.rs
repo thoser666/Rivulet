@@ -2180,6 +2180,13 @@ fn local_pre_push_hook_mirrors_the_ci_lints_job() {
         "cargo fmt --all --check",
         "clippy --workspace --all-targets -- -D warnings",
         "RIVULET_SKIP_PRE_PUSH",
+        "RIVULET_PRE_PUSH_FAST_TESTS",
+        "cargo test -p rivulet-core --test ci_pinning",
+        "generate-action-pins.py --check",
+        "check-parity-checklist.py --self-test",
+        "check-release-notes.py --self-test",
+        "generate-release-notes.sh --self-test",
+        "check-theme-contrast.py",
         "06792c6",
     ] {
         assert!(
@@ -2191,8 +2198,10 @@ fn local_pre_push_hook_mirrors_the_ci_lints_job() {
     assert!(
         contributing.contains("Local pre-push checks")
             && contributing.contains("git config core.hooksPath .githooks")
-            && contributing.contains("-D warnings"),
-        "CONTRIBUTING.md must document the pre-push hook and its -D warnings flags"
+            && contributing.contains("-D warnings")
+            && contributing.contains("RIVULET_PRE_PUSH_FAST_TESTS=0 git push")
+            && contributing.contains("RIVULET_SKIP_PRE_PUSH=1 git push"),
+        "CONTRIBUTING.md must document the pre-push hook, its -D warnings flags and the toggles"
     );
 }
 

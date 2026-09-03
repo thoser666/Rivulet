@@ -13,6 +13,11 @@
 #
 # Skip for an individual push:
 #   RIVULET_SKIP_PRE_PUSH=1 git push        # or: git push --no-verify
+#
+# The fast-guard stage (optional, default on) runs the CI pinning tests and
+# the Lints-job script self-tests so the repo-internal guards pass before
+# the push; disable just that stage with:
+#   RIVULET_PRE_PUSH_FAST_TESTS=0 git push
 set -euo pipefail
 
 if [[ "${RIVULET_SKIP_PRE_PUSH:-}" == "1" || "${RIVULET_SKIP_PRE_PUSH:-}" == "true" ]]; then
@@ -29,5 +34,33 @@ cargo fmt --all --check
 
 echo "pre-push: cargo clippy --workspace --all-targets -- -D warnings"
 cargo clippy --workspace --all-targets -- -D warnings
+
+# ── Optional fast-guard stage ────────────────────────────────────────────
+# Mirrors the CI Pinning-Tests job and the Lints-job script self-tests.
+if [[ "${RIVULET_PRE_PUSH_FAST_TESTS:-}" != "0" ]]; then
+  echo "pre-push: cargo test -p rivulet-core --test ci_pinning"
+  cargo test -p rivulet-core --test ci_pinning
+
+  if command -v python3 >/dev/null 2>&1; then
+    echo "pre-push: python3 scripts/generate-action-pins.py --check"
+    python3 scripts/generate-action-pins.py --check
+
+    echo "pre-push: python3 scripts/check-parity-checklist.py --self-test"
+    python3 scripts/check-parity-checklist.py --self-test
+
+    echo "pre-push: python3 scripts/check-release-notes.py --self-test"
+    python3 scripts/check-release-notes.py --self-test
+
+    echo "pre-push: python3 scripts/check-theme-contrast.py"
+    python3 scripts/check-theme-contrast.py
+  else
+    echo "pre-push: python3 not found — skipping script self-tests"
+  fi
+
+  if command -v bash >/dev/null 2>&1; then
+    echo "pre-push: bash scripts/generate-release-notes.sh --self-test"
+    bash scripts/generate-release-notes.sh --self-test
+  fi
+fi
 
 echo "pre-push: all checks passed"
