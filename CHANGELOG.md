@@ -1,5 +1,246 @@
 # Changelog
 
+## [0.65.0-alpha.121] - 2026-09-03
+- ci(roadmap): add Roadmap-Sync Check against GitHub milestones
+- docs(roadmap): insert M6 Creator Toolkit, shift M6–M10 to M7–M11
+- feat(discord): dynamic composed presence title line (i18n DE/EN)
+- docs(obs): commit the generated 32.2.2 candidates fragment
+- chore(deps): include Cargo.lock update for the chat tungstenite dependency
+- feat(chat): multi-platform chat dock (Twitch / Kick / YouTube)
+- feat(gui): responsive Stream workspace keeps controls reachable
+- roadmap(obs): approve the 32.2.2 strong-fit candidates
+- ci(obs): fail loudly when the OBS upstream report is empty
+- ci(obs): persist last-checked release tag for delta tracking
+- fix(updater): reject NUL-poisoned SHA256SUMS entries in parse_checksums
+- feat(gui): Meld-style Stream workspace with embedded chat dock
+- fix(ci): restore the OBS upstream report (END marker dropped by the writer)
+- ci(release): apply release hygiene to the tag-based beta/rc/stable path
+- ci(release): verify release-notes completeness before publishing
+- ci: weekly deep-fuzz campaign with corpus cache, commit-derived release notes
+- build(deps): bump serde_json from 1.0.149 to 1.0.151 (#84)
+- ci(fuzz): install the pipewire/spa dev packages the libspa-sys build needs
+- ci: serialize alpha releases and complete the fuzz job's build deps
+- ci(fuzz): fix the fuzz smoke job's missing glib headers and pin comment
+- fix(security): validate shared-memory frame headers against forged geometry
+- test(security): fuzz the untrusted-input parsers with a CI smoke gate
+- ci(release): write SHA256SUMS outside the scanned directory
+- feat(security): verify release installers against SHA256SUMS before install
+- ci(wiki): audit repo-doc wiki references backwards too
+- ci(wiki): audit interwiki and external links too
+- build(deps): bump async-trait from 0.1.89 to 0.1.92 (#86)
+- ci(wiki): audit repo-doc links (files + heading anchors)
+- build(deps): bump libc from 0.2.180 to 0.2.189 (#88)
+- docs(presence): add the application-id rotation runbook
+- feat(presence): guarded fallback chain makes the app id updateable
+- ci(toolchain): pin rustfmt via rust-toolchain.toml for CI/local parity
+- style: bound the release-gate needle so CI and local rustfmt agree
+- feat(presence): zero-config Discord Rich Presence with official defaults
+- ci(release): include ci: commits in the alpha release gate
+- ci(release): ship alpha releases from build/chore commits too
+- build(packaging): ship Discord setup assets inside all three installers
+- feat(assets): add a dedicated Discord App Icon asset for the member list
+- docs(presence): record the member-list rendering limit
+- feat(presence): mirror the art asset to small_image for the member list
+- docs(presence): fix the CDN verification path and keep the rivulet_logo asset
+- fix(presence): update the Unix-socket IPC smoke to the swapped card lines
+- feat(presence): swap Discord card lines and add OBS-WS handshake load test
+- fix(obs-ws): restore blocking before the handshake to stop CI flake
+- feat(ui): warn on Apply when the Discord presence payload violates rules
+- ci(presence): enforce Discord SET_ACTIVITY validation rules in CI
+- test(presence): omit empty details in the live handshake script + CDN check
+- feat(m5): reply in Twitch chat from the Chat dock
+- ci(assets): regenerate Discord artwork via the asset generator
+- fix(presence): omit empty Discord details field (4000 rejected)
+- docs(presence): ship Rivulet Discord artwork + upload guide
+- docs(presence): document how to verify Rich Presence on the Discord app
+- feat(m5): import stream alert overlays via the browser source
+- feat(presence): OBS-style Discord activity card with artwork and clean layout
+- feat(m5): Twitch chat dock + visible record-dialog cancellation logging
+- feat(ui): validate the Discord client id on Apply
+- feat(ui): add one-click Discord reconnect in the Stream view
+- fix(presence): use Discord IPC v1 opcode framing
+- fix(logging): default the daily log to info level
+- fix(presence): drop useless PathBuf conversion flagged by CI clippy
+- fix(presence): surface Discord connection diagnostics
+- fix(gui): restore persisted app state on startup
+- docs(presence): add state-reference table for all six presence states
+- feat(ui): status legend with per-state tooltips in the Stream view
+- feat(presence): wire up the Error activity state
+- fix(presence): sync Discord status every frame, not only in the Stream view
+- fix(ui): make tabs responsive so controls stay reachable on small windows
+- feat(midi): learn mode and per-device mapping presets (M5)
+- fix(ci): unblock MIDI release build and harden obs-websocket shutdown test
+- feat(midi): MIDI controller mapping (scene/fader/filter) (M5)
+- test(core): fix month-boundary flake in recording path test
+- ci(obs-websocket): add loopback smoke job against a real client
+- docs(obs-websocket): add Stream Deck / TouchPortal step-by-step guide
+- feat(obs-websocket): OBS WebSocket v5 server (#72)
+- feat(hotkeys): OBS-style rebinding + global hotkeys (M5 #80)
+- feat(presence): configurable Discord client id, game name in status, IPC smoke test
+- feat(presence): add opt-out, non-blocking Discord Rich Presence adapter
+- ci(nightly): make newer-major action-pin gaps fatal (--fail-on-major)
+- feat(m4): real S3 upload after stop_recording (SigV4 PUT) + VST3 hosting issue
+- chore(ci): bump codeql-action to v4 and dependency-review to v5
+- fix(ci): repair nightly workflow — compound-action pins, stale SHAs, flaky test
+- docs(m4): mark M4 milestone complete in README status and parity checklist
+- fix(ci): collapse nested filter-restart if and update tracing assertion
+- fix(ci): complete AudioFilters literals in linux-only tests
+- docs(m4): record the M4 output quality gate
+- fix(ci): hoist tr() labels in mixer UI and fix filter-name test
+- feat(m4): VST 3.x contract + cloud recordings contract
+- feat(m4): audio + video filters/effects
+- feat(m4): multi-track audio export with per-track toggles
+- feat(m4): advanced rate control (VBR/CQ/CQ-VBR + custom options)
+- feat(m4): master audio mix with output VU meter
+- ci: verify the wiki remote hash after publish
+- test: add local wiki-sync smoke test
+- docs: add repository-hygiene policy for .gitattributes/.gitignore
+- chore: ignore wiki working clone and Python cache, drop orphaned theme WIP
+- docs: normalize README line endings to LF and split merged M4 bullets
+- feat(m4): live recording split via splitmuxsink
+- feat(m4): recording file management (patterns, split, auto-record)
+- feat(m4): execute GStreamer remux after recording stop (#71)
+- feat(m4): recording container formats and crash-safe remux
+- feat(m4): add sidechain audio ducking filter
+- fix(ui): resolve help docs from workspace root
+- feat(streaming): complete keyring and transport safeguards
+- feat(streaming): secure keys and bound private tests
+- fix(gui): show complete help page links
+- feat(gui): make help documentation links actionable
+- fix(packaging): map msi product version into compared fields
+- docs(quality): add M10 completion gate
+- docs(roadmap): add extensible UI plugin milestone
+- feat(gui): add help documentation menu
+- feat(streaming): add RTMPS reachability preflight
+- fix(ui): stop idle repaints so the gui rests in egui's reactive mode
+- feat(streaming): add platform test ingest defaults
+- test(ci): pin release-branch reconciliation to current-source contract
+- fix(ci): rebuild release branch from current source
+- chore(release): prepare v0.65.0-alpha.55 (#95)
+- fix(updater): satisfy non-Windows release builds
+- fix(updater): silence non-Windows watchdog parameters
+- fix(ci): restore cross-platform updater builds
+- fix(update): wait for app exit before replacing files on Windows
+- fix(ui): redact secrets from smoke reports
+- feat(streaming): add platform setup assistant
+- test(streaming): add documented RTMPS smoke test
+- docs: add first stream platform checklist
+- feat(presence): localize Discord activity and include game name
+- feat(presence): document optional Discord adapter roadmap
+- fix(windows): make MSI upgrades replace existing install
+- fix(m4): derive virtual camera defaults
+- fix(gui): show implemented streaming view
+- feat(m4): add virtual camera lifecycle contract
+- fix(updater): avoid GUI deadlock during installation
+- fix(updater): prevent update crash by adding file existence check and deferring installer cleanup
+- fix(ci): isolate actionlint archive extraction
+- debug(ci): print README head before parity check
+- debug(ci): print heading sample when parity section is missing
+- test(streaming): de-flake reconnect worker timing test
+- docs(security): add responsible-disclosure security policy
+- fix(ci): pin docker base and actionlint downloads
+- fix(ci): deduplicate test attribute in M3 report test
+- docs(m3): close streaming milestone with completion report
+- feat(streaming): add NDI output contract; refresh action pins
+- feat(streaming): add VOD track configuration model
+- fix(ci): pin checkout action in wiki workflow
+- feat(streaming): add WHIP session lifecycle and teardown
+- fix(ci): validate and publish wiki checkout correctly
+- fix(ci): accept wiki translation page pairs
+- fix(ci): pass wiki checkout to translation checks
+- fix(ci): detect wiki language links across lines
+- docs(ci): automate bilingual wiki checks
+- docs: define bilingual wiki navigation
+- docs: define GitHub Wiki content policy
+- docs: add end-user guide
+- fix(ci): match RIST identity dump format
+- fix(ci): make RIST buffer probe portable
+- fix(ci): capture RIST receiver buffer diagnostics
+- feat(streaming): complete M3 transport verification
+- test(streaming): verify RIST delivery and retry windows
+- fix(updater): accept MSI reboot-required exit code
+- feat(streaming): expose live bitrate change diagnostics
+- fix(updater): launch Windows installer asynchronously
+- fix(ci): report RIST sender timeout
+- fix(ci): use installed GStreamer binary in RIST smoke
+- fix(ci): harden action pin and RIST diagnostics
+- fix(gui): persist theme on application exit
+- fix(streaming): restore queue telemetry API
+- feat(streaming): show per-target queue telemetry
+- fix(ci): stabilize RIST receiver readiness check
+- fix(ci): bound RIST smoke test runtime
+- ci(deps): split Cargo and action update ownership
+- test(gui): add accessibility regression contract
+- fix(ci): validate RIST image diagnostics
+- fix(security): update yanked chacha20 dependency
+- fix(ci): build RIST image before inspection
+- fix(rist): payload MPEG-TS into RTP via rtpmp2tpay for ristsink
+- Inspect Rist plugin (#94)
+- fix(ci): declare RIST MPEG-TS caps
+- fix(ci): use native RIST MPEG-TS caps
+- fix(ci): stop Dependabot bot approval failures
+- feat(streaming): add network telemetry to adaptive bitrate
+- fix(ci): make RIST smoke caps explicit
+- fix(ci): provide RTP caps for RIST smoke
+- fix(ci): correct RIST MPEG-TS smoke pipeline
+- fix(ci): stabilize release retries and RIST pipeline
+- feat(perf): validate runtime resource telemetry
+- test(ci): include RIST in required checks
+- fix(ci): use valid RIST sink properties
+- test(ci): add RIST interoperability smoke test
+- feat(streaming): wire health-driven bitrate and WHIP contract
+- feat(ci): activate resource efficiency gate
+- feat(streaming): expose bounded delay overflow
+- fix(release): reset generated files before branch reuse
+- fix(ci): run SRT receiver in listener mode
+- fix(release): make version branch retries idempotent
+- fix(ci): stabilize SRT smoke and pinning checks
+- fix(ci): use valid SRT smoke image reference
+- feat(streaming): rebuild complete target branches
+- test(ci): add reproducible SRT receiver smoke test
+- feat(streaming): harden transport interoperability and reconnects
+- fix(release): always publish GitHub releases after tagging
+- feat(streaming): automate reconnect and transport fanout
+- feat(streaming): add cancellable reconnect worker
+- feat(streaming): add reconnect runtime contracts
+- feat(streaming): harden reconnect and transport supervision
+- feat(streaming): integrate multistream fanout
+- feat(streaming): add live policy and target fanout contracts
+- feat(streaming): add SRT and RIST contribution contract
+- feat(streaming): add WHIP signaling client
+- feat(streaming): add multistream target model
+- fix(ci): unify upload artifact action pin
+- feat(streaming): document WHIP strategy spike
+- ci: classify OBS features against product vision
+- ci: monitor OBS upstream feature releases
+- test(gui): add egui regression snapshot job
+- test(gui): add cross-platform UI smoke contract
+- feat(streaming): add delay and multitrack video support
+- feat(streaming): add stream presets and adaptive bitrate policy
+- docs(m2): reflect closed milestone status
+- docs(m2): close milestone with quality gate
+- docs(m2): clarify cross-platform UX review procedure
+- docs(m2): record cross-platform UI UX gate
+- feat(filters): add per-source chroma key controls
+- feat(m2): complete scene workflow controls and quality docs
+- fix(ci): satisfy redundant closure lint in scene export
+- feat(scenes): add profile workflows and scene overlays
+- feat(scenes): add scene hotkeys and auto-switch rules
+- feat(scenes): add collection import export and duplication workflows
+- fix(ci): prepare releases without protected branch push
+- fix(gui): satisfy live preview clippy
+- fix(core): satisfy snapshot clippy lint
+- feat(gui): add recording live preview
+- feat(gui): add deterministic scene snapshots
+- fix(ci): resolve current RustSec advisories
+- fix(ci): remove yanked image codec dependency
+- fix(ci): resolve cargo audit dependency failures
+- ci: add dependency gates and distribution readiness
+- ci: require security and scorecard checks
+- docs(ci): refresh generated action pin table
+- docs(security): document develop ruleset bypass
+- ci: add required develop branch checks
+
 ## [Unreleased]
 - ci(roadmap): add a Roadmap-Sync Check — scripts/check-roadmap-sync.py validates that the README "Milestone overview" table (contiguous ascending M-numbers, badges), docs/milestone-quality-gates.md (resource table + `### M<n>:` sections from M2) and the live GitHub milestones (titles, badge ids, M-prefix set) stay in sync; the dedicated CI job runs with issues:read and is required by the aggregate, offline --fixture/--self-test modes included, ci_pinning guard roadmap_sync_check_keeps_docs_and_milestones_aligned + docs/roadmap-sync-check.md added; the overview rows for M4/M8/M11 now use the canonical full milestone names
 - roadmap: restructure the milestone sequence — a new **M6 – Creator Toolkit & Interactivity** (chat-driven auto-clips, multi-platform restream, mobile/HTTP remote companion) is inserted right after M5, and the former M6–M10 shift to M7–M11 (Automation & Determinism, Embeddable Engine, Modern Architecture, AI Chat Assistant, Extensible UI). GitHub milestones #7–#10 were retitled, new milestones were created (M6, M11), and the overview table, section order, quality-gate document (including a new M6 resource row + gate section), and all cross-references in the README, ui-design, release-platforms, resource-efficiency, extensible-ui-roadmap, obs-vision docs and M2/M3 reports were renumbered consistently; the Scene-item copy/paste row and its candidates entry move from M6 to M7, AI assistant references move from M9 to M10, Extensible UI from M10 to M11, and Modern Architecture/renderer references from M8 to M9. The feature-parity checklist, obs-upstream checker, and release-notes self-tests stay green.
