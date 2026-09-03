@@ -281,9 +281,22 @@ Review privacy, control, and failure boundaries:
 - Rate limits, provider outages, malformed responses, moderation blocks, and
   context overflow have understandable recovery paths.
 - Bot coexistence and duplicate-response suppression are visible and testable.
+- Per-platform chat compliance is implemented and verified: Twitch honors the
+  global 20-messages/30-s limit for non-privileged accounts (token bucket, no
+  bursting), answers `PING` with `PONG`, and sends replies via
+  `reply-parent-msg-id`; Kick self-throttles conservatively (undocumented API,
+  no published ceiling) and degrades to read-only when the endpoints break;
+  YouTube sends through the official Live Streaming API with quota accounting
+  (`insert` ≈ 200 units) and falls back to the read-only Innertube poller
+  without or over quota.
+- The auth/scope matrix is explicit and masked: Twitch token with
+  `chat:read`+`chat:edit`, Kick session token, YouTube API key + OAuth
+  (`youtube.force-ssl`), none of them ever logged, exported, or screenshotted;
+  the UI surfaces missing scopes and the Twitch phone-verification requirement.
 
 Exit evidence: privacy review, redacted chat transcript, provider failure cases,
-and confirmation/permission checks.
+confirmation/permission checks, and a per-platform compliance test matrix
+(rate-limit throttle, reply threading, quota fallback, scope masking).
 
 ### M11: Extensible UI and Plugin Platform
 

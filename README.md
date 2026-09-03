@@ -434,6 +434,21 @@ must not be implied by beta parity.
 *Differentiation pillar #4: OBS has no native chat; streamers use cloud SaaS. Rivulet ships a local-first AI chat assistant.*
 
 - [ ] Chat adapters: Twitch (IRC/WebSocket), Kick (WebSocket), YouTube (Live API)
+- [ ] **Platform compliance** — the bot must satisfy each platform's hard
+      constraints to stay connected and legal:
+  - Twitch: OAuth token with `chat:read` + `chat:edit`; global rate limit of
+    20 messages/30 s for non-broadcaster/mod/VIP accounts (throttled token
+    bucket, never burst); `PONG` on every `PING`; replies via
+    `reply-parent-msg-id` (needs the `twitch.tv/tags` capability); surface a
+    phone-verification hint when Twitch demands a verified bot account
+  - Kick: sending uses the authenticated session token via the undocumented
+    `kick.com` API/Pusher WebSocket — no documented rate limits, so the bot
+    self-throttles conservatively per channel, and endpoint breakage must
+    degrade to read-only/observer mode instead of failing the chat dock
+  - YouTube: official sending needs the Live Streaming API (API key + OAuth
+    `youtube.force-ssl`/`youtube` scope) with `parentId` replies and quota
+    accounting (`insert` ≈ 200 units; daily budget 10 000); without/over
+    quota the bot falls back to the read-only Innertube poller
 - [ ] LLM provider abstraction — **local-first**:
   - Ollama (`http://localhost:11434`) as default
   - llama.cpp server / in-process (`llama_cpp2`)
