@@ -4440,6 +4440,18 @@ impl RivuletApp {
         worker.send_reply(&text, &parent_id)
     }
 
+    /// Remaining outbound chat budget `(available, capacity)` of the running
+    /// worker's shared rate limiter, for the budget line above the input.
+    /// `None` while no worker is running. `available` is fractional (tokens
+    /// refill continuously over the window); the UI floors it.
+    fn chat_rate_budget(&self) -> Option<(f64, f64)> {
+        let worker = self.chat_worker.as_ref()?;
+        Some((
+            worker.rate_limit_remaining(),
+            worker.rate_limit_config().capacity as f64,
+        ))
+    }
+
     /// Handle the Settings "Apply" action for the Discord client id: validate
     /// the format immediately and only mark the adapter for rebuild when the
     /// value is a plausible snowflake (or empty, which keeps the adapter off).
@@ -5296,6 +5308,31 @@ impl RivuletApp {
                         self.chat_reply_target = None;
                     }
                 });
+            }
+            // Send-budget line directly above the input: shows how many
+            // platform messages are still allowed right now, so throttling is
+            // visible *before* a send is silently dropped. The line turns
+            // warning-colored when the bucket is near-empty and is replaced
+            // by a pause notice while the bucket is empty.
+            if let Some((remaining, capacity)) = self.chat_rate_budget() {
+                let colors = theme::StatusColors::for_ui(ui);
+                let budget = remaining.floor().max(0.0) as u64;
+                let cap = capacity.max(0.0) as u64;
+                if remaining < 1.0 {
+                    ui.small(
+                        egui::RichText::new(self.tr("chat_rate_limited")).color(colors.warning),
+                    );
+                } else {
+                    let low = budget <= cap.saturating_div(4);
+                    let color = if low {
+                        colors.warning
+                    } else {
+                        ui.visuals().weak_text_color()
+                    };
+                    let label =
+                        self.tr_fmt("chat_rate_budget", &[budget.to_string(), cap.to_string()]);
+                    ui.small(egui::RichText::new(label).color(color));
+                }
             }
             let send_hint = self.tr("chat_send_hint");
             let send_button = self.tr("chat_send");
@@ -10455,6 +10492,33 @@ mod tests {
     }
 
     #[test]
+    fn chat_rate_budget_reports_limiter_state() {
+        // No worker running: no budget to show.
+        let app = RivuletApp::default();
+        assert_eq!(app.chat_rate_budget(), None);
+
+        // A fresh worker starts with a full bucket (Twitch default 20/30 s).
+        // The real clock may have refilled nothing beyond capacity, so the
+        // available budget equals the capacity.
+        let app = RivuletApp {
+            chat_worker: Some(rivulet_core::Chat::new(&rivulet_core::ChatConfig {
+                platform: rivulet_core::ChatPlatform::Twitch,
+                twitch_endpoint: "127.0.0.1:1".to_owned(), // worker backs off
+                channel: "rivulet".to_owned(),
+                token: "oauth:abc123".to_owned(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let (remaining, capacity) = app.chat_rate_budget().expect("budget with a worker");
+        assert_eq!(capacity, 20.0);
+        assert!(
+            (remaining - 20.0).abs() < f64::EPSILON * 64.0,
+            "a fresh bucket must be full, got {remaining}"
+        );
+    }
+
+    #[test]
     fn stream_workspace_stays_reachable_on_narrow_windows_in_source() {
         // Responsive contract for the Meld-style Stream page: below the
         // narrow-width threshold the action bar and every control row wrap
@@ -10507,6 +10571,12 @@ mod tests {
         assert!(draw.contains("ChatAction::SendReply"));
         assert!(draw.contains("phone_verification_required()"));
         assert!(draw.contains("chat_reply_to"));
+        // The send-budget line must sit above the input and read the live
+        // limiter state so throttling is visible before sends are dropped.
+        assert!(draw.contains("chat_rate_budget"));
+        assert!(draw.contains("chat_rate_limited"));
+        assert!(draw.contains("chat_rate_budget()"));
+        assert!(draw.contains("rate_limit_remaining()"));
         let i18n = std::fs::read_to_string("../rivulet-core/src/i18n.rs").expect("i18n readable");
         for key in [
             "chat_send",
@@ -10519,6 +10589,8 @@ mod tests {
             "chat_reply_to",
             "chat_reply_cancel",
             "chat_phone_verification",
+            "chat_rate_budget",
+            "chat_rate_limited",
         ] {
             let k = format!("\"{key}\"");
             assert!(

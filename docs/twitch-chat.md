@@ -36,6 +36,11 @@ and **YouTube** (Innertube polling) from one unified UI.
   Kick session token) — type and press Enter (or click **Send**). Sending
   is **non-blocking** (enqueued to the worker thread). **YouTube is
   read-only** (anonymous clients cannot send); a hint replaces the input.
+- **Send-budget indicator**: directly above the input field the dock shows
+  how many platform messages are still allowed right now (e.g. “Send
+  budget: 17/20 messages”). The line turns warning-colored at ≤ ¼ capacity
+  and is replaced by a pause notice while the bucket is empty, so the
+  platform rate limit is visible *before* a send is silently dropped.
 - **Threaded replies (Twitch)**: every Twitch message keeps its IRCv3
   `id=` tag; clicking the **↩** affordance on a message arms a reply
   target (banner: “Replying to <user>”, cancel with ✕) and the next Send
@@ -95,6 +100,10 @@ can never burst against a platform limit:
   line, and `Chat::rate_limit_config()` for the settings UI.
 - The bucket is clock-injectable (`RateLimiter::with_clock`) so the unit
   tests are deterministic; the production clock is monotonic.
+- The dock reads the live budget through `Chat::rate_limit_remaining()`
+  and `Chat::rate_limit_config()` (helper `chat_rate_budget()` in the
+  app) and renders it above the input — warning at ≤ ¼ capacity, pause
+  notice while empty.
 
 ### Threaded replies and phone verification (Twitch)
 
@@ -128,9 +137,11 @@ rivulet-gui::app
   ├─ reconcile_chat()                          # one action per frame
   ├─ send_chat_message(text)                   # token + platform gate
   ├─ send_chat_reply(text, parent_id)          # threaded reply (Twitch)
+  ├─ chat_rate_budget()                        # live (remaining, capacity)
   ├─ draw_chat_dock(ui, max_list_height)       # platform selector + inputs + reply
-  │                                            #   affordance + phone warning,
-  │                                            #   embedded in the Stream workspace
+  │                                            #   affordance + phone warning +
+  │                                            #   send-budget line, embedded in
+  │                                            #   the Stream workspace
   └─ i18n keys: chat_* (DE/EN)
 ```
 
@@ -168,9 +179,9 @@ rivulet-gui::app
   send path (`send_message` / `ChatAction::Send` / `PRIVMSG`) stays covered,
   Twitch replies stay threaded (`send_reply` / `@reply-parent-msg-id` /
   `chat_reply_target` / `submit_chat_input` / `ChatAction::SendReply`) with
-  the phone-verification flag surfaced in the dock and i18n, and
-  Kick/YouTube wiring (platform selector, read-only gate, i18n keys, docs)
-  cannot silently regress.
+  the phone-verification flag surfaced in the dock and i18n,  and Kick/YouTube wiring (platform selector, read-only gate, i18n keys,
+  docs) cannot silently regress. The send-budget indicator is pinned too
+  (`chat_rate_budget` helper + rendered keys + translated strings).
 
 ## Roadmap
 

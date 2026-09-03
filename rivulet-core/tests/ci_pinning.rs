@@ -2128,6 +2128,25 @@ fn chat_outbound_is_rate_limited_per_platform() {
         chat.contains("send_message_drops_when_custom_rate_limit_is_exhausted"),
         "the facade-level rate-limit rejection must be covered by a test"
     );
+    // The dock must surface the live budget above the input so throttling is
+    // visible before a send is silently dropped (budget line + pause notice).
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        gui.contains("fn chat_rate_budget")
+            && gui.contains("rate_limit_remaining()")
+            && gui.contains("chat_rate_budget")
+            && gui.contains("chat_rate_limited"),
+        "the chat dock must read and render the send budget"
+    );
+    assert!(
+        gui.contains("chat_rate_budget_reports_limiter_state"),
+        "the budget accessor must be covered by a GUI behavior test"
+    );
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.contains("chat_rate_budget") && i18n.contains("chat_rate_limited"),
+        "the budget strings must be translated"
+    );
     // The platform compliance contract (M10 issue #100) stays documented.
     let readme = read("README.md");
     assert!(readme.contains("20 messages/30 s"));
