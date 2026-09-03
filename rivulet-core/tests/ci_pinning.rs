@@ -1964,6 +1964,33 @@ fn twitch_chat_dock_is_wired_and_covered() {
 }
 
 #[test]
+fn stream_workspace_controls_stay_reachable_on_narrow_windows() {
+    // Responsive contract of the Meld-style Stream page: below the narrow
+    // width threshold the action bar and every control row wrap and the
+    // chat/info columns stack, so start/stop, connect, send and mixer stay
+    // reachable when the window is shrunk (regression: buttons used to clip
+    // off-screen in a plain ui.horizontal / columns(2) layout).
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(
+        app.contains("const STREAM_WORKSPACE_NARROW_WIDTH: f32 = 720.0;"),
+        "the stream workspace must define a narrow-width threshold"
+    );
+    assert!(
+        app.contains("action_bar_wraps") && app.contains("horizontal_wrapped"),
+        "the action bar and control rows must wrap on narrow windows"
+    );
+    assert!(
+        app.contains("available_width() >= STREAM_WORKSPACE_NARROW_WIDTH")
+            && app.contains("self.draw_chat_dock(ui, chat_list_height)"),
+        "the chat/info columns must stack instead of clipping on narrow windows"
+    );
+    assert!(
+        app.contains("available_width() - 70.0).max(120.0)"),
+        "the chat send input must never get a negative width"
+    );
+}
+
+#[test]
 fn alert_overlay_import_is_wired_through_browser_source() {
     // M5 community dock: alert overlays are imported as browser-source widget
     // URLs (Streamlabs/StreamElements), exactly like OBS. The core must know

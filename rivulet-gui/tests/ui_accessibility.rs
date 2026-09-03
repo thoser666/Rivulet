@@ -36,15 +36,31 @@ fn accessibility_report_is_stable() {
 /// The narrow-layout contract is verified against the GUI source: the main
 /// view content and the sidebar must live in scroll areas so controls stay
 /// reachable (and a minimum window size guards the layout) when the window
-/// is shrunk.
+/// is shrunk. The Stream workspace additionally wraps its action bar, chat
+/// dock and audio rows and stacks its columns below the narrow-width
+/// threshold, so the start/stop, connect and send controls are never
+/// clipped off-screen.
 fn narrow_layout_is_responsive() -> bool {
     let source = std::fs::read_to_string("src/app.rs").expect("GUI source must be readable");
     let main = std::fs::read_to_string("src/main.rs").expect("GUI main must be readable");
+    let stream = source
+        .split_once("fn draw_stream_view")
+        .map(|(_, rest)| rest)
+        .unwrap_or("");
+    let chat = source
+        .split_once("fn draw_chat_dock")
+        .map(|(_, rest)| rest)
+        .unwrap_or("");
     source.contains("egui::ScrollArea::vertical()")
         && source.contains("auto_shrink([false, false])")
         && source.contains("nav_panel")
         && source.contains("CentralPanel::default()")
         && main.contains("with_min_inner_size")
+        && stream.contains("STREAM_WORKSPACE_NARROW_WIDTH")
+        && stream.contains("horizontal_wrapped")
+        && stream.contains("available_width() >= STREAM_WORKSPACE_NARROW_WIDTH")
+        && chat.contains("horizontal_wrapped")
+        && chat.contains("available_width() - 70.0).max(120.0)")
 }
 
 fn accessibility_report() -> AccessibilityReport {

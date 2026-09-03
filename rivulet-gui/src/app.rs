@@ -194,6 +194,12 @@ pub const DEFAULT_NO_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::f
 /// Bounded size of the in-memory Twitch chat message list (oldest dropped).
 const MAX_CHAT_MESSAGES: usize = 500;
 
+/// Minimum workspace width (px) at which the Stream page keeps its
+/// side-by-side layout. Below this the action bar, the chat dock and the
+/// audio section switch to wrapped/stacked layouts so no control (start/
+/// stop, connect, send, mixer) is clipped off-screen.
+const STREAM_WORKSPACE_NARROW_WIDTH: f32 = 720.0;
+
 // --- Auto-update state machine ---
 #[derive(Debug, Clone, PartialEq, Default)]
 enum UpdateUi {
@@ -5057,10 +5063,11 @@ impl RivuletApp {
         ui.label(egui::RichText::new(self.tr("chat_title")).strong());
         ui.separator();
 
-        // Connection controls.
+        // Connection controls. Wrapped so the connect/disconnect button and
+        // status stay reachable in a narrow Stream workspace.
         let channel_hint = self.tr("chat_channel_hint");
         let oauth_hint = self.tr("chat_oauth_hint");
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(self.tr("chat_channel_label"));
             ui.add(
                 egui::TextEdit::singleline(&mut self.chat_channel)
@@ -5092,7 +5099,7 @@ impl RivuletApp {
         });
 
         // Optional authenticated read (privacy-safe: never echoed back).
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(self.tr("chat_oauth_label"));
             ui.add(
                 egui::TextEdit::singleline(&mut self.chat_oauth_token)
@@ -5152,11 +5159,11 @@ impl RivuletApp {
         if can_send {
             let send_hint = self.tr("chat_send_hint");
             let send_button = self.tr("chat_send");
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let input = ui.add(
                     egui::TextEdit::singleline(&mut self.chat_input)
                         .hint_text(send_hint)
-                        .desired_width(ui.available_width() - 70.0),
+                        .desired_width((ui.available_width() - 70.0).max(120.0)),
                 );
                 let enter_pressed =
                     input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -5189,6 +5196,75 @@ impl RivuletApp {
         }
     }
 
+    /// Platform + preset combo boxes of the Stream workspace action bar.
+    /// Extracted so the wide (right-aligned button) and the narrow (wrapped)
+    /// action-bar layouts share the same selectors.
+    fn draw_stream_platform_preset_selectors(&mut self, ui: &mut egui::Ui) {
+        let mut platform = self.stream_platform;
+        egui::ComboBox::from_id_salt("stream_platform")
+            .selected_text(platform.label())
+            .show_ui(ui, |ui| {
+                for candidate in [
+                    StreamPlatform::Twitch,
+                    StreamPlatform::YouTube,
+                    StreamPlatform::Kick,
+                    StreamPlatform::Custom,
+                ] {
+                    if ui
+                        .selectable_value(&mut platform, candidate, candidate.label())
+                        .clicked()
+                    {
+                        self.stream_platform = candidate;
+                        if let Some(url) = candidate.default_ingest_url() {
+                            self.stream_ingest_url = url.to_owned();
+                        }
+                    }
+                }
+            });
+        egui::ComboBox::from_id_salt("stream_preset")
+            .selected_text(self.stream_preset.label())
+            .show_ui(ui, |ui| {
+                for preset in StreamPreset::all() {
+                    ui.selectable_value(&mut self.stream_preset, *preset, preset.label());
+                }
+            });
+    }
+
+    /// Start/stop streaming button of the Stream workspace action bar.
+    fn draw_stream_start_stop_button(&mut self, ui: &mut egui::Ui, configured: bool) {
+        let label = if self.engine.is_streaming() {
+            self.tr("stream_stop")
+        } else {
+            self.tr("stream_start")
+        };
+        if ui
+            .add_enabled(
+                configured || self.engine.is_streaming(),
+                egui::Button::new(egui::RichText::new(label).size(18.0).strong())
+                    .min_size(egui::vec2(170.0, 42.0)),
+            )
+            .clicked()
+        {
+            if self.engine.is_streaming() {
+                self.engine.set_stream_settings(None);
+                self.stream_status_message = Some(self.tr("stopped").to_owned());
+            } else {
+                let settings = StreamSettings::new(
+                    self.stream_platform,
+                    self.stream_ingest_url.clone(),
+                    self.stream_key.clone(),
+                )
+                .with_preset(self.stream_preset);
+                self.engine.set_stream_settings(Some(settings));
+                // Clear a stale error so a new stream starts from the
+                // Ready/Streaming label (mirrors the recording starts).
+                self.last_error = None;
+                self.engine.start_streaming();
+                self.stream_status_message = Some(self.tr("stream_status_connecting").to_owned());
+            }
+        }
+    }
+
     fn draw_stream_view(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
         self.handle_stream_key_actions();
 
@@ -5207,71 +5283,22 @@ impl RivuletApp {
             .is_ok();
 
         // ── Action bar (Meld-style broadcast header): platform + preset on
-        //    the left, the prominent start/stop button on the right. ──
-        ui.horizontal(|ui| {
-            let mut platform = self.stream_platform;
-            egui::ComboBox::from_id_salt("stream_platform")
-                .selected_text(platform.label())
-                .show_ui(ui, |ui| {
-                    for candidate in [
-                        StreamPlatform::Twitch,
-                        StreamPlatform::YouTube,
-                        StreamPlatform::Kick,
-                        StreamPlatform::Custom,
-                    ] {
-                        if ui
-                            .selectable_value(&mut platform, candidate, candidate.label())
-                            .clicked()
-                        {
-                            self.stream_platform = candidate;
-                            if let Some(url) = candidate.default_ingest_url() {
-                                self.stream_ingest_url = url.to_owned();
-                            }
-                        }
-                    }
-                });
-            egui::ComboBox::from_id_salt("stream_preset")
-                .selected_text(self.stream_preset.label())
-                .show_ui(ui, |ui| {
-                    for preset in StreamPreset::all() {
-                        ui.selectable_value(&mut self.stream_preset, *preset, preset.label());
-                    }
-                });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let label = if self.engine.is_streaming() {
-                    self.tr("stream_stop")
-                } else {
-                    self.tr("stream_start")
-                };
-                if ui
-                    .add_enabled(
-                        configured || self.engine.is_streaming(),
-                        egui::Button::new(egui::RichText::new(label).size(18.0).strong())
-                            .min_size(egui::vec2(170.0, 42.0)),
-                    )
-                    .clicked()
-                {
-                    if self.engine.is_streaming() {
-                        self.engine.set_stream_settings(None);
-                        self.stream_status_message = Some(self.tr("stopped").to_owned());
-                    } else {
-                        let settings = StreamSettings::new(
-                            self.stream_platform,
-                            self.stream_ingest_url.clone(),
-                            self.stream_key.clone(),
-                        )
-                        .with_preset(self.stream_preset);
-                        self.engine.set_stream_settings(Some(settings));
-                        // Clear a stale error so a new stream starts from the
-                        // Ready/Streaming label (mirrors the recording starts).
-                        self.last_error = None;
-                        self.engine.start_streaming();
-                        self.stream_status_message =
-                            Some(self.tr("stream_status_connecting").to_owned());
-                    }
-                }
+        //    the left, the prominent start/stop button on the right. On
+        //    narrow windows the bar wraps so the button stays reachable. ──
+        let action_bar_wraps = ui.available_width() < STREAM_WORKSPACE_NARROW_WIDTH;
+        if action_bar_wraps {
+            ui.horizontal_wrapped(|ui| {
+                self.draw_stream_platform_preset_selectors(ui);
+                self.draw_stream_start_stop_button(ui, configured);
             });
-        });
+        } else {
+            ui.horizontal(|ui| {
+                self.draw_stream_platform_preset_selectors(ui);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    self.draw_stream_start_stop_button(ui, configured);
+                });
+            });
+        }
         if !configured && !self.engine.is_streaming() {
             ui.colored_label(colors.warning, self.tr("stream_configure_first"));
         }
@@ -5293,21 +5320,24 @@ impl RivuletApp {
             .id_salt("stream_config_details")
             .default_open(!configured)
             .show(ui, |ui| {
-                ui.horizontal(|ui| {
+                // Wrapped rows: on narrow windows the label/input/button
+                // rows flow onto a second line instead of clipping at the
+                // right edge (controls must stay reachable).
+                ui.horizontal_wrapped(|ui| {
                     ui.label(self.tr("stream_ingest"));
                     ui.add_enabled(
                         self.stream_platform == StreamPlatform::Custom,
                         egui::TextEdit::singleline(&mut self.stream_ingest_url),
                     );
                 });
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label(self.tr("stream_key"));
                     ui.add(egui::TextEdit::singleline(&mut self.stream_key).password(true));
                     if !self.stream_key.is_empty() {
                         ui.label(format!("••••{}", self.stream_key.chars().count().min(4)));
                     }
                 });
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if theme::accent_button(ui, self.tr("stream_key_save")).clicked() {
                         self.stream_key_save_requested = true;
                     }
@@ -5318,7 +5348,7 @@ impl RivuletApp {
                         ui.small(status);
                     }
                 });
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let probe_enabled =
                         configured && !self.stream_probe_running && !self.engine.is_streaming();
                     if ui
@@ -5360,12 +5390,20 @@ impl RivuletApp {
 
         // ── Workspace: chat dock (left) | stream information (right). The
         //    chat is bounded in height so it behaves like a docked panel on
-        //    this page rather than growing the scroll area without end. ──
+        //    this page rather than growing the scroll area without end. On
+        //    narrow windows the two columns stack vertically so the chat
+        //    connect/send controls never clip off-screen. ──
         ui.separator();
-        ui.columns(2, |cols| {
-            self.draw_chat_dock(&mut cols[0], chat_list_height);
-            self.draw_stream_information_panel(&mut cols[1], colors);
-        });
+        if ui.available_width() >= STREAM_WORKSPACE_NARROW_WIDTH {
+            ui.columns(2, |cols| {
+                self.draw_chat_dock(&mut cols[0], chat_list_height);
+                self.draw_stream_information_panel(&mut cols[1], colors);
+            });
+        } else {
+            self.draw_chat_dock(ui, chat_list_height);
+            ui.separator();
+            self.draw_stream_information_panel(ui, colors);
+        }
 
         // ── Compact audio: master fader + VU and monitoring; the detailed
         //    mixer (filters, EQ, per-track capture) stays in its own view. ──
@@ -5400,7 +5438,7 @@ impl RivuletApp {
     fn draw_stream_audio_compact(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
         ui.separator();
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new(self.tr("stream_output_monitoring")).strong());
             if ui.button(self.tr("stream_open_mixer")).clicked() {
                 self.view = AppView::Mixer;
@@ -5409,7 +5447,7 @@ impl RivuletApp {
 
         let mut sys_mon = self.system_monitor;
         let mut mic_mon = self.mic_monitor;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.checkbox(&mut sys_mon, self.tr("monitoring_system"));
             ui.checkbox(&mut mic_mon, self.tr("monitoring_microphone"));
             let mut mon_vol = self.monitor_volume;
@@ -5431,7 +5469,7 @@ impl RivuletApp {
             }
         }
 
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(egui::RichText::new(self.tr("master_output")).strong());
             let mut master_vol = self.master_volume;
             if ui
@@ -10177,6 +10215,37 @@ mod tests {
         assert!(app.send_chat_message(" hello there ".to_owned()));
         // The trimmed message goes through the worker channel (best effort;
         // the worker is not reachable here), so the app reports success.
+    }
+
+    #[test]
+    fn stream_workspace_stays_reachable_on_narrow_windows_in_source() {
+        // Responsive contract for the Meld-style Stream page: below the
+        // narrow-width threshold the action bar and every control row wrap
+        // (horizontal_wrapped) and the chat/info columns stack instead of
+        // clipping, so start/stop, connect, send and mixer controls are
+        // never pushed off-screen.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let stream = source
+            .split_once("fn draw_stream_view")
+            .map(|(_, rest)| rest)
+            .expect("draw_stream_view must exist");
+        assert!(source.contains("const STREAM_WORKSPACE_NARROW_WIDTH: f32 = 720.0;"));
+        assert!(stream.contains("action_bar_wraps"));
+        assert!(stream.contains("ui.horizontal_wrapped"));
+        assert!(stream.contains("available_width() >= STREAM_WORKSPACE_NARROW_WIDTH"));
+        assert!(stream.contains("self.draw_chat_dock(ui, chat_list_height)"));
+        assert!(stream.contains("self.draw_stream_start_stop_button(ui, configured)"));
+        let chat = source
+            .split_once("fn draw_chat_dock")
+            .map(|(_, rest)| rest)
+            .expect("draw_chat_dock must exist");
+        assert!(chat.contains("ui.horizontal_wrapped"));
+        assert!(chat.contains("available_width() - 70.0).max(120.0)"));
+        let audio = source
+            .split_once("fn draw_stream_audio_compact")
+            .map(|(_, rest)| rest)
+            .unwrap_or("");
+        assert!(audio.contains("ui.horizontal_wrapped"));
     }
 
     #[test]

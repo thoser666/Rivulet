@@ -69,6 +69,32 @@ fn responsive_contract_keeps_controls_reachable_on_narrow_windows() {
         main.contains("with_min_inner_size"),
         "main.rs must set a minimum inner window size"
     );
+    // The Stream workspace must degrade gracefully on narrow windows: the
+    // action bar and every control row wrap instead of clipping, the chat/
+    // info columns stack instead of splitting, and the send input never
+    // gets a negative width.
+    let stream = app
+        .split_once("fn draw_stream_view")
+        .map(|(_, rest)| rest)
+        .expect("draw_stream_view must exist");
+    assert!(
+        stream.contains("STREAM_WORKSPACE_NARROW_WIDTH") && stream.contains("horizontal_wrapped"),
+        "the stream action bar and control rows must wrap on narrow windows"
+    );
+    assert!(
+        stream.contains("available_width() >= STREAM_WORKSPACE_NARROW_WIDTH")
+            && stream.contains("self.draw_chat_dock(ui, chat_list_height)"),
+        "the chat/info columns must stack instead of clipping on narrow windows"
+    );
+    let chat = app
+        .split_once("fn draw_chat_dock")
+        .map(|(_, rest)| rest)
+        .expect("draw_chat_dock must exist");
+    assert!(
+        chat.contains("horizontal_wrapped")
+            && chat.contains("available_width() - 70.0).max(120.0)"),
+        "the chat dock rows must wrap and the send input must keep a sane width"
+    );
 }
 
 #[test]
