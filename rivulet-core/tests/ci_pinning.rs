@@ -862,19 +862,21 @@ fn discord_client_id_is_restored_from_eframe_storage() {
 }
 
 #[test]
-fn discord_presence_uses_obs_style_assets_and_no_duplicate_name() {
+fn discord_presence_uses_obs_style_assets_and_composed_title() {
     // Like OBS, the activity card should render the app artwork (large image
     // from the Discord Developer Portal) instead of the generic placeholder
-    // icon, and the payload must not duplicate the app name into state or
-    // details (Discord renders the name from the application registration).
+    // icon. The first card line (`details`) is the dynamic composed title
+    // "Rivulet · <localized status>" so small hover cards identify Rivulet
+    // even when they do not render the registration title; the app word is
+    // deliberately NOT duplicated into the game slot (`state`) or the assets.
     let presence = read("rivulet-core/src/presence.rs");
     assert!(
         presence.contains("let state = match game"),
-        "the game name must live in state (details stays the plain label)"
+        "the game name must live in state (second card line)"
     );
     assert!(
-        presence.contains("let details = label.to_owned()"),
-        "details must be the plain localized label without the app name"
+        presence.contains("let details = format!(\"Rivulet · {label}\")"),
+        "details must be the composed title \"Rivulet · <status>\""
     );
     let discord = read("rivulet-core/src/discord.rs");
     assert!(discord.contains("large_image_key: Option<String>"));

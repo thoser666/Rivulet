@@ -8596,11 +8596,9 @@ mod tests {
         }];
         app.selected_game_window_idx = Some(0);
         let status = app.current_presence_status();
-        // Line layout: the status label lives in `details` (first card line),
-        // the game name in `state` (second line), and the app name is rendered
-        // by the Discord application registration (card title) — never
-        // duplicated into the payload.
-        assert_eq!(status.details, "Ready");
+        // Line layout: the composed title (app word + status label) lives in
+        // `details` (first card line), the game name in `state` (second line).
+        assert_eq!(status.details, "Rivulet · Ready");
         assert_eq!(status.state, "Elden Ring");
 
         // No selection -> plain status without a game name.
@@ -8627,20 +8625,20 @@ mod tests {
         app.sync_discord_presence();
         let idle = app.current_presence_status();
         assert_eq!(app.discord_presence_last.as_ref(), Some(&idle));
-        assert_eq!(idle.details, "Ready");
+        assert_eq!(idle.details, "Rivulet · Ready");
 
         // Recording starts while the user is not looking at the Stream view.
         app.is_aux_recording = true;
         app.sync_discord_presence();
         let recording = app.current_presence_status();
-        assert_eq!(recording.details, "Recording");
+        assert_eq!(recording.details, "Rivulet · Recording");
         assert_eq!(app.discord_presence_last.as_ref(), Some(&recording));
 
         // Pausing while recording surfaces as Paused.
         app.is_paused = true;
         app.sync_discord_presence();
         let paused = app.current_presence_status();
-        assert_eq!(paused.details, "Paused");
+        assert_eq!(paused.details, "Rivulet · Paused");
 
         // Stopping returns to Idle.
         app.is_aux_recording = false;
@@ -8782,7 +8780,7 @@ mod tests {
         app.is_aux_recording = true;
         app.last_error = Some("pipeline failed".to_owned());
         let status = app.current_presence_status();
-        assert_eq!(status.details, "Error");
+        assert_eq!(status.details, "Rivulet · Error");
         assert!(status.state.is_empty());
 
         // The error text itself is never sent (privacy-safe payload).
@@ -8792,19 +8790,19 @@ mod tests {
         // Error has priority over pause and streaming too.
         app.is_paused = true;
         let status = app.current_presence_status();
-        assert_eq!(status.details, "Error");
+        assert_eq!(status.details, "Rivulet · Error");
 
         // Clearing the error (next start) returns to the activity label.
         app.last_error = None;
         let status = app.current_presence_status();
-        assert_eq!(status.details, "Paused");
+        assert_eq!(status.details, "Rivulet · Paused");
 
         // Error label is localized.
         app.locale = Locale::De;
         app.is_paused = false;
         app.last_error = Some("pipeline failed".to_owned());
         let status = app.current_presence_status();
-        assert_eq!(status.details, "Fehler");
+        assert_eq!(status.details, "Rivulet · Fehler");
     }
 
     #[test]
@@ -8819,12 +8817,12 @@ mod tests {
         };
         app.last_error = Some("old failure".to_owned());
         let before = app.current_presence_status();
-        assert_eq!(before.details, "Error");
+        assert_eq!(before.details, "Rivulet · Error");
 
         // The same reset the streaming start path applies.
         app.last_error = None;
         let status = app.current_presence_status();
-        assert_eq!(status.details, "Ready");
+        assert_eq!(status.details, "Rivulet · Ready");
 
         // Source contract: every streaming start path (OBS-WebSocket command
         // and GUI stream button) clears last_error. Only inspect the part of
@@ -8947,11 +8945,10 @@ mod tests {
         let mut app = RivuletApp::default();
         app.locale = Locale::De;
         let status = app.current_presence_status();
-        // The app name is the Discord card title (application registration),
-        // `details` carries the German label, and no game name is selected so
-        // the `state` line stays empty.
+        // `details` carries the composed title (app word + German label), and
+        // no game name is selected so the `state` line stays empty.
         assert_eq!(status.application, "Rivulet");
-        assert_eq!(status.details, "Bereit");
+        assert_eq!(status.details, "Rivulet · Bereit");
         assert!(status.state.is_empty());
         // Never any sensitive token/path.
         assert!(!status.details.to_lowercase().contains("rtmp"));

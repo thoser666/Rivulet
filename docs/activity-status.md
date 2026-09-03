@@ -3,12 +3,20 @@
 Rivulet now exposes a platform-neutral activity-status contract for a Discord-style
 status message. The GUI shows the current product activity using the **Rivulet**
 name. Activity labels are localized through the selected UI locale and may include
-the explicitly selected game name, for example:
+the explicitly selected game name, for example (first card line / second line):
 
-- `Rivulet · Aufnahme` / `Aufnahme · Elden Ring`
-- `Rivulet · Streamt` / `Streamt · Elden Ring`
-- `Rivulet · Aufnahme + Stream` / `Aufnahme + Stream · Elden Ring`
-- `Rivulet · Pausiert` / `Pausiert · Elden Ring`
+- `Rivulet · Aufnahme` / `Elden Ring`
+- `Rivulet · Streamt` / `Elden Ring`
+- `Rivulet · Aufnahme + Stream` / `Elden Ring`
+- `Rivulet · Pausiert` / `Elden Ring`
+
+Discord renders `details` as the **first line**: it is composed dynamically as
+**`Rivulet · <Status>`** (localized label), so the status title changes with
+the activity — `Rivulet · Bereit` when idle, `Rivulet · Aufnahme` while
+recording, `Rivulet · Streamt` while streaming, plus `Pausiert`, `Aufnahme +
+Stream` and `Fehler`. The **second line** (`state`) carries the selected game
+name whenever a game/window source is selected; without one the line is
+omitted entirely (Discord rejects empty strings).
 
 Game names must be supplied from the user's explicit source selection (the
 selected game-capture window or the selected window-capture title), not inferred
@@ -338,11 +346,15 @@ If you upload the artwork under a different asset name, use that exact name
 as the key in Settings — the two must match character-for-character.
 
 The two card lines follow Discord's rendering order: `details` is the
-**first line** and always carries the plain status label
-("Recording"/"Aufnahme"), `state` is the **second line** and carries the
-selected game name when a game/window source is selected — the application
-name is rendered by the Discord registration and is never duplicated into
-the payload.
+**first line** and always carries the composed title
+**`Rivulet · <Status>`** (app word + localized label, e.g.
+"Rivulet · Recording"/"Rivulet · Aufnahme") so small hover cards that do
+not render the registration title still identify Rivulet; `state` is the
+**second line** and carries the selected game name when a game/window
+source is selected, and is omitted entirely when no game is selected. The
+literal app title row on the full profile card (application icon + name)
+still comes from the Discord application registration and cannot be
+changed per status via the API.
 
 The configured art asset key is attached twice: as `large_image` (rendered
 as the big artwork on the profile card) and mirrored as `small_image`

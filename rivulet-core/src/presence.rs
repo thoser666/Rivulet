@@ -89,13 +89,14 @@ impl PresenceStatus {
     /// The game name is user-selected metadata; callers must not pass window
     /// titles or other untrusted sensitive data.
     ///
-    /// The presence is split into two lines: the status label (`details`, e.g.
-    /// "Recording") and the game name (`state`, when a game source is
-    /// selected). Discord renders `details` as the first line of the card and
-    /// `state` as the second line beneath it. The application name "Rivulet"
-    /// is supplied by the Discord application registration itself and must not
-    /// be duplicated here — Discord renders it as the card title together
-    /// with the configured large image.
+    /// The presence is split into two lines: the composed title line
+    /// (`details`, e.g. "Rivulet · Recording") and the game name (`state`,
+    /// when a game source is selected). Discord renders `details` as the
+    /// first line of the card and `state` as the second line beneath it. The
+    /// app word is intentionally included in `details` so small hover cards
+    /// that do not render the application registration title still read as
+    /// Rivulet; the application name itself stays out of `state`/`details`'s
+    /// game slot.
     pub fn for_activity_localized(
         activity: PresenceActivity,
         locale: crate::Locale,
@@ -104,10 +105,10 @@ impl PresenceStatus {
         let label = locale.tr(activity.i18n_key());
         let game = game_name.filter(|name| !name.trim().is_empty());
         // `details` is Discord's first card line, `state` the second, so the
-        // status label lives in `details` and the game name in `state` (empty
-        // when no game is selected — the serializer omits it, since Discord
-        // rejects empty strings with 4000).
-        let details = label.to_owned();
+        // composed "Rivulet · <status>" title lives in `details` and the game
+        // name in `state` (empty when no game is selected — the serializer
+        // omits it, since Discord rejects empty strings with 4000).
+        let details = format!("Rivulet · {label}");
         let state = match game {
             Some(game) => game.to_owned(),
             None => String::new(),
@@ -136,12 +137,32 @@ mod tests {
         ] {
             let status = PresenceStatus::for_activity(activity);
             assert_eq!(status.application, "Rivulet");
-            // The app name is rendered by the Discord application registration
-            // (card title), never duplicated into state or details. Without a
-            // game name the status label lives in `details`, `state` is empty.
-            assert!(!status.details.contains("Rivulet"));
+            // The composed title line always leads with the app word so small
+            // hover cards read as Rivulet; the localized status label follows
+            // it and the game slot (`state`) stays empty without a game.
+            assert!(status.details.starts_with("Rivulet · "));
             assert!(status.details.contains(activity.fallback_label()));
             assert!(status.state.is_empty());
+        }
+    }
+
+    #[test]
+    fn composed_title_line_is_localized_per_locale() {
+        // The dynamic first line is "Rivulet · <localized label>": the app
+        // word and separator are language-neutral, the status word comes from
+        // the locale tables, so every state reads correctly in DE and EN.
+        for activity in PresenceActivity::all() {
+            let en = PresenceStatus::for_activity_localized(activity, crate::Locale::En, None);
+            let de = PresenceStatus::for_activity_localized(activity, crate::Locale::De, None);
+            let en_label = crate::Locale::En.tr(activity.i18n_key());
+            let de_label = crate::Locale::De.tr(activity.i18n_key());
+            assert_eq!(en.details, format!("Rivulet · {en_label}"));
+            assert_eq!(de.details, format!("Rivulet · {de_label}"));
+            assert!(
+                en.details != de.details,
+                "localized labels must differ where the locale differs: {activity:?}"
+            );
+            assert!(en.state.is_empty() && de.state.is_empty());
         }
     }
 
@@ -153,7 +174,7 @@ mod tests {
         );
         assert_eq!(
             PresenceStatus::for_activity(PresenceActivity::RecordingAndStreaming).details,
-            "Recording + streaming"
+            "Rivulet · Recording + streaming"
         );
     }
 
@@ -164,10 +185,10 @@ mod tests {
             crate::Locale::De,
             Some("Elden Ring"),
         );
-        // Line layout: `details` carries the status label (first card line),
-        // `state` the game name (second line), and the app name stays out of
-        // both (Discord shows it as the title).
-        assert_eq!(status.details, "Streamt");
+        // Line layout: `details` carries the composed title line (first card
+        // line, app word + localized status), `state` the game name (second
+        // line).
+        assert_eq!(status.details, "Rivulet · Streamt");
         assert_eq!(status.state, "Elden Ring");
         assert!(!status.details.contains("rtmp"));
         assert!(!status.details.contains("/"));
@@ -180,7 +201,7 @@ mod tests {
             crate::Locale::En,
             None,
         );
-        assert_eq!(status.details, "Recording");
+        assert_eq!(status.details, "Rivulet · Recording");
         assert!(status.state.is_empty());
     }
 

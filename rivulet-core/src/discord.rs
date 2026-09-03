@@ -971,7 +971,7 @@ mod tests {
         assert_eq!(value["cmd"], "SET_ACTIVITY");
         assert_eq!(value["args"]["pid"], 1234);
         assert_eq!(value["args"]["activity"]["type"], 0);
-        assert_eq!(value["args"]["activity"]["details"], "Streaming");
+        assert_eq!(value["args"]["activity"]["details"], "Rivulet · Streaming");
         assert_eq!(value["args"]["activity"]["state"], "Elden Ring");
         assert!(value["args"]["activity"]["assets"].is_null());
         assert!(!value["nonce"].as_str().unwrap().is_empty());
@@ -987,7 +987,7 @@ mod tests {
         let mut buf = Vec::new();
         let st = PresenceStatus::for_activity(PresenceActivity::Idle);
         assert!(st.state.is_empty());
-        assert_eq!(st.details, "Ready");
+        assert_eq!(st.details, "Rivulet · Ready");
         let mut seq = 2;
         send_set_activity(&mut buf, &st, 5, &mut seq, None).unwrap();
         let value: serde_json::Value = serde_json::from_slice(&buf[8..]).unwrap();
@@ -996,7 +996,7 @@ mod tests {
             "empty state must be omitted, got: {}",
             value["args"]["activity"]["state"]
         );
-        assert_eq!(value["args"]["activity"]["details"], "Ready");
+        assert_eq!(value["args"]["activity"]["details"], "Rivulet · Ready");
         let text = String::from_utf8(buf[8..].to_vec()).unwrap();
         assert!(
             !text.contains("\"state\":\"\""),
@@ -1086,12 +1086,15 @@ mod tests {
                         let act = &value["args"]["activity"];
 
                         // Rule 1 (error 4000): `details` is the first card line
-                        // and always carries the status label — it must be
-                        // present and non-empty on the wire.
+                        // and always carries the composed title (app word + the
+                        // status label) — it must be present and non-empty on
+                        // the wire.
+                        let expected_details =
+                            format!("Rivulet · {}", locale.tr(activity.i18n_key()));
                         assert_eq!(
                             act["details"].as_str(),
-                            Some(locale.tr(activity.i18n_key())),
-                            "details must carry the status label on the wire: \
+                            Some(expected_details.as_str()),
+                            "details must carry the composed title on the wire: \
                              {activity:?}/{locale:?}"
                         );
                         // The game name lives in `state` (second line); it
@@ -1298,9 +1301,9 @@ mod tests {
         assert_eq!(set["cmd"], "SET_ACTIVITY");
         assert_eq!(set["args"]["pid"], std::process::id());
         assert_eq!(set["args"]["activity"]["type"], 0);
-        // First card line carries the status label; the game name lives in
-        // `state` and is omitted when no game is selected.
-        assert_eq!(set["args"]["activity"]["details"], "Recording");
+        // First card line carries the composed title (app word + status); the
+        // game name lives in `state` and is omitted when no game is selected.
+        assert_eq!(set["args"]["activity"]["details"], "Rivulet · Recording");
         assert!(set["args"]["activity"]["state"].is_null());
 
         // The shared connection state must reflect the successful handshake so
@@ -1444,9 +1447,10 @@ mod tests {
             let set: serde_json::Value = serde_json::from_slice(&set).expect("json");
             assert_eq!(set["cmd"], "SET_ACTIVITY");
             assert_eq!(set["args"]["pid"], std::process::id());
-            // First card line carries the status label; the game name lives in
-            // `state` and is omitted when no game is selected.
-            assert_eq!(set["args"]["activity"]["details"], "Streaming");
+            // First card line carries the composed title (app word + status);
+            // the game name lives in `state` and is omitted when no game is
+            // selected.
+            assert_eq!(set["args"]["activity"]["details"], "Rivulet · Streaming");
             assert!(set["args"]["activity"]["state"].is_null());
 
             // The shared connection state must reflect the successful handshake
