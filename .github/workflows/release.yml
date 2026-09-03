@@ -28,6 +28,17 @@ on:
         required: false
         type: string
 
+# Two pushes in quick succession would run two release preparations racing
+# for the same next version number, the same release branch and the same
+# GitHub release object (observed as tag-push rejections and asset-upload
+# "Not Found" errors while the other run mutated the release). Serializing
+# the workflow makes each release start from a settled state; with the
+# default cancel-in-progress=false the latest queued run simply waits.
+
+concurrency:
+  group: release-alpha
+  cancel-in-progress: false
+
 permissions:
   contents: read
 

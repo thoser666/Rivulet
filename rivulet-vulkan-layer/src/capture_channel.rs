@@ -43,13 +43,22 @@ impl FrameHeader {
     pub const SIZE: usize = 32;
 
     pub fn new(width: u32, height: u32, sequence: u64) -> Self {
+        // Checked multiplication: a hostile/corrupt extent (e.g. u32::MAX
+        // from a broken swapchain) must wrap to None instead of overflowing
+        // in release builds and writing a header whose data_size disagrees
+        // with the geometry.
+        let pixels = (width as u64)
+            .checked_mul(height as u64)
+            .and_then(|px| px.checked_mul(4))
+            .and_then(|bytes| u32::try_from(bytes).ok());
+        let data_size = pixels.expect("[Rivulet Layer] frame geometry overflows the SHM protocol");
         Self {
             magic: SHM_MAGIC,
             width,
             height,
             format: 0,
             sequence,
-            data_size: width * height * 4,
+            data_size,
         }
     }
 

@@ -107,8 +107,10 @@ pub fn check_for_update_from(
 /// Parse the newest release from a GitHub API response body.
 ///
 /// Returns `Ok(None)` when no release exists, the release is older than or
-/// equal to `current`, or its version is not valid SemVer.
-fn parse_latest_release(json: &[u8], current: &str) -> anyhow::Result<Option<UpdateInfo>> {
+/// equal to `current`, or its version is not valid SemVer. Public so the
+/// fuzz target (`fuzz/fuzz_targets/parse_latest_release.rs`) exercises the
+/// same untrusted-network-input path as production code.
+pub fn parse_latest_release(json: &[u8], current: &str) -> anyhow::Result<Option<UpdateInfo>> {
     let releases: Vec<GitHubRelease> = serde_json::from_slice(json)?;
     let Some(release) = releases.into_iter().next() else {
         return Ok(None);

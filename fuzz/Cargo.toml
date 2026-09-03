@@ -1,0 +1,46 @@
+[package]
+name = "rivulet-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.rivulet-core]
+path = "../rivulet-core"
+
+[dependencies.rivulet-updater]
+path = "../rivulet-updater"
+
+# Keep the fuzz corpus and artifacts out of the workspace target dir.
+[[bin]]
+name = "parse_irc_line"
+path = "fuzz_targets/parse_irc_line.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sdp_offer_endpoint"
+path = "fuzz_targets/sdp_offer_endpoint.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_latest_release"
+path = "fuzz_targets/parse_latest_release.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_checksums"
+path = "fuzz_targets/parse_checksums.rs"
+test = false
+doc = false
+bench = false

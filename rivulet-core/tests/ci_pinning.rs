@@ -1206,7 +1206,7 @@ fn develop_required_checks_have_stable_job_names() {
             && ci.contains("cargo test -p rivulet-core --test ci_pinning")
             && ci.contains("name: CI")
             && ci.contains(
-                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke]"
+                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke]"
             ),
         "CI must expose dedicated Pinning-Tests and aggregate CI checks"
     );
@@ -1391,6 +1391,142 @@ fn updater_verifies_release_checksums_before_install() {
     assert!(
         gui.contains("verify_downloaded_asset"),
         "the GUI download flow must verify the installer before Downloaded"
+    );
+}
+
+#[test]
+fn fuzz_targets_cover_the_untrusted_input_parsers() {
+    // Every parser that consumes remote-controlled bytes must have a fuzz
+    // target, and CI must run a libFuzzer smoke over all of them so parser
+    // regressions (panics on crafted input) fail the build.
+    for (target, _crate_under_test, symbol) in [
+        ("parse_irc_line.rs", "rivulet-core", "parse_irc_line"),
+        (
+            "sdp_offer_endpoint.rs",
+            "rivulet-core",
+            "SdpOffer::h264_opus",
+        ),
+        (
+            "parse_latest_release.rs",
+            "rivulet-updater",
+            "parse_latest_release",
+        ),
+        ("parse_checksums.rs", "rivulet-updater", "parse_checksums"),
+    ] {
+        let path = format!("fuzz/fuzz_targets/{target}");
+        let source = read(&path);
+        assert!(
+            source.contains("no_main") && source.contains("fuzz_target!"),
+            "{path} must be a real libFuzzer target"
+        );
+        assert!(source.contains(symbol), "{path} must exercise {symbol}");
+    }
+    assert!(
+        read("fuzz/Cargo.toml").contains("cargo-fuzz = true"),
+        "fuzz/Cargo.toml must be a cargo-fuzz crate"
+    );
+    let workspace = read("Cargo.toml");
+    assert!(
+        workspace.contains("exclude = [\"fuzz\"]"),
+        "the fuzz crate must stay excluded from the normal workspace build"
+    );
+
+    let smoke = read("scripts/fuzz-smoke.sh");
+    for target in [
+        "parse_irc_line",
+        "sdp_offer_endpoint",
+        "parse_latest_release",
+        "parse_checksums",
+    ] {
+        assert!(smoke.contains(target), "smoke must run {target}");
+    }
+
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("Fuzz smoke (regression corpus)")
+            && ci.contains("scripts/fuzz-smoke.sh")
+            && ci.contains("fuzz-crashes"),
+        "CI must run the fuzz smoke and upload crash artifacts"
+    );
+    assert!(
+        ci.contains("libglib2.0-dev") && ci.contains("libgstreamer1.0-dev"),
+        "the fuzz job must install the glib/gstreamer pkg-config files rivulet-core's -sys crates need"
+    );
+    assert!(
+        !ci.contains("# nightly"),
+        "toolchain selection must use the action input, not a ref comment the pin generator misreads"
+    );
+}
+
+#[test]
+fn shared_memory_frames_are_validated_before_read() {
+    // Shared memory is writable by every process in the session, and the
+    // writer runs inside the captured game — an untrusted host. The readers
+    // must therefore validate the frame header beyond the magic: geometry,
+    // pixel format, data/geometry agreement, an allocation cap and the true
+    // mapping size (never a compile-time constant).
+    let channel = read("rivulet-core/src/capture_channel.rs");
+    assert!(
+        channel.contains("pub fn is_plausible"),
+        "FrameHeader must expose the plausibility check"
+    );
+    assert!(
+        channel.contains("MAX_PIXEL_BYTES"),
+        "pixel payload must be capped before allocation"
+    );
+    assert!(
+        channel.contains("checked_mul"),
+        "geometry math must not overflow silently"
+    );
+    assert!(
+        channel.contains("mapped_region_size") && channel.contains("VirtualQuery"),
+        "the Windows reader must query the real mapping size"
+    );
+    assert!(
+        channel.contains("libc::fstat"),
+        "the Linux reader must bound the mapping by the object size"
+    );
+    assert!(
+        channel.contains("UnmapViewOfFile"),
+        "the Windows mapping must be released on drop"
+    );
+    assert!(
+        !channel.contains("data_offset + data_len > self.size"),
+        "the old constant-size bounds check must not return"
+    );
+
+    // Both readers go through the check.
+    let opengl = read("rivulet-core/src/opengl_hook.rs");
+    assert!(
+        opengl.contains("is_plausible"),
+        "the OpenGL hook reader must validate headers too"
+    );
+
+    // The writers must not emit headers whose data_size disagrees with the
+    // geometry (checked multiplication instead of release-mode wrapping).
+    let layer = read("rivulet-vulkan-layer/src/capture_channel.rs");
+    assert!(
+        layer.contains("checked_mul") && layer.contains("u32::try_from"),
+        "the Vulkan layer writer must compute data_size with checked math"
+    );
+    let dll = read("rivulet-opengl-hook-dll/src/lib.rs");
+    assert!(
+        dll.contains("checked_mul"),
+        "the OpenGL hook writer must refuse geometry/data disagreement"
+    );
+}
+
+#[test]
+fn alpha_release_runs_are_serialized() {
+    // Two pushes in quick succession used to race for the same next version
+    // number, release branch and GitHub release object (tag-push rejections,
+    // asset-upload Not Found). The workflow must serialize itself.
+    let workflow = read(".github/workflows/release.yml");
+    assert!(
+        workflow.contains("concurrency:")
+            && workflow.contains("group: release-alpha")
+            && workflow.contains("cancel-in-progress: false"),
+        "release.yml must serialize runs via a concurrency group"
     );
 }
 
