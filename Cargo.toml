@@ -20,7 +20,7 @@ exclude = ["fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.65.0-alpha.55"
+version = "0.65.0-alpha.122"
 authors = ["thoser666"]
 edition = "2021"
 repository = "https://github.com/thoser666/rivulet"
