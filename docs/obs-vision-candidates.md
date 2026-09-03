@@ -19,7 +19,7 @@ and testability before updating the README or creating an issue.
 
 | Candidate | Review decision | Roadmap row |
 | --- | --- | --- |
-| Added copy paste functions to frontend API | Approved — deterministic + embeddable, no duplication with existing work, no privacy impact | [`docs/obs-vision-roadmap.md`](obs-vision-roadmap.md) → Scene-item copy/paste API (M6) |
+| Added copy paste functions to frontend API | Approved — deterministic + embeddable, no duplication with existing work, no privacy impact | [`docs/obs-vision-roadmap.md`](obs-vision-roadmap.md) → Scene-item copy/paste API (M7) |
 | Added delete as a hotkey to delete sources on macOS | Approved — automation + cross-platform parity, extension of the existing M5 hotkey registry | [`docs/obs-vision-roadmap.md`](obs-vision-roadmap.md) → Source delete hotkey (M5) |
 
 Both features were added to `scripts/obs-features.json` so future OBS release

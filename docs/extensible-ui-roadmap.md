@@ -1,4 +1,4 @@
-# M10 – Extensible UI & Plugin Platform
+# M11 – Extensible UI & Plugin Platform
 
 Rivulet reserves a separate milestone for customizable layouts and UI plugins.
 This work must not weaken streaming reliability or expose credentials.
@@ -18,10 +18,10 @@ This work must not weaken streaming reliability or expose credentials.
 - **P6 – Quality gate:** compatibility, migration, accessibility, UX, performance,
   security, and example-plugin checks.
 
-## M10 completion gate
+## M11 completion gate
 
-M10 is complete only after the common checks in
-[`milestone-quality-gates.md`](milestone-quality-gates.md) and all M10-specific
+M11 is complete only after the common checks in
+[`milestone-quality-gates.md`](milestone-quality-gates.md) and all M11-specific
 checks pass. The final report must include:
 
 - layout persistence round-trip and migrations from every supported schema;
@@ -34,7 +34,7 @@ checks pass. The final report must include:
 
 No Blocker or Critical finding may remain. High findings must be fixed or assigned
 to a named follow-up issue and milestone. The result is recorded in
-`docs/m10-quality-report.md` as `PASS`, `CONDITIONAL`, or `FAIL`.
+`docs/m11-quality-report.md` as `PASS`, `CONDITIONAL`, or `FAIL`.
 
 ## Guardrails
 

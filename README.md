@@ -34,10 +34,10 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 
 | OBS strength | OBS weakness | Rivulet's answer |
 | --- | --- | --- |
-| Powerful, mature feature set | Interactive-first: no headless/CI/render-farm use, hard to automate | Deterministic pipeline, headless CLI, testable engine (M6) |
-| Monolithic app + libobs | `libobs` is not a clean library API; embedding it into products is painful | `rivulet-core` as a normal, semver-stable crate (M7) |
+| Powerful, mature feature set | Interactive-first: no headless/CI/render-farm use, hard to automate | Deterministic pipeline, headless CLI, testable engine (M7) |
+| Monolithic app + libobs | `libobs` is not a clean library API; embedding it into products is painful | `rivulet-core` as a normal, semver-stable crate (M8) |
 | Plugin ecosystem | C/C++ plugins against the libobs ABI, version-sensitive, can crash the app | WASM plugin runtime + temporary OBS compat mode (M5) |
-| Powerful renderer | OpenGL/D3D legacy, hard to modernize | WebGPU/Zero-copy from the ground up (M8) |
+| Powerful renderer | OpenGL/D3D legacy, hard to modernize | WebGPU/Zero-copy from the ground up (M9) |
 | Streaming foundation | Core is RTMP/FLV, low-latency protocols are fiddly | WebRTC/WHIP & SRT/RIST as first-class citizens (M3) |
 | Windows-first | Uneven platform parity (macOS/Linux weaker) | Parity as a release blocker, not an afterthought (M5) |
 
@@ -83,7 +83,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
   - Mixer - Audio mixer with live level meter and volume sliders
   - Scenes - Scene composition (M2, planned)
   - Stream - Meld-style single broadcast page (streaming controls, chat dock, status/health, audio)
-  - Assistant - AI chat assistant (M9, planned)
+  - Assistant - AI chat assistant (M10, planned)
   - Settings - All configuration options (recording, codec, presets, hotkeys, replay buffer, language)
 - **Customizable Settings**
   - Recording presets (1080p60, 720p30, ...) or original resolution
@@ -121,7 +121,7 @@ werden.
 ## 🚀 Roadmap
 
 > **Goal:** OBS core parity *and* the architectural strengths OBS cannot offer (determinism, embeddability, modernity).
-> **Strategy:** First a stable, embeddable engine, then scenes & streaming, then the differentiation features (M6–M9) as product identity.
+> **Strategy:** First a stable, embeddable engine, then scenes & streaming, then the differentiation features (M6–M11) as product identity.
 > **Priority:** Gaming streamers are a primary audience — Game Capture (M2) and Replay Buffer (M4) are prioritized accordingly.
 > 
 > **#1 Priority**: Game capture (D3D/Vulkan/OpenGL hook, zero-overhead) — without this, Rivulet cannot replace OBS for gaming. Current: Window capture via WGC (Windows) / xcap (Linux) for gaming window selection. Roadmap: D3D11/D3D12 interposition (M3), Vulkan interposition (M3), OpenGL hook (M3) as architecture steps after M2.
@@ -145,11 +145,12 @@ werden.
 | M3 – Streaming | RTMP/RTMPS, WebRTC/WHIP, SRT/RIST, Multitrack Video | ✅ Complete (conditional: live interop follow-ups) | — | [![M3](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F5&query=open_issues&label=M3&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/5) |
 | M4 – Advanced Output | Virtual Camera, Replay Buffer, Filters, Formats | ✅ Complete (conditional: integration follow-ups; milestone closed) | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat, Platform Parity | 🚧 In progress (installers, signing, i18n done) | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
-| M6 – Automation & Determinism | Headless CLI, CI Rendering, Reproducible Pipelines | 📅 Planned | — | [![M6](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F7&query=open_issues&label=M6&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/7) |
-| M7 – Embeddable Engine | Stable `rivulet-core` API, Docs, Tooling | 📅 Planned | — | [![M7](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F8&query=open_issues&label=M7&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/8) |
-| M8 – Modern Architecture | WebGPU, Zero-copy, Compute Filters | 📅 Planned | — | [![M8](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F9&query=open_issues&label=M8&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/9) |
-| M9 – AI Chat Assistant | Local-first LLM Chat Bot for Streamers | 📅 Planned | — | [![M9](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F10&query=open_issues&label=M9&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/10) |
-| M10 – Extensible UI & Plugins | Persisted layouts, view registry, declarative/WASM plugins, permissions | 📅 Planned | — | [![M10](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F11&query=open_issues&label=M10&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/11) |
+| M6 – Creator Toolkit & Interactivity | Chat auto-clips, Restream, Remote | 📅 Planned | — | [![M6](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F11&query=open_issues&label=M6&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/11) |
+| M7 – Automation & Determinism | Headless CLI, CI Rendering, Reproducible Pipelines | 📅 Planned | — | [![M7](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F7&query=open_issues&label=M7&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/7) |
+| M8 – Embeddable Engine | Stable `rivulet-core` API, Docs, Tooling | 📅 Planned | — | [![M8](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F8&query=open_issues&label=M8&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/8) |
+| M9 – Modern Architecture | WebGPU, Zero-copy, Compute Filters | 📅 Planned | — | [![M9](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F9&query=open_issues&label=M9&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/9) |
+| M10 – AI Chat Assistant | Local-first LLM Chat Bot for Streamers | 📅 Planned | — | [![M10](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F10&query=open_issues&label=M10&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/10) |
+| M11 – Extensible UI & Plugins | Persisted layouts, view registry, declarative/WASM plugins, permissions | 📅 Planned | — | [![M11](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F12&query=open_issues&label=M11&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/12) |
 
 ---
 
@@ -274,7 +275,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 
 **Goal:** The composable workspace OBS users expect.
 
-**M2 completion gate:** ✅ Complete. The cross-platform UI/UX review followed [`docs/m2-ui-ux-review.md`](docs/m2-ui-ux-review.md) and the common/M2-specific criteria in [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md). The recorded result is a conditional pass in [`docs/m2-ui-ux-review-report.md`](docs/m2-ui-ux-review-report.md): zero Blocker/Critical findings and zero open High findings. Remaining Medium follow-ups (native projector routing, native source rendering, and native browser adapters) are explicitly assigned to M5/M8 and are not hidden. Issue #75 was moved to M5 and closed as the native projector follow-up.
+**M2 completion gate:** ✅ Complete. The cross-platform UI/UX review followed [`docs/m2-ui-ux-review.md`](docs/m2-ui-ux-review.md) and the common/M2-specific criteria in [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md). The recorded result is a conditional pass in [`docs/m2-ui-ux-review-report.md`](docs/m2-ui-ux-review-report.md): zero Blocker/Critical findings and zero open High findings. Remaining Medium follow-ups (native projector routing, native source rendering, and native browser adapters) are explicitly assigned to M5/M9 and are not hidden. Issue #75 was moved to M5 and closed as the native projector follow-up.
 
 ---
 
@@ -340,7 +341,6 @@ must not be implied by beta parity.
 - [ ] Plugin system (native Rust plugins)
 - [ ] **WASM plugin runtime** (stable ABI, sandboxed: plugins can never crash the app; long-term target plugin model)
 - [ ] **OBS plugin compatibility layer** — *temporary bridge*: opt-in "Compatibility Mode" (explicitly marked as unsafe), loads native libobs plugins (encoders/filters/sources without UI); UI plugins (Qt) are out of scope; the goal is migration to the WASM plugin system
-- [ ] Mobile companion app (remote control)
 - [x] **obs-websocket compatibility** — OBS WebSocket v5 server (JSON) for Streamdeck/TouchPortal ecosystem remote control: scene list/switch, source listing, recording/streaming start/stop/toggle/status, optional password authentication and event subscriptions, verified end-to-end with a real WebSocket client (see [`docs/obs-websocket.md`](docs/obs-websocket.md)). [#72](https://github.com/thoser666/Rivulet/issues/72)
 - [ ] **Windows/macOS feature parity** (currently Linux-first; window capture on Windows exists, macOS still open) — as a release blocker, not an afterthought
 - [ ] **Source delete hotkey** — delete the selected source/scene item via a hotkey action in the existing registry (OBS 32.2 parity; cross-platform, not macOS-only), rebindable in Settings → Hotkeys, with an honest platform matrix
@@ -361,7 +361,21 @@ must not be implied by beta parity.
 
 ---
 
-### 🤖 M6 – Automation & Determinism ("Render-First")
+### 🎬 M6 – Creator Toolkit & Interactivity
+
+**Status: Planned**
+
+*Differentiation: streamer-facing creator features that OBS leaves to third-party SaaS — chat-triggered clips, one-pipeline restreaming, and remote control — built on shipped building blocks (chat dock, replay buffer, obs-websocket, multi-target fan-out).*
+
+- [ ] **Chat-driven auto-clips** — save replay-buffer highlight clips automatically when chat activity spikes (message-rate or emote bursts, configurable thresholds) or on a chat command (`!clip`); builds on the shipped chat dock (Twitch/Kick/YouTube) and M4 replay buffer; per-channel enable/disable, cooldown, and duration
+- [ ] **Multi-platform restream** — one pipeline to Twitch, YouTube, and Kick simultaneously with per-platform keys/bitrate and independent health (extends M3 multi-target fan-out and the M5 platform presets to the simultaneous "restream" workflow)
+- [ ] **Mobile & HTTP remote companion** — drive scenes, record, and stream from the phone or a browser on the LAN, building on the shipped obs-websocket v5 server (M5) with optional auth
+
+**Goal:** The creator workflows that make a streamer choose Rivulet — clips appear when chat pops off, the stream reaches every platform at once, and the setup is controllable from the couch.
+
+---
+
+### 🤖 M7 – Automation & Determinism ("Render-First")
 
 **Status: Planned**
 
@@ -379,7 +393,7 @@ must not be implied by beta parity.
 
 ---
 
-### 📦 M7 – Embeddable Engine & API
+### 📦 M8 – Embeddable Engine & API
 
 **Status: Planned**
 
@@ -395,7 +409,7 @@ must not be implied by beta parity.
 
 ---
 
-### ⚡ M8 – Modern Architecture
+### ⚡ M9 – Modern Architecture
 
 **Status: Planned**
 
@@ -413,7 +427,7 @@ must not be implied by beta parity.
 
 ---
 
-### 🤖 M9 – AI Chat Assistant
+### 🤖 M10 – AI Chat Assistant
 
 **Status: Planned**
 
@@ -438,7 +452,7 @@ must not be implied by beta parity.
 
 > ⚠️ **Coexistence with Vivid:** Rivulet (desktop) and Vivid (Android) can be used at the same time — e.g. Vivid streaming from the phone while Rivulet runs on the PC. The Rivulet bot must therefore never fight with the Vivid bot for the same chat: no duplicate replies, coordinated `!`-commands, and a per-channel configurable bot identity.
 
-### 🧩 M10 – Extensible UI & Plugin Platform
+### 🧩 M11 – Extensible UI & Plugin Platform
 
 Details, guardrails, and the completion gate: [`docs/extensible-ui-roadmap.md`](docs/extensible-ui-roadmap.md) and [`docs/milestone-quality-gates.md`](docs/milestone-quality-gates.md).
 
@@ -473,7 +487,7 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Source transforms & composition | ✅ Done (M2 S1) |
 | Hotkeys (incl. remapping, global) | Partial (record/pause/mute/save-replay; remapping planned M5) |
 | Source delete hotkey | Open (M5: delete-source hotkey action on all platforms, OBS 32.2 parity) |
-| Scene-item copy/paste (API) | Open (M6: deterministic scriptable copy/paste of scene items, OBS 32.2 frontend-API parity) |
+| Scene-item copy/paste (API) | Open (M7: deterministic scriptable copy/paste of scene items, OBS 32.2 frontend-API parity) |
 | Undo/Redo | Done (M2) |
 | Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks, filters) |
 | Video filters (color correction, LUT, blur, sharpen, chroma key) | Partial (M4: color correction/blur/sharpen done; LUT grading + chroma-key refinement open) |
@@ -492,13 +506,13 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Multi-track audio | Partial (2 local tracks; VOD-track model in M3) |
 | Plugin ecosystem & OBS compatibility | Open |
 | obs-websocket / Streamdeck | Implemented (M5) |
-| Mobile remote & MIDI | Open (M5) |
+| Mobile remote & MIDI | Open (M6: mobile/HTTP remote companion; obs-websocket server + MIDI shipped in M5) |
 | Cloud & telemetry | Partial (M4 S3 SigV4 PUT upload after stop; multipart + GUI settings open) |
 | Discord Rich Presence | Implemented (optional, privacy-safe activity status; M5, see docs/activity-status.md) |
 | Chat dock & alerts | Partial (M5: Twitch IRC + Kick WebSocket + YouTube polling chat in the Stream workspace, see docs/twitch-chat.md; follow/sub/donation alerts open, see docs/obs-vision-roadmap.md) |
 | Multi-language support | Partial (DE/EN wired) |
 | Platform parity (Windows/macOS) | Open |
-| AI chat assistant | Open (M9) |
+| AI chat assistant | Open (M10) |
 
 > The checklist is verified against the machine-readable OBS catalog
 > [`scripts/obs-features.json`](scripts/obs-features.json) by

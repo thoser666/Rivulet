@@ -8,14 +8,14 @@ support costs. The canonical source remains [GitHub Releases](https://github.com
 
 | Stage | Milestone | Channel | Platforms | Recommendation | Current state |
 | --- | --- | --- | --- | --- | --- |
-| 1 | M5, supported by M6 | GitHub Releases | Windows, macOS, Linux | Keep as the source of truth for release notes, checksums, and updater downloads. | Active: MSI/portable ZIP, DMG, and AppImage are built by CI. |
-| 2 | M5, supported by M6 | WinGet | Windows | Add after the MSI product identity and signing are stable. It provides native discovery and upgrades without another binary hosting system. | Readiness workflow validates the MSI and portable ZIP; manifest submission is still open. |
-| 2 | M5, supported by M6 | Flathub | Linux | Prefer this over maintaining distribution-specific packages. It gives Linux users a familiar, sandboxed, updateable installation. | Open: a Flatpak manifest, permissions review, and Flathub submission are needed. |
+| 1 | M5, supported by M7 | GitHub Releases | Windows, macOS, Linux | Keep as the source of truth for release notes, checksums, and updater downloads. | Active: MSI/portable ZIP, DMG, and AppImage are built by CI. |
+| 2 | M5, supported by M7 | WinGet | Windows | Add after the MSI product identity and signing are stable. It provides native discovery and upgrades without another binary hosting system. | Readiness workflow validates the MSI and portable ZIP; manifest submission is still open. |
+| 2 | M5, supported by M7 | Flathub | Linux | Prefer this over maintaining distribution-specific packages. It gives Linux users a familiar, sandboxed, updateable installation. | Open: a Flatpak manifest, permissions review, and Flathub submission are needed. |
 | 3 | M5 | Homebrew Cask | macOS | Useful for developer-oriented installs; publish only signed/notarized DMGs. | Readiness workflow validates the DMG; cask/tap submission is still open. |
 | 3 | M5 | Steam | Windows, macOS | Worth preparing for the gaming-streamer audience, but treat it as a secondary channel rather than the update authority. | Open: Steam App ID, depots, SteamPipe credentials, store metadata, and a Steam-specific package layout. |
 | 4 | M5 | Microsoft Store | Windows | Consider later for enterprise trust and discoverability. It requires MSIX packaging and Partner Center identity management. | Not ready: the current pipeline produces MSI/ZIP, not MSIX. |
 
-WinGet and Flathub are the next M5 integrations; M6 supplies the reproducible
+WinGet and Flathub are the next M5 integrations; M7 supplies the reproducible
 package and verification foundation they depend on. Steam is a good strategic
 option once the product has a stable beta and a predictable update cadence; it
 should not be used to bypass GitHub's release checks. Homebrew Cask is low effort

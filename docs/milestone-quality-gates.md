@@ -80,7 +80,7 @@ GPU, WebView, and display-server checks must be marked `PASS`, `BLOCKED`, or
 
 ## Cross-cutting resource-efficiency gate
 
-This gate applies to **every milestone M0–M10**, in addition to the milestone-specific checks below. It is scaled to the feature: a CLI or API feature may use process CPU/RAM and determinism measurements, while capture/rendering features must also measure frame time, GPU, queues, and power where available.
+This gate applies to **every milestone M0–M11**, in addition to the milestone-specific checks below. It is scaled to the feature: a CLI or API feature may use process CPU/RAM and determinism measurements, while capture/rendering features must also measure frame time, GPU, queues, and power where available.
 
 Use [`resource-efficiency-goal.md`](resource-efficiency-goal.md) as the source of thresholds and methodology. Every milestone report must record:
 
@@ -99,11 +99,12 @@ Use [`resource-efficiency-goal.md`](resource-efficiency-goal.md) as the source o
 | M3 | Fan-out queues, reconnect isolation, bitrate and delay overhead |
 | M4 | Replay, filters, remux, and virtual-camera resource behavior |
 | M5 | Plugin, hotkey, updater, and cross-platform overhead/fallback behavior |
-| M6 | Headless resource limits and deterministic CI execution |
-| M7 | Host-application overhead, lifecycle, and bounded background work |
-| M8 | GPU-direct, zero-copy, renderer, thermal, and battery measurements |
-| M9 | Local model CPU/RAM/VRAM budget, responsiveness, and graceful degradation |
-| M10 | Layout persistence, registry/plugin overhead, sandbox limits, and failure isolation |
+| M6 | Chat/replay fan-out, restream concurrency, remote-control, and clip-write overhead |
+| M7 | Headless resource limits and deterministic CI execution |
+| M8 | Host-application overhead, lifecycle, and bounded background work |
+| M9 | GPU-direct, zero-copy, renderer, thermal, and battery measurements |
+| M10 | Local model CPU/RAM/VRAM budget, responsiveness, and graceful degradation |
+| M11 | Layout persistence, registry/plugin overhead, sandbox limits, and failure isolation |
 
 A milestone cannot claim resource efficiency from compilation or unit tests alone. Attach the report or mark the measurement `BLOCKED`/`N/A`; never silently omit it.
 
@@ -191,7 +192,26 @@ Review trust, permissions, installation, and cross-platform consistency:
 Exit evidence: platform feature matrix, installer/update recordings, and plugin
 trust/permission review.
 
-### M6: Automation and Determinism
+### M6: Creator Toolkit and Interactivity
+
+Review creator workflows that build on shipped chat/replay/remote building
+blocks:
+
+- Chat-driven auto-clips respect per-channel enable/disable, thresholds,
+  cooldown, and duration; a clip is only saved when a real replay buffer is
+  available and the save reports the exact output path.
+- Restreaming to multiple platforms keeps per-platform keys, bitrates, and
+  health independent; one failing target never takes down the others or the
+  local recording.
+- Mobile/HTTP remote control is authenticated, bound to the LAN where
+  configured, and cannot start or stop streams without explicit permission.
+- Clip writes, restream fan-out, and remote sessions stay within the
+  documented CPU/memory/frame-time budgets (see the resource table above).
+
+Exit evidence: clip trigger/save tests, per-target restream failure tests,
+remote-auth tests, and a resource report for active creator sessions.
+
+### M7: Automation and Determinism
 
 This is a developer-experience gate as well as a UI gate:
 
@@ -209,7 +229,7 @@ This is a developer-experience gate as well as a UI gate:
 Exit evidence: clean-machine command transcript, reproducibility comparison,
 and machine-readable schema validation.
 
-### M7: Embeddable Engine and API
+### M8: Embeddable Engine and API
 
 Review the API as a product consumed by another developer:
 
@@ -225,7 +245,7 @@ Review the API as a product consumed by another developer:
 Exit evidence: docs build, example build/run matrix, public API review, and a
 small downstream-consumer smoke test.
 
-### M8: Modern Architecture
+### M9: Modern Architecture
 
 Review perceived performance and hardware fallback behavior:
 
@@ -245,7 +265,25 @@ Review perceived performance and hardware fallback behavior:
 Exit evidence: representative performance report, backend matrix, and screenshots
 or recordings at the minimum and recommended hardware profiles.
 
-### M10: Extensible UI and Plugin Platform
+### M10: AI Chat Assistant
+
+Review privacy, control, and failure boundaries:
+
+- The user can tell whether a request is processed locally or sent to a cloud
+  endpoint before enabling it.
+- Provider, model, channel, persona, memory, and moderation settings are
+  discoverable and persist as documented.
+- Tokens and chat content are masked in logs, exports, screenshots, and errors.
+- The assistant distinguishes suggestions from actions and requires explicit
+  confirmation for destructive or externally visible operations.
+- Rate limits, provider outages, malformed responses, moderation blocks, and
+  context overflow have understandable recovery paths.
+- Bot coexistence and duplicate-response suppression are visible and testable.
+
+Exit evidence: privacy review, redacted chat transcript, provider failure cases,
+and confirmation/permission checks.
+
+### M11: Extensible UI and Plugin Platform
 
 Review customization without sacrificing safety, accessibility, or responsiveness:
 
@@ -271,24 +309,6 @@ Review customization without sacrificing safety, accessibility, or responsivenes
 Exit evidence: layout round-trip and migration tests, registry collision/accessibility
 checks, permission-denial tests, malformed-manifest tests, plugin timeout/crash
 isolation evidence, and a resource-efficiency report for an enabled/disabled plugin set.
-
-### M9: AI Chat Assistant
-
-Review privacy, control, and failure boundaries:
-
-- The user can tell whether a request is processed locally or sent to a cloud
-  endpoint before enabling it.
-- Provider, model, channel, persona, memory, and moderation settings are
-  discoverable and persist as documented.
-- Tokens and chat content are masked in logs, exports, screenshots, and errors.
-- The assistant distinguishes suggestions from actions and requires explicit
-  confirmation for destructive or externally visible operations.
-- Rate limits, provider outages, malformed responses, moderation blocks, and
-  context overflow have understandable recovery paths.
-- Bot coexistence and duplicate-response suppression are visible and testable.
-
-Exit evidence: privacy review, redacted chat transcript, provider failure cases,
-and confirmation/permission checks.
 
 ## Platform and viewport matrix
 

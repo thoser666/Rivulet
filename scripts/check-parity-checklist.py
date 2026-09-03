@@ -112,7 +112,7 @@ def self_test() -> int:
         "| --- | --- |\n"
         "| Display capture | Partial |\n"
         "| Remux & file management | Open (M4) |\n"
-        "| AI chat assistant | Open (M9) |\n"
+        "| AI chat assistant | Open (M10) |\n"
         "## Next section\n"
     )
     failures = []
