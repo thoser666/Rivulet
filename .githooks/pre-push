@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Pre-push hook: mirror the CI "Lints (Fmt & Clippy)" job locally so a push
+# can never break the required checks.
+#
+# Why `-D warnings`: CI runs `cargo clippy --workspace --all-targets -- -D
+# warnings`, but a plain local `cargo clippy` only *warns* on lints such as
+# `clippy::field_reassign_with_default` — commit 06792c6 shipped four GUI
+# tests that were clean locally yet failed the CI Lints job. This hook uses
+# the exact CI flags so the failure happens before the push, not after.
+#
+# Install (one time per clone):
+#   git config core.hooksPath .githooks
+#
+# Skip for an individual push:
+#   RIVULET_SKIP_PRE_PUSH=1 git push        # or: git push --no-verify
+set -euo pipefail
+
+if [[ "${RIVULET_SKIP_PRE_PUSH:-}" == "1" || "${RIVULET_SKIP_PRE_PUSH:-}" == "true" ]]; then
+  echo "pre-push: checks skipped (RIVULET_SKIP_PRE_PUSH=1)"
+  exit 0
+fi
+
+# Resolve the repository root regardless of the hook's working directory.
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}"
+
+echo "pre-push: cargo fmt --all --check"
+cargo fmt --all --check
+
+echo "pre-push: cargo clippy --workspace --all-targets -- -D warnings"
+cargo clippy --workspace --all-targets -- -D warnings
+
+echo "pre-push: all checks passed"

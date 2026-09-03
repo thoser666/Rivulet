@@ -104,6 +104,24 @@ All releases are alpha until the first beta. The version in `Cargo.toml` is the 
 5. Merge (squash or rebase)
 6. If the commit is `feat:` or `fix:`, an alpha release is automatically built and published
 
+### Local pre-push checks
+
+A committed git hook (`.githooks/pre-push`) mirrors the CI **Lints (Fmt &
+Clippy)** job locally, so pushes cannot break the required checks. Enable it
+once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook runs `cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets -- -D warnings` with the exact CI
+flags. The `-D warnings` part matters: a plain `cargo clippy` only *warns*
+on lints such as `clippy::field_reassign_with_default`, which is how commit
+`06792c6` shipped GUI tests that were clean locally but failed the CI Lints
+job. Skip it for a single push with `RIVULET_SKIP_PRE_PUSH=1 git push` (or
+`git push --no-verify`).
+
 ## Testing
 
 ```bash

@@ -2167,6 +2167,36 @@ fn chat_outbound_is_rate_limited_per_platform() {
 }
 
 #[test]
+fn local_pre_push_hook_mirrors_the_ci_lints_job() {
+    // Commit 06792c6 shipped four GUI tests that were clean under a plain
+    // `cargo clippy` but failed CI's `-- -D warnings` Lints job
+    // (clippy::field_reassign_with_default). The committed `.githooks/pre-
+    // push` hook must keep mirroring the CI Lints job (fmt + workspace
+    // clippy with -D warnings) and stay documented in CONTRIBUTING so the
+    // failure happens before the push, not after.
+    let hook = read(".githooks/pre-push");
+    for marker in [
+        "core.hooksPath .githooks",
+        "cargo fmt --all --check",
+        "clippy --workspace --all-targets -- -D warnings",
+        "RIVULET_SKIP_PRE_PUSH",
+        "06792c6",
+    ] {
+        assert!(
+            hook.contains(marker),
+            ".githooks/pre-push must mention {marker}"
+        );
+    }
+    let contributing = read("CONTRIBUTING.md");
+    assert!(
+        contributing.contains("Local pre-push checks")
+            && contributing.contains("git config core.hooksPath .githooks")
+            && contributing.contains("-D warnings"),
+        "CONTRIBUTING.md must document the pre-push hook and its -D warnings flags"
+    );
+}
+
+#[test]
 fn twitch_replies_thread_the_parent_message_id_and_surface_phone_verification() {
     // Twitch replies must use the IRCv3 `@reply-parent-msg-id` tag so the bot
     // answers the exact line a viewer asked about, and the worker must turn
