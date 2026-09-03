@@ -1,6 +1,6 @@
 {
   "source": "OBS Studio core + mainstream plugin feature catalog (curated; mirror of the README Feature-Parity Checklist)",
-  "updated": "2026-08-21",
+  "updated": "2026-09-03",
   "about": "Each entry is an OBS capability that must have a matching row in the README Feature-Parity Checklist. 'id' is the canonical name; 'aliases' are substrings that identify the capability inside a checklist row. Add a new entry here when OBS ships a capability the checklist must acknowledge.",
   "features": [
     { "id": "display-capture", "aliases": ["display"] },
@@ -45,6 +45,8 @@
     { "id": "obs-websocket", "aliases": ["obs-websocket", "streamdeck"] },
     { "id": "mobile-remote", "aliases": ["mobile", "remote"] },
     { "id": "midi", "aliases": ["midi"] },
-    { "id": "multi-language", "aliases": ["language", "locale", "i18n"] }
+    { "id": "multi-language", "aliases": ["language", "locale", "i18n"] },
+    { "id": "scene-item-copy-paste", "aliases": ["copy paste", "copy/paste", "copy scene items", "paste scene items"] },
+    { "id": "source-delete-hotkey", "aliases": ["delete hotkey", "delete source", "delete as a hotkey"] }
   ]
 }

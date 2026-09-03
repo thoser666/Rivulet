@@ -1,0 +1,14 @@
+# Pinned Rust toolchain — keep local and CI builds byte-identical.
+#
+# Why a specific version instead of `stable`?
+# Rust 1.98.0 introduced a rustfmt regression for the 0.65.0-alpha.100 window
+# (rustfmt 1.9.0 collapses a long `contains("…")` argument that the CI runner's
+# rustfmt 1.8.x wanted wrapped, flip-flopping `cargo fmt --check`). A rolling
+# `stable` channel can never pin a formatting decision, so this file binds the
+# entire workspace — every `cargo` command in any checkout of this repo — to
+# one compiler + one rustfmt. Bump the version deliberately together with
+# `docs/ci-action-pins.md`.
+[toolchain]
+channel = "1.98.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

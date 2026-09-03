@@ -1,0 +1,79 @@
+name: Deep fuzz (weekly)
+
+# Long-running libFuzzer campaign over the untrusted-input parsers. Runs
+# every Monday outside the push pipeline: each fuzz target gets 10 minutes
+# of wall-clock fuzzing and the grown corpus is persisted between runs
+# through the actions cache, so coverage accumulates instead of restarting
+# from zero. A crash (panic, overflow, hang under the time budget) fails the
+# workflow and uploads the crashing input as an artifact.
+#
+# The push-time "Fuzz smoke (regression corpus)" job in ci.yml remains the
+# fast gate on every commit; this workflow is its deep, scheduled
+# complement. Runs manually via workflow_dispatch on demand.
+
+on:
+  schedule:
+    # Weekly, Monday 02:00 UTC
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deep_fuzz:
+    name: Deep fuzz (10 min per target)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust nightly (cargo-fuzz requirement)
+        # Same pinned SHA as every other dtolnay/rust-toolchain use — the
+        # action's `toolchain` input, not the pin, selects nightly.
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Install GStreamer/PipeWire build dependencies
+        run: |
+          # rivulet-core links glib, gstreamer and pipewire/spa via
+          # gstreamer-rs / libspa; the -sys crates need the pkg-config files
+          # at build time even though the fuzz targets never touch them.
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libglib2.0-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev
+
+      - name: Restore fuzz corpus from cache
+        # Corpus persistence: the exact key (run id) never exists, so the
+        # step falls back to the most recent corpus via restore-keys and
+        # then saves the grown corpus under the unique key on job success.
+        # GitHub evicts old caches by LRU, so coverage keeps accumulating
+        # across weekly runs without unbounded cache growth.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: |
+            fuzz-corpus-
+
+      - name: Run deep fuzz (10 minutes per target)
+        env:
+          FUZZ_MAX_TOTAL_TIME: "600"
+        run: bash scripts/fuzz-smoke.sh
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-deep-crashes
+          path: fuzz/artifacts/
+          if-no-files-found: ignore

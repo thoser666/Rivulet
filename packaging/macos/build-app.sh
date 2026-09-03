@@ -41,5 +41,24 @@ else
   echo "warning: packaging/rivulet.icns missing; using the generic app icon" >&2
 fi
 
+# Ship the Discord Rich Presence setup assets (app icon for the member list,
+# Rich Presence artwork for the profile card) and the setup documentation so
+# users can complete the Discord configuration without the repository.
+DOCDIR="$APP/Contents/Resources/discord"
+mkdir -p "$DOCDIR/assets"
+for pair in \
+  "docs/assets/rivulet-app-icon-512.png:rivulet-app-icon-512.png" \
+  "docs/assets/rivulet-rich-presence-1024.png:rivulet-rich-presence-1024.png" \
+  "docs/assets/rivulet-rich-presence-512.png:assets/rivulet-rich-presence-512.png" \
+  "docs/activity-status.md:activity-status.md"; do
+  src="${pair%%:*}"
+  dst="${pair##*:}"
+  if [[ -f "$src" ]]; then
+    cp "$src" "$DOCDIR/$dst"
+  else
+    echo "warning: Discord asset missing, skipped: $src" >&2
+  fi
+done
+
 chmod -R u+rwX "$APP"
 echo "App bundle created: $APP"

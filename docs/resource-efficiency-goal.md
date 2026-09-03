@@ -10,7 +10,7 @@ recorder into the dominant workload, especially on older hardware and laptops.
 > stutter, avoidable frame-time spikes, or unexplained resource growth.
 
 This is a cross-cutting goal for game capture (G2–G6), streaming (M3), advanced
-output (M4), and the modern renderer (M8). It is not a promise that every
+output (M4), and the modern renderer (M9). It is not a promise that every
 hardware combination reaches the same quality; unsupported hardware must instead
 fall back clearly and remain responsive.
 
@@ -67,7 +67,7 @@ measurements are hardware evidence and must be marked `PASS`, `BLOCKED`, or
 - G5 owns benchmark definitions and regression reporting.
 - G2–G6 own backend-specific overhead and fallback evidence.
 - M3 owns streaming queue isolation and adaptive-quality behavior.
-- M8 owns zero-copy, WebGPU, and compute-path improvements.
+- M9 owns zero-copy, WebGPU, and compute-path improvements.
 
-The goal is reviewed at every M0–M9 milestone quality gate. Each milestone report must include the applicable resource evidence or an explicit `BLOCKED`/`N/A` reason. A release must not claim
+The goal is reviewed at every M0–M11 milestone quality gate. Each milestone report must include the applicable resource evidence or an explicit `BLOCKED`/`N/A` reason. A release must not claim
 "low overhead" solely because compilation or synthetic unit tests pass.

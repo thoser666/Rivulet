@@ -69,7 +69,7 @@ claimed from compilation alone.
 | ID | Severity | Profile / check | Description | Reproduction | Issue / owner | Retest |
 | --- | --- | --- | --- | --- | --- | --- |
 | F-M2-001 | Medium | P1/P2 projector | Native fullscreen routing to a second display is not available; the UI uses an in-window projector fallback. | Enable Multi-view and open Projector in Scenes. | M5 platform parity / renderer owner; existing issue #75 | Retest at native projector implementation |
-| F-M2-002 | Medium | P3/P4 source rendering | Snapshot/composition uses deterministic layout tiles until native source-pixel renderers are connected. | Export a scene snapshot with native sources. | M8 renderer owner; documented follow-up | Retest when native renderer lands |
+| F-M2-002 | Medium | P3/P4 source rendering | Snapshot/composition uses deterministic layout tiles until native source-pixel renderers are connected. | Export a scene snapshot with native sources. | M9 renderer owner; documented follow-up | Retest when native renderer lands |
 | F-M2-003 | Medium | P5 browser source | Browser configuration is portable, but native WebView adapter wiring remains unavailable. | Configure a browser source and attempt native rendering. | M5 ecosystem owner; S5b follow-up | Retest when platform adapters land |
 
 There are no Blocker, Critical, or open High findings. The macOS capture limitation is an

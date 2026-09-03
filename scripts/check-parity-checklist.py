@@ -112,7 +112,7 @@ def self_test() -> int:
         "| --- | --- |\n"
         "| Display capture | Partial |\n"
         "| Remux & file management | Open (M4) |\n"
-        "| AI chat assistant | Open (M9) |\n"
+        "| AI chat assistant | Open (M10) |\n"
         "## Next section\n"
     )
     failures = []
@@ -193,6 +193,14 @@ def main() -> int:
 
     if rows is None:
         print(f"error: '{SECTION_MARKER}' section not found in {README}", file=sys.stderr)
+        headers = [
+            l.strip() for l in README.read_text(encoding="utf-8").splitlines()
+            if l.strip().startswith("#")
+        ]
+        print(
+            f"debug: {len(headers)} markdown headings; sample: {headers[:8]}",
+            file=sys.stderr,
+        )
         return 2
 
     missing = find_missing(rows, features)

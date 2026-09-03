@@ -11,6 +11,33 @@ use std::time::{Duration, Instant};
 // Important: The prelude is still needed for methods like .set_state(), .by_name(), etc.
 use gst::prelude::*;
 
+pub mod output;
+pub mod presence;
+pub use presence::{PresenceActivity, PresenceStatus};
+pub mod discord;
+pub use discord::{DiscordPresence, DiscordPresenceConfig};
+pub mod twitch_chat;
+pub use twitch_chat::{ChatConnState, ChatMessage, TwitchChat, TwitchChatConfig};
+pub mod kick_chat;
+pub use kick_chat::{KickChat, KickChatConfig};
+pub mod youtube_chat;
+pub use youtube_chat::{YouTubeChat, YouTubeChatConfig};
+pub mod chat;
+pub use chat::{Chat, ChatConfig, ChatPlatform};
+pub mod rate_limit;
+pub use rate_limit::{RateLimitConfig, RateLimiter};
+pub mod global_hotkey;
+pub mod midi;
+pub use global_hotkey::{GlobalBinding, GlobalHotkey, KeyCode, ModMask};
+pub use midi::{
+    parse_midi, MidiAction, MidiBinding, MidiKind, MidiMapping, MidiMessage, MidiPreset,
+    MidiPresetLibrary,
+};
+pub mod virtual_camera;
+pub use virtual_camera::{
+    VirtualCamera, VirtualCameraConfig, VirtualCameraError, VirtualCameraFormat, VirtualCameraState,
+};
+
 pub mod audio;
 pub use audio::{AudioFrame, AudioTrack, SkippedFilter};
 
@@ -29,27 +56,50 @@ pub use reconnect::{
     target_index_from_sink_name, ReconnectCommand, ReconnectWorker, RetryPolicy, SinkBusEvent,
     StreamingReconnectSupervisor, TargetReconnectState,
 };
-pub use stream_runtime::{AdaptiveBitrateController, DelaySupervisor};
+pub use stream_runtime::{AdaptiveBitrateController, BitrateChange, DelaySupervisor};
 
 pub mod encoder;
+pub mod video_effects;
 pub use encoder::{
     best_encoder, best_encoder_for_codec, detect_available_encoders,
-    detect_available_encoders_for_codec, VideoCodec, VideoEncoder,
+    detect_available_encoders_for_codec, RateControl, RateControlMode, VideoCodec, VideoEncoder,
 };
+pub use video_effects::VideoEffects;
 
 pub mod health;
 pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 
+pub mod container;
+pub use container::{remux_to_mp4, RecordingContainer, RemuxOutcome, RemuxPlan, RemuxSettings};
+
+pub mod file_management;
+pub use file_management::{
+    FileNamePattern, PatternToken, PatternValues, RecordingFileSettings, RecordingSession, SplitBy,
+};
+
 pub mod metrics;
 pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
+
+pub mod ndi;
+pub use ndi::NdiOutput;
+
+pub mod cloud;
+pub use cloud::{mask_secret, CloudRecording};
+
+pub mod vst3;
+pub use vst3::{discover_in, discover_vst3_plugins, vst3_search_dirs, VstChain, VstPlugin};
+
+pub mod sdp;
+pub use sdp::SdpOffer;
 
 pub mod srt;
 pub mod stream;
 pub use srt::{ContributionProtocol, ContributionSettings};
 pub use stream::{
-    parse_whip_response, AdaptiveBitrate, MultistreamSettings, MultitrackVideo, StreamDelay,
-    StreamPlatform, StreamPreset, StreamSettings, StreamTarget, StreamTargetState,
-    TargetPluginStatus, WhipSession, WhipSettings,
+    parse_whip_response, AdaptiveBitrate, MultistreamSettings, MultitrackVideo, PrivateTestStream,
+    PrivateTestStreamState, StreamConnectionResult, StreamDelay, StreamKeyStore, StreamPlatform,
+    StreamPreset, StreamProbeResult, StreamSettings, StreamTarget, StreamTargetState,
+    TargetPluginStatus, VodTrack, WhipMediaSession, WhipMediaState, WhipSession, WhipSettings,
 };
 
 pub mod i18n;
@@ -95,10 +145,14 @@ pub mod audio_source;
 pub use audio_source::{AudioSource, AudioSourceKind};
 
 pub mod browser_source;
+pub mod ducking;
 pub use browser_source::{
     BrowserFrame, BrowserInput, BrowserMouseButton, BrowserSource, BrowserSourceBackend,
     BrowserSourceError,
 };
+
+pub mod alerts;
+pub use alerts::{AlertOverlayError, AlertProvider};
 
 pub mod benchmark;
 pub mod capture_channel;
@@ -141,10 +195,28 @@ pub struct RivuletEngine {
     video_encoder: VideoEncoder,
     /// Video codec selected for recording (H.264, H.265, or VP9).
     video_codec: VideoCodec,
+    /// Container format selected for recording (MP4 default, or crash-safe
+    /// MKV/MOV/TS as remux intermediates).
+    recording_container: RecordingContainer,
+    /// Remux settings: whether to auto-remux the finished recording to MP4
+    /// after stop (issue #71).
+    remux_settings: RemuxSettings,
+    /// Optional S3-compatible cloud destination; finished recordings are
+    /// uploaded after stop when `enabled` (M4 follow-up).
+    cloud_recording: CloudRecording,
+    /// Recording file-management policy: filename pattern, split rules, and
+    /// whether a recording auto-starts alongside the stream (M4).
+    recording_file: RecordingFileSettings,
     /// Recording preset controlling resolution, FPS, and bitrate.
     preset: RecordingPreset,
     /// Target video bitrate in kbit/s applied to the selected encoder.
     encoder_bitrate_kbps: u32,
+    /// Advanced rate-control strategy (CBR/VBR/CQ/CQ-VBR plus custom encoder
+    /// options) layered on top of the target bitrate.
+    rate_control: RateControl,
+    /// Video filters/effects (colour correction, blur, sharpen) applied to the
+    /// capture before encoding.
+    video_effects: VideoEffects,
     /// Tracks stream health while a streaming pipeline is active. Always
     /// `None` for plain local recordings.
     stream_health: Option<StreamHealthMonitor>,
@@ -192,8 +264,14 @@ impl Default for RivuletEngine {
             delay_supervisors: Vec::new(),
             video_encoder: best_encoder(),
             video_codec: VideoCodec::default(),
+            recording_container: RecordingContainer::default(),
+            remux_settings: RemuxSettings::default(),
+            cloud_recording: CloudRecording::default(),
+            recording_file: RecordingFileSettings::default(),
             preset: RecordingPreset::default(),
             encoder_bitrate_kbps: 5_000,
+            rate_control: RateControl::default(),
+            video_effects: VideoEffects::default(),
             stream_health: None,
             recording_metrics: None,
             last_error: None,
@@ -276,6 +354,45 @@ impl RivuletEngine {
 
     pub fn stream_target_states(&self) -> &[StreamTargetState] {
         &self.stream_target_states
+    }
+
+    /// Return the target names paired with their current lifecycle state.
+    pub fn stream_targets_with_states(&self) -> Vec<(String, StreamTargetState)> {
+        self.stream_targets
+            .as_ref()
+            .map(|settings| {
+                settings
+                    .targets
+                    .iter()
+                    .enumerate()
+                    .map(|(index, target)| {
+                        (
+                            target.name.clone(),
+                            self.stream_target_states
+                                .get(index)
+                                .copied()
+                                .unwrap_or(StreamTargetState::Offline),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Return per-target delay and queue telemetry in target order.
+    pub fn stream_target_telemetry(&self) -> Vec<(String, StreamTargetState, f64, u64, u64)> {
+        self.stream_targets_with_states()
+            .into_iter()
+            .enumerate()
+            .map(|(index, (name, state))| {
+                let (fill, underflows, overflows) = self
+                    .delay_supervisors
+                    .get(index)
+                    .map(|delay| (delay.fill_ratio(), delay.underflows(), delay.dropped()))
+                    .unwrap_or((0.0, 0, 0));
+                (name, state, fill, underflows, overflows)
+            })
+            .collect()
     }
 
     /// Update one target from a GStreamer bus event and return whether the
@@ -538,6 +655,95 @@ impl RivuletEngine {
         self.video_codec
     }
 
+    /// Select the recording container format.
+    ///
+    /// Defaults to MP4. Choose a crash-safe intermediate (MKV/MOV/TS) to enable
+    /// post-stop remux to MP4 (see [`RecordingContainer`] and [`RemuxPlan`]).
+    /// Must be called before recording starts.
+    pub fn set_recording_container(&mut self, container: RecordingContainer) {
+        self.recording_container = container;
+    }
+
+    /// The currently selected recording container.
+    pub fn recording_container(&self) -> RecordingContainer {
+        self.recording_container
+    }
+
+    /// Configure whether finished recordings are auto-remuxed to MP4 (issue
+    /// #71). Ignored for MP4 recordings (nothing to remux).
+    pub fn set_auto_remux(&mut self, enabled: bool) {
+        self.remux_settings.auto_remux_after_stop = enabled;
+    }
+
+    /// Whether auto-remux after stop is enabled.
+    pub fn auto_remux(&self) -> bool {
+        self.remux_settings.auto_remux_after_stop
+    }
+
+    /// Configure the S3-compatible cloud destination. Finished recordings are
+    /// uploaded after stop only when the destination has `enabled` set.
+    pub fn set_cloud_recording(&mut self, cloud: CloudRecording) {
+        self.cloud_recording = cloud;
+    }
+
+    /// The currently configured cloud destination (default: disabled).
+    pub fn cloud_recording(&self) -> &CloudRecording {
+        &self.cloud_recording
+    }
+
+    /// Configure the recording file-management policy (M4).
+    pub fn set_recording_file(&mut self, settings: RecordingFileSettings) {
+        self.recording_file = settings;
+    }
+
+    /// The currently configured recording file-management policy.
+    pub fn recording_file(&self) -> &RecordingFileSettings {
+        &self.recording_file
+    }
+
+    /// Builds the default recording filename for the current container,
+    /// applying the configured filename pattern with the current timestamp and
+    /// an optional stream label. Used by the GUI's file dialogs.
+    pub fn default_recording_path(&self, dir: &str, stream_label: &str) -> PathBuf {
+        let now = chrono::Local::now();
+        let vals = PatternValues {
+            name: "rivulet-recording".to_string(),
+            date: now.format("%Y-%m-%d").to_string(),
+            time: now.format("%H-%M-%S").to_string(),
+        };
+        let stem = self
+            .recording_file
+            .filename_pattern
+            .render(&vals, 1, stream_label);
+        let ext = self.container_extension();
+        PathBuf::from(dir).join(format!("{stem}.{ext}"))
+    }
+
+    /// The recording muxer element, honoring the container selection.
+    ///
+    /// The default MP4 choice maps to the codec-native muxer (so VP9 keeps
+    /// `webmmux` and H.264/H.265 keep `mp4mux`, preserving prior behavior); a
+    /// crash-safe intermediate container (MKV/MOV/TS) opts into that container's
+    /// muxer so the file can be remuxed to MP4 afterwards.
+    pub fn container_muxer(&self) -> &'static str {
+        match self.recording_container {
+            RecordingContainer::Mp4 => self.video_codec.muxer_element(),
+            other => other.muxer_element(),
+        }
+    }
+
+    /// The recording file extension, honoring the container selection.
+    ///
+    /// Mirrors [`Self::container_muxer`]: the default MP4 container uses the
+    /// codec-native extension (H.264/H.265 => `mp4`, VP9 => `webm`), while a
+    /// crash-safe intermediate uses that container's extension.
+    pub fn container_extension(&self) -> &'static str {
+        match self.recording_container {
+            RecordingContainer::Mp4 => self.video_codec.file_extension(),
+            other => other.file_extension(),
+        }
+    }
+
     /// Select a recording preset that controls resolution, FPS, and bitrate.
     ///
     /// Must be called before recording starts. Defaults to
@@ -561,6 +767,44 @@ impl RivuletEngine {
     /// Must be called before recording starts. Defaults to 5000 kbit/s.
     pub fn set_video_bitrate(&mut self, kbps: u32) {
         self.encoder_bitrate_kbps = kbps;
+    }
+
+    /// Apply advanced rate control (VBR/CQ/CQ-VBR and custom encoder options).
+    ///
+    /// Call before recording or streaming starts; the settings are folded into
+    /// the encoder `parse_launch` fragment whenever the pipeline is rebuilt.
+    pub fn set_rate_control(&mut self, rc: RateControl) {
+        self.rate_control = rc;
+    }
+
+    /// Apply video filters/effects (colour correction, blur, sharpen) to the
+    /// capture before encoding.
+    ///
+    /// Call before recording or streaming starts. Effects are inserted after
+    /// `videoconvert` and before the encoder-input caps filter.
+    pub fn set_video_effects(&mut self, effects: VideoEffects) {
+        self.video_effects = effects;
+    }
+
+    /// The currently configured video effects.
+    pub fn video_effects(&self) -> &VideoEffects {
+        &self.video_effects
+    }
+
+    /// The ` ! <effects>` pipeline segment to insert right after `videoconvert`,
+    /// or an empty string when no effect is active.
+    fn video_effects_fragment(&self) -> String {
+        let frag = self.video_effects.fragment();
+        if frag.is_empty() {
+            String::new()
+        } else {
+            format!(" ! {frag}")
+        }
+    }
+
+    /// The currently configured rate-control strategy.
+    pub fn rate_control(&self) -> &RateControl {
+        &self.rate_control
     }
 
     /// The configured target video bitrate in kbit/s.
@@ -611,6 +855,11 @@ impl RivuletEngine {
 
     pub fn video_bitrate(&self) -> u32 {
         self.encoder_bitrate_kbps
+    }
+
+    /// Returns the most recent live bitrate decision, including its reason.
+    pub fn last_bitrate_change(&self) -> Option<BitrateChange> {
+        self.bitrate_controller.last_change()
     }
 
     /// Enable or disable the recording overlay (timer + FPS counter burned
@@ -664,19 +913,22 @@ impl RivuletEngine {
         let caps = self
             .video_encoder
             .input_caps_fragment_for_codec(self.video_codec);
-        let encoder = self
-            .video_encoder
-            .branch_fragment_for_codec(self.video_codec, self.encoder_bitrate_kbps);
+        let encoder = self.video_encoder.branch_fragment_for_codec_rc(
+            self.video_codec,
+            self.encoder_bitrate_kbps,
+            self.rate_control.clone(),
+        );
         let overlay = if self.show_overlay {
             " ! textoverlay name=overlay text=\"\" valignment=top halignment=right \
              font-desc=\"Sans, 24\" background-color=0x000000AA "
         } else {
             ""
         };
+        let effects = self.video_effects_fragment();
         if transform.is_empty() {
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert ! {}{} ! {}{} ",
+                 ! videoconvert{effects} ! {}{} ! {}{} ",
                 caps,
                 overlay,
                 encoder,
@@ -689,7 +941,7 @@ impl RivuletEngine {
             let transform_caps = format!("{}!{}", transform.trim_end(), caps.trim_start());
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert ! {}{} ! {}{} ",
+                 ! videoconvert{effects} ! {}{} ! {}{} ",
                 transform_caps,
                 overlay,
                 encoder,
@@ -741,15 +993,52 @@ impl RivuletEngine {
         s
     }
 
+    /// The GStreamer fragment feeding the recording muxer, given the branches
+    /// already target a sink named `mux`. When a split rule is configured on a
+    /// crash-safe container, emits a `splitmuxsink` (which rolls over to a new
+    /// `%02d`-numbered file automatically); otherwise a plain muxer + filesink.
+    fn recording_muxer_fragment(&self, location: &str) -> String {
+        // Splitting into numbered parts is only safe on crash-safe containers;
+        // an interrupted MP4 part would be unreadable.
+        if self.recording_file.split.is_enabled() && self.recording_container.is_crash_safe() {
+            let split_loc = Self::split_location(location, "%02d");
+            let mut frag = format!("splitmuxsink name=mux location={split_loc}");
+            match self.recording_file.split {
+                crate::SplitBy::Duration { seconds } => {
+                    let nanos = seconds * 1_000_000_000;
+                    frag.push_str(&format!(" max-size-time={nanos}"));
+                }
+                crate::SplitBy::Size { megabytes } => {
+                    let bytes = megabytes * 1024 * 1024;
+                    frag.push_str(&format!(" max-size-bytes={bytes}"));
+                }
+                crate::SplitBy::None => {}
+            }
+            frag
+        } else {
+            let escaped = Self::escape_location(location);
+            let muxer = self.container_muxer();
+            format!(
+                "{} name=mux ! filesink name=file_sink location=\"{}\"",
+                muxer, escaped
+            )
+        }
+    }
+
+    /// Derive a `splitmuxsink` location by inserting `suffix` before the file
+    /// extension (e.g. `/tmp/clip.mkv` + `%02d` -> `/tmp/clip_%02d.mkv`).
+    fn split_location(location: &str, suffix: &str) -> String {
+        let path = std::path::Path::new(location);
+        let base = path.with_extension("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("mp4");
+        let loc = format!("{}_{}.{}", base.display(), suffix, ext);
+        Self::escape_location(&loc)
+    }
+
     fn build_recording_pipeline_str(&self, location: &str) -> String {
         let mut s = self.video_branch_str();
         s.push_str(&self.audio_branch_str(false));
-        let escaped = Self::escape_location(location);
-        let muxer = self.video_codec.muxer_element();
-        s.push_str(&format!(
-            "{} name=mux ! filesink name=file_sink location=\"{}\"",
-            muxer, escaped
-        ));
+        s.push_str(&self.recording_muxer_fragment(location));
         s
     }
 
@@ -825,24 +1114,27 @@ impl RivuletEngine {
         let location = path.to_str().expect("Invalid file path.");
         tracing::info!(stream_location = %stream_location, "Initializing dual-output pipeline");
 
-        let muxer = self.video_codec.muxer_element();
+        let muxer = self.container_muxer();
         let transform = self.preset.transform_fragment();
         let caps = self
             .video_encoder
             .input_caps_fragment_for_codec(self.video_codec);
-        let encoder = self
-            .video_encoder
-            .branch_fragment_for_codec(self.video_codec, self.encoder_bitrate_kbps);
+        let encoder = self.video_encoder.branch_fragment_for_codec_rc(
+            self.video_codec,
+            self.encoder_bitrate_kbps,
+            self.rate_control.clone(),
+        );
         let overlay = if self.show_overlay {
             " ! textoverlay name=overlay text=\"\" valignment=top halignment=right \
              font-desc=\"Sans, 24\" background-color=0x000000AA "
         } else {
             ""
         };
+        let effects = self.video_effects_fragment();
         let video_part = if transform.is_empty() {
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert ! {}{} ! {} ",
+                 ! videoconvert{effects} ! {}{} ! {} ",
                 caps, overlay, encoder
             )
         } else {
@@ -1325,6 +1617,11 @@ impl RivuletEngine {
         }
         tracing::info!("Stopping recording");
 
+        // Capture the output path and container before the recording state is
+        // torn down, so auto-remux can run on the finished file (issue #71).
+        let finished_path = self.output_path.clone();
+        let finished_container = self.recording_container;
+
         if let Some(appsrc) = self.appsrc.as_ref() {
             let _ = appsrc.end_of_stream();
         }
@@ -1374,6 +1671,72 @@ impl RivuletEngine {
             replay.lock().unwrap_or_else(|e| e.into_inner()).clear();
         }
         tracing::info!("Recording stopped and file saved");
+
+        // Auto-remux the finished crash-safe recording to MP4 (issue #71).
+        self.remux_finished_recording(finished_path.as_deref(), finished_container);
+
+        // Upload the finished recording to the configured cloud destination
+        // (M4 follow-up: S3-compatible PUT after stop).
+        if let Some(path) = finished_path.as_deref() {
+            self.upload_finished_recording(path);
+        }
+    }
+
+    /// Uploads a finished recording to the configured S3-compatible cloud
+    /// destination when enabled and valid. The upload runs synchronously on
+    /// the caller thread and is best-effort: failures are logged, never fatal.
+    fn upload_finished_recording(&self, path: &std::path::Path) {
+        if !self.cloud_recording.enabled {
+            return;
+        }
+        match self
+            .cloud_recording
+            .upload_recording(path, &cloud::UreqPut, chrono::Utc::now())
+        {
+            Ok(bytes) => {
+                tracing::info!(path = %path.display(), bytes, "Recording uploaded to cloud");
+            }
+            Err(e) => {
+                tracing::error!(path = %path.display(), error = %e, "Cloud upload failed");
+            }
+        }
+    }
+
+    /// Remuxes a finished recording to MP4 when auto-remux is enabled and the
+    /// source is a crash-safe intermediate container (MKV/MOV/TS). No-op for
+    /// MP4 recordings and for recordings that did not produce an output file.
+    fn remux_finished_recording(
+        &self,
+        path: Option<&std::path::Path>,
+        container: RecordingContainer,
+    ) {
+        if !self.remux_settings.auto_remux_after_stop {
+            return;
+        }
+        let Some(path) = path else {
+            return;
+        };
+        if !RemuxPlan::is_supported(container, RemuxSettings::default().target) {
+            return;
+        }
+        let output = RemuxPlan::output_for(&path.display().to_string(), RecordingContainer::Mp4);
+        let plan = RemuxPlan {
+            source_path: path.display().to_string(),
+            output_path: output.clone(),
+            source: container,
+            target: RecordingContainer::Mp4,
+        };
+        match remux_to_mp4(&plan) {
+            Ok(RemuxOutcome::Success { output_path }) => {
+                tracing::info!(source = %path.display(), output = %output_path, "Recording remuxed to MP4");
+            }
+            Ok(RemuxOutcome::Skipped(reason)) => {
+                tracing::warn!(reason, "Auto-remux skipped");
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Auto-remux failed");
+            }
+        }
     }
 
     pub fn process_raw_frame(&mut self, frame_data: &[u8], width: u32, height: u32) {
@@ -1426,10 +1789,32 @@ impl RivuletEngine {
     /// Returns [`StreamStats::offline`] when the engine is not streaming (only
     /// local recording or nothing).
     pub fn stream_stats(&mut self) -> StreamStats {
-        self.stream_health
+        let mut stats = self
+            .stream_health
             .as_mut()
             .map(StreamHealthMonitor::stats)
-            .unwrap_or_else(StreamStats::offline)
+            .unwrap_or_else(StreamStats::offline);
+        if !self.delay_supervisors.is_empty() {
+            let total = self.delay_supervisors.len() as f64;
+            let fill = self
+                .delay_supervisors
+                .iter()
+                .map(DelaySupervisor::fill_ratio)
+                .sum::<f64>()
+                / total;
+            stats.queue_fill_ratio = Some(fill.clamp(0.0, 1.0));
+            stats.queue_overflows = self
+                .delay_supervisors
+                .iter()
+                .map(DelaySupervisor::dropped)
+                .sum();
+            stats.queue_underflows = self
+                .delay_supervisors
+                .iter()
+                .map(DelaySupervisor::underflows)
+                .sum();
+        }
+        stats
     }
 
     /// Current recording performance metrics (FPS, encoder load, file size).
@@ -1826,6 +2211,54 @@ mod tests {
         assert!(pipeline_str.contains("mp4mux name=mux"));
     }
 
+    /// A disabled audio track is dropped from the multi-track recording
+    /// pipeline, while the enabled one still feeds the shared muxer.
+    #[test]
+    fn recording_pipeline_drops_disabled_track_branch() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+        engine.set_audio_track_enabled(AudioTrack::Microphone, false);
+
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out_sys_only.mp4");
+        assert!(pipeline_str.contains("name=audio_src_sys"));
+        assert!(
+            !pipeline_str.contains("name=audio_src_mic"),
+            "disabled track must not be built: {pipeline_str}"
+        );
+        assert!(pipeline_str.contains("mp4mux name=mux"), "{pipeline_str}");
+
+        // Re-enable both: both branches come back.
+        engine.set_audio_track_enabled(AudioTrack::Microphone, true);
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out_both.mp4");
+        assert!(pipeline_str.contains("name=audio_src_sys"));
+        assert!(pipeline_str.contains("name=audio_src_mic"));
+    }
+
+    /// With separate tracks enabled, both audio branches are built into the
+    /// shared muxer so the output file carries system audio and microphone on
+    /// distinct tracks.
+    #[test]
+    fn multi_track_branches_feed_the_shared_muxer() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_separate_audio_tracks(true);
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out_both.mp4");
+        // Both encoder branches must end at the same named muxer.
+        let sys_idx = pipeline_str.find("appsrc name=audio_src_sys").unwrap();
+        let mic_idx = pipeline_str.find("appsrc name=audio_src_mic").unwrap();
+        assert!(sys_idx < mic_idx, "sys branch precedes mic branch");
+        // avenc_aac encodes system and microphone into distinct tracks.
+        assert_eq!(
+            pipeline_str.matches("! avenc_aac").count(),
+            2,
+            "{pipeline_str}"
+        );
+        assert!(pipeline_str.contains("name=mux"), "{pipeline_str}");
+    }
+
     /// Without stream settings the engine is not configured for streaming.
     #[test]
     fn engine_is_not_streaming_by_default() {
@@ -2103,6 +2536,25 @@ mod tests {
         assert_eq!(stats.dropped_ratio, 0.0);
     }
 
+    #[test]
+    fn stream_target_telemetry_preserves_target_order_and_state() {
+        let mut engine = RivuletEngine::default();
+        let mut settings = MultistreamSettings::default();
+        settings
+            .add_target(StreamTarget::new("Twitch", StreamSettings::twitch("key")))
+            .unwrap();
+        settings
+            .add_target(StreamTarget::new("YouTube", StreamSettings::youtube("key")))
+            .unwrap();
+        engine.set_multistream_settings(Some(settings));
+        let telemetry = engine.stream_target_telemetry();
+        assert_eq!(telemetry.len(), 2);
+        assert_eq!(telemetry[0].0, "Twitch");
+        assert_eq!(telemetry[1].0, "YouTube");
+        assert_eq!(telemetry[0].1, StreamTargetState::Connecting);
+        assert_eq!(telemetry[0].2, 0.0);
+    }
+
     /// `start_streaming` arms the engine for pure streaming; the health monitor
     /// is created immediately and reports Connecting until frames flow.
     #[test]
@@ -2201,6 +2653,121 @@ mod tests {
             pipeline_str
         );
         gst::parse::launch(&pipeline_str).expect("pipeline with x264 should parse");
+    }
+
+    /// Video effects are inserted between `videoconvert` and the encoder-input
+    /// caps, and disappear again once the effects are reset.
+    #[test]
+    fn recording_pipeline_applies_video_effects() {
+        let mut engine = RivuletEngine::default();
+        engine.set_video_effects(VideoEffects {
+            brightness: 0.1,
+            saturation: -0.2,
+            blur: true,
+            ..Default::default()
+        });
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/vf.mp4");
+        assert!(
+            pipeline_str.contains("videoconvert ! videobalance"),
+            "{pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("videoconvert ! videobalance brightness=0.100 "),
+            "{pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("brightness=0.100 saturation=-0.200 ! gaussianblur"),
+            "{pipeline_str}"
+        );
+
+        // Reset to defaults -> no effects in the pipeline.
+        engine.set_video_effects(VideoEffects::default());
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/vf.mp4");
+        assert!(!pipeline_str.contains("videobalance"), "{pipeline_str}");
+        assert!(!pipeline_str.contains("gaussianblur"), "{pipeline_str}");
+    }
+
+    /// The recording pipeline keeps a single muxer + filesink when no split
+    /// rule is configured.
+    #[test]
+    fn recording_pipeline_keeps_single_muxer_without_split() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_recording_container(crate::RecordingContainer::Mkv);
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out.mkv");
+        assert!(
+            pipeline_str.contains("matroskamux name=mux"),
+            "{pipeline_str}"
+        );
+        assert!(!pipeline_str.contains("splitmuxsink"), "{pipeline_str}");
+    }
+
+    /// Split-by-duration maps to a `splitmuxsink` with `max-size-time` and a
+    /// `%02d`-numbered location, on a crash-safe container.
+    #[test]
+    fn recording_pipeline_splits_by_duration_on_crash_safe_container() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_recording_container(crate::RecordingContainer::Mkv);
+        engine.set_recording_file(crate::RecordingFileSettings {
+            filename_pattern: crate::FileNamePattern::default(),
+            split: crate::SplitBy::Duration { seconds: 120 },
+            auto_record_with_stream: false,
+            auto_record_dir: "records".to_string(),
+        });
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out.mkv");
+        assert!(
+            pipeline_str.contains("splitmuxsink name=mux"),
+            "{pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("max-size-time=120000000000"),
+            "{pipeline_str}"
+        );
+        assert!(pipeline_str.contains("/tmp/out_%02d.mkv"), "{pipeline_str}");
+        // The video/audio branches still target the same `mux.` any-pad.
+        assert!(pipeline_str.contains("! queue ! mux."), "{pipeline_str}");
+    }
+
+    /// Splitting is disabled on MP4 because it is not crash-safe: a partial
+    /// numbered part would be unreadable.
+    #[test]
+    fn recording_pipeline_ignores_split_on_mp4() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_recording_file(crate::RecordingFileSettings {
+            filename_pattern: crate::FileNamePattern::default(),
+            split: crate::SplitBy::Duration { seconds: 60 },
+            auto_record_with_stream: false,
+            auto_record_dir: "records".to_string(),
+        });
+        // container defaults to MP4 (not crash-safe).
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out.mp4");
+        assert!(pipeline_str.contains("mp4mux name=mux"), "{pipeline_str}");
+        assert!(!pipeline_str.contains("splitmuxsink"), "{pipeline_str}");
+    }
+
+    /// Split-by-size maps to `max-size-bytes` on `splitmuxsink`.
+    #[test]
+    fn recording_pipeline_splits_by_size() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_recording_container(crate::RecordingContainer::Mkv);
+        engine.set_recording_file(crate::RecordingFileSettings {
+            filename_pattern: crate::FileNamePattern::default(),
+            split: crate::SplitBy::Size { megabytes: 250 },
+            auto_record_with_stream: false,
+            auto_record_dir: "records".to_string(),
+        });
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/out.mkv");
+        assert!(
+            pipeline_str.contains("splitmuxsink name=mux"),
+            "{pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("max-size-bytes=262144000"),
+            "{pipeline_str}"
+        );
     }
 
     /// The streaming pipeline uses the selected encoder as well.
@@ -2380,6 +2947,7 @@ mod tests {
             adaptive_bitrate: AdaptiveBitrate::default(),
             delay: StreamDelay::default(),
             multitrack_video: MultitrackVideo::default(),
+            vod_track: VodTrack::default(),
         }));
         let path = std::env::temp_dir().join("rivulet_test_overlay_dual.mp4");
         engine.start_local_recording(path.clone());
@@ -2533,6 +3101,7 @@ mod tests {
             adaptive_bitrate: AdaptiveBitrate::default(),
             delay: StreamDelay::default(),
             multitrack_video: MultitrackVideo::default(),
+            vod_track: VodTrack::default(),
         }));
         engine.start_streaming();
         let pipeline_str = engine.build_pipeline_str().unwrap();
@@ -2562,6 +3131,7 @@ mod tests {
             adaptive_bitrate: AdaptiveBitrate::default(),
             delay: StreamDelay::default(),
             multitrack_video: MultitrackVideo::default(),
+            vod_track: VodTrack::default(),
         }));
         let path = std::env::temp_dir().join("rivulet_replay_dual.mp4");
         engine.start_local_recording(path.clone());
@@ -2604,6 +3174,34 @@ mod tests {
     }
 
     #[test]
+    fn cloud_recording_setter_roundtrips_and_upload_is_off_by_default() {
+        let mut engine = RivuletEngine::default();
+        // Default: disabled, no destination.
+        assert!(!engine.cloud_recording().enabled);
+
+        let cloud = crate::CloudRecording::new("https://s3.example.com", "bucket")
+            .with_credentials("keyid", "secret")
+            .with_prefix("clips")
+            .enabled(true);
+        engine.set_cloud_recording(cloud.clone());
+        assert_eq!(engine.cloud_recording(), &cloud);
+        assert!(engine.cloud_recording().enabled);
+    }
+
+    #[test]
+    fn stop_recording_with_disabled_cloud_does_not_upload() {
+        // Regression: with the default (disabled) cloud config, stop_recording
+        // must not attempt any network call — the upload helper short-circuits
+        // on `enabled == false`. Recording itself still stops cleanly.
+        let mut engine = RivuletEngine::default();
+        let path = std::env::temp_dir().join("rivulet_no_cloud_upload.mp4");
+        engine.start_local_recording(path.clone());
+        engine.stop_recording();
+        assert!(!engine.is_recording);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn stop_recording_clears_the_replay_ring() {
         let mut engine = RivuletEngine::default();
         engine.set_replay_duration(std::time::Duration::from_secs(30));
@@ -2624,5 +3222,38 @@ mod tests {
             assert!(replay.lock().unwrap().is_empty());
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn default_recording_path_uses_engine_pattern_and_container() {
+        let mut engine = RivuletEngine::default();
+        engine.set_recording_container(crate::RecordingContainer::Mkv);
+        let path = engine.default_recording_path("videos", "");
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        // The default pattern sanitizes the base name (hyphen -> underscore)
+        // and the container selection yields an mkv extension.
+        assert!(name.starts_with("rivulet_recording_"), "got {name}");
+        assert!(name.ends_with(".mkv"), "got {name}");
+        // The timestamp date component is the current local date, so compare
+        // dynamically instead of hard-coding a month (the test used to break
+        // on every month boundary).
+        let today = chrono::Local::now().format("%Y-%m-").to_string();
+        assert!(
+            name.contains(&today),
+            "timestamp date component missing: {name}"
+        );
+        // The parent directory is preserved from the dir argument.
+        assert!(path.parent().unwrap().to_string_lossy().ends_with("videos"));
+    }
+
+    #[test]
+    fn default_recording_path_honors_stream_label() {
+        let engine = RivuletEngine::default();
+        let path = engine.default_recording_path("out", "Twitch");
+        // Default pattern is {name}_{date}_{time} (no {stream}), so the label
+        // is ignored; the filename still carries the date and time.
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("rivulet_recording_"), "got {name}");
+        assert!(name.len() > "rivulet_recording_".len());
     }
 }

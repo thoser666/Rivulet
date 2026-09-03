@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Pre-push hook: mirror the CI "Lints (Fmt & Clippy)" job locally so a push
+# can never break the required checks.
+#
+# Why `-D warnings`: CI runs `cargo clippy --workspace --all-targets -- -D
+# warnings`, but a plain local `cargo clippy` only *warns* on lints such as
+# `clippy::field_reassign_with_default` — commit 06792c6 shipped four GUI
+# tests that were clean locally yet failed the CI Lints job. This hook uses
+# the exact CI flags so the failure happens before the push, not after.
+#
+# Install (one time per clone):
+#   git config core.hooksPath .githooks
+#
+# Skip for an individual push:
+#   RIVULET_SKIP_PRE_PUSH=1 git push        # or: git push --no-verify
+#
+# The fast-guard stage (optional, default on) runs the CI pinning tests and
+# the Lints-job script self-tests so the repo-internal guards pass before
+# the push; disable just that stage with:
+#   RIVULET_PRE_PUSH_FAST_TESTS=0 git push
+set -euo pipefail
+
+if [[ "${RIVULET_SKIP_PRE_PUSH:-}" == "1" || "${RIVULET_SKIP_PRE_PUSH:-}" == "true" ]]; then
+  echo "pre-push: checks skipped (RIVULET_SKIP_PRE_PUSH=1)"
+  exit 0
+fi
+
+# Resolve the repository root regardless of the hook's working directory.
+repo_root="$(git rev-parse --show-toplevel)"
+cd "${repo_root}"
+
+echo "pre-push: cargo fmt --all --check"
+cargo fmt --all --check
+
+echo "pre-push: cargo clippy --workspace --all-targets -- -D warnings"
+cargo clippy --workspace --all-targets -- -D warnings
+
+# ── Optional fast-guard stage ────────────────────────────────────────────
+# Mirrors the CI Pinning-Tests job and the Lints-job script self-tests.
+if [[ "${RIVULET_PRE_PUSH_FAST_TESTS:-}" != "0" ]]; then
+  echo "pre-push: cargo test -p rivulet-core --test ci_pinning"
+  cargo test -p rivulet-core --test ci_pinning
+
+  if command -v python3 >/dev/null 2>&1; then
+    echo "pre-push: python3 scripts/generate-action-pins.py --check"
+    python3 scripts/generate-action-pins.py --check
+
+    echo "pre-push: python3 scripts/check-parity-checklist.py --self-test"
+    python3 scripts/check-parity-checklist.py --self-test
+
+    echo "pre-push: python3 scripts/check-release-notes.py --self-test"
+    python3 scripts/check-release-notes.py --self-test
+
+    echo "pre-push: python3 scripts/check-theme-contrast.py"
+    python3 scripts/check-theme-contrast.py
+  else
+    echo "pre-push: python3 not found — skipping script self-tests"
+  fi
+
+  if command -v bash >/dev/null 2>&1; then
+    echo "pre-push: bash scripts/generate-release-notes.sh --self-test"
+    bash scripts/generate-release-notes.sh --self-test
+  fi
+fi
+
+echo "pre-push: all checks passed"

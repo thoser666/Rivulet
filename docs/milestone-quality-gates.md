@@ -74,13 +74,15 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 Also run the applicable CI checks: workflow linting, ShellCheck, action-pin
-validation, asset drift, signing/packaging tests, and parity checks. Hardware,
+validation, asset drift, signing/packaging tests, parity checks, and the
+roadmap-sync check (README overview table + gates doc vs the GitHub
+milestones — see [`roadmap-sync-check.md`](roadmap-sync-check.md)). Hardware,
 GPU, WebView, and display-server checks must be marked `PASS`, `BLOCKED`, or
 `N/A` with a reason; they must not be silently omitted.
 
 ## Cross-cutting resource-efficiency gate
 
-This gate applies to **every milestone M0–M9**, in addition to the milestone-specific checks below. It is scaled to the feature: a CLI or API feature may use process CPU/RAM and determinism measurements, while capture/rendering features must also measure frame time, GPU, queues, and power where available.
+This gate applies to **every milestone M0–M11**, in addition to the milestone-specific checks below. It is scaled to the feature: a CLI or API feature may use process CPU/RAM and determinism measurements, while capture/rendering features must also measure frame time, GPU, queues, and power where available.
 
 Use [`resource-efficiency-goal.md`](resource-efficiency-goal.md) as the source of thresholds and methodology. Every milestone report must record:
 
@@ -99,10 +101,12 @@ Use [`resource-efficiency-goal.md`](resource-efficiency-goal.md) as the source o
 | M3 | Fan-out queues, reconnect isolation, bitrate and delay overhead |
 | M4 | Replay, filters, remux, and virtual-camera resource behavior |
 | M5 | Plugin, hotkey, updater, and cross-platform overhead/fallback behavior |
-| M6 | Headless resource limits and deterministic CI execution |
-| M7 | Host-application overhead, lifecycle, and bounded background work |
-| M8 | GPU-direct, zero-copy, renderer, thermal, and battery measurements |
-| M9 | Local model CPU/RAM/VRAM budget, responsiveness, and graceful degradation |
+| M6 | Chat/replay fan-out, restream concurrency, remote-control, and clip-write overhead |
+| M7 | Headless resource limits and deterministic CI execution |
+| M8 | Host-application overhead, lifecycle, and bounded background work |
+| M9 | GPU-direct, zero-copy, renderer, thermal, and battery measurements |
+| M10 | Local model CPU/RAM/VRAM budget, responsiveness, and graceful degradation |
+| M11 | Layout persistence, registry/plugin overhead, sandbox limits, and failure isolation |
 
 A milestone cannot claim resource efficiency from compilation or unit tests alone. Attach the report or mark the measurement `BLOCKED`/`N/A`; never silently omit it.
 
@@ -190,7 +194,26 @@ Review trust, permissions, installation, and cross-platform consistency:
 Exit evidence: platform feature matrix, installer/update recordings, and plugin
 trust/permission review.
 
-### M6: Automation and Determinism
+### M6: Creator Toolkit and Interactivity
+
+Review creator workflows that build on shipped chat/replay/remote building
+blocks:
+
+- Chat-driven auto-clips respect per-channel enable/disable, thresholds,
+  cooldown, and duration; a clip is only saved when a real replay buffer is
+  available and the save reports the exact output path.
+- Restreaming to multiple platforms keeps per-platform keys, bitrates, and
+  health independent; one failing target never takes down the others or the
+  local recording.
+- Mobile/HTTP remote control is authenticated, bound to the LAN where
+  configured, and cannot start or stop streams without explicit permission.
+- Clip writes, restream fan-out, and remote sessions stay within the
+  documented CPU/memory/frame-time budgets (see the resource table above).
+
+Exit evidence: clip trigger/save tests, per-target restream failure tests,
+remote-auth tests, and a resource report for active creator sessions.
+
+### M7: Automation and Determinism
 
 This is a developer-experience gate as well as a UI gate:
 
@@ -208,7 +231,7 @@ This is a developer-experience gate as well as a UI gate:
 Exit evidence: clean-machine command transcript, reproducibility comparison,
 and machine-readable schema validation.
 
-### M7: Embeddable Engine and API
+### M8: Embeddable Engine and API
 
 Review the API as a product consumed by another developer:
 
@@ -224,7 +247,7 @@ Review the API as a product consumed by another developer:
 Exit evidence: docs build, example build/run matrix, public API review, and a
 small downstream-consumer smoke test.
 
-### M8: Modern Architecture
+### M9: Modern Architecture
 
 Review perceived performance and hardware fallback behavior:
 
@@ -244,7 +267,7 @@ Review perceived performance and hardware fallback behavior:
 Exit evidence: representative performance report, backend matrix, and screenshots
 or recordings at the minimum and recommended hardware profiles.
 
-### M9: AI Chat Assistant
+### M10: AI Chat Assistant
 
 Review privacy, control, and failure boundaries:
 
@@ -258,9 +281,49 @@ Review privacy, control, and failure boundaries:
 - Rate limits, provider outages, malformed responses, moderation blocks, and
   context overflow have understandable recovery paths.
 - Bot coexistence and duplicate-response suppression are visible and testable.
+- Per-platform chat compliance is implemented and verified: Twitch honors the
+  global 20-messages/30-s limit for non-privileged accounts (token bucket, no
+  bursting), answers `PING` with `PONG`, and sends replies via
+  `reply-parent-msg-id`; Kick self-throttles conservatively (undocumented API,
+  no published ceiling) and degrades to read-only when the endpoints break;
+  YouTube sends through the official Live Streaming API with quota accounting
+  (`insert` ≈ 200 units) and falls back to the read-only Innertube poller
+  without or over quota.
+- The auth/scope matrix is explicit and masked: Twitch token with
+  `chat:read`+`chat:edit`, Kick session token, YouTube API key + OAuth
+  (`youtube.force-ssl`), none of them ever logged, exported, or screenshotted;
+  the UI surfaces missing scopes and the Twitch phone-verification requirement.
 
 Exit evidence: privacy review, redacted chat transcript, provider failure cases,
-and confirmation/permission checks.
+confirmation/permission checks, and a per-platform compliance test matrix
+(rate-limit throttle, reply threading, quota fallback, scope masking).
+
+### M11: Extensible UI and Plugin Platform
+
+Review customization without sacrificing safety, accessibility, or responsiveness:
+
+- A clean profile opens with a safe default layout; persisted layout state survives
+  restart and is migrated from every supported schema version.
+- Layout persistence stores only versioned, non-sensitive preferences; secrets,
+  tokens, private endpoints, runtime handles, and process state are excluded.
+- Built-in and optional views use one stable registry with deterministic ordering,
+  collision handling, localization, keyboard focus, and accessible labels.
+- Plugin manifests declare API version, publisher/integrity information, requested
+  capabilities, and compatibility before activation.
+- UI-only plugins receive no network, filesystem, capture, audio, or secrets access
+  unless explicitly granted; denied capabilities produce actionable feedback.
+- A plugin cannot freeze or terminate the GUI: timeouts, resource limits, cancellation,
+  and crash isolation are observable and tested.
+- Disabled, incompatible, corrupted, and removed plugins leave the core navigation
+  and persisted layout usable.
+- Plugin panels remain readable at supported DPI scales, in both themes and locales,
+  and do not obscure primary recording/streaming controls.
+- The plugin registry and runtime stay within the documented CPU, memory, startup,
+  and frame-time budgets; idle plugins do not force continuous repainting.
+
+Exit evidence: layout round-trip and migration tests, registry collision/accessibility
+checks, permission-denial tests, malformed-manifest tests, plugin timeout/crash
+isolation evidence, and a resource-efficiency report for an enabled/disabled plugin set.
 
 ## Platform and viewport matrix
 

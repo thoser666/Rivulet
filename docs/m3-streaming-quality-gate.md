@@ -30,14 +30,25 @@ presets, adaptive bitrate, and the reviewed WHIP strategy. It supplements the fu
 ## RIST interoperability
 
 The RIST sink uses the plugin's supported `address`, `port`, and `latency`
-properties rather than the unsupported `uri` property. The smoke sender parses H.264, muxes it as MPEG-TS with packet alignment, payloads it into RTP via `rtpmp2tpay`, and connects to `ristsink`, satisfying the `application/x-rtp` sink pad contract of GStreamer's `ristsink` element. CI now includes a dedicated RIST receiver smoke job using
+properties rather than the unsupported `uri` property. The smoke setup uses a caller/listener topology and validates the installed plugin contract before launching the pipeline; it does not assume that `ristsink` accepts an RTMP-style URI or arbitrary RTP caps. The smoke sender parses H.264, muxes it as MPEG-TS with packet alignment, payloads it into RTP via `rtpmp2tpay`, and connects to `ristsink`, satisfying the `application/x-rtp` sink pad contract of GStreamer's `ristsink` element. CI now includes a dedicated RIST receiver smoke job using
 `docker/rist-smoke/Dockerfile` and `scripts/rist-receiver-smoke.sh`. The test
 uses a finite MPEG-TS test source, a listener receiver, and a caller sender;
 plugin availability and real receiver compatibility remain explicit evidence.
 The diagnostic `gst-inspect-1.0` step runs after the image is built in the same
 job, so it never tries to pull the local-only `rivulet-rist-smoke:ci` tag from a
-registry. It prints the installed GStreamer/RIST pad contracts before the smoke
-pipeline executes, making future caps failures actionable. The lightweight
+registry. It prints the installed GStreamer/RIST pad contracts beforethe smoke pipeline executes, making future caps failures actionable. The smoke script
+also bounds receiver startup and sender execution with `timeout`; it uses the
+Ubuntu package's `gst-launch-1.0` binary name (not the nonexistent
+`gst-launch-1.0.0` name), polls for the receiver's PLAYING state, and emits
+container logs on early exit or timeout. A sender timeout (exit 124) is treated as
+an interoperability failure report rather than allowing the script to hang; other
+sender failures remain fatal. The receiver also includes a verbose `identity`
+probe (`dump=true`) and the smoke test requires at least one received buffer.
+The check uses the stable `identity dump=true` line format (offset plus hex
+bytes) emitted by `identity`, rather than version-dependent human-readable
+debug text; a merely running GStreamer process cannot produce a false positive.
+
+ The lightweight
 `scripts/check-rist-pipeline.py` contract test runs before Docker and verifies the
 image build order, listener/caller properties, and absence of unsupported RTP
 caps. This catches wiring regressions even when Docker is unavailable locally.
@@ -55,6 +66,7 @@ required as documented hardware evidence before claiming the M3 budget.
 - Stream model tests cover endpoint defaults, validation, masking, preset values,
   adaptive-bitrate bounds, disabled behavior, and compatibility with existing
   pipeline location construction.
+- Reconnect tests cover exponential backoff, target isolation, duplicate-failure suppression, retry-window observation, and recovery.
 - Existing workspace tests continue to cover RTMP/RTMPS pipeline construction,
   health classification, and dual-output routing.
 - Multistream model tests cover target limits, duplicate-name rejection, invalid
@@ -75,14 +87,13 @@ The WHIP/WebRTC strategy is documented in [`whip-strategy-spike.md`](whip-strate
 The current core contract exposes `WhipSettings` with endpoint validation,
 bounded signaling timeout, explicit trickle-ICE configuration, token-safe
 endpoint reporting, and a deterministic `webrtcbin` media-branch contract.
-The real SFU/ICE/DTLS media handshake remains the implementation-phase evidence;
-`webrtcbin` availability and the deterministic branch contract are tested locally.
+`WhipMediaSession` now drives the deterministic signaling lifecycle: it generates a stable H.264/Opus SDP offer (`SdpOffer`), exchanges it through `post_offer`, applies the remote answer, tracks the session state (`Idle` → `Negotiating` → `Live`/`Failed`), and issues the server-side HTTP `DELETE` on the resource `Location` during shutdown. The session state machine, offer determinism, redaction safety, and the DELETE teardown are covered by offline unit tests, including a local HTTP mock that verifies the request method and resource URL. `webrtcbin` availability and the `Ready`-state pipeline preflight are tested locally; the remaining implementation-phase evidence is the live SFU/ICE/DTLS/SRTP media handshake against a real WHIP endpoint.
 
 ## Reconnect and live bitrate integration
 
-The reconnect supervisor is now connected to the engine's target status API. Callers handling GStreamer bus `Error`/`Eos` messages should call `handle_stream_target_failure`; after a successful sink restart they should call `handle_stream_target_live`. `SinkBusEvent` provides the tested mapping for fatal (`Error`/`Eos`), non-fatal (`Warning`), and successful state-change events. Retry state, limits, and exponential backoff are deterministic and fully tested. The pipeline-owner `service_streaming()` tick now polls bus messages, drains due reconnect commands, and invokes target-local branch rebuilds without moving GStreamer mutations to the worker thread. Rebuilds preserve the configured transport by reconstructing the validated RTMP/RTMPS, SRT, or RIST sink fragment rather than hard-coding RTMP. Duplicate failures are ignored while a retry is already pending, preventing retry storms.
+The reconnect supervisor is now connected to the engine's target status API. Its retry window can be observed without mutating state, which makes delay/reconnect load tests deterministic: a target is only marked live after the pipeline owner confirms the replacement sink. Callers handling GStreamer bus `Error`/`Eos` messages should call `handle_stream_target_failure`; after a successful sink restart they should call `handle_stream_target_live`. `SinkBusEvent` provides the tested mapping for fatal (`Error`/`Eos`), non-fatal (`Warning`), and successful state-change events. Retry state, limits, and exponential backoff are deterministic and fully tested. The pipeline-owner `service_streaming()` tick now polls bus messages, drains due reconnect commands, and invokes target-local branch rebuilds without moving GStreamer mutations to the worker thread. Rebuilds preserve the configured transport by reconstructing the validated RTMP/RTMPS, SRT, or RIST sink fragment rather than hard-coding RTMP. Duplicate failures are ignored while a retry is already pending, preventing retry storms.
 
-Adaptive bitrate remains bounded by the existing policy and updates the active `video_enc` property when present. `service_streaming()` now samples `StreamHealthMonitor` and invokes the runtime controller in the pipeline-owner tick; cooldown and hysteresis prevent flapping. The monitor exposes rolling bitrate/FPS, throughput, dropped-frame ratio, optional sink latency, and queue fill ratio. `record_network_telemetry()` clamps transport-provided latency and queue values before they reach policy decisions. Production hardware measurement remains gate evidence; CI validates the deterministic telemetry contract and budget limits.
+Adaptive bitrate remains bounded by the existing policy and updates the active `video_enc` property when present. Each successful live change records the previous bitrate, new bitrate, and health reason through `last_bitrate_change()` for UI/diagnostics; stable-sample and cooldown guards prevent flapping. `service_streaming()` now samples `StreamHealthMonitor` and invokes the runtime controller in the pipeline-owner tick; cooldown and hysteresis prevent flapping. The monitor exposes rolling bitrate/FPS, throughput, dropped-frame ratio, optional sink latency, and queue fill ratio. The engine additionally exposes target-ordered delay telemetry with lifecycle state, queue fill, underflow, and overflow counters; the Stream view renders these values per configured destination. `record_network_telemetry()` clamps transport-provided latency and queue values before they reach policy decisions. Production hardware measurement remains gate evidence; CI validates the deterministic telemetry contract and budget limits.
 
 ## Runtime supervision
 
@@ -94,7 +105,7 @@ SRT/RIST settings now generate protocol-specific sink fragments including latenc
 
 The adaptive-bitrate implementation provides a bounded policy and applies changed values to the active `video_enc` bitrate property. `AdaptiveBitrateController` adds stable-sample and cooldown protection and accepts a complete `StreamStats` telemetry snapshot. `StreamHealthMonitor` supplies rolling bitrate, FPS, bytes-per-second throughput, sent/dropped-frame counters, dropped ratio, and optional sink/queue measurements from the active pipeline. The resource-efficiency checker validates p95/p99 frame-time, 1% lows, CPU, memory, and optional GPU fields; real hardware baselines remain required before declaring the M3 performance gate complete.
 
-Stream delay is applied per fan-out branch as a bounded outgoing stage. `DelaySupervisor` retains bounded media across reconnects and counts overflow drops; each live branch now owns queue and delay stages, so queue overflow/underflow behavior is observable and testable. Multitrack Video currently validates and carries the representation count,
+Stream delay is applied per fan-out branch as a bounded outgoing stage. `DelaySupervisor` retains bounded media across reconnects, exposes a normalized fill ratio, counts overflow drops, and records underflows when a branch consumes more media than it has buffered. `StreamStats` aggregates queue fill, underflow, and overflow counters across targets so the GUI/diagnostics can expose delay health without conflating it with video-frame drops. Each live branch owns queue and delay stages, so queue overflow/underflow behavior is observable and testable. Multitrack Video currently validates and carries the representation count,
 but the RTMP/FLV transport still emits one negotiated track. Per-track encoder
 and transport negotiation requires a later protocol implementation.
 
@@ -104,13 +115,45 @@ storage before stable releases. Until then, keys must be supplied through the
 existing protected runtime configuration and must never be committed, logged, or
 included in screenshots.
 
+## VOD track
+
+The Twitch VOD workflow is modelled as `VodTrack` on `StreamSettings` with a
+ deterministic `enabled`/`recorded` pair. A track is only ever considered active
+ when both flags are set, which guarantees it can never silently leak into the
+ live ingest: enabling the feature forces the local VOD recording flag on unless
+ explicitly overridden, and `twitch_ivod_flag()` returns `Some("ivod")` only for
+ an active track. The model is off by default and covered by unit tests
+ (inactive default, active-when-recorded, muted override, integration with
+ `StreamSettings`, and no leakage into masked/redacted output or the ingest
+ `location()`).
+
+Actual per-track GStreamer routing into the muxed output remains an integration
+ item; the deterministic config and leakage guarantees are the tested contract.
+
+## NDI output
+
+NDI LAN contribution/monitoring is exposed as `NdiOutput` on the core: a
+validated source name and optional group, a quote-escaped GStreamer `ndisink`
+fragment that prevents pipeline-string breakout from a hostile name, an
+`ndisink` plugin-availability probe, and an off-by-default `active` flag so a
+feed is never published unintentionally. Coverage includes name/group
+validation, escape safety, group rendering, and a deterministic plugin probe.
+Real NewTek NDI runtime and LAN interoperability remain an integration
+follow-up.
+
 ## Release verification
 
-The alpha release workflow is intentionally two-phase: it first prepares a
-release branch, then builds all platform packages, and only after the matrix
-succeeds creates or reuses the tag and publishes the GitHub Release. A tag
-without a release is considered a failed run and must be repaired with
-`scripts/backfill-releases.sh --check` followed by the targeted backfill.
+The alpha release workflow is intentionally CI-gated and two-phase: it is
+triggered by the CI workflow completing (`workflow_run`, branch `develop`)
+rather than by the push itself, and only proceeds when that CI run concluded
+`success`. A failed or cancelled CI run (e.g. a transient runner flake)
+leaves the release skipped; rerunning CI green fires the workflow again
+automatically, so no manual release rerun is needed after a flake. It then
+first prepares a release branch, builds all platform packages, and only after
+the matrix succeeds creates or reuses the tag and publishes the GitHub
+Release. A tag without a release is considered a failed run and must be
+repaired with `scripts/backfill-releases.sh --check` followed by the
+targeted backfill.
 Retries for the same alpha version reuse the existing `release/<tag>` branch.
 The workflow resets the generated version/changelog changes before switching to
 that branch and skips an empty version-bump commit, preventing checkout and
@@ -141,11 +184,22 @@ release URL, prerelease flag, and uploaded assets.
 - [ ] Configure SRT and RIST endpoints and verify the protocol scheme, latency bounds, passphrase validation, and target-local missing-plugin status.
 - [ ] Validate the WHIP endpoint and verify that non-loopback HTTP is rejected;
       confirm bearer tokens never appear in status, logs, or diagnostics.
+- [ ] Run the WHIP media preflight and verify the H.264/Opus branch reaches
+      `READY`; then verify the real SFU offer/answer, ICE, DTLS, and SRTP path.
+- [ ] Configure the VOD track and verify it is off by default, becomes active
+      only when both `enabled` and `recorded` are set, and never appears in the
+      live ingest or in any masked/redacted output.
+- [ ] Configure an NDI output with a normal and a quote-containing name; verify
+      the name/group validation, the escaped `ndisink` fragment (no raw quote
+      breakout), the off-by-default flag, and the availability probe result.
 - [ ] Test the view at the M3 viewport profiles from the common quality-gate
       matrix, including narrow windows and long custom endpoint names.
 
 ## Decision
 
-This increment passes its feature gate. M3 as a whole remains in progress until
-live encoder reconfiguration, reconnect/delay, and the remaining protocol and
-multistreaming work are complete.
+This increment passes its feature gate. The functional roadmap checklist for M3
+is complete (15/15) and the milestone completion is recorded in
+[`docs/m3-streaming-completion-report.md`](m3-streaming-completion-report.md),
+which assigns the remaining live-integration evidence (real SFU WHIP handshake,
+SRT/RIST receiver interop, multitrack transport, VOD routing, NDI LAN, production
+resource baselines, and OS-backed credential storage) to follow-up milestones.

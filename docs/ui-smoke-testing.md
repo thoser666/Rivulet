@@ -1,68 +1,21 @@
-# Cross-platform UI smoke testing
+# UI-Smoke-Tests
 
-Rivulet has a deterministic, headless UI smoke-test contract in
-`rivulet-gui/tests/ui_smoke.rs`. It runs on Linux, Windows, and macOS without
-requiring a GPU, display server, or native window manager.
+Die UI-Smoke-Tests laufen headless und prüfen plattformneutral die stabilen UI-Verträge für Navigation, Tastaturbedienung, Diagnostik, Accessibility und Screenshot-Inhalte.
 
-## Covered checks
+## Datenschutz im Screenshot-Report
 
-- Primary sidebar navigation is complete and has stable translation keys.
-- Global keyboard shortcuts are guarded while a text field owns keyboard input.
-- Capture and engine errors have a GUI-visible receiver and status field.
-- The smoke screenshot contract uses a fixed 1280x800 viewport and verifies that
-  navigation and status regions are present.
-- Screenshot-like text is checked for stream-key and RTMP URL leakage.
-- Focus/hover semantics and theme contrast hooks are present.
+Der deterministische Report darf keine Stream-Keys, Ingest-URLs oder interne Secret-Feldnamen enthalten. Der Test modelliert deshalb ausschließlich sichtbaren Text und filtert credential-bezogene Implementierungsdetails aus der Quelltext-basierten Headless-Repräsentation. Die GUI selbst verwendet für Stream-Keys ein maskiertes Passwortfeld; Keys werden weder in Screenshots noch in Status-/Presence-Daten aufgenommen.
 
-The test intentionally checks the stable UI contract instead of pixel-perfect
-raster output. Font, DPI, GPU driver, and compositor differences make exact
-PNG snapshots unreliable across operating systems.
+Ein grüner Smoke-Test beweist nicht, dass ein echter Plattformstream funktioniert. Dafür ist der dokumentierte private RTMPS-Test in `docs/stream-setup.md` vorgesehen.
 
-## Running locally
+## Responsive Layouts
 
-```bash
-cargo test -p rivulet-gui --test ui_smoke
-cargo test --workspace
-```
+Beim Verkleinern des Fensters dürfen Bedienelemente nicht unerreichbar werden:
 
-For a manual evidence run, start the GUI at 1280x800 on each target platform,
-visit Record, Scenes, Stream, and Settings, exercise Tab/Shift+Tab and the
-recording error path, then attach redacted screenshots to the milestone review.
-Do not include stream keys, personal paths, or window titles containing private
-information.
+- Der gesamte Inhalt der Hauptansicht (Record, Mixer, Szenen, Stream, …) liegt in einer vertikalen `ScrollArea` (`auto_shrink([false, false])`), sodass Buttons am unteren Rand einer Ansicht erreichbar bleiben.
+- Die Navigations-Sidebar (`nav_panel`) scrollt ebenfalls vertikal und schneidet bei sehr niedrigen Fenstern keine Einträge ab.
+- `main.rs` setzt eine Mindestfenstergröße (`with_min_inner_size(480×360)`) als Boden, damit das Layout nie unter eine sinnvolle Größe schrumpft.
+- Der **Stream-Workspace** (Meld-artige Broadcast-Seite) schaltet unterhalb von `STREAM_WORKSPACE_NARROW_WIDTH` (720 px) auf responsive Layouts um: die Action-Bar (Plattform/Preset + Start/Stop) und alle Steuerzeilen (Stream-Config, Chat-Dock, Audio-Sektion) wrappen mit `ui.horizontal_wrapped`, die Chat-/Info-Spalten stapeln statt in `columns(2)` zu klemmen, und das Chat-Sende-Eingabefeld behält eine Mindestbreite (`.max(120.0)`). So bleiben Start/Stop, Connect, Senden und Mixer-Shortcut auch in schmalen Fenstern erreichbar.
+- Die **Sende-Budget-Anzeige** über dem Chat-Eingabefeld bleibt ebenfalls schmal-tauglich: sie rendert als explizit wrapendes Label (`egui::Label::new(…).wrap()`), damit lange (deutsche) Hinweise in einer schmalen Dock-Spalte nicht rechts abgeschnitten werden, und stapelt zwischen Reply-Banner und Eingabezeile. Vertikal ist sie durch den umgebenden Seiten-Scroll (ganze View im vertikalen `ScrollArea`, `auto_shrink([false, false])`) auch bei kurzen Fenstern erreichbar.
 
-## Accessibility contract
-
-The `ui_accessibility` integration test is a deterministic semantic guard for
-native egui screens. It checks that primary actions have labels, navigation has
-a defined focus order, errors are surfaced in the UI, status is not conveyed by
-color alone, narrow layouts remain responsive, and secrets remain redacted.
-These assertions are intentionally platform-neutral; manual accessibility
-review at the viewport/theme profiles remains required by the milestone gates.
-
-Run it locally with:
-
-```bash
-cargo test -p rivulet-gui --test ui_accessibility
-```
-
-CI runs this test in the existing Windows, Linux, and macOS build matrix.
-
-## egui regression snapshots
-
-The CI matrix also runs `rivulet-gui/tests/ui_regression.rs`. It verifies stable
-viewport contracts at 1280x800, 1024x768, and 800x600 plus deterministic
-interaction sequences for sidebar navigation, Tab focus cycling, Undo/Redo, and
-visible diagnostics.
-
-These are semantic snapshots rather than pixel goldens. They intentionally avoid
-font- and GPU-dependent PNG comparisons while still detecting accidental loss
-of required controls or interaction paths. Native visual evidence remains part
-of the milestone gate.
-
-## Limitations
-
-This headless contract does not replace manual visual review or a native
-accessibility-tree scan. The M2/M3 quality gates therefore still require
-platform evidence for DPI scaling, screen readers, native dialogs, and
-Wayland/X11 or Windows/macOS compositor behavior.
+Die Verträge werden in `tests/ui_smoke.rs` (`responsive_contract_keeps_controls_reachable_on_narrow_windows`, inkl. Reihenfolge Reply-Banner → Sende-Budget → Eingabezeile und `.wrap()`-Marker), `tests/ui_accessibility.rs` (`narrow_layout_is_responsive`), `tests/ui_regression.rs` (alle Viewports inkl. 640×480), dem In-File-Test `stream_workspace_stays_reachable_on_narrow_windows_in_source` und dem ci_pinning-Guard `stream_workspace_controls_stay_reachable_on_narrow_windows` geprüft — der Guard prüft zusätzlich, dass die Budget-Zeile im Dock als wrapendes Label über der Eingabezeile liegt.

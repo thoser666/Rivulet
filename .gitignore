@@ -18,6 +18,13 @@ rivulet-gui/assets/fonts/*.zip
 # Freebuff tool artifacts
 .freebuff/
 
+# Freebuff wiki working clone (nested repo, not part of the codebase)
+.freebuff-rivulet-wiki/
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
 # IDE / Editors
 .idea/
 .vscode/
@@ -84,3 +91,10 @@ bench/
 # Environment
 .env
 .env.local
+# cargo-fuzz build outputs and crash artifacts (fuzz/)
+fuzz/target/
+fuzz/artifacts/
+fuzz/coverage/
+
+# OBS upstream check: last-checked release tag (runtime artifact, persisted via actions cache)
+/scripts/.obs-upstream-state.json
