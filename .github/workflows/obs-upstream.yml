@@ -36,9 +36,17 @@ jobs:
 
       - name: Check latest OBS release and update vision documentation
         id: upstream
-        continue-on-error: true
         run: |
           python3 scripts/check-obs-upstream.py --update-doc | tee "$RUNNER_TEMP/obs-upstream-report.md"
+          # Fail loudly instead of masking: the pipeline already fails on a
+          # checker error (pipefail), and an empty or header-less report
+          # (the silent failure mode that emptied the weekly artifact before)
+          # must abort the run too.
+          if [ ! -s "$RUNNER_TEMP/obs-upstream-report.md" ] \
+             || ! grep -q "## OBS upstream check" "$RUNNER_TEMP/obs-upstream-report.md"; then
+            echo "::error::OBS upstream report is empty or malformed — no usable report produced"
+            exit 1
+          fi
           cp docs/obs-vision-candidates.md "$RUNNER_TEMP/obs-vision-candidates.md"
 
       - name: Publish report

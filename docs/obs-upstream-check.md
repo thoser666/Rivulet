@@ -40,6 +40,17 @@ repo write is involved, so the workflow keeps `contents: read` only. On the
 first run (no cache entry yet) the previous tag reads as `none`; a corrupt
 state file degrades to `none` as well instead of failing the run.
 
+### Loud failures
+
+The workflow fails loudly instead of masking problems: `continue-on-error`
+is not used, so a checker error (for example the "candidate markers missing"
+case that used to silently empty the report) fails the run with its
+traceback. After the check, an explicit guard asserts the report file is
+non-empty and carries the `## OBS upstream check` header; an empty or
+malformed report aborts the run with a clear `::error::` annotation. The
+report is still published to the step summary and uploaded as an artifact
+on failure (`if: always()`) so a broken run stays diagnosable.
+
 ## Local usage
 
 ```bash

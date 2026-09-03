@@ -1624,6 +1624,15 @@ fn obs_upstream_candidates_doc_keeps_both_generation_markers() {
         workflow.contains("--update-doc") && workflow.contains("obs-upstream-report"),
         "the weekly workflow must generate the candidates doc and publish the report artifact"
     );
+    assert!(
+        !workflow.contains("continue-on-error"),
+        "the OBS workflow must not mask check failures with continue-on-error"
+    );
+    assert!(
+        workflow.contains("report is empty or malformed")
+            && workflow.contains("## OBS upstream check"),
+        "the OBS workflow must fail loudly when the report is empty or malformed"
+    );
 }
 
 #[test]
