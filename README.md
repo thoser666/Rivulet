@@ -82,7 +82,7 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
   - Record - Main recording controls and preview
   - Mixer - Audio mixer with live level meter and volume sliders
   - Scenes - Scene composition (M2, planned)
-  - Stream - Live streaming (M3, planned)
+  - Stream - Meld-style single broadcast page (streaming controls, chat dock, status/health, audio)
   - Assistant - AI chat assistant (M9, planned)
   - Settings - All configuration options (recording, codec, presets, hotkeys, replay buffer, language)
 - **Customizable Settings**

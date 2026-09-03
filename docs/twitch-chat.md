@@ -9,9 +9,12 @@ browser source or overlay needed for monitoring chat while streaming.
   `irc.chat.twitch.tv`, handles the CAP/PASS/NICK/JOIN handshake, answers
   PING/PONG keepalives and parses IRCv3 tags (display name, color, badges,
   broadcaster marker) plus `/me` actions.
-- **Chat view** (`Chat` tab in the sidebar): channel input, connect/
-  disconnect, optional OAuth token, and a bounded, auto-scrolling message
-  list that renders each user in their Twitch color.
+- **Chat dock on the Stream page**: the chat is embedded in the **Stream**
+  workspace (Meld-style single broadcast page) — left column next to the
+  stream status/health, above the compact audio section. Channel input,
+  connect/disconnect, optional OAuth token, and a bounded, auto-scrolling
+  message list render in the dock; the chat no longer has its own sidebar
+  entry.
 - **Anonymous by default**: read-only chat works without any token (Twitch
   allows anonymous IRC reads). With an OAuth token (`chat:read`) you get
   colors and badges for your own messages.
@@ -26,7 +29,7 @@ browser source or overlay needed for monitoring chat while streaming.
 
 ## Setup
 
-1. Open the **Chat** tab.
+1. Open the **Stream** tab — the chat dock sits in the left column.
 2. Enter the channel name (without `#`), e.g. `yourtwitchname`.
 3. Click **Connect**. The status line shows `Connected` / `Disconnected —
    retrying` / `Off`.
@@ -57,7 +60,8 @@ rivulet-gui::app
   ├─ chat_action_pending / ChatAction               # Connect/Disconnect/Send
   ├─ reconcile_twitch_chat()                        # one action per frame
   ├─ send_chat_message(text)                        # token + worker gate
-  ├─ draw_chat_view()                               # inputs + message list + reply
+  ├─ draw_chat_dock(ui, max_list_height)            # inputs + message list + reply,
+  │                                                 #   embedded in the Stream workspace
   └─ i18n keys: chat_* (DE/EN)
 ```
 
@@ -69,12 +73,14 @@ rivulet-gui::app
   listener** (deterministic in CI, no real network) — including sending:
   the listener asserts the worker writes `PRIVMSG #channel :text` back on
   the same socket after `send_message`.
-- `rivulet-gui`: navigation contract (`AppView::Chat`, `nav_chat`), view
-  coverage and i18n parity, plus behavior tests for the send gate (no token
-  / no worker / whitespace are rejected) and a source-contract test that the
-  reply input only renders when connected and a token is configured.
-- `ci_pinning.rs`: guard that the chat view stays wired into the sidebar,
-  the worker keeps its local-listener smoke test, and the send path
+- `rivulet-gui`: navigation contract (no standalone chat sidebar entry;
+  chat is part of the Stream workspace), view coverage and i18n parity, plus
+  behavior tests for the send gate (no token / no worker / whitespace are
+  rejected) and a source-contract test that the reply input only renders when
+  connected and a token is configured.
+- `ci_pinning.rs`: guard that the chat dock stays embedded in the Stream
+  workspace (and does not reappear as its own sidebar view), the worker keeps
+  its local-listener smoke test, and the send path
   (`send_message` / `ChatAction::Send` / `PRIVMSG`) stays covered.
 
 ## Roadmap

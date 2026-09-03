@@ -1866,18 +1866,23 @@ fn cancelled_file_dialog_is_logged_at_info_level() {
 
 #[test]
 fn twitch_chat_dock_is_wired_and_covered() {
-    // M5 community dock: the Chat view must be a first-class sidebar entry
-    // (nav key + heading i18n), the core worker must keep its local-listener
-    // smoke test (deterministic in CI without real network), and the feature
-    // must be documented.
+    // M5 community dock: the chat lives inside the Stream workspace (one
+    // Meld-style broadcast page with stream start/stop, chat, stream status
+    // and compact audio), no longer as its own sidebar entry. The core worker
+    // must keep its local-listener smoke test (deterministic in CI without
+    // real network), and the feature must be documented.
     let app = read("rivulet-gui/src/app.rs");
     assert!(
-        app.contains("AppView::Chat") && app.contains("nav_chat"),
-        "the Chat view must be a first-class AppView with a nav key"
+        !app.contains("AppView::Chat") && !app.contains("nav_chat"),
+        "the chat must be part of the Stream workspace, not a sidebar view"
     );
     assert!(
-        app.contains("fn draw_chat_view") && app.contains("fn reconcile_twitch_chat"),
-        "the Chat view must have a draw + reconcile path"
+        app.contains("fn draw_chat_dock") && app.contains("fn reconcile_twitch_chat"),
+        "the chat dock must have a draw + reconcile path"
+    );
+    assert!(
+        app.contains("self.draw_chat_dock(&mut cols[0], chat_list_height)"),
+        "the Stream workspace must embed the chat dock next to the stream info"
     );
     let core = read("rivulet-core/src/twitch_chat.rs");
     assert!(

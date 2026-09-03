@@ -223,7 +223,6 @@ enum AppView {
     Mixer,
     Scenes,
     Stream,
-    Chat,
     Assistant,
     Settings,
     Help,
@@ -237,7 +236,6 @@ impl AppView {
             AppView::Mixer,
             AppView::Scenes,
             AppView::Stream,
-            AppView::Chat,
             AppView::Assistant,
             AppView::Settings,
             AppView::Help,
@@ -251,7 +249,6 @@ impl AppView {
             AppView::Mixer => "nav_mixer",
             AppView::Scenes => "nav_scenes",
             AppView::Stream => "nav_stream",
-            AppView::Chat => "nav_chat",
             AppView::Assistant => "nav_assistant",
             AppView::Settings => "nav_settings",
             AppView::Help => "nav_help",
@@ -5051,7 +5048,11 @@ impl RivuletApp {
 
     /// Render the Twitch chat dock: channel + token inputs, connect/
     /// disconnect, and the (bounded) message list with user colors.
-    fn draw_chat_view(&mut self, ui: &mut egui::Ui) {
+    /// Draw the Twitch chat dock. Used by the Stream view workspace (the
+    /// chat no longer has its own sidebar entry): the message list is bounded
+    /// by `max_list_height` so it behaves like a docked panel on the
+    /// broadcast page instead of growing the outer scroll area without end.
+    fn draw_chat_dock(&mut self, ui: &mut egui::Ui, max_list_height: f32) {
         ui.add_space(8.0);
         ui.label(egui::RichText::new(self.tr("chat_title")).strong());
         ui.separator();
@@ -5110,6 +5111,7 @@ impl RivuletApp {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .stick_to_bottom(true)
+            .max_height(max_list_height)
             .show(ui, |ui| {
                 for message in &messages {
                     let mut text = egui::RichText::new(message.user.as_str()).strong();
@@ -5189,63 +5191,10 @@ impl RivuletApp {
 
     fn draw_stream_view(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
         self.handle_stream_key_actions();
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new(self.tr("streaming")).strong());
-        ui.separator();
 
-        let mut platform = self.stream_platform;
-        egui::ComboBox::from_id_salt("stream_platform")
-            .selected_text(platform.label())
-            .show_ui(ui, |ui| {
-                for candidate in [
-                    StreamPlatform::Twitch,
-                    StreamPlatform::YouTube,
-                    StreamPlatform::Kick,
-                    StreamPlatform::Custom,
-                ] {
-                    if ui
-                        .selectable_value(&mut platform, candidate, candidate.label())
-                        .clicked()
-                    {
-                        self.stream_platform = candidate;
-                        if let Some(url) = candidate.default_ingest_url() {
-                            self.stream_ingest_url = url.to_owned();
-                        }
-                    }
-                }
-            });
-        ui.horizontal(|ui| {
-            ui.label(self.tr("stream_ingest"));
-            ui.add_enabled(
-                self.stream_platform == StreamPlatform::Custom,
-                egui::TextEdit::singleline(&mut self.stream_ingest_url),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.label(self.tr("stream_key"));
-            ui.add(egui::TextEdit::singleline(&mut self.stream_key).password(true));
-            if !self.stream_key.is_empty() {
-                ui.label(format!("••••{}", self.stream_key.chars().count().min(4)));
-            }
-        });
-        ui.horizontal(|ui| {
-            if theme::accent_button(ui, self.tr("stream_key_save")).clicked() {
-                self.stream_key_save_requested = true;
-            }
-            if ui.button(self.tr("stream_key_delete")).clicked() {
-                self.stream_key_delete_requested = true;
-            }
-            if let Some(status) = &self.stream_key_store_status {
-                ui.small(status);
-            }
-        });
-        egui::ComboBox::from_id_salt("stream_preset")
-            .selected_text(self.stream_preset.label())
-            .show_ui(ui, |ui| {
-                for preset in StreamPreset::all() {
-                    ui.selectable_value(&mut self.stream_preset, *preset, preset.label());
-                }
-            });
+        // Capture the usable viewport height before any widgets shrink the
+        // available space: the chat list is docked (bounded) on this page.
+        let chat_list_height = (ui.available_height() * 0.45).clamp(160.0, 460.0);
 
         let configured = !self.stream_key.trim().is_empty()
             && StreamSettings::new(
@@ -5256,71 +5205,78 @@ impl RivuletApp {
             .with_preset(self.stream_preset)
             .validate()
             .is_ok();
+
+        // ── Action bar (Meld-style broadcast header): platform + preset on
+        //    the left, the prominent start/stop button on the right. ──
         ui.horizontal(|ui| {
-            let probe_enabled =
-                configured && !self.stream_probe_running && !self.engine.is_streaming();
-            if ui
-                .add_enabled(
-                    probe_enabled,
-                    egui::Button::new(self.tr("stream_test_connection")),
-                )
-                .clicked()
-            {
-                let url = self.stream_ingest_url.clone();
-                self.stream_probe_running = true;
-                self.stream_probe_result = None;
-                self.stream_status_message = Some(self.tr("stream_probe_running").to_owned());
-                let (tx, rx) = std::sync::mpsc::channel();
-                std::thread::spawn(move || {
-                    let result = rivulet_core::stream::probe_ingest_reachability(
-                        &url,
-                        std::time::Duration::from_secs(5),
-                    );
-                    let _ = tx.send(result);
+            let mut platform = self.stream_platform;
+            egui::ComboBox::from_id_salt("stream_platform")
+                .selected_text(platform.label())
+                .show_ui(ui, |ui| {
+                    for candidate in [
+                        StreamPlatform::Twitch,
+                        StreamPlatform::YouTube,
+                        StreamPlatform::Kick,
+                        StreamPlatform::Custom,
+                    ] {
+                        if ui
+                            .selectable_value(&mut platform, candidate, candidate.label())
+                            .clicked()
+                        {
+                            self.stream_platform = candidate;
+                            if let Some(url) = candidate.default_ingest_url() {
+                                self.stream_ingest_url = url.to_owned();
+                            }
+                        }
+                    }
                 });
-                self.stream_probe_result =
-                    rx.recv_timeout(std::time::Duration::from_millis(1)).ok();
-                if self.stream_probe_result.is_some() {
-                    self.stream_probe_running = false;
-                }
-            }
-            let label = if self.engine.is_streaming() {
-                self.tr("stream_stop")
-            } else {
-                self.tr("stream_start")
-            };
-            if ui
-                .add_enabled(
-                    configured || self.engine.is_streaming(),
-                    egui::Button::new(label),
-                )
-                .clicked()
-            {
-                if self.engine.is_streaming() {
-                    self.engine.set_stream_settings(None);
-                    self.stream_status_message = Some(self.tr("stopped").to_owned());
+            egui::ComboBox::from_id_salt("stream_preset")
+                .selected_text(self.stream_preset.label())
+                .show_ui(ui, |ui| {
+                    for preset in StreamPreset::all() {
+                        ui.selectable_value(&mut self.stream_preset, *preset, preset.label());
+                    }
+                });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let label = if self.engine.is_streaming() {
+                    self.tr("stream_stop")
                 } else {
-                    let settings = StreamSettings::new(
-                        self.stream_platform,
-                        self.stream_ingest_url.clone(),
-                        self.stream_key.clone(),
+                    self.tr("stream_start")
+                };
+                if ui
+                    .add_enabled(
+                        configured || self.engine.is_streaming(),
+                        egui::Button::new(egui::RichText::new(label).size(18.0).strong())
+                            .min_size(egui::vec2(170.0, 42.0)),
                     )
-                    .with_preset(self.stream_preset);
-                    self.engine.set_stream_settings(Some(settings));
-                    // Clear a stale error so a new stream starts from the
-                    // Ready/Streaming label (mirrors the recording starts).
-                    self.last_error = None;
-                    self.engine.start_streaming();
-                    self.stream_status_message =
-                        Some(self.tr("stream_status_connecting").to_owned());
+                    .clicked()
+                {
+                    if self.engine.is_streaming() {
+                        self.engine.set_stream_settings(None);
+                        self.stream_status_message = Some(self.tr("stopped").to_owned());
+                    } else {
+                        let settings = StreamSettings::new(
+                            self.stream_platform,
+                            self.stream_ingest_url.clone(),
+                            self.stream_key.clone(),
+                        )
+                        .with_preset(self.stream_preset);
+                        self.engine.set_stream_settings(Some(settings));
+                        // Clear a stale error so a new stream starts from the
+                        // Ready/Streaming label (mirrors the recording starts).
+                        self.last_error = None;
+                        self.engine.start_streaming();
+                        self.stream_status_message =
+                            Some(self.tr("stream_status_connecting").to_owned());
+                    }
                 }
-            }
-            if !configured && !self.engine.is_streaming() {
-                ui.colored_label(colors.warning, self.tr("stream_configure_first"));
-            }
+            });
         });
+        if !configured && !self.engine.is_streaming() {
+            ui.colored_label(colors.warning, self.tr("stream_configure_first"));
+        }
         if let Some(message) = &self.stream_status_message {
-            ui.label(message);
+            ui.colored_label(colors.info, message);
         }
         if let Some(result) = &self.stream_probe_result {
             ui.label(match result {
@@ -5329,26 +5285,184 @@ impl RivuletApp {
                 StreamProbeResult::Unavailable(_) => self.tr("stream_probe_unavailable"),
             });
         }
+
+        // ── Details: ingest URL, stream key, connection test, assistant.
+        //    Hidden behind a collapsed header so the start/stop action stays
+        //    one click away (automatically open while nothing is configured).
+        egui::CollapsingHeader::new(self.tr("stream_config"))
+            .id_salt("stream_config_details")
+            .default_open(!configured)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(self.tr("stream_ingest"));
+                    ui.add_enabled(
+                        self.stream_platform == StreamPlatform::Custom,
+                        egui::TextEdit::singleline(&mut self.stream_ingest_url),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label(self.tr("stream_key"));
+                    ui.add(egui::TextEdit::singleline(&mut self.stream_key).password(true));
+                    if !self.stream_key.is_empty() {
+                        ui.label(format!("••••{}", self.stream_key.chars().count().min(4)));
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if theme::accent_button(ui, self.tr("stream_key_save")).clicked() {
+                        self.stream_key_save_requested = true;
+                    }
+                    if ui.button(self.tr("stream_key_delete")).clicked() {
+                        self.stream_key_delete_requested = true;
+                    }
+                    if let Some(status) = &self.stream_key_store_status {
+                        ui.small(status);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let probe_enabled =
+                        configured && !self.stream_probe_running && !self.engine.is_streaming();
+                    if ui
+                        .add_enabled(
+                            probe_enabled,
+                            egui::Button::new(self.tr("stream_test_connection")),
+                        )
+                        .clicked()
+                    {
+                        let url = self.stream_ingest_url.clone();
+                        self.stream_probe_running = true;
+                        self.stream_probe_result = None;
+                        self.stream_status_message =
+                            Some(self.tr("stream_probe_running").to_owned());
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        std::thread::spawn(move || {
+                            let result = rivulet_core::stream::probe_ingest_reachability(
+                                &url,
+                                std::time::Duration::from_secs(5),
+                            );
+                            let _ = tx.send(result);
+                        });
+                        self.stream_probe_result =
+                            rx.recv_timeout(std::time::Duration::from_millis(1)).ok();
+                        if self.stream_probe_result.is_some() {
+                            self.stream_probe_running = false;
+                        }
+                    }
+                    if ui.button(self.tr("stream_setup_assistant")).clicked() {
+                        self.setup_wizard_open = true;
+                        self.setup_wizard_step = 0;
+                    }
+                    if self.setup_wizard_open {
+                        ui.label(self.tr("stream_setup_assistant_active"));
+                    }
+                });
+            });
+        ui.small(self.tr("stream_m3_note"));
+
+        // ── Workspace: chat dock (left) | stream information (right). The
+        //    chat is bounded in height so it behaves like a docked panel on
+        //    this page rather than growing the scroll area without end. ──
+        ui.separator();
+        ui.columns(2, |cols| {
+            self.draw_chat_dock(&mut cols[0], chat_list_height);
+            self.draw_stream_information_panel(&mut cols[1], colors);
+        });
+
+        // ── Compact audio: master fader + VU and monitoring; the detailed
+        //    mixer (filters, EQ, per-track capture) stays in its own view. ──
+        #[cfg(target_os = "linux")]
+        self.draw_stream_audio_compact(ui, colors);
+        #[cfg(not(target_os = "linux"))]
+        {
+            ui.separator();
+            ui.small(self.tr("mixer_unavailable"));
+        }
+
+        self.draw_stream_setup_wizard(ui);
+    }
+
+    /// Right-hand column of the Stream workspace: stream health, target
+    /// telemetry and the Discord presence card.
+    fn draw_stream_information_panel(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(self.tr("stream_information")).strong());
+        ui.separator();
+        self.draw_stream_health_panel(ui, *colors);
+        ui.small(self.tr("stream_health_help"));
+        self.draw_presence_status(ui);
+    }
+
+    /// Compact output/monitoring section at the bottom of the Stream
+    /// workspace: monitoring toggles, monitor volume, master fader with the
+    /// output VU meter, plus a shortcut into the full audio mixer view.
+    /// (The audio mixer — and its fields — are Linux-only; other platforms
+    /// render an "unavailable" hint instead.)
+    #[cfg(target_os = "linux")]
+    fn draw_stream_audio_compact(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
+        ui.separator();
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui.button(self.tr("stream_setup_assistant")).clicked() {
-                self.setup_wizard_open = true;
-                self.setup_wizard_step = 0;
-            }
-            if self.setup_wizard_open {
-                ui.label(self.tr("stream_setup_assistant_active"));
+            ui.label(egui::RichText::new(self.tr("stream_output_monitoring")).strong());
+            if ui.button(self.tr("stream_open_mixer")).clicked() {
+                self.view = AppView::Mixer;
             }
         });
-        ui.label(self.tr("stream_m3_note"));
-        self.draw_presence_status(ui);
-        self.draw_stream_setup_wizard(ui);
-        for (name, state, fill, underflows, overflows) in self.engine.stream_target_telemetry() {
-            ui.horizontal(|ui| {
-                ui.label(name);
-                ui.label(format!("{state:?}"));
-                ui.label(format!("queue {:.0}%", fill * 100.0));
-                ui.label(format!("underflow {underflows} / overflow {overflows}"));
-            });
+
+        let mut sys_mon = self.system_monitor;
+        let mut mic_mon = self.mic_monitor;
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut sys_mon, self.tr("monitoring_system"));
+            ui.checkbox(&mut mic_mon, self.tr("monitoring_microphone"));
+            let mut mon_vol = self.monitor_volume;
+            if ui
+                .add(egui::Slider::new(&mut mon_vol, 0.0..=1.0).text(self.tr("monitoring_volume")))
+                .changed()
+            {
+                self.monitor_volume = mon_vol;
+                if let Some(audio) = &self.audio {
+                    audio.set_monitor_volume(mon_vol);
+                }
+            }
+        });
+        if sys_mon != self.system_monitor || mic_mon != self.mic_monitor {
+            self.system_monitor = sys_mon;
+            self.mic_monitor = mic_mon;
+            if self.audio_preview {
+                self.start_audio_capture();
+            }
         }
+
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(self.tr("master_output")).strong());
+            let mut master_vol = self.master_volume;
+            if ui
+                .add(egui::Slider::new(&mut master_vol, 0.0..=1.0).text(self.tr("master_volume")))
+                .changed()
+            {
+                self.master_volume = master_vol;
+                if let Some(audio) = &self.audio {
+                    audio.set_master_volume(master_vol);
+                }
+            }
+            // Master output VU meter (level of the whole mix after the master
+            // volume is applied).
+            let peak = f32::from_bits(self.audio_peak.load(Ordering::SeqCst)).clamp(0.0, 1.0);
+            let db = if peak > 0.0 {
+                20.0 * peak.log10()
+            } else {
+                -96.0
+            };
+            ui.add(
+                egui::ProgressBar::new(peak)
+                    .desired_width(180.0)
+                    .text(self.tr_fmt("output_vu", &[format!("{db:.1}")])),
+            );
+            if let Some(status) = &self.audio_status {
+                ui.colored_label(colors.error, status);
+            }
+            if let Some(warning) = &self.audio_warning {
+                ui.colored_label(colors.warning, warning);
+            }
+        });
     }
 
     /// Render the region capture editor (preview with drag selection,
@@ -6808,11 +6922,6 @@ impl eframe::App for RivuletApp {
                             }
                         }
 
-                        if self.view == AppView::Stream {
-                            self.draw_stream_health_panel(ui, colors);
-                            ui.label(self.tr("stream_health_help"));
-                        }
-
                         if self.view == AppView::Mixer {
                             ui.separator();
                             ui.label(egui::RichText::new(self.tr("audio_mixer")).strong());
@@ -7066,12 +7175,11 @@ impl eframe::App for RivuletApp {
                     }
 
                     // Streaming controls are implemented in M3 and must not render
-                    // the generic planned-section placeholder.
+                    // the generic planned-section placeholder. The Stream view is
+                    // the Meld-style broadcast workspace: chat dock, stream
+                    // status and compact audio all live on this single page.
                     if self.view == AppView::Stream {
                         self.draw_stream_view(ui, &colors);
-                    }
-                    if self.view == AppView::Chat {
-                        self.draw_chat_view(ui);
                     }
                     if self.view == AppView::Help {
                         self.draw_help_view(ui);
@@ -8072,11 +8180,9 @@ mod tests {
         for view in AppView::all() {
             assert!(!view.nav_key().is_empty(), "view has no nav key");
         }
-        assert_eq!(AppView::all().len(), 8);
+        assert_eq!(AppView::all().len(), 7);
         assert_eq!(AppView::Help.nav_key(), "nav_help");
-        assert_eq!(AppView::Chat.nav_key(), "nav_chat");
         assert!(AppView::Stream.planned_milestone().is_none());
-        assert!(AppView::Chat.planned_milestone().is_none());
     }
 
     #[test]
@@ -10080,9 +10186,9 @@ mod tests {
         // keeps the UI from offering an input that Twitch would reject.
         let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
         let draw = source
-            .split_once("fn draw_chat_view")
+            .split_once("fn draw_chat_dock")
             .map(|(_, rest)| rest)
-            .expect("draw_chat_view must exist");
+            .expect("draw_chat_dock must exist in the Stream workspace");
         assert!(draw.contains("chat_send_locked"));
         assert!(draw.contains("chat_state == rivulet_core::ChatConnState::Connected"));
         assert!(draw.contains("chat_oauth_token.trim().is_empty()"));
