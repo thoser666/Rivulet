@@ -2136,6 +2136,84 @@ fn chat_outbound_is_rate_limited_per_platform() {
 }
 
 #[test]
+fn m10_platform_compliance_bullets_are_pinned_in_docs() {
+    // M10 issue #100 (platform-compliance baseline): the bot must satisfy
+    // each platform's hard constraints, and that contract is specified in
+    // BOTH the README roadmap section and the M10 quality gate. Pinning the
+    // key markers here makes a silent edit to either document fail CI, so the
+    // two sources cannot drift apart or lose a platform.
+    let readme = read("README.md");
+    assert!(
+        readme.contains("**Platform compliance**"),
+        "README M10 must carry the Platform compliance bullet"
+    );
+    // Twitch: scopes, global rate limit, PING/PONG, reply threading, phone
+    // verification.
+    for marker in [
+        "chat:read` + `chat:edit",
+        "20 messages/30 s for non-broadcaster/mod/VIP",
+        "`PONG` on every `PING`",
+        "`reply-parent-msg-id`",
+        "`twitch.tv/tags`",
+        "phone-verification hint",
+    ] {
+        assert!(
+            readme.contains(marker),
+            "README M10 Twitch bullet must mention {marker}"
+        );
+    }
+    // Kick: session-token sending, conservative self-throttle, read-only
+    // degradation for the undocumented API.
+    for marker in [
+        "session token",
+        "undocumented",
+        "self-throttles conservatively",
+        "degrade to read-only/observer mode",
+    ] {
+        assert!(
+            readme.contains(marker),
+            "README M10 Kick bullet must mention {marker}"
+        );
+    }
+    // YouTube: official Live Streaming API + OAuth, parentId, quota
+    // accounting, read-only Innertube fallback.
+    for marker in [
+        "Live Streaming API",
+        "`youtube.force-ssl`/`youtube` scope",
+        "`parentId`",
+        "`insert` ≈ 200 units",
+        "read-only Innertube poller",
+    ] {
+        assert!(
+            readme.contains(marker),
+            "README M10 YouTube bullet must mention {marker}"
+        );
+    }
+
+    let gates = read("docs/milestone-quality-gates.md");
+    assert!(
+        gates.contains("Per-platform chat compliance is implemented and verified")
+            && gates.contains("The auth/scope matrix is explicit and masked"),
+        "the M10 gate must review compliance behavior and the masked auth/scope matrix"
+    );
+    for marker in [
+        "20-messages/30-s",
+        "`PING` with `PONG`",
+        "`reply-parent-msg-id`",
+        "degrades to read-only",
+        "`insert` ≈ 200 units",
+        "read-only Innertube poller",
+        "`chat:read`+`chat:edit`",
+        "Kick session token",
+        "`youtube.force-ssl`",
+        "ever logged, exported, or screenshotted",
+        "per-platform compliance test matrix",
+    ] {
+        assert!(gates.contains(marker), "M10 gate must review {marker}");
+    }
+}
+
+#[test]
 fn stream_workspace_controls_stay_reachable_on_narrow_windows() {
     // Responsive contract of the Meld-style Stream page: below the narrow
     // width threshold the action bar and every control row wrap and the
