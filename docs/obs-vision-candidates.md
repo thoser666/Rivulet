@@ -19,6 +19,7 @@ _No strong-fit candidates have been reviewed yet._
 
 <!-- OBS-VISION-CANDIDATES:START -->
 <!-- No new strong-fit candidates detected in the latest checked release. -->
+<!-- OBS-VISION-CANDIDATES:END -->
 
 
 ## Workflow

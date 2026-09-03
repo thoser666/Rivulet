@@ -84,7 +84,11 @@ def update_candidate_doc(release: dict, rows: list[tuple[str, list[str]]]) -> No
     if start not in text or end not in text:
         raise ValueError(f"{DOC}: candidate markers missing")
     fragment = candidate_doc_fragment(release, rows)
-    updated = text.split(start)[0] + start + "\n" + fragment + "\n" + text.split(end, 1)[1]
+    # The END marker must be written back too — dropping it (as an earlier
+    # version did) leaves the doc with only a START marker, which makes the
+    # next run fail with "candidate markers missing" and silently empties
+    # the weekly report (masked by continue-on-error in the workflow).
+    updated = text.split(start)[0] + start + "\n" + fragment + "\n" + end + text.split(end, 1)[1]
     DOC.write_text(updated, encoding="utf-8")
 
 

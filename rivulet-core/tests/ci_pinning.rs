@@ -1601,6 +1601,32 @@ fn alpha_release_notes_are_generated_from_commits_since_last_tag() {
 }
 
 #[test]
+fn obs_upstream_candidates_doc_keeps_both_generation_markers() {
+    // The OBS upstream workflow rewrites the candidates doc between its
+    // START/END markers on every run. An earlier version dropped the END
+    // marker when writing, so the next run failed with "candidate markers
+    // missing" and — masked by continue-on-error — silently emptied the
+    // weekly report artifact and step summary. The doc must carry both
+    // markers and the writer must write the END marker back.
+    let doc = read("docs/obs-vision-candidates.md");
+    assert!(
+        doc.contains("<!-- OBS-VISION-CANDIDATES:START -->")
+            && doc.contains("<!-- OBS-VISION-CANDIDATES:END -->"),
+        "the candidates doc must keep both generation markers"
+    );
+    let script = read("scripts/check-obs-upstream.py");
+    assert!(
+        script.contains("+ end + text.split(end, 1)[1]"),
+        "update_candidate_doc must write the END marker back"
+    );
+    let workflow = read(".github/workflows/obs-upstream.yml");
+    assert!(
+        workflow.contains("--update-doc") && workflow.contains("obs-upstream-report"),
+        "the weekly workflow must generate the candidates doc and publish the report artifact"
+    );
+}
+
+#[test]
 fn tag_based_release_attaches_checksums_and_generated_notes() {
     // The beta/rc/stable tag path must ship the same release hygiene as the
     // alpha channel: a SHA256SUMS manifest over the attached assets (the
