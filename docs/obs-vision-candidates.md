@@ -15,7 +15,17 @@ and testability before updating the README or creating an issue.
 
 ## Candidates
 
-_No strong-fit candidates have been reviewed yet._
+### Reviewed — approved for the roadmap (OBS 32.2.2, 2026-09-03)
+
+| Candidate | Review decision | Roadmap row |
+| --- | --- | --- |
+| Added copy paste functions to frontend API | Approved — deterministic + embeddable, no duplication with existing work, no privacy impact | [`docs/obs-vision-roadmap.md`](obs-vision-roadmap.md) → Scene-item copy/paste API (M6) |
+| Added delete as a hotkey to delete sources on macOS | Approved — automation + cross-platform parity, extension of the existing M5 hotkey registry | [`docs/obs-vision-roadmap.md`](obs-vision-roadmap.md) → Source delete hotkey (M5) |
+
+Both features were added to `scripts/obs-features.json` so future OBS release
+notes classify them as already represented, and to the README Feature-Parity
+Checklist.
+
 
 <!-- OBS-VISION-CANDIDATES:START -->
 <!-- No new strong-fit candidates detected in the latest checked release. -->

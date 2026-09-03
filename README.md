@@ -343,6 +343,7 @@ must not be implied by beta parity.
 - [ ] Mobile companion app (remote control)
 - [x] **obs-websocket compatibility** — OBS WebSocket v5 server (JSON) for Streamdeck/TouchPortal ecosystem remote control: scene list/switch, source listing, recording/streaming start/stop/toggle/status, optional password authentication and event subscriptions, verified end-to-end with a real WebSocket client (see [`docs/obs-websocket.md`](docs/obs-websocket.md)). [#72](https://github.com/thoser666/Rivulet/issues/72)
 - [ ] **Windows/macOS feature parity** (currently Linux-first; window capture on Windows exists, macOS still open) — as a release blocker, not an afterthought
+- [ ] **Source delete hotkey** — delete the selected source/scene item via a hotkey action in the existing registry (OBS 32.2 parity; cross-platform, not macOS-only), rebindable in Settings → Hotkeys, with an honest platform matrix
 - [x] Installers (Windows MSI, macOS DMG, Linux AppImage) — automated in CI
 - [x] Code signing (signing automation present, secrets needed)
 - [ ] Telemetry (opt-in, privacy-friendly)
@@ -371,6 +372,7 @@ must not be implied by beta parity.
 - [ ] CI-friendly rendering: generate video from code (Remotion approach, native in Rust) — e.g. batch creation, tests, per-frame screenshots
 - [ ] Reproducible distribution inputs: deterministic packages, SHA-256 manifests, and post-publish verification for the M5 channel rollout (see [`docs/release-platforms.md`](docs/release-platforms.md))
 - [ ] Pipeline inspector/diagnostics tooling (analogous to `gst-inspect`, `gst-launch`), embedded in the engine
+- [ ] **Scene-item copy/paste API** — deterministic duplicate/paste of scene items within and across scenes, exposed scriptably (OBS 32.2 frontend-API parity), with undo integration and deterministic tests
 - [ ] Deterministic tests as first-class citizens (golden-frame tests, exact PTS/DTS verification)
 
 **Goal:** "Video from code" and reproducible capture pipelines — the reason a developer/team *cannot* use OBS but can use Rivulet.
@@ -470,6 +472,8 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Studio mode & multi-view | Partial (Studio Mode done; multi-view/projectors open, M2) |
 | Source transforms & composition | ✅ Done (M2 S1) |
 | Hotkeys (incl. remapping, global) | Partial (record/pause/mute/save-replay; remapping planned M5) |
+| Source delete hotkey | Open (M5: delete-source hotkey action on all platforms, OBS 32.2 parity) |
+| Scene-item copy/paste (API) | Open (M6: deterministic scriptable copy/paste of scene items, OBS 32.2 frontend-API parity) |
 | Undo/Redo | Done (M2) |
 | Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks, filters) |
 | Video filters (color correction, LUT, blur, sharpen, chroma key) | Partial (M4: color correction/blur/sharpen done; LUT grading + chroma-key refinement open) |
