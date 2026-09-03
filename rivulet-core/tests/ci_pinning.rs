@@ -2205,6 +2205,54 @@ fn local_pre_push_hook_mirrors_the_ci_lints_job() {
     );
 }
 
+/// Bash to run the hook syntax check with. On Unix `bash` on PATH is fine
+/// (CI ubuntu enforces the check there). On Windows, `bash` on PATH may
+/// resolve to the WSL launcher (`C:\Windows\System32\bash.exe`), which
+/// cannot read Windows-style paths and takes seconds to boot — so prefer an
+/// explicit Git for Windows bash and skip locally when none is installed
+/// (the CI Pinning-Tests job on ubuntu keeps the check enforced).
+fn bash_program() -> Option<std::ffi::OsString> {
+    if !cfg!(windows) {
+        return Some("bash".into());
+    }
+    const GIT_BASH: &[&str] = &[
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\usr\bin\bash.exe",
+    ];
+    GIT_BASH
+        .iter()
+        .map(Path::new)
+        .find(|path| path.exists())
+        .map(|path| path.as_os_str().to_owned())
+}
+
+#[test]
+fn pre_push_hook_is_valid_bash() {
+    // A syntactically broken pre-push hook would fail silently on every git
+    // push (git does not run an unparsable hook and reports nothing), which
+    // would defeat the fmt/clippy/guard checks the hook provides. `bash -n`
+    // parses the script without executing it.
+    let Some(program) = bash_program() else {
+        eprintln!(
+            "pre-push hook syntax check skipped: no bash available (Windows without Git Bash)"
+        );
+        return;
+    };
+    let hook = repo_file(".githooks/pre-push");
+    let output = std::process::Command::new(&program)
+        .arg("-n")
+        .arg(&hook)
+        .output()
+        .expect("run bash -n");
+    assert!(
+        output.status.success(),
+        "bash -n failed for .githooks/pre-push — the hook has a shell syntax error:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[test]
 fn twitch_replies_thread_the_parent_message_id_and_surface_phone_verification() {
     // Twitch replies must use the IRCv3 `@reply-parent-msg-id` tag so the bot

@@ -130,6 +130,14 @@ Disable just that stage with `RIVULET_PRE_PUSH_FAST_TESTS=0 git push`; skip
 the whole hook for a single push with `RIVULET_SKIP_PRE_PUSH=1 git push`
 (or `git push --no-verify`).
 
+Edits to the hook itself are guarded too: the ci_pinning suite runs
+`bash -n` on `.githooks/pre-push`, so a hook with a shell syntax error
+fails CI (and the local pre-push run) instead of being silently skipped by
+git on every push. On Windows the check prefers an explicit Git for
+Windows bash (a `bash` on PATH may be the WSL launcher) and is skipped
+locally only when no Git Bash is installed — the CI Pinning-Tests job on
+ubuntu keeps it enforced.
+
 ## Testing
 
 ```bash
