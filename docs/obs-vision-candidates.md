@@ -28,7 +28,12 @@ Checklist.
 
 
 <!-- OBS-VISION-CANDIDATES:START -->
-<!-- No new strong-fit candidates detected in the latest checked release. -->
+### 32.2.2
+
+| Candidate | Matching vision pillars |
+| --- | --- |
+| Added copy paste functions to frontend API [exeldro] | deterministic, embeddable |
+| Added delete as a hotkey to delete sources on macOS [PatTheMav] | deterministic, cross-platform |
 <!-- OBS-VISION-CANDIDATES:END -->
 
 
