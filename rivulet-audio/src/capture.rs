@@ -1080,53 +1080,56 @@ mod sys_impl {
                     .default_input_device()
                     .context(messages::macos_no_input_device())?,
             };
-            let format = device
-                .default_input_format()
+            // cpal 0.15: `default_input_config` yields a `SupportedStreamConfig`
+            // whose fields are private — read them through the accessors and
+            // derive the plain `StreamConfig` for the stream builder.
+            let supported = device
+                .default_input_config()
                 .context(messages::macos_no_input_format())?;
-            let sample_format = match format.sample_format {
-                cpal::SampleFormat::F32 => "f32",
-                cpal::SampleFormat::I16 => "i16",
-                cpal::SampleFormat::U16 => "u16",
-                other => {
-                    return Err(anyhow::anyhow!(
-                        "{}",
-                        messages::macos_unsupported_sample_format(&format!("{other:?}"))
-                    ))
-                }
-            };
-            let channels = format.channels.max(1);
-            let input_rate = format.sample_rate.0;
+            // Only the sample formats our byte pipeline can decode are
+            // accepted; anything else is reported instead of silently
+            // recording silence. The typed stream is built with the very
+            // sample type the device advertises, so the byte tag always
+            // matches the samples the callback receives.
+            let channels = supported.channels().max(1);
+            let input_rate = supported.sample_rate().0;
+            let config = supported.config();
             let kind_for_cb = kind;
             let raw_tx = raw_tx.clone();
 
-            let stream = device
-                .build_input_stream(
-                    &format.into(),
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        // cpal delivers the device-native sample format; the f32
-                        // buffer is reinterpreted as raw bytes and converted by
-                        // `to_f32` according to the captured sample format.
-                        let bytes = unsafe {
-                            std::slice::from_raw_parts(
-                                data.as_ptr() as *const u8,
-                                data.len() * std::mem::size_of::<f32>(),
-                            )
-                        }
-                        .to_vec();
-                        let _ = raw_tx.send(RawSamples {
-                            kind: kind_for_cb,
-                            sample_format,
-                            bytes,
-                            stride: channels,
-                            input_rate,
-                        });
-                    },
-                    move |_| {},
-                    None,
-                )
-                .map_err(|e| {
-                    anyhow::anyhow!("{}", messages::macos_stream_failed(&format!("{e}")))
-                })?;
+            let stream = match supported.sample_format() {
+                cpal::SampleFormat::F32 => open_typed_stream::<f32>(
+                    &device,
+                    &config,
+                    "f32",
+                    kind_for_cb,
+                    raw_tx,
+                    channels,
+                    input_rate,
+                ),
+                cpal::SampleFormat::I16 => open_typed_stream::<i16>(
+                    &device,
+                    &config,
+                    "i16",
+                    kind_for_cb,
+                    raw_tx,
+                    channels,
+                    input_rate,
+                ),
+                cpal::SampleFormat::U16 => open_typed_stream::<u16>(
+                    &device,
+                    &config,
+                    "u16",
+                    kind_for_cb,
+                    raw_tx,
+                    channels,
+                    input_rate,
+                ),
+                other => Err(anyhow::anyhow!(
+                    "{}",
+                    messages::macos_unsupported_sample_format(&format!("{other:?}"))
+                )),
+            }?;
 
             match kind {
                 SourceKind::System => self.sys_stream = Some(stream),
@@ -1134,6 +1137,58 @@ mod sys_impl {
             }
             Ok(())
         }
+    }
+
+    /// Open a typed cpal input stream on `device` whose samples are forwarded
+    /// as raw bytes tagged with `sample_format` (matching `T`) into `raw_tx`.
+    /// cpal 0.15 requires an explicit [`cpal::traits::StreamTrait::play`] after
+    /// creation, otherwise no callback ever fires.
+    fn open_typed_stream<T>(
+        device: &cpal::Device,
+        config: &cpal::StreamConfig,
+        sample_format: &'static str,
+        kind: SourceKind,
+        raw_tx: mpsc::Sender<RawSamples>,
+        channels: u16,
+        input_rate: u32,
+    ) -> Result<cpal::Stream>
+    where
+        T: cpal::SizedSample,
+    {
+        let kind_for_cb = kind;
+        let stream = device
+            .build_input_stream::<T, _, _>(
+                config,
+                move |data: &[T], _: &cpal::InputCallbackInfo| {
+                    // cpal delivers `T` samples; reinterpret the buffer as raw
+                    // bytes so `to_f32` can decode it according to the captured
+                    // sample format.
+                    // SAFETY: `T` is a plain numeric sample type with no
+                    // padding, so the `&[T]` buffer's underlying bytes form a
+                    // valid `&[u8]` of `len * size_of::<T>()` bytes.
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts(
+                            data.as_ptr() as *const u8,
+                            data.len() * std::mem::size_of::<T>(),
+                        )
+                    }
+                    .to_vec();
+                    let _ = raw_tx.send(RawSamples {
+                        kind: kind_for_cb,
+                        sample_format,
+                        bytes,
+                        stride: channels,
+                        input_rate,
+                    });
+                },
+                move |_| {},
+                None,
+            )
+            .map_err(|e| anyhow::anyhow!("{}", messages::macos_stream_failed(&format!("{e}"))))?;
+        stream
+            .play()
+            .map_err(|e| anyhow::anyhow!("{}", messages::macos_stream_failed(&format!("{e}"))))?;
+        Ok(stream)
     }
 
     /// Convert raw device samples into a configured [`AudioFrame`]: native
