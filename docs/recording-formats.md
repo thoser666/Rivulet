@@ -69,6 +69,12 @@ immediately (a new recording/stream can start at once) and runs the whole
 teardown/finalize sequence on a background thread, so clicking "Stop" never
 freezes the UI.
 
+`stop_recording_background` returns a completion handle that fires when the
+background finalization has finished. The GUI uses it to show a visible status
+under the record controls — "Finalizing recording…" while the teardown/remux/
+upload runs, flipping to "Recording saved." the moment it completes (i18n
+`recording_finalizing` / `recording_saved`, both EN and DE).
+
 ## Status
 
 - [x] Container model + validation + GUI picker

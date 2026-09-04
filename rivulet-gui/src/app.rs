@@ -905,9 +905,19 @@ pub struct RivuletApp {
     #[cfg(target_os = "linux")]
     #[serde(skip)]
     raw_rx: Option<std_mpsc::Receiver<RawFrame>>,
-    #[cfg(target_os = "linux")]
+    /// Transient feedback under the record controls (both platforms), e.g.
+    /// "Finalizing recording…" while the background stop teardown runs and
+    /// "Recording saved." once it finished. Runtime-only, never persisted.
+    /// (macOS has no recording engine yet, so it only writes this field.)
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     #[serde(skip)]
     record_status: Option<String>,
+    /// Completion handle of an in-flight background stop (see
+    /// `begin_background_stop`/`poll_stop_finalization`): while `Some`, the UI
+    /// shows the "finalizing" status; the receiver fires once the background
+    /// teardown (EOS finalization, auto-remux, cloud upload) has finished.
+    #[serde(skip)]
+    stop_finalizing: Option<Receiver<()>>,
 
     // Windows Fields
     #[cfg(target_os = "windows")]
@@ -1306,8 +1316,8 @@ impl Default for RivuletApp {
             selected_window_idx: None,
             #[cfg(target_os = "linux")]
             raw_rx: None,
-            #[cfg(target_os = "linux")]
             record_status: None,
+            stop_finalizing: None,
 
             #[cfg(target_os = "windows")]
             is_windows_recording: false,
@@ -1592,6 +1602,10 @@ impl RivuletApp {
 
     #[cfg(target_os = "windows")]
     fn start_windows_recording(&mut self) {
+        // A new session starts with clean feedback: drop any completion handle
+        // still pending from a previous stop and clear its status text.
+        self.stop_finalizing = None;
+        self.record_status = None;
         let ext = self.selected_container_extension();
         let file_path = rfd::FileDialog::new()
             .add_filter("Video", &[ext])
@@ -1862,9 +1876,10 @@ impl RivuletApp {
         }
         self.is_windows_recording = false;
         self.capture_backend = None;
-        // Teardown runs on a background thread so the UI never freezes for the
-        // EOS wait / auto-remux / cloud upload (see stop_recording_background).
-        self.engine.stop_recording_background();
+        // Teardown runs on a background thread (never freezes the UI); the
+        // "finalizing…" → "Recording saved." status is driven by
+        // begin_background_stop/poll_stop_finalization.
+        self.begin_background_stop();
         self.frame_receiver = None;
         // Keep the error receiver alive after the stop so a capture error
         // that arrives a frame late is still shown in the UI; the next
@@ -2339,6 +2354,9 @@ impl RivuletApp {
         self.is_recording = true;
         self.record_started = Instant::now();
         self.last_frame_at = None;
+        // A new session starts with clean feedback: drop any completion handle
+        // still pending from a previous stop and clear its status text.
+        self.stop_finalizing = None;
         self.record_status = None;
         tracing::info!(source = %source_desc, "Linux recording started");
     }
@@ -2353,14 +2371,14 @@ impl RivuletApp {
         }
         // Stop PipeWire portal capture if active (G6)
         self.pipewire_capture = None;
-        // Teardown runs on a background thread so the UI never freezes for the
-        // EOS wait / auto-remux / cloud upload (see stop_recording_background).
-        self.engine.stop_recording_background();
+        // Teardown runs on a background thread (never freezes the UI); the
+        // "finalizing…" → "Recording saved." status is driven by
+        // begin_background_stop/poll_stop_finalization.
+        self.begin_background_stop();
         self.raw_rx = None;
         self.stop_signal = None;
         self.stop_audio_capture();
         self.is_recording = false;
-        self.record_status = Some(self.tr("recording_saved").to_string());
     }
 
     fn drain_linux_frames(&mut self) {
@@ -2457,7 +2475,7 @@ impl RivuletApp {
         }
         // Teardown runs on a background thread so the UI never freezes for the
         // EOS wait / auto-remux / cloud upload (see stop_recording_background).
-        self.engine.stop_recording_background();
+        self.begin_background_stop();
         self.camera_rx = None;
         self.camera_handle = None;
         self.game_capture_rx = None;
@@ -2467,6 +2485,42 @@ impl RivuletApp {
         #[cfg(target_os = "windows")]
         {
             self.capture_backend = None;
+        }
+    }
+
+    /// Arms the non-blocking recording stop: shows the translated
+    /// "finalizing…" status and keeps the completion handle that fires once
+    /// the background teardown (EOS finalization, auto-remux, cloud upload)
+    /// has finished. [`Self::poll_stop_finalization`] flips the status to
+    /// "Recording saved." when that happens.
+    fn begin_background_stop(&mut self) {
+        match self.engine.stop_recording_background() {
+            Some(rx) => {
+                self.record_status = Some(self.tr("recording_finalizing").to_string());
+                self.stop_finalizing = Some(rx);
+            }
+            None => {
+                // Nothing was active (idempotent stop): there is no background
+                // work, so a "finalizing…" state would never clear itself.
+                self.stop_finalizing = None;
+            }
+        }
+    }
+
+    /// Called once per frame while a stop finalization may be in flight: when
+    /// the background teardown completes, drop the handle and flip the status
+    /// from "finalizing…" to "Recording saved.".
+    fn poll_stop_finalization(&mut self) {
+        let finished = match &self.stop_finalizing {
+            None => false,
+            Some(rx) => matches!(
+                rx.try_recv(),
+                Ok(()) | Err(std::sync::mpsc::TryRecvError::Disconnected)
+            ),
+        };
+        if finished {
+            self.stop_finalizing = None;
+            self.record_status = Some(self.tr("recording_saved").to_string());
         }
     }
 }
@@ -6003,6 +6057,15 @@ impl eframe::App for RivuletApp {
         // ── Hotkey handling ────────────────────────────────────────
         let ctx = ui.ctx();
 
+        // Flip "Finalizing recording…" → "Recording saved." as soon as the
+        // background stop teardown (EOS, auto-remux, cloud upload) finished.
+        self.poll_stop_finalization();
+        // Keep repainting while a stop finalization is in flight, so the
+        // status flips without requiring user input to trigger a frame.
+        if self.stop_finalizing.is_some() {
+            ctx.request_repaint();
+        }
+
         // Reconcile OS-level global hotkeys (create/rebind on change) and
         // dispatch any global hotkey events fired while the app was unfocused.
         self.reconcile_global_hotkeys();
@@ -6778,6 +6841,12 @@ impl eframe::App for RivuletApp {
                         if let Some(err) = &self.last_error {
                             ui.colored_label(colors.error, err);
                         }
+                        // Stop feedback ("Finalizing recording…" → "Recording
+                        // saved.") below the controls, visible in both the
+                        // recording and the idle state.
+                        if let Some(status) = &self.record_status {
+                            ui.colored_label(colors.info, status);
+                        }
                     }
 
                     #[cfg(target_os = "linux")]
@@ -6786,6 +6855,9 @@ impl eframe::App for RivuletApp {
                         // Surface engine failures (pipeline build/start/push errors)
                         // in the UI instead of only on the console.
                         if let Some(err) = self.engine.take_error() {
+                            // An error beats the "Recording saved." flip of a
+                            // still-pending background stop.
+                            self.stop_finalizing = None;
                             self.record_status = Some(err);
                         }
                         // Abort when the capture delivers no frames within the
@@ -6805,9 +6877,11 @@ impl eframe::App for RivuletApp {
                                 timeout_seconds = secs,
                                 "No frames received; stopping recording"
                             );
-                            // stop_linux_recording sets record_status to
-                            // "recording_saved"; override it with the abort reason.
+                            // stop_linux_recording arms the background
+                            // finalization; override its status with the abort
+                            // reason and cancel the later "Recording saved." flip.
                             self.stop_linux_recording();
+                            self.stop_finalizing = None;
                             self.record_status =
                                 Some(self.tr_fmt("recording_no_frames", &[secs.to_string()]));
                         }
@@ -9035,24 +9109,82 @@ mod tests {
         // wait (up to 10 s), pipeline teardown, auto-remux, and cloud upload
         // on the calling thread. When the GUI called it from the UI thread,
         // clicking "Stop" froze the interface for the whole duration. Every
-        // GUI stop handler must use the non-blocking background variant.
+        // GUI stop handler must go through the non-blocking
+        // begin_background_stop() (which arms the engine's background stop
+        // plus the visible "finalizing…" status).
         let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
         let production = source
             .split_once("#[cfg(test)]")
             .map(|(head, _)| head)
             .unwrap_or(&source);
-        let background = production
-            .matches("self.engine.stop_recording_background();")
-            .count();
-        let blocking = production.matches("self.engine.stop_recording();").count();
+        let handlers = production.matches("self.begin_background_stop();").count();
         assert!(
-            background >= 3,
-            "each recording stop handler must use the background teardown, found {background}"
+            handlers >= 3,
+            "each recording stop handler must arm the background stop, found {handlers}"
         );
+        assert!(
+            production.contains("fn begin_background_stop"),
+            "begin_background_stop helper must exist"
+        );
+        assert!(
+            production.contains("fn poll_stop_finalization"),
+            "poll_stop_finalization helper must exist"
+        );
+        assert!(
+            production.contains("self.engine.stop_recording_background()"),
+            "the helper must use the engine's background stop"
+        );
+        let blocking = production.matches("self.engine.stop_recording();").count();
         assert_eq!(
             blocking, 0,
-            "no GUI stop handler may call the blocking engine.stop_recording()"
+            "no GUI code may call the blocking engine.stop_recording()"
         );
+    }
+
+    #[test]
+    fn background_stop_shows_finalizing_status_until_saved() {
+        let mut app = RivuletApp::default();
+
+        // Nothing recording: no finalizing status and no completion handle.
+        app.begin_background_stop();
+        assert!(app.stop_finalizing.is_none());
+        assert_ne!(
+            app.record_status.as_deref(),
+            Some(app.tr("recording_finalizing")),
+            "idle stop must not show a finalizing status"
+        );
+
+        // Active engine session (no frames needed for the stop path): the stop
+        // arms the handle and shows the translated "finalizing…" status.
+        let path =
+            std::env::temp_dir().join(format!("rivulet_gui_bgstop_{}.mp4", std::process::id()));
+        app.engine.start_local_recording(path.clone());
+        app.begin_background_stop();
+        assert!(
+            app.stop_finalizing.is_some(),
+            "an active recording must arm the completion handle"
+        );
+        assert_eq!(
+            app.record_status.as_deref(),
+            Some(app.tr("recording_finalizing"))
+        );
+
+        // The status flips to "Recording saved." once the background
+        // finalization ran (polled once per frame like the real UI).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while app.record_status.as_deref() != Some(app.tr("recording_saved")) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "status must flip to saved after the background finalization"
+            );
+            app.poll_stop_finalization();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            app.stop_finalizing.is_none(),
+            "handle is dropped after completion"
+        );
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

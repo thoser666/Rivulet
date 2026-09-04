@@ -1650,17 +1650,25 @@ impl RivuletEngine {
     /// thread so clicking "Stop" never freezes the interface for the duration
     /// of the teardown/remux/upload (which can take a while for long
     /// recordings).
-    pub fn stop_recording_background(&mut self) {
+    ///
+    /// Returns a completion handle that fires once the background finalization
+    /// (file saved, remux/upload done) has finished — the caller can show a
+    /// "finalizing…" status until then. `None` when no session was active
+    /// (idempotent stop).
+    pub fn stop_recording_background(&mut self) -> Option<std::sync::mpsc::Receiver<()>> {
         if !self.is_recording {
-            return;
+            return None;
         }
         tracing::info!("Stopping recording (background teardown)");
         let parts = self.detach_stopped_session();
         let remux_settings = self.remux_settings;
         let cloud_recording = self.cloud_recording.clone();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             Self::finalize_stopped_session(parts, remux_settings, cloud_recording);
+            let _ = done_tx.send(());
         });
+        Some(done_rx)
     }
 
     /// Common synchronous half of [`Self::stop_recording`] and
@@ -1846,7 +1854,10 @@ impl RivuletEngine {
                         "Could not push a frame into the recording pipeline: {:?}",
                         err
                     ));
-                    self.stop_recording();
+                    // Teardown on a background thread: the push failure may
+                    // leave the muxer waiting for EOS (up to 10 s), and the
+                    // engine must not block the GUI frame that reported it.
+                    self.stop_recording_background();
                 }
             }
         }
@@ -2104,9 +2115,10 @@ mod tests {
             engine.process_raw_frame(&video, width, height);
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
-
         let started = std::time::Instant::now();
-        engine.stop_recording_background();
+        let completion = engine
+            .stop_recording_background()
+            .expect("an active recording must arm a completion handle");
         let stop_latency = started.elapsed();
 
         // The engine must be reset synchronously: the UI thread returns at
@@ -2122,6 +2134,12 @@ mod tests {
         assert!(
             stop_latency < std::time::Duration::from_secs(2),
             "background stop must return quickly, took {stop_latency:?}"
+        );
+        // Idempotent stop (nothing active) must not arm a handle.
+        let mut idle = RivuletEngine::default();
+        assert!(
+            idle.stop_recording_background().is_none(),
+            "idle stop has nothing to finalize"
         );
 
         // The engine is immediately reusable while the old pipeline drains on
@@ -2149,6 +2167,12 @@ mod tests {
         assert!(first_ready, "background stop must finalize the file");
         let second_len = std::fs::metadata(&second).map(|m| m.len()).unwrap_or(0);
         assert!(second_len > 0, "second recording must be finalized");
+
+        // The completion handle fires once the background finalization ran
+        // (its sender is dropped at the end of `finalize_stopped_session`).
+        completion
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("background finalize must signal completion");
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(&second);
