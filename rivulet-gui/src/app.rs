@@ -20,6 +20,7 @@ use std::time::Instant;
 #[cfg(target_os = "macos")]
 use {
     rivulet_audio::{AudioCapture, AudioConfig},
+    rivulet_core::{AudioFrame, AudioTrack},
     std::sync::mpsc as std_mpsc,
     std::thread,
 };

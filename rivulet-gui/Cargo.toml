@@ -69,7 +69,10 @@ pipewire = { version = "0.10.0", features = ["v0_3_33"] }
 rivulet-audio = { path = "../rivulet-audio" }
 rivulet-capture = { path = "../rivulet-capture" }
 
-
+# macOS-specific dependencies (screen/window capture via xcap which is a
+# plain dependency; cpal-backed audio capture via rivulet-audio)
+[target.'cfg(target_os = "macos")'.dependencies]
+rivulet-audio = { path = "../rivulet-audio" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-capture = { version = "2.0.0" }
