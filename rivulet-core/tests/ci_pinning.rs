@@ -1386,7 +1386,6 @@ fn workspace_manifests_declare_the_workspace_license() {
         "rivulet-obs-websocket/Cargo.toml",
         "rivulet-opengl-hook-dll/Cargo.toml",
         "rivulet-plugins/Cargo.toml",
-        "rivulet-streaming/Cargo.toml",
         "rivulet-updater/Cargo.toml",
         "rivulet-vulkan-layer/Cargo.toml",
     ] {

@@ -4,7 +4,6 @@ members = [
     "rivulet-gui",
     "rivulet-capture",
     "rivulet-audio",
-    "rivulet-streaming",
     "rivulet-plugins",
     "rivulet-obs-compat",
     "rivulet-updater",

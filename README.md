@@ -181,7 +181,7 @@ release channel only describes *how* the tag is built and published.
 **Status: Done**
 
 - [x] Screen capture (monitor, real-time)
-- [x] H.264 video encoding (FFmpeg/GStreamer)
+- [x] H.264 video encoding (GStreamer)
 - [x] Audio capture (system + microphone, mixed, 48 kHz stereo)
 - [x] Audio/video synchronization
 - [x] Audio mixer UI with live level meter and volume sliders
@@ -838,16 +838,6 @@ and the GitHub release attaches them as standalone downloads.
 ### Prerequisites
 
 **GStreamer** (Core + `gst-plugins-good`/`gst-plugins-bad`/`gst-plugins-ugly` + `gst-libav`) is required by the engine for encoding, audio mixing, and streaming (H.264 + AAC).
-
-**FFmpeg** is only used by the legacy encoder in `rivulet-streaming` and must be available when that path is used:
-
-#### Windows
-```powershell
-# Using Chocolatey
-choco install ffmpeg
-
-# Or download from: https://ffmpeg.org/download.html
-```
 
 ---
 

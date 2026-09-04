@@ -4193,15 +4193,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rivulet-streaming"
-version = "0.65.0-alpha.55"
-dependencies = [
- "anyhow",
- "crossbeam-channel",
- "xcap",
-]
-
-[[package]]
 name = "rivulet-updater"
 version = "0.65.0-alpha.55"
 dependencies = [

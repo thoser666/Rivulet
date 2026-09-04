@@ -65,7 +65,6 @@ werden automatisch über das `*.md`-Muster abgedeckt.
 | Pfad / Muster | Art | Begründung |
 | --- | --- | --- |
 | `target/` | Rust-Build | Kompilierartefakte, niemals versionieren. |
-| `ffmpeg/`, `ffmpeg.exe` … | Tool-Binaries | Lokale Werkzeuge, die Nutzer selbst installieren. |
 | `*.log`, `logs/` | Laufzeit-Logs | Tägliche Logs gehören in das Systemdaten-Verzeichnis, nicht ins Repo. |
 | `*.mp4`, `*.mkv`, `*.mov`, `*.flv` u.&nbsp;a. | Test-Aufnahmen | Generierte Medien, nie committen. |
 | `.env`, `.env.local` | Secrets | Umgebungsvariablen mit potenziellen Stream-Keys/Tokens. |
