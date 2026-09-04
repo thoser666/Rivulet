@@ -147,6 +147,33 @@ jobs:
         run: cargo test -p rivulet-core --test ci_pinning --verbose
 
   ################################################################
+  # DCO sign-off check: every commit in a pull request must carry a
+  # Signed-off-by trailer matching its author (see scripts/check-dco.py).
+  # Enforced on pull_request only: develop commits are squash-merged and
+  # release-bot pushes to release/* cannot carry per-commit sign-offs.
+  ################################################################
+  dco:
+    name: DCO (Signed-off-by)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository (full history for the base range)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # Check out the PR head, NOT the synthetic merge ref: the merge
+          # commit GitHub creates for pull_request events has no author
+          # sign-off of its own and would fail the DCO check. Falls back to
+          # the push SHA for push events.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Check DCO sign-offs on branch commits
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/check-dco.py --base origin/develop
+
+      - name: Verify the DCO checker itself
+        run: python3 scripts/check-dco.py --self-test
+
+  ################################################################
   # SRT interoperability smoke test
   ################################################################
   srt_receiver_smoke:

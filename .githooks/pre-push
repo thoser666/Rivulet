@@ -45,6 +45,13 @@ if [[ "${RIVULET_PRE_PUSH_FAST_TESTS:-}" != "0" ]]; then
     echo "pre-push: python3 scripts/generate-action-pins.py --check"
     python3 scripts/generate-action-pins.py --check
 
+    if git rev-parse --verify --quiet origin/develop >/dev/null; then
+      echo "pre-push: python3 scripts/check-dco.py --base origin/develop"
+      python3 scripts/check-dco.py --base origin/develop
+    else
+      echo "pre-push: no origin/develop ref — skipping DCO check (CI enforces it on PRs)"
+    fi
+
     echo "pre-push: python3 scripts/check-parity-checklist.py --self-test"
     python3 scripts/check-parity-checklist.py --self-test
 

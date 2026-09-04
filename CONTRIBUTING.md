@@ -17,6 +17,24 @@ chore(deps): upgrade ureq from 2.12 to 3.4
 
 Scopes are optional but encouraged: `core`, `gui`, `audio`, `capture`, `streaming`, `updater`, `plugins`, `i18n`, `signing`, `ci`, `deps`.
 
+### Developer Certificate of Origin (DCO)
+
+Every commit MUST carry a `Signed-off-by` trailer matching the commit author:
+
+```
+fix(gui): keep the action bar reachable in narrow windows
+
+Signed-off-by: Ada Example <ada@example.com>
+```
+
+The trailer asserts that the author is legally entitled to make the
+contribution under the project's MIT license and agrees to the Developer
+Certificate of Origin (<https://developercertificate.org>). It is enforced by
+CI (`scripts/check-dco.py` runs on every pull request) and locally by
+`git commit -s`. Community rules, escalation, and enforcement follow the
+[Code of Conduct](CODE_OF_CONDUCT.md) and the
+[governance model](GOVERNANCE.md).
+
 ---
 
 ## Release Strategy
@@ -214,6 +232,9 @@ A contribution is acceptable when it meets **all** of the following:
    policy — see the OpenSSF Best Practices `test_policy` criterion). Tests
    for pure-wiring and release-automation changes live in
    `rivulet-core/tests/ci_pinning.rs` as content guards.
+- **Regression test with every bug fix.** A `fix:` change MUST add or update a
+   regression test that fails on the unfixed code (policy and exceptions in
+   [`docs/regression-testing.md`](docs/regression-testing.md)).
 - **i18n parity.** Any user-visible string must exist in **both** the EN and
    DE locale tables (`rivulet-core/src/i18n.rs`) in the same order.
 - **Documentation.** User-visible behavior is reflected in `README.md`, the
