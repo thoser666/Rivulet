@@ -828,6 +828,7 @@ mod sys_impl {
 mod sys_impl {
     use super::*;
     use anyhow::Context;
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc;
     use std::sync::{Arc, Mutex};
@@ -925,10 +926,11 @@ mod sys_impl {
                 while running.load(Ordering::SeqCst) {
                     let mut any = false;
                     while let Ok(raw) = raw_rx.try_recv() {
+                        let kind = raw.kind;
                         let mut frame = to_audio_frame(raw, channels, sample_rate);
                         apply_volume(
                             &mut frame,
-                            if raw.kind == SourceKind::System {
+                            if kind == SourceKind::System {
                                 sys_volume
                             } else {
                                 mic_volume
@@ -989,25 +991,21 @@ mod sys_impl {
             let handle = thread::spawn(move || {
                 while running.load(Ordering::SeqCst) {
                     let mut any = false;
-                    if let Some(rx) = &sys_rx {
-                        while let Ok(raw) = rx.try_recv() {
-                            let mut frame = to_audio_frame(raw, channels, sample_rate);
-                            apply_volume(&mut frame, sys_volume);
-                            if let Ok(mut cb) = sys_callback.lock() {
-                                cb(frame);
-                            }
-                            any = true;
+                    while let Ok(raw) = sys_rx.try_recv() {
+                        let mut frame = to_audio_frame(raw, channels, sample_rate);
+                        apply_volume(&mut frame, sys_volume);
+                        if let Ok(mut cb) = sys_callback.lock() {
+                            cb(frame);
                         }
+                        any = true;
                     }
-                    if let Some(rx) = &mic_rx {
-                        while let Ok(raw) = rx.try_recv() {
-                            let mut frame = to_audio_frame(raw, channels, sample_rate);
-                            apply_volume(&mut frame, mic_volume);
-                            if let Ok(mut cb) = mic_callback.lock() {
-                                cb(frame);
-                            }
-                            any = true;
+                    while let Ok(raw) = mic_rx.try_recv() {
+                        let mut frame = to_audio_frame(raw, channels, sample_rate);
+                        apply_volume(&mut frame, mic_volume);
+                        if let Ok(mut cb) = mic_callback.lock() {
+                            cb(frame);
                         }
+                        any = true;
                     }
                     if !any {
                         thread::sleep(std::time::Duration::from_millis(5));
