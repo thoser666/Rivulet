@@ -27,7 +27,7 @@ during the online self-certification.
 | Dynamic analysis | cargo-fuzz targets (CI smoke + weekly deep campaign) |
 | Release hygiene | Generated notes + completeness check + `SHA256SUMS` + HTTPS |
 | Codebases | Primary `thoser666/Rivulet` + `Rivulet.wiki` docs companion (README **Repositories** section) |
-| Automation proposals | `.bestpractices.json` (all 24 baseline-1 controls, schema-validated by CI) |
+| Automation proposals | `.bestpractices.json` (baseline-1 24/24 + metal passing subset, schema-validated by CI) |
 
 ## Contribution process (`contribution`, `contribution_requirements`)
 
@@ -103,6 +103,21 @@ gaps were closed as follows:
 Statuses the site understands: `Met`, `Unmet`, `N/A`, `?` and `unknown`
 (`?`/`unknown` are ignored and safe as placeholders).
 
+Beyond baseline-1, the file also carries **metal-series passing** proposals
+for the criteria the repo demonstrably meets and that a file can vouch for:
+`contribution`, `contribution_requirements`, `floss_license`,
+`license_location`, `documentation_basics`, `sites_https`, `discussion`,
+`english`, `repo_public`, `repo_track`, `repo_interim`, `version_unique`,
+`release_notes`, `report_process`, `report_tracker`, `report_archive`,
+`vulnerability_report_process`, `vulnerability_report_private`, `build`,
+`test`, `test_invocation`, `test_policy`, `warnings`, `warnings_fixed`,
+`static_analysis`, `no_leaked_credentials`, `delivery_mitm`,
+`dynamic_analysis`, `description_good` and `interact`. Behavioural criteria
+(`maintained`, `report_responses`, `know_secure_design`, the `crypto_*`
+family, `vulnerabilities_fixed_60_days`, …) are deliberately **not** claimed
+from a file — they are answered truthfully during the online
+self-certification.
+
 ## How this page stays true
 
 The following are pinned by `rivulet-core/tests/ci_pinning.rs` so the
@@ -127,6 +142,11 @@ evidence cannot drift out of existence:
   `osps_qa_04_01` as `Met`, the README keeps the multi-repo list, both
   release workflows ship the license, and the docs keep the no-bypass
   ruleset wording.
+- `bestpractices_metal_passing_claims_are_pinned` — the claimed metal
+  passing criteria stay exactly in sync: every listed criterion is `Met`
+  with evidence, no other metal passing criterion gains a claim without a
+  deliberate list change, and the schema guard accepts the full canonical
+  passing key set (`METAL_PASSING_CRITERIA`).
 
 ## Remaining (maintainer action, not repo files)
 

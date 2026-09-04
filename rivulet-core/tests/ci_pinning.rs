@@ -267,6 +267,88 @@ const BASELINE_1_CRITERIA: &[&str] = &[
     "osps_vm_02_01", // OSPS-VM-02.01 security contacts documented
 ];
 
+/// Canonical metal-series "passing" criterion keys (short lowercase names
+/// used by `.bestpractices.json` and proposal URLs), from the OpenSSF
+/// criteria (`criteria/criteria.yml`). Only the passing level is listed;
+/// behavioral criteria (maintained, report_responses, know_secure_design,
+/// the crypto_* family, vulnerabilities_fixed_60_days, ...) are intentionally
+/// included so the file may answer them honestly but are left unclaimed here.
+const METAL_PASSING_CRITERIA: &[&str] = &[
+    "description_good",
+    "interact",
+    "contribution",
+    "contribution_requirements",
+    "floss_license",
+    "floss_license_osi",
+    "license_location",
+    "documentation_basics",
+    "documentation_interface",
+    "sites_https",
+    "discussion",
+    "english",
+    "maintained",
+    "repo_public",
+    "repo_track",
+    "repo_interim",
+    "repo_distributed",
+    "version_unique",
+    "version_semver",
+    "version_tags",
+    "release_notes",
+    "release_notes_vulns",
+    "report_process",
+    "report_tracker",
+    "report_responses",
+    "enhancement_responses",
+    "report_archive",
+    "vulnerability_report_process",
+    "vulnerability_report_private",
+    "vulnerability_report_response",
+    "build",
+    "build_common_tools",
+    "build_floss_tools",
+    "test",
+    "test_invocation",
+    "test_most",
+    "test_continuous_integration",
+    "test_policy",
+    "tests_are_added",
+    "tests_documented_added",
+    "warnings",
+    "warnings_fixed",
+    "warnings_strict",
+    "know_secure_design",
+    "know_common_errors",
+    "crypto_published",
+    "crypto_call",
+    "crypto_floss",
+    "crypto_keylength",
+    "crypto_working",
+    "crypto_weaknesses",
+    "crypto_pfs",
+    "crypto_password_storage",
+    "crypto_random",
+    "delivery_mitm",
+    "delivery_unsigned",
+    "vulnerabilities_fixed_60_days",
+    "vulnerabilities_critical_fixed",
+    "no_leaked_credentials",
+    "static_analysis",
+    "static_analysis_common_vulnerabilities",
+    "static_analysis_fixed",
+    "static_analysis_often",
+    "dynamic_analysis",
+    "dynamic_analysis_unsafe",
+    "dynamic_analysis_enable_assertions",
+    "dynamic_analysis_fixed",
+];
+
+/// A claim key is canonical when it names a baseline-1 control or a
+/// metal-series passing criterion.
+fn is_canonical_claim_criterion(criterion: &str) -> bool {
+    BASELINE_1_CRITERIA.contains(&criterion) || METAL_PASSING_CRITERIA.contains(&criterion)
+}
+
 #[test]
 fn bestpractices_json_claims_are_schema_valid_and_canonical() {
     // `.bestpractices.json` is the draft automation-proposal file the OpenSSF
@@ -301,8 +383,8 @@ fn bestpractices_json_claims_are_schema_valid_and_canonical() {
     for (key, value) in obj {
         if let Some(criterion) = key.strip_suffix("_status") {
             assert!(
-                BASELINE_1_CRITERIA.contains(&criterion),
-                ".bestpractices.json: `{key}` is not a canonical baseline-1 criterion key"
+                is_canonical_claim_criterion(criterion),
+                ".bestpractices.json: `{key}` is not a canonical baseline-1 or metal-passing criterion key"
             );
             let status = value
                 .as_str()
@@ -315,8 +397,8 @@ fn bestpractices_json_claims_are_schema_valid_and_canonical() {
             );
         } else if let Some(criterion) = key.strip_suffix("_justification") {
             assert!(
-                BASELINE_1_CRITERIA.contains(&criterion),
-                ".bestpractices.json: `{key}` is not a canonical baseline-1 criterion key"
+                is_canonical_claim_criterion(criterion),
+                ".bestpractices.json: `{key}` is not a canonical baseline-1 or metal-passing criterion key"
             );
             assert!(
                 value.is_string(),
@@ -468,6 +550,103 @@ fn ossf_baseline_1_gap_closures_are_pinned() {
             "docs/openssf-best-practices.md must mention {marker}"
         );
     }
+}
+
+/// The metal-series passing criteria Rivulet claims as `Met` in
+/// `.bestpractices.json` — the repo-evidenced subset. Behavioral criteria
+/// (maintained, report_responses, know_secure_design, the crypto_* family,
+/// vulnerabilities_fixed_60_days, ...) are deliberately NOT listed: they stay
+/// unclaimed for the online questionnaire instead of being asserted from a
+/// file. This list must exactly match the claimed `*_status` keys in the file.
+const METAL_PASSING_CLAIMS: &[&str] = &[
+    "description_good",
+    "interact",
+    "contribution",
+    "contribution_requirements",
+    "floss_license",
+    "license_location",
+    "documentation_basics",
+    "sites_https",
+    "discussion",
+    "english",
+    "repo_public",
+    "repo_track",
+    "repo_interim",
+    "version_unique",
+    "release_notes",
+    "report_process",
+    "report_tracker",
+    "report_archive",
+    "vulnerability_report_process",
+    "vulnerability_report_private",
+    "build",
+    "test",
+    "test_invocation",
+    "test_policy",
+    "warnings",
+    "warnings_fixed",
+    "static_analysis",
+    "no_leaked_credentials",
+    "delivery_mitm",
+    "dynamic_analysis",
+];
+
+#[test]
+fn bestpractices_metal_passing_claims_are_pinned() {
+    // Every listed metal passing criterion must be claimed Met with evidence,
+    // and no other metal passing criterion may carry a status key (adding or
+    // removing a claim is a deliberate, reviewed change to this list).
+    let raw = read(".bestpractices.json");
+    let doc: serde_json::Value =
+        serde_json::from_str(&raw).expect(".bestpractices.json must be valid JSON");
+    let obj = doc
+        .as_object()
+        .expect(".bestpractices.json must be a JSON object");
+    for criterion in METAL_PASSING_CLAIMS {
+        let status_key = format!("{criterion}_status");
+        let status = obj
+            .get(&status_key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        assert_eq!(
+            status, "Met",
+            ".bestpractices.json must claim {criterion} (metal passing) as Met"
+        );
+        let just_key = format!("{criterion}_justification");
+        let justification = obj
+            .get(&just_key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        assert!(
+            !justification.trim().is_empty(),
+            "{criterion} must carry a non-empty justification"
+        );
+    }
+    for key in obj.keys() {
+        let Some(criterion) = key.strip_suffix("_status") else {
+            continue;
+        };
+        if criterion.starts_with("osps_") {
+            continue; // baseline-1 controls are pinned by the other guards
+        }
+        assert!(
+            METAL_PASSING_CLAIMS.contains(&criterion),
+            ".bestpractices.json claims `{key}` but {criterion} is not in the \
+             METAL_PASSING_CLAIMS list (update the list deliberately)"
+        );
+    }
+
+    // The evidence map must document the metal-series proposals and this
+    // guard.
+    let map = read("docs/openssf-best-practices.md");
+    assert!(
+        map.contains("metal") && map.contains("passing"),
+        "docs/openssf-best-practices.md must cover the metal passing series"
+    );
+    assert!(
+        map.contains("bestpractices_metal_passing_claims_are_pinned"),
+        "docs/openssf-best-practices.md must list the metal-claims guard"
+    );
 }
 
 #[test]

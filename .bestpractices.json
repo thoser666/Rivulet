@@ -4,7 +4,7 @@
   "license": "MIT",
   "implementation_languages": "Rust",
 
-  "_comment": "Automation proposals for the OpenSSF Best Practices baseline-1 badge (OSPS v2026.08.28, 24 controls). All 24 controls are proposed Met with evidence; schema and content are pinned by the ci_pinning guards bestpractices_json_claims_are_schema_valid_and_canonical and ossf_baseline_1_gap_closures_are_pinned. See docs/openssf-best-practices.md. Field naming follows https://github.com/ossf/best-practices-badge/blob/main/docs/automation-proposals.md",
+  "_comment": "Automation proposals for the OpenSSF Best Practices badge: the OSPS baseline-1 series (v2026.08.28, all 24 controls) and the metal-series passing level (the repo-evidenced criteria; behavioral ones stay unclaimed for the questionnaire). Schema and content are pinned by the ci_pinning guards bestpractices_json_claims_are_schema_valid_and_canonical, ossf_baseline_1_gap_closures_are_pinned and bestpractices_metal_passing_claims_are_pinned. See docs/openssf-best-practices.md. Field naming follows https://github.com/ossf/best-practices-badge/blob/main/docs/automation-proposals.md",
 
   "osps_ac_01_01_status": "Met",
   "osps_ac_01_01_justification": "Hosted on GitHub, which has required two-factor authentication for all contributors since March 2023 (https://github.com/thoser666/Rivulet).",
@@ -76,5 +76,95 @@
   "osps_qa_05_02_justification": "No unreviewable binary artifacts are committed; only image/text assets such as icons (rivulet-gui/assets) are tracked.",
 
   "osps_vm_02_01_status": "Met",
-  "osps_vm_02_01_justification": "SECURITY.md documents security contacts and the coordinated-disclosure process; docs/security.md adds detail and a response timeline."
+  "osps_vm_02_01_justification": "SECURITY.md documents security contacts and the coordinated-disclosure process; docs/security.md adds detail and a response timeline.",
+
+  "description_good_status": "Met",
+  "description_good_justification": "README.md opens with a one-sentence description of what the software does (modern screen recording and streaming software built in Rust) followed by a feature list and roadmap.",
+
+  "interact_status": "Met",
+  "interact_justification": "The README links installation, the user guide, the first-stream checklist, help, contributing and bug reporting, and GitHub Issues/PRs are open for feedback.",
+
+  "contribution_status": "Met",
+  "contribution_justification": "CONTRIBUTING.md documents the full contribution process (branch strategy, PR flow against develop, code review policy): https://github.com/thoser666/Rivulet/blob/develop/CONTRIBUTING.md",
+
+  "contribution_requirements_status": "Met",
+  "contribution_requirements_justification": "CONTRIBUTING.md lists the requirements for acceptable contributions in its Definition of Done section: https://github.com/thoser666/Rivulet/blob/develop/CONTRIBUTING.md",
+
+  "floss_license_status": "Met",
+  "floss_license_justification": "The project is released under the MIT license (repository LICENSE file); the software is produced by the project itself.",
+
+  "license_location_status": "Met",
+  "license_location_justification": "The MIT license text is maintained in the repository root LICENSE file: https://github.com/thoser666/Rivulet/blob/develop/LICENSE",
+
+  "documentation_basics_status": "Met",
+  "documentation_basics_justification": "User guides cover installation, configuration and usage: README.md, docs/user-guide.md, docs/first-stream-checklist.md, docs/stream-setup.md, docs/macos-recording.md.",
+
+  "sites_https_status": "Met",
+  "sites_https_justification": "The repository, wiki, releases and all official channels referenced in documentation are served over HTTPS (github.com).",
+
+  "discussion_status": "Met",
+  "discussion_justification": "Public discussion happens through GitHub Issues, pull requests and the project wiki: https://github.com/thoser666/Rivulet/issues",
+
+  "english_status": "Met",
+  "english_justification": "All documentation is written in English (German translations are provided for the UI and key guides).",
+
+  "repo_public_status": "Met",
+  "repo_public_justification": "The source repository is publicly readable: https://github.com/thoser666/Rivulet",
+
+  "repo_track_status": "Met",
+  "repo_track_justification": "All changes are tracked in git with a public history of authors and timestamps: https://github.com/thoser666/Rivulet/commits/develop",
+
+  "repo_interim_status": "Met",
+  "repo_interim_justification": "Interim versions between releases are visible on the develop branch and per-release branches: https://github.com/thoser666/Rivulet/tree/develop",
+
+  "version_unique_status": "Met",
+  "version_unique_justification": "Every release has a unique semantic version tag (e.g. v0.65.0-alpha.132): https://github.com/thoser666/Rivulet/releases",
+
+  "release_notes_status": "Met",
+  "release_notes_justification": "Every GitHub Release carries notes generated from the actual commits since the previous tag (scripts/generate-release-notes.sh), completeness-checked in CI: https://github.com/thoser666/Rivulet/releases",
+
+  "report_process_status": "Met",
+  "report_process_justification": "The README Bug reporting section and CONTRIBUTING.md point to the GitHub issue tracker: https://github.com/thoser666/Rivulet/issues",
+
+  "report_tracker_status": "Met",
+  "report_tracker_justification": "Bugs are tracked in the public GitHub issue tracker: https://github.com/thoser666/Rivulet/issues",
+
+  "report_archive_status": "Met",
+  "report_archive_justification": "GitHub preserves the full public issue and pull-request archive: https://github.com/thoser666/Rivulet/issues",
+
+  "vulnerability_report_process_status": "Met",
+  "vulnerability_report_process_justification": "SECURITY.md documents how to report vulnerabilities and the coordinated-disclosure process: https://github.com/thoser666/Rivulet/blob/develop/SECURITY.md",
+
+  "vulnerability_report_private_status": "Met",
+  "vulnerability_report_private_justification": "SECURITY.md points to GitHub private vulnerability reporting for coordinated disclosure: https://github.com/thoser666/Rivulet/security/advisories/new",
+
+  "build_status": "Met",
+  "build_justification": "The project builds from source with cargo build on the pinned toolchain (workspace); build and test commands are documented in README Development/Tests and CONTRIBUTING.md.",
+
+  "test_status": "Met",
+  "test_justification": "A substantial automated test suite runs via cargo test in CI on three operating systems (core unit/integration, GUI, obs-websocket, smoke and pinning tests).",
+
+  "test_invocation_status": "Met",
+  "test_invocation_justification": "The README Tests section and CONTRIBUTING.md document the exact cargo test invocations used locally and in CI.",
+
+  "test_policy_status": "Met",
+  "test_policy_justification": "CONTRIBUTING.md Definition of Done requires tests for new functionality (the project's formal test policy).",
+
+  "warnings_status": "Met",
+  "warnings_justification": "CI runs clippy with -D warnings and rustfmt checks in the Lints job; warning-emitting code fails the build.",
+
+  "warnings_fixed_status": "Met",
+  "warnings_fixed_justification": "The CI Lints job fails on any compiler or clippy warning (-D warnings), so merged code is kept warning-free.",
+
+  "static_analysis_status": "Met",
+  "static_analysis_justification": "Static analysis runs in CI: clippy -D warnings, CodeQL (rust), Cargo Audit, Cargo Deny and the OpenSSF Scorecard workflow.",
+
+  "no_leaked_credentials_status": "Met",
+  "no_leaked_credentials_justification": "GitHub Secret Scanning and Push Protection are enabled; secret-prone files are gitignored and CONTRIBUTING.md enforces a no-secrets rule.",
+
+  "delivery_mitm_status": "Met",
+  "delivery_mitm_justification": "Release assets are distributed over HTTPS via GitHub Releases and verified against a published SHA256SUMS manifest (the updater fails closed on mismatch).",
+
+  "dynamic_analysis_status": "Met",
+  "dynamic_analysis_justification": "Dynamic analysis via cargo-fuzz targets for the untrusted parsers (Twitch IRC, SDP, updater JSON) with a CI smoke run and a weekly deep campaign (fuzz-deep.yml)."
 }
