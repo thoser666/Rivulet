@@ -38,6 +38,10 @@ hmac = "0.12"
 base64 = "0.22"
 
 [profile.release]
+# Release build settings. Debug info is deliberately PRESERVED (no `strip`, no
+# `install -s`, no `-C debuginfo=0`): RUSTFLAGS-requested debug info (-C
+# debuginfo) flows through to the artifacts, satisfying the OpenSSF silver
+# `build_preserve_debug` criterion. See docs/security/assurance-case.md.
 opt-level = 3
 lto = true
 codegen-units = 1

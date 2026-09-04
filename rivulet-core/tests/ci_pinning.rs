@@ -638,6 +638,61 @@ fn ossf_silver_gap_closures_are_pinned() {
         "the PR template must capture the regression-test and DCO requirements"
     );
 
+    // access_continuity + bus_factor: GOVERNANCE.md documents the concrete
+    // contingency plan (backup maintainer, credential handover, 1-week
+    // recovery window).
+    assert!(
+        gov.contains("## Access continuity (bus factor)")
+            && gov.contains("Backup maintainer")
+            && gov.contains("Credential contingency")
+            && gov.contains("Recovery window")
+            && gov.contains("bus factor 1"),
+        "GOVERNANCE.md must document the access-continuity plan"
+    );
+
+    // assurance_case: the dedicated assurance-case document exists and argues
+    // the security requirements (threat model, trust boundaries, secure
+    // design, common weaknesses).
+    let assurance = read("docs/security/assurance-case.md");
+    for marker in [
+        "# Rivulet Assurance Case",
+        "Threat model",
+        "Trust boundaries",
+        "Secure-design argument",
+        "Common implementation weaknesses countered",
+        "test_statement_coverage80",
+    ] {
+        assert!(
+            assurance.contains(marker),
+            "docs/security/assurance-case.md must contain {marker}"
+        );
+    }
+
+    // test_statement_coverage80: the coverage gate script + CI job exist and
+    // require >= 80 % statement coverage on rivulet-core.
+    let gate = read("scripts/coverage-gate.sh");
+    for marker in ["rivulet-core", "--fail-under-lines", "80"] {
+        assert!(
+            gate.contains(marker),
+            "scripts/coverage-gate.sh must contain {marker}"
+        );
+    }
+    assert!(
+        ci.contains("name: Statement Coverage (rivulet-core >= 80%)")
+            && ci.contains("bash scripts/coverage-gate.sh")
+            && ci.contains("needs.coverage.result"),
+        "ci.yml must run the coverage gate and aggregate it"
+    );
+
+    // build_preserve_debug: the release profile preserves debug info (no
+    // strip, no install -s) and documents it.
+    let cargo = read("Cargo.toml");
+    assert!(
+        cargo.contains("Debug info is deliberately PRESERVED")
+            && cargo.contains("build_preserve_debug"),
+        "Cargo.toml must document that release debug info is preserved"
+    );
+
     // The evidence map must document the closures and this guard.
     let map = read("docs/openssf-best-practices.md");
     for marker in [
@@ -646,6 +701,9 @@ fn ossf_silver_gap_closures_are_pinned() {
         "CODE_OF_CONDUCT.md",
         "check-dco.py",
         "regression-testing.md",
+        "assurance-case.md",
+        "coverage-gate.sh",
+        "build_preserve_debug",
     ] {
         assert!(
             map.contains(marker),
@@ -1857,7 +1915,7 @@ fn develop_required_checks_have_stable_job_names() {
             && ci.contains("cargo test -p rivulet-core --test ci_pinning")
             && ci.contains("name: CI")
             && ci.contains(
-                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke, roadmap_sync]"
+                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke, coverage, roadmap_sync]"
             ),
         "CI must expose dedicated Pinning-Tests and aggregate CI checks"
     );

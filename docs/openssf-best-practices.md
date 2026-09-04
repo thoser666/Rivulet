@@ -178,13 +178,32 @@ by `ossf_silver_gap_closures_are_pinned`:
   is the formal policy and tracking mechanism (every bug fix ships a
   regression test; exceptions must be named); it is wired into the
   Definition of Done and the pull-request template.
+- **`access_continuity` / `bus_factor`** — [`GOVERNANCE.md`](../GOVERNANCE.md)
+  now documents a concrete **access-continuity plan**: a backup-maintainer
+  onboarding path, a private credential-contingency procedure (key/signing/DNS
+  handover), and a one-week recovery window. The current honest status (bus
+  factor 1, single maintainer) is stated explicitly rather than overclaimed.
+- **`assurance_case`** — [`docs/security/assurance-case.md`](../docs/security/assurance-case.md)
+  is the written security assurance case: security requirements, threat model,
+  trust boundaries, the secure-design argument, and the table of common
+  implementation weaknesses counteracted (fuzzing, secret-redaction,
+  fail-closed updates, memory safety).
+- **`test_statement_coverage80`** — [`scripts/coverage-gate.sh`](../scripts/coverage-gate.sh)
+  measures `rivulet-core` statement coverage with `cargo-llvm-cov` and
+  **fails CI below 80 %** (job `Statement Coverage (rivulet-core >= 80%)`).
+  Scope is the core library because the platform hook/launcher shims cannot be
+  exercised headlessly; measured locally at ~88 %.
+- **`build_preserve_debug`** — the release profile in [`Cargo.toml`](../Cargo.toml)
+  deliberately preserves debug info (no `strip`, no `install -s`,
+  RUSTFLAGS `-C debuginfo` passes through) and documents that choice inline.
 
 ## Remaining (maintainer action, not repo files)
 
-1. Register the project at <https://www.bestpractices.dev> with the GitHub
-   account and answer the questionnaire (baseline-1 series is the fastest
-   start; the metal "passing" series is the badge referenced above).
-2. Answer the behavioural criteria truthfully (bug/vulnerability response
-   history, maintainer security knowledge); accept the 🤖 automation
-   proposals from `.bestpractices.json` as you go.
-3. Embed the badge markdown in `README.md` once the project has an ID.
+1. Answer the remaining behavioural criteria and the structural items that a
+   file cannot fix alone: `bus_factor` (needs a second maintainer),
+   `signed_releases` / `version_tags_signed` (needs a trusted signing key +
+   user-verification documentation; currently only self-signed smoke tests).
+2. Accept the 🤖 automation proposals from `.bestpractices.json` as you go;
+   the coverage gate above is what makes `test_statement_coverage80` honest.
+3. Embed the badge markdown in `README.md` (already present) and keep the
+   badge status current.
