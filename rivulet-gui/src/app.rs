@@ -9852,6 +9852,12 @@ mod tests {
     #[test]
     fn macos_stop_arms_the_background_finalization() {
         let mut app = RivuletApp::default();
+        // Simulate an active session the way start_macos_recording leaves it:
+        // the engine session is started (state-only, no GStreamer pipeline is
+        // built until the first frame) and the app arms the capture channel.
+        let path =
+            std::env::temp_dir().join(format!("rivulet_gui_macos_stop_{}.mp4", std::process::id()));
+        app.engine.start_local_recording(path);
         app.is_recording = true;
         app.raw_rx = Some(std_mpsc::channel::<RawFrame>().1);
         app.stop_signal = Some(Arc::new(AtomicBool::new(false)));
