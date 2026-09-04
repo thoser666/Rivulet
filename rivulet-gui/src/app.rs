@@ -9,12 +9,16 @@ use rivulet_core::{
     StreamConnectionResult, StreamHealthStatus, StreamPlatform, StreamPreset, StreamProbeResult,
     StreamSettings, StreamStats,
 };
-use std::sync::mpsc::{self as std_mpsc, Receiver};
+use std::sync::mpsc::Receiver;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex, RwLock,
 };
 use std::time::Instant;
+
+// --- macOS imports (xcap screen/window capture for recording) ---
+#[cfg(target_os = "macos")]
+use {std::sync::mpsc as std_mpsc, std::thread};
 
 // --- Linux-specific imports ---
 #[cfg(target_os = "linux")]
@@ -2800,30 +2804,27 @@ impl RivuletApp {
                     }
                 });
         });
+        let overlay_label = self.tr("overlay_toggle").to_string();
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.show_overlay, self.tr("overlay_toggle"));
+            ui.checkbox(&mut self.show_overlay, overlay_label);
         });
 
         let source_selected =
             self.selected_monitor_idx.is_some() || self.selected_window_idx.is_some();
+        let stop_label = format!("⏹ {}", self.tr("stop_recording"));
+        let start_label = format!("⏺ {}", self.tr("start_recording"));
         if self.is_recording {
             let elapsed = self.record_started.elapsed().as_secs();
             let in_progress = self.tr_fmt("recording_in_progress", &[elapsed.to_string()]);
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(in_progress).color(colors.active));
-                if ui
-                    .button(format!("⏹ {}", self.tr("stop_recording")))
-                    .clicked()
-                {
+                if ui.button(&stop_label).clicked() {
                     self.stop_macos_recording();
                     self.is_paused = false;
                 }
             });
         } else if ui
-            .add_enabled(
-                source_selected,
-                egui::Button::new(format!("⏺ {}", self.tr("start_recording"))),
-            )
+            .add_enabled(source_selected, egui::Button::new(&start_label))
             .clicked()
         {
             self.start_macos_recording();
@@ -6540,6 +6541,8 @@ impl eframe::App for RivuletApp {
                         self.stop_windows_recording();
                         #[cfg(target_os = "linux")]
                         self.stop_linux_recording();
+                        #[cfg(target_os = "macos")]
+                        self.stop_macos_recording();
                     }
                     self.is_paused = false;
                     self.is_muted = false;
