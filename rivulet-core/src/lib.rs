@@ -239,6 +239,22 @@ pub struct RivuletEngine {
     replay: Option<Arc<Mutex<ReplayBuffer>>>,
 }
 
+/// GStreamer objects and per-session state detached from the engine when a
+/// recording/stream stops, so the teardown (EOS finalization, auto-remux,
+/// cloud upload) can run either synchronously (via `stop_recording`) or on a
+/// background thread (via `stop_recording_background`) without keeping the
+/// engine itself busy.
+struct StoppedParts {
+    pipeline: Option<gst::Pipeline>,
+    appsrc: Option<gst_app::AppSrc>,
+    audio_appsrc: Option<gst_app::AppSrc>,
+    audio_appsrc_sys: Option<gst_app::AppSrc>,
+    audio_appsrc_mic: Option<gst_app::AppSrc>,
+    finished_path: Option<PathBuf>,
+    finished_container: RecordingContainer,
+    replay: Option<Arc<Mutex<ReplayBuffer>>>,
+}
+
 impl Default for RivuletEngine {
     fn default() -> Self {
         Lazy::force(&GSTREAMER_INIT);
@@ -1616,46 +1632,55 @@ impl RivuletEngine {
             return;
         }
         tracing::info!("Stopping recording");
+        let parts = self.detach_stopped_session();
 
+        // Teardown and finalize on the calling thread: after this returns, the
+        // recording file is finalized and any configured post-processing
+        // (auto-remux, cloud upload) has completed.
+        Self::finalize_stopped_session(parts, self.remux_settings, self.cloud_recording.clone());
+    }
+
+    /// Stops the recording without blocking the caller.
+    ///
+    /// The engine's session state is reset synchronously — a new recording or
+    /// stream can start immediately after this returns — but the GStreamer
+    /// teardown (EOS push, the up-to-10 s wait for the muxer to finalize the
+    /// file, setting the pipeline to Null) plus the optional auto-remux and
+    /// cloud upload run on a background thread. The GUI uses this from the UI
+    /// thread so clicking "Stop" never freezes the interface for the duration
+    /// of the teardown/remux/upload (which can take a while for long
+    /// recordings).
+    pub fn stop_recording_background(&mut self) {
+        if !self.is_recording {
+            return;
+        }
+        tracing::info!("Stopping recording (background teardown)");
+        let parts = self.detach_stopped_session();
+        let remux_settings = self.remux_settings;
+        let cloud_recording = self.cloud_recording.clone();
+        std::thread::spawn(move || {
+            Self::finalize_stopped_session(parts, remux_settings, cloud_recording);
+        });
+    }
+
+    /// Common synchronous half of [`Self::stop_recording`] and
+    /// [`Self::stop_recording_background`]: detaches the pipeline (and its
+    /// appsrcs) from the engine and resets the recording state so the engine
+    /// is immediately ready for the next session.
+    fn detach_stopped_session(&mut self) -> StoppedParts {
         // Capture the output path and container before the recording state is
         // torn down, so auto-remux can run on the finished file (issue #71).
-        let finished_path = self.output_path.clone();
-        let finished_container = self.recording_container;
+        let parts = StoppedParts {
+            finished_path: self.output_path.clone(),
+            finished_container: self.recording_container,
+            pipeline: self.pipeline.take(),
+            appsrc: self.appsrc.take(),
+            audio_appsrc: self.audio_appsrc.take(),
+            audio_appsrc_sys: self.audio_appsrc_sys.take(),
+            audio_appsrc_mic: self.audio_appsrc_mic.take(),
+            replay: self.replay.clone(),
+        };
 
-        if let Some(appsrc) = self.appsrc.as_ref() {
-            let _ = appsrc.end_of_stream();
-        }
-        if let Some(appsrc) = self.audio_appsrc.as_ref() {
-            let _ = appsrc.end_of_stream();
-        }
-        if let Some(appsrc) = self.audio_appsrc_sys.as_ref() {
-            let _ = appsrc.end_of_stream();
-        }
-        if let Some(appsrc) = self.audio_appsrc_mic.as_ref() {
-            let _ = appsrc.end_of_stream();
-        }
-
-        // Wait for EOS so the muxer finalizes the file (moov atom)
-        // before the pipeline is set to Null.
-        if let Some(pipeline) = self.pipeline.as_ref() {
-            if let Some(bus) = pipeline.bus() {
-                let _ = bus.timed_pop_filtered(
-                    gst::ClockTime::from_seconds(10),
-                    &[gst::MessageType::Eos, gst::MessageType::Error],
-                );
-            }
-        }
-
-        if let Some(pipeline) = self.pipeline.take() {
-            pipeline
-                .set_state(gst::State::Null)
-                .expect("Pipeline could not be stopped.");
-        }
-
-        self.appsrc = None;
-        self.audio_appsrc = None;
-        self.audio_appsrc_sys = None;
-        self.audio_appsrc_mic = None;
         self.output_path = None;
         self.stream_health = None;
         self.recording_metrics = None;
@@ -1664,35 +1689,78 @@ impl RivuletEngine {
         self.reconnect_started = None;
         self.delay_supervisors.clear();
         self.is_recording = false;
+        parts
+    }
+
+    /// Pushes EOS on every appsrc, waits (up to 10 s) for the muxer to
+    /// finalize the file, brings the pipeline to Null, clears the session
+    /// replay ring, and then runs the optional auto-remux and cloud upload for
+    /// the finished recording. Owns only the detached session parts, so it can
+    /// run on any thread.
+    fn finalize_stopped_session(
+        parts: StoppedParts,
+        remux_settings: RemuxSettings,
+        cloud_recording: CloudRecording,
+    ) {
+        for src in [
+            parts.appsrc,
+            parts.audio_appsrc,
+            parts.audio_appsrc_sys,
+            parts.audio_appsrc_mic,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let _ = src.end_of_stream();
+        }
+
+        // Wait for EOS so the muxer finalizes the file (moov atom)
+        // before the pipeline is set to Null.
+        if let Some(pipeline) = parts.pipeline.as_ref() {
+            if let Some(bus) = pipeline.bus() {
+                let _ = bus.timed_pop_filtered(
+                    gst::ClockTime::from_seconds(10),
+                    &[gst::MessageType::Eos, gst::MessageType::Error],
+                );
+            }
+        }
+
+        if let Some(pipeline) = parts.pipeline {
+            pipeline
+                .set_state(gst::State::Null)
+                .expect("Pipeline could not be stopped.");
+        }
+
         // Drop the buffered replay data: a clip is only meaningful while the
         // session that produced it is running. The replay setting itself
         // (duration/enabled) is kept for the next recording.
-        if let Some(replay) = &self.replay {
+        if let Some(replay) = parts.replay {
             replay.lock().unwrap_or_else(|e| e.into_inner()).clear();
         }
         tracing::info!("Recording stopped and file saved");
 
         // Auto-remux the finished crash-safe recording to MP4 (issue #71).
-        self.remux_finished_recording(finished_path.as_deref(), finished_container);
+        Self::remux_finished_recording(
+            &remux_settings,
+            parts.finished_path.as_deref(),
+            parts.finished_container,
+        );
 
         // Upload the finished recording to the configured cloud destination
         // (M4 follow-up: S3-compatible PUT after stop).
-        if let Some(path) = finished_path.as_deref() {
-            self.upload_finished_recording(path);
+        if let Some(path) = parts.finished_path.as_deref() {
+            Self::upload_finished_recording(&cloud_recording, path);
         }
     }
 
     /// Uploads a finished recording to the configured S3-compatible cloud
-    /// destination when enabled and valid. The upload runs synchronously on
-    /// the caller thread and is best-effort: failures are logged, never fatal.
-    fn upload_finished_recording(&self, path: &std::path::Path) {
-        if !self.cloud_recording.enabled {
+    /// destination when enabled and valid. Best-effort: failures are logged,
+    /// never fatal.
+    fn upload_finished_recording(cloud: &CloudRecording, path: &std::path::Path) {
+        if !cloud.enabled {
             return;
         }
-        match self
-            .cloud_recording
-            .upload_recording(path, &cloud::UreqPut, chrono::Utc::now())
-        {
+        match cloud.upload_recording(path, &cloud::UreqPut, chrono::Utc::now()) {
             Ok(bytes) => {
                 tracing::info!(path = %path.display(), bytes, "Recording uploaded to cloud");
             }
@@ -1706,11 +1774,11 @@ impl RivuletEngine {
     /// source is a crash-safe intermediate container (MKV/MOV/TS). No-op for
     /// MP4 recordings and for recordings that did not produce an output file.
     fn remux_finished_recording(
-        &self,
+        settings: &RemuxSettings,
         path: Option<&std::path::Path>,
         container: RecordingContainer,
     ) {
-        if !self.remux_settings.auto_remux_after_stop {
+        if !settings.auto_remux_after_stop {
             return;
         }
         let Some(path) = path else {
@@ -2016,6 +2084,74 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// Regression: stopping a recording used to run the whole GStreamer
+    /// teardown on the caller's thread — up to a 10 s EOS wait plus the
+    /// auto-remux and cloud upload — which froze the GUI. The background stop
+    /// must reset the engine state synchronously (a new session can start
+    /// immediately) and finalize the file on a background thread.
+    #[test]
+    fn background_stop_returns_immediately_and_finalizes_the_file() {
+        let mut engine = RivuletEngine::default();
+        let path =
+            std::env::temp_dir().join(format!("rivulet_bg_stop_test_{}.mp4", std::process::id()));
+        engine.start_local_recording(path.clone());
+
+        let (width, height) = (320u32, 240u32);
+        let video = vec![0u8; (width * height * 4) as usize];
+        for _ in 0..12 {
+            engine.process_raw_frame(&video, width, height);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let started = std::time::Instant::now();
+        engine.stop_recording_background();
+        let stop_latency = started.elapsed();
+
+        // The engine must be reset synchronously: the UI thread returns at
+        // once and must not wait for EOS/remux/upload.
+        assert!(
+            !engine.is_recording,
+            "engine state must reset synchronously"
+        );
+        assert!(
+            engine.output_path.is_none(),
+            "output path must be cleared synchronously"
+        );
+        assert!(
+            stop_latency < std::time::Duration::from_secs(2),
+            "background stop must return quickly, took {stop_latency:?}"
+        );
+
+        // The engine is immediately reusable while the old pipeline drains on
+        // the background thread.
+        let second =
+            std::env::temp_dir().join(format!("rivulet_bg_stop_second_{}.mp4", std::process::id()));
+        engine.start_local_recording(second.clone());
+        for _ in 0..12 {
+            engine.process_raw_frame(&video, width, height);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        engine.stop_recording();
+
+        // Both files must be finalized: the second synchronously by the stop
+        // above, the first by the background thread (polled up to a deadline).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let mut first_ready = false;
+        while std::time::Instant::now() < deadline {
+            if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > 0 {
+                first_ready = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert!(first_ready, "background stop must finalize the file");
+        let second_len = std::fs::metadata(&second).map(|m| m.len()).unwrap_or(0);
+        assert!(second_len > 0, "second recording must be finalized");
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&second);
     }
 
     /// End-to-end test with the replay buffer enabled: the same synthetic

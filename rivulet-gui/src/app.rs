@@ -1862,7 +1862,9 @@ impl RivuletApp {
         }
         self.is_windows_recording = false;
         self.capture_backend = None;
-        self.engine.stop_recording();
+        // Teardown runs on a background thread so the UI never freezes for the
+        // EOS wait / auto-remux / cloud upload (see stop_recording_background).
+        self.engine.stop_recording_background();
         self.frame_receiver = None;
         // Keep the error receiver alive after the stop so a capture error
         // that arrives a frame late is still shown in the UI; the next
@@ -2351,7 +2353,9 @@ impl RivuletApp {
         }
         // Stop PipeWire portal capture if active (G6)
         self.pipewire_capture = None;
-        self.engine.stop_recording();
+        // Teardown runs on a background thread so the UI never freezes for the
+        // EOS wait / auto-remux / cloud upload (see stop_recording_background).
+        self.engine.stop_recording_background();
         self.raw_rx = None;
         self.stop_signal = None;
         self.stop_audio_capture();
@@ -2451,7 +2455,9 @@ impl RivuletApp {
         if let Some(signal) = &self.stop_signal {
             signal.store(true, Ordering::SeqCst);
         }
-        self.engine.stop_recording();
+        // Teardown runs on a background thread so the UI never freezes for the
+        // EOS wait / auto-remux / cloud upload (see stop_recording_background).
+        self.engine.stop_recording_background();
         self.camera_rx = None;
         self.camera_handle = None;
         self.game_capture_rx = None;
@@ -9020,6 +9026,32 @@ mod tests {
                 .count()
                 >= 2,
             "every streaming start must clear last_error"
+        );
+    }
+
+    #[test]
+    fn gui_recording_stop_never_blocks_the_ui_thread_on_teardown() {
+        // Regression: the engine's synchronous stop runs the GStreamer EOS
+        // wait (up to 10 s), pipeline teardown, auto-remux, and cloud upload
+        // on the calling thread. When the GUI called it from the UI thread,
+        // clicking "Stop" froze the interface for the whole duration. Every
+        // GUI stop handler must use the non-blocking background variant.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let production = source
+            .split_once("#[cfg(test)]")
+            .map(|(head, _)| head)
+            .unwrap_or(&source);
+        let background = production
+            .matches("self.engine.stop_recording_background();")
+            .count();
+        let blocking = production.matches("self.engine.stop_recording();").count();
+        assert!(
+            background >= 3,
+            "each recording stop handler must use the background teardown, found {background}"
+        );
+        assert_eq!(
+            blocking, 0,
+            "no GUI stop handler may call the blocking engine.stop_recording()"
         );
     }
 

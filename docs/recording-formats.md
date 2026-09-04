@@ -52,9 +52,22 @@ the target container (MP4). The source extension is swapped for the output.
 - Waits for EOS/error (bounded 60s timeout), then returns a `RemuxOutcome`:
   `Success { output_path }`, `Skipped(reason)` when a GStreamer element is
   unavailable, or an error.
-- The engine runs this automatically at the end of `stop_recording` when
-  auto-remux is enabled; the GUI exposes the toggle alongside the container
-  picker.
+- The engine runs this automatically when a session is finalized: after
+  `stop_recording`, and on the background teardown thread after
+  `stop_recording_background`. Auto-remux is enabled by default; the GUI
+  exposes the toggle alongside the container picker.
+
+## Stop is non-blocking
+
+The stop sequence — pushing EOS, waiting (up to 10 s) for the muxer to
+finalize the file, setting the pipeline to Null, then the optional auto-remux
+and cloud upload — can take a while for long recordings. `stop_recording`
+runs it synchronously on the caller's thread (used by the engine tests and
+callers that need the file finalized when the call returns). The GUI stop
+handlers call `stop_recording_background`, which resets the engine state
+immediately (a new recording/stream can start at once) and runs the whole
+teardown/finalize sequence on a background thread, so clicking "Stop" never
+freezes the UI.
 
 ## Status
 

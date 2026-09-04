@@ -34,10 +34,13 @@ ausgeführt wird (nur wenn `enabled` gesetzt ist).
   (Path-Style-URL, AWS SigV4-Signierung mit Region `us-east-1` als Default).
   Gibt die hochgeladene Bytezahl zurück; Fehler (deaktiviert, ungültig, HTTP
   ≠ 2xx) werden als `Err` gemeldet.
-- Nach `stop_recording` wird die fertige Datei automatisch hochgeladen, sobald
-  eine `CloudRecording`-Konfiguration mit `enabled: true` gesetzt wurde
-  (`engine.set_cloud_recording(...)`). Der Upload läuft synchron und ist
-  best-effort: Fehler werden geloggt, nie fatal.
+- Nach dem Stopp wird die fertige Datei automatisch hochgeladen, sobald eine
+  `CloudRecording`-Konfiguration mit `enabled: true` gesetzt wurde
+  (`engine.set_cloud_recording(...)`). Der Upload läuft im Rahmen der
+  Stop-Finalisierung und ist best-effort: Fehler werden geloggt, nie fatal.
+  Beim GUI-Stopp (`stop_recording_background`) geschieht die Finalisierung
+  inklusive Upload auf einem Hintergrund-Thread — die Oberfläche friert nie
+  für die Dauer des Uploads ein.
 
 ## Tests & Verifikation
 
