@@ -69,6 +69,14 @@ Start/Stop ist idempotent auf Engine-Ebene: Ein Stream wird nur mit gültiger
 Konfiguration gestartet; beim Stop werden Streaming-Zustand und aktive
 Transportüberwachung beendet.
 
+Der Stopp blockiert die GUI nie: Reine Stream-Sessions (ohne lokale Aufnahme)
+beenden die Engine-Session im Hintergrund — die Statuszeile zeigt kurz
+„Aufnahme wird finalisiert…“ und wechselt auf „Aufnahme gespeichert.“, sobald
+der Hintergrund-Teardown fertig ist. Läuft parallel eine Aufnahme (Dual
+Output), wird beim Stream-Stopp nur die Stream-Konfiguration entfernt und die
+laufende Aufnahme unverändert weitergeführt; sie endet über ihren eigenen,
+ebenfalls nicht blockierenden Stopp-Pfad.
+
 Der Verbindungstest ist ein begrenzter Preflight: Er verwendet die konfigurierte
 Host-/Port-Kombination, führt keinen RTMPS-Publish und keinen Authentifizierungs-
 Handshake mit Stream-Key aus. Ein positives Ergebnis bedeutet daher nur, dass

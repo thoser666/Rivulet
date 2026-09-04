@@ -636,6 +636,12 @@ impl RivuletEngine {
         self.stream_settings.is_some()
     }
 
+    /// Whether an engine session (local recording, streaming, or dual output)
+    /// is currently active.
+    pub fn is_recording(&self) -> bool {
+        self.is_recording
+    }
+
     /// Whether the engine records and streams at the same time (dual output).
     /// This is the case when both stream settings and a local output path are
     /// configured.

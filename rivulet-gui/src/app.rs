@@ -2507,6 +2507,23 @@ impl RivuletApp {
         }
     }
 
+    /// Stop the streaming session (Stream-workspace button and OBS
+    /// StopStreaming). The engine cannot reconfigure a live dual-output
+    /// pipeline, so a dual session (recording still active) only drops the
+    /// stream config — the running recording continues and the stream stops
+    /// with the session. A pure-stream session has nothing to keep, so it ends
+    /// the whole engine session via the non-blocking background stop (with the
+    /// visible "Finalizing…" → "Recording saved." status) instead of leaking
+    /// an active engine session.
+    fn stop_streaming_session(&mut self) {
+        let end_session = self.engine.is_recording() && !self.engine.is_dual_output();
+        self.engine.set_stream_settings(None);
+        if end_session {
+            self.begin_background_stop();
+        }
+        self.stream_status_message = Some(self.tr("stopped").to_owned());
+    }
+
     /// Called once per frame while a stop finalization may be in flight: when
     /// the background teardown completes, drop the handle and flip the status
     /// from "finalizing…" to "Recording saved.".
@@ -5033,7 +5050,7 @@ impl RivuletApp {
                         comment: "Stream not active".into(),
                     }
                 } else {
-                    self.engine.set_stream_settings(None);
+                    self.stop_streaming_session();
                     self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
                     rivulet_obs_websocket::ObsCommandResult::Success(vec![
                         ObsEvent::StreamStateChanged {
@@ -5531,8 +5548,7 @@ impl RivuletApp {
             .clicked()
         {
             if self.engine.is_streaming() {
-                self.engine.set_stream_settings(None);
-                self.stream_status_message = Some(self.tr("stopped").to_owned());
+                self.stop_streaming_session();
             } else {
                 let settings = StreamSettings::new(
                     self.stream_platform,
@@ -9184,6 +9200,75 @@ mod tests {
             app.stop_finalizing.is_none(),
             "handle is dropped after completion"
         );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn stopping_a_pure_stream_session_ends_it_in_the_background() {
+        let mut app = RivuletApp::default();
+        app.engine
+            .set_stream_settings(Some(StreamSettings::twitch("live_123-test")));
+        app.engine.start_streaming();
+        assert!(app.engine.is_streaming());
+        assert!(app.engine.is_recording(), "a stream-only session is active");
+
+        app.stop_streaming_session();
+
+        // A pure-stream session has no local output to keep: stopping the
+        // stream ends the engine session instead of leaking an active session
+        // that would silently block the next recording/stream start.
+        assert!(!app.engine.is_streaming());
+        assert!(!app.engine.is_recording(), "session must not leak");
+        assert!(
+            app.stop_finalizing.is_some(),
+            "the background stop must be armed"
+        );
+        assert_eq!(
+            app.record_status.as_deref(),
+            Some(app.tr("recording_finalizing"))
+        );
+        assert_eq!(
+            app.stream_status_message.as_deref(),
+            Some(app.tr("stopped"))
+        );
+
+        // The status flips to "Recording saved." once the background
+        // finalization ran (polled once per frame like the real UI).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while app.record_status.as_deref() != Some(app.tr("recording_saved")) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "status must flip to saved after the background finalization"
+            );
+            app.poll_stop_finalization();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(app.stop_finalizing.is_none());
+    }
+
+    #[test]
+    fn stopping_the_stream_keeps_a_dual_recording_session_alive() {
+        let mut app = RivuletApp::default();
+        app.engine
+            .set_stream_settings(Some(StreamSettings::twitch("live_123-test")));
+        let path =
+            std::env::temp_dir().join(format!("rivulet_gui_dual_stop_{}.mp4", std::process::id()));
+        app.engine.start_local_recording(path.clone());
+        assert!(app.engine.is_dual_output(), "dual session expected");
+
+        app.stop_streaming_session();
+
+        // Dual output cannot be reconfigured live: only the stream config is
+        // dropped, the running recording (and its own non-blocking stop path)
+        // stays untouched.
+        assert!(!app.engine.is_streaming());
+        assert!(app.engine.is_recording(), "recording must continue");
+        assert!(
+            app.stop_finalizing.is_none(),
+            "no background stop may be armed for a running recording"
+        );
+
+        app.engine.stop_recording();
         let _ = std::fs::remove_file(&path);
     }
 
