@@ -362,6 +362,18 @@ fn bestpractices_json_claims_are_schema_valid_and_canonical() {
         );
     }
 
+    // Complete coverage: every canonical baseline-1 criterion must carry a
+    // status key. A control that silently disappears from the file would
+    // revert to `?` on the badge site without any error.
+    for criterion in BASELINE_1_CRITERIA {
+        let status_key = format!("{criterion}_status");
+        assert!(
+            obj.contains_key(&status_key),
+            ".bestpractices.json must answer every baseline-1 control; \
+             missing `{status_key}`"
+        );
+    }
+
     // The evidence map must document the file and this very guard, so the
     // schema contract cannot be deleted without a conscious doc+test change.
     let map = read("docs/openssf-best-practices.md");
@@ -373,6 +385,89 @@ fn bestpractices_json_claims_are_schema_valid_and_canonical() {
         map.contains("bestpractices_json_claims_are_schema_valid_and_canonical"),
         "docs/openssf-best-practices.md must list the .bestpractices.json guard"
     );
+}
+
+#[test]
+fn ossf_baseline_1_gap_closures_are_pinned() {
+    // The three baseline-1 gaps that kept .bestpractices.json at 21/24 are
+    // closed and must stay closed: the develop ruleset has no bypass actors
+    // (osps_ac_03_01), releases ship the license (osps_le_03_02), and the
+    // README documents the project's repositories (osps_qa_04_01). Reverting
+    // any of them would silently reopen a badge gap.
+    let raw = read(".bestpractices.json");
+    let doc: serde_json::Value =
+        serde_json::from_str(&raw).expect(".bestpractices.json must be valid JSON");
+    for criterion in ["osps_ac_03_01", "osps_le_03_02", "osps_qa_04_01"] {
+        let status = doc
+            .get(format!("{criterion}_status"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        assert_eq!(
+            status, "Met",
+            ".bestpractices.json must claim {criterion} as Met (gap closed)"
+        );
+        let justification = doc
+            .get(format!("{criterion}_justification"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        assert!(
+            !justification.trim().is_empty(),
+            "{criterion} must carry a non-empty justification"
+        );
+    }
+
+    // osps_ac_03_01: CONTRIBUTING.md and docs/security.md must keep stating
+    // that the ruleset has no bypass actors (direct pushes blocked for every
+    // actor, administrators included).
+    let contributing = read("CONTRIBUTING.md");
+    assert!(
+        contributing.contains("no bypass actors"),
+        "CONTRIBUTING.md must state the ruleset has no bypass actors"
+    );
+    let security = read("docs/security.md");
+    assert!(
+        security.contains("no bypass actors")
+            && security.contains("cannot push to `develop` directly"),
+        "docs/security.md must describe the no-bypass ruleset"
+    );
+
+    // osps_le_03_02: both release paths must copy the license into the
+    // release assets before the checksum manifest is generated.
+    for workflow in ["release.yml", "ci.yml"] {
+        let wf = read(&format!(".github/workflows/{workflow}"));
+        assert!(
+            wf.contains("Ship the license alongside the release assets")
+                && wf.contains("cp LICENSE release-assets/LICENSE"),
+            "{workflow} must ship LICENSE as a release asset"
+        );
+    }
+
+    // osps_qa_04_01: the README must keep the multi-repo list with status
+    // and intent for each codebase.
+    let readme = read("README.md");
+    assert!(
+        readme.contains("## 📚 Repositories"),
+        "README must keep the Repositories section"
+    );
+    assert!(
+        readme.contains("https://github.com/thoser666/Rivulet/wiki"),
+        "README must list the wiki codebase"
+    );
+    assert!(readme.contains("Status & intent"));
+
+    // The evidence map must document the closures and this guard.
+    let map = read("docs/openssf-best-practices.md");
+    for marker in [
+        "osps_ac_03_01",
+        "osps_le_03_02",
+        "osps_qa_04_01",
+        "ossf_baseline_1_gap_closures_are_pinned",
+    ] {
+        assert!(
+            map.contains(marker),
+            "docs/openssf-best-practices.md must mention {marker}"
+        );
+    }
 }
 
 #[test]

@@ -4,10 +4,13 @@
   "license": "MIT",
   "implementation_languages": "Rust",
 
-  "_comment": "Draft automation proposals for the OpenSSF Best Practices baseline-1 badge (OSPS v2026.08.28, 24 controls). Status values are only proposed for criteria the repository demonstrably meets today; the three known gaps (osps_ac_03_01, osps_le_03_02, osps_qa_04_01) are intentionally left unknown so the maintainer can answer them during review. See docs/openssf-best-practices.md. Field naming follows https://github.com/ossf/best-practices-badge/blob/main/docs/automation-proposals.md",
+  "_comment": "Automation proposals for the OpenSSF Best Practices baseline-1 badge (OSPS v2026.08.28, 24 controls). All 24 controls are proposed Met with evidence; schema and content are pinned by the ci_pinning guards bestpractices_json_claims_are_schema_valid_and_canonical and ossf_baseline_1_gap_closures_are_pinned. See docs/openssf-best-practices.md. Field naming follows https://github.com/ossf/best-practices-badge/blob/main/docs/automation-proposals.md",
 
   "osps_ac_01_01_status": "Met",
   "osps_ac_01_01_justification": "Hosted on GitHub, which has required two-factor authentication for all contributors since March 2023 (https://github.com/thoser666/Rivulet).",
+
+  "osps_ac_03_01_status": "Met",
+  "osps_ac_03_01_justification": "The active branch ruleset on the primary branch develop (id 8577978) lists no bypass actors: a direct commit by any actor, including repository administrators, is rejected. Changes land only through pull requests that satisfy the required status checks (CI, Security, OpenSSF Scorecard, CodeQL (rust), Dependency Review, Pinning-Tests); the ruleset additionally prevents deletions and non-fast-forward updates.",
 
   "osps_ac_02_01_status": "Met",
   "osps_ac_02_01_justification": "GitHub assigns collaborators the lowest available permission by default; access is granted manually per role, never auto-escalated.",
@@ -51,6 +54,9 @@
   "osps_le_03_01_status": "Met",
   "osps_le_03_01_justification": "The MIT license text is maintained in the repository LICENSE file at the root.",
 
+  "osps_le_03_02_status": "Met",
+  "osps_le_03_02_justification": "The release workflows (release.yml for alpha, ci.yml for beta/rc/stable tags) copy the LICENSE file into the release-assets folder before generating SHA256SUMS, so the MIT license is attached to every GitHub Release alongside the binaries and covered by the checksum manifest.",
+
   "osps_qa_01_01_status": "Met",
   "osps_qa_01_01_justification": "The source repository is publicly readable at the static URL https://github.com/thoser666/Rivulet.",
 
@@ -59,6 +65,9 @@
 
   "osps_qa_02_01_status": "Met",
   "osps_qa_02_01_justification": "Direct dependencies are enumerated in Cargo.toml manifests with Cargo.lock pinning and deny.toml policy.",
+
+  "osps_qa_04_01_status": "Met",
+  "osps_qa_04_01_justification": "The README 'Repositories' section documents the project's codebases: the primary thoser666/Rivulet repository (application + engine, built into every release) and the thoser666/Rivulet.wiki documentation companion, each with its status and intent.",
 
   "osps_qa_05_01_status": "Met",
   "osps_qa_05_01_justification": "No generated executable artifacts are tracked in the repository (verified by CI hygiene checks); binaries are produced at build time in CI.",

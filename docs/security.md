@@ -206,17 +206,21 @@ checks before merging:
 - `Dependency Review` — pull-request dependency security review.
 - `Pinning-Tests` — dedicated SHA-pinning regression tests.
 
-Direct updates to `develop` are blocked for ordinary contributors. Because this
-is a personal repository, GitHub does not allow the `github-actions` integration
-to be registered as a ruleset bypass actor. The active fallback is the
-`RepositoryRole` administrator bypass, which is broader than a release-only
-exception and must therefore be used sparingly. The ruleset also prevents
-deletions and non-fast-forward updates.
+Direct updates to `develop` are blocked for **every** actor: the active ruleset
+lists **no bypass actors** (no `RepositoryRole` administrator exception), so even
+repository administrators cannot push to `develop` directly — every change
+lands as a pull request whose required status checks must pass. Because this is
+a single-maintainer repository the ruleset does not require a second human
+approval; the automated checks are treated as the review (see the Code Review
+Policy in `CONTRIBUTING.md`). The ruleset also prevents deletions and
+non-fast-forward updates.
 
 The release workflow still uses `GITHUB_TOKEN` to push generated version commits
-and tags. Verify each release run after a ruleset change; if GitHub rejects that
-push, move versioning/tagging to an administrator-approved pull request or use a
-separately scoped release credential rather than weakening the ruleset further.
+and tags — but only to `release/<tag>` branches and tags, never to `develop`, so
+the ruleset does not affect it. Verify each release run after a ruleset change;
+if GitHub ever rejects that push, move versioning/tagging to an
+administrator-approved pull request or use a separately scoped release
+credential rather than weakening the ruleset.
 
 Inspect the live ruleset with:
 

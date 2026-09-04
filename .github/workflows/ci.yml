@@ -652,6 +652,14 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: Ship the license alongside the release assets
+        run: |
+          # OSPS-LE-03.02: the MIT license must travel with every release, not
+          # only with the source checkout. Copying LICENSE into the
+          # release-assets folder before the manifest is generated puts it
+          # under SHA256SUMS and attaches it via the release-assets/* glob.
+          cp LICENSE release-assets/LICENSE
+
       - name: Generate SHA256SUMS manifest
         run: |
           # Same contract as the alpha channel (release.yml): the manifest
