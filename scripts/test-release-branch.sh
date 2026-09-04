@@ -62,7 +62,7 @@ make_commits() {
 publish_remote_branch() {
   pushd "$CLONE" >/dev/null
   local branch="$1"
-  git push -q origin "HEAD:$branch"
+  git push -q origin "HEAD:refs/heads/$branch"
   popd >/dev/null
 }
 
@@ -110,7 +110,7 @@ setup_diverged_release_branch() {
   echo "old-snapshot $(date +%s%N)" > old.txt
   git add old.txt
   git commit -q -m "chore(release): prepare $branch"
-  git push -q origin "HEAD:$branch"
+  git push -q origin "HEAD:refs/heads/$branch"
   git checkout -q main
   # Now advance main with NEW source (the fixed current code).
   echo "new-source $(date +%s%N)" > new.txt

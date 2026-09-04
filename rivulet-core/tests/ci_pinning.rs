@@ -1163,11 +1163,18 @@ fn release_workflow_publishes_current_source_onto_release_branch() {
         script.contains("git fetch origin \"$BRANCH\"")
             && script.contains("git show-ref --verify --quiet \"refs/remotes/origin/$BRANCH\"")
             && script.contains("git merge-base --is-ancestor \"$REMOTE_TIP\" HEAD")
-            && script.contains("git push origin \"HEAD:$BRANCH\"")
-            && script.contains("git push --force-with-lease origin \"HEAD:$BRANCH\""),
+            && script.contains("DEST=\"refs/heads/$BRANCH\"")
+            && script.contains("git push origin \"HEAD:$DEST\"")
+            && script.contains("git push --force-with-lease origin \"HEAD:$DEST\""),
         "release-branch.sh must publish current HEAD onto the release branch, \
          fast-forwarding when the remote is at/behind HEAD and force-with-lease \
          overwriting a divergent/stale tip so a release always builds current source"
+    );
+    assert!(
+        !script.contains("git push origin \"HEAD:$BRANCH\""),
+        "every push must use the fully-qualified refs/heads/ destination: newer git \
+         versions reject an unqualified destination when pushing HEAD (\"The destination \
+         you provided is not a full refname\")"
     );
 }
 

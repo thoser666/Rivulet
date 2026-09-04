@@ -28,21 +28,25 @@ fi
 # true current remote tip. A missing branch simply leaves no tracking ref.
 git fetch origin "$BRANCH" 2>/dev/null || true
 
+# Recent git versions refuse an unqualified destination when pushing HEAD
+# ("The destination you provided is not a full refname"), so every push below
+# uses the fully-qualified refs/heads/<branch> destination form.
+DEST="refs/heads/$BRANCH"
 if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
   REMOTE_TIP="$(git rev-parse "origin/$BRANCH")"
   if git merge-base --is-ancestor "$REMOTE_TIP" HEAD; then
     # Remote is at or behind our HEAD: a normal push fast-forwards it. This is
     # the common "same version, branch already exists" retry path.
     echo "release branch $BRANCH is at or behind HEAD; fast-forwarding." >&2
-    git push origin "HEAD:$BRANCH"
+    git push origin "HEAD:$DEST"
   else
     # Remote has diverged (or is ahead) with code that is not our current
     # source. The version job is authoritative: it always carries the latest
     # develop plus a fresh version bump, so the stale tip must be overwritten.
     echo "release branch $BRANCH diverged; overwriting with current HEAD." >&2
-    git push --force-with-lease origin "HEAD:$BRANCH"
+    git push --force-with-lease origin "HEAD:$DEST"
   fi
 else
   echo "creating new release branch $BRANCH." >&2
-  git push origin "HEAD:$BRANCH"
+  git push origin "HEAD:$DEST"
 fi
