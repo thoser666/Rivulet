@@ -9,7 +9,7 @@ use rivulet_core::{
     StreamConnectionResult, StreamHealthStatus, StreamPlatform, StreamPreset, StreamProbeResult,
     StreamSettings, StreamStats,
 };
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{self as std_mpsc, Receiver};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex, RwLock,
@@ -905,11 +905,9 @@ pub struct RivuletApp {
     #[cfg(target_os = "linux")]
     #[serde(skip)]
     raw_rx: Option<std_mpsc::Receiver<RawFrame>>,
-    /// Transient feedback under the record controls (both platforms), e.g.
+    /// Transient feedback under the record controls (recording platforms), e.g.
     /// "Finalizing recording…" while the background stop teardown runs and
     /// "Recording saved." once it finished. Runtime-only, never persisted.
-    /// (macOS has no recording engine yet, so it only writes this field.)
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
     #[serde(skip)]
     record_status: Option<String>,
     /// Completion handle of an in-flight background stop (see
@@ -945,6 +943,28 @@ pub struct RivuletApp {
     #[cfg(target_os = "windows")]
     #[serde(skip)]
     capture_backend: Option<BackendStatus>,
+
+    // macOS Fields (xcap screen/window capture; video-only recording, M5
+    // Windows/macOS feature parity)
+    #[cfg(target_os = "macos")]
+    #[serde(skip)]
+    is_recording: bool,
+    #[cfg(target_os = "macos")]
+    #[serde(skip)]
+    monitors: Vec<xcap::Monitor>,
+    #[cfg(target_os = "macos")]
+    #[serde(skip)]
+    selected_monitor_idx: Option<usize>,
+    #[cfg(target_os = "macos")]
+    #[serde(skip)]
+    windows: Vec<xcap::Window>,
+    #[cfg(target_os = "macos")]
+    #[serde(skip)]
+    selected_window_idx: Option<usize>,
+    #[cfg(target_os = "macos")]
+    #[serde(skip)]
+    raw_rx: Option<std_mpsc::Receiver<RawFrame>>,
+
     #[serde(skip)]
     error_receiver: Option<Receiver<String>>,
     #[serde(skip)]
@@ -1343,6 +1363,18 @@ impl Default for RivuletApp {
             selected_window_idx: None,
             #[cfg(target_os = "windows")]
             capture_backend: None,
+            #[cfg(target_os = "macos")]
+            is_recording: false,
+            #[cfg(target_os = "macos")]
+            monitors: Vec::new(),
+            #[cfg(target_os = "macos")]
+            selected_monitor_idx: None,
+            #[cfg(target_os = "macos")]
+            windows: Vec::new(),
+            #[cfg(target_os = "macos")]
+            selected_window_idx: None,
+            #[cfg(target_os = "macos")]
+            raw_rx: None,
 
             // Platform-agnostic fields (used by camera/game capture)
             #[cfg(target_os = "windows")]
@@ -2489,6 +2521,322 @@ impl RivuletApp {
     }
 }
 
+// --- macOS logic implementation (M5 Windows/macOS feature parity) ---
+#[cfg(target_os = "macos")]
+impl RivuletApp {
+    /// Refresh the xcap monitor/window lists used for macOS recording. Without
+    /// the Screen Recording permission both lists stay empty and the Record
+    /// view shows the permission hint instead.
+    fn refresh_macos_sources(&mut self) {
+        self.monitors = xcap::Monitor::all().unwrap_or_default();
+        if self
+            .selected_monitor_idx
+            .map_or(true, |idx| idx >= self.monitors.len())
+        {
+            self.selected_monitor_idx = None;
+        }
+        self.windows = xcap::Window::all()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|w| !w.title().unwrap_or_default().trim().is_empty())
+            .collect();
+        if self
+            .selected_window_idx
+            .map_or(true, |idx| idx >= self.windows.len())
+        {
+            self.selected_window_idx = None;
+        }
+    }
+
+    /// Start a macOS recording of the selected monitor or window. Video-only
+    /// (no system/mic audio capture yet); frames are captured via xcap and
+    /// pushed into the same engine recording pipeline as on Linux/Windows.
+    fn start_macos_recording(&mut self) {
+        if self.is_recording {
+            return;
+        }
+        enum Source {
+            Monitor(xcap::Monitor),
+            Window(xcap::Window),
+        }
+        let source = if let Some(idx) = self.selected_monitor_idx {
+            match self.monitors.get(idx).cloned() {
+                Some(m) => Source::Monitor(m),
+                None => {
+                    self.record_status = Some(self.tr("invalid_monitor").to_string());
+                    return;
+                }
+            }
+        } else if let Some(idx) = self.selected_window_idx {
+            match self.windows.get(idx).cloned() {
+                Some(w) => Source::Window(w),
+                None => {
+                    self.record_status = Some(self.tr("invalid_window").to_string());
+                    return;
+                }
+            }
+        } else {
+            self.record_status = Some(self.tr("no_source_selected").to_string());
+            return;
+        };
+
+        let ext = self.selected_container_extension();
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Video", &[ext])
+            .set_file_name(self.default_recording_filename())
+            .save_file()
+        else {
+            tracing::info!("File selection cancelled");
+            return;
+        };
+
+        self.engine.set_video_codec(self.selected_codec);
+        self.engine.set_recording_container(self.selected_container);
+        self.engine.set_auto_remux(self.auto_remux);
+        self.apply_recording_file_settings();
+        self.engine.set_preset(self.selected_preset);
+        self.apply_rate_control();
+        self.engine.set_overlay_enabled(self.show_overlay);
+        self.engine.set_video_effects(self.video_effects);
+        self.apply_replay_setting();
+        self.apply_ndi_output();
+        self.engine.start_local_recording(path);
+
+        let (raw_tx, raw_rx) = std_mpsc::channel::<RawFrame>();
+        let stop = Arc::new(AtomicBool::new(false));
+        self.raw_rx = Some(raw_rx);
+        self.stop_signal = Some(stop.clone());
+
+        let source_desc = match &source {
+            Source::Monitor(m) => format!(
+                "Monitor {} ({}x{})",
+                m.name().unwrap_or_default(),
+                m.width().unwrap_or(0),
+                m.height().unwrap_or(0)
+            ),
+            Source::Window(w) => format!(
+                "Window \"{}\" ({}x{})",
+                w.title().unwrap_or_default(),
+                w.width().unwrap_or(0),
+                w.height().unwrap_or(0)
+            ),
+        };
+
+        let fps = self.selected_preset.effective_fps(30) as u64;
+        let frame_duration = std::time::Duration::from_millis(1000 / fps);
+        thread::spawn(move || {
+            let mut next = Instant::now();
+            while !stop.load(Ordering::SeqCst) {
+                let result = match &source {
+                    Source::Monitor(m) => m.capture_image(),
+                    Source::Window(w) => w.capture_image(),
+                };
+                match result {
+                    Ok(image) => {
+                        let frame = RawFrame {
+                            data: image.as_raw().to_vec(),
+                            width: image.width(),
+                            height: image.height(),
+                        };
+                        if raw_tx.send(frame).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "Capture error");
+                        break;
+                    }
+                }
+                next += frame_duration;
+                let now = Instant::now();
+                if next > now {
+                    std::thread::sleep(next - now);
+                }
+            }
+        });
+
+        self.is_recording = true;
+        self.record_started = Instant::now();
+        self.last_frame_at = None;
+        // A new session starts with clean feedback.
+        self.stop_finalizing = None;
+        self.record_status = None;
+        tracing::info!(source = %source_desc, "macOS recording started");
+    }
+
+    /// Stop a macOS recording: signal the capture thread and tear the engine
+    /// pipeline down on a background thread so the UI never freezes.
+    fn stop_macos_recording(&mut self) {
+        if !self.is_recording {
+            return;
+        }
+        if let Some(signal) = &self.stop_signal {
+            signal.store(true, Ordering::SeqCst);
+        }
+        self.begin_background_stop();
+        self.raw_rx = None;
+        self.stop_signal = None;
+        self.is_recording = false;
+    }
+
+    /// Push captured macOS frames into the engine and refresh the live preview
+    /// thumbnail; records the last-frame timestamp used by the no-frame abort.
+    fn drain_macos_frames(&mut self) {
+        let paused = self.is_paused;
+        if let Some(rx) = &self.raw_rx {
+            while let Ok(raw) = rx.try_recv() {
+                let frame = cropped_frame_for_region(
+                    self.region_enabled && self.selected_monitor_idx.is_some(),
+                    self.region,
+                    &raw,
+                )
+                .into_owned();
+                if !paused {
+                    self.engine
+                        .process_raw_frame(&frame.data, frame.width, frame.height);
+                }
+                self.pending_preview_frame = Some(frame);
+                self.last_frame_at = Some(Instant::now());
+            }
+        }
+        if self.show_overlay && self.is_recording && !paused {
+            let text = self.overlay_text();
+            self.engine.update_overlay_text(&text);
+        }
+    }
+
+    /// Draw the macOS Record view: source selection (monitor or window),
+    /// video-only + Screen Recording permission hints, and start/stop with the
+    /// finalizing status.
+    fn draw_macos_record_view(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
+        ui.add_space(10.0);
+        ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
+        if self.monitors.is_empty() && self.windows.is_empty() {
+            ui.small(self.tr("mac_permission_hint"));
+        }
+        ui.small(self.tr("mac_video_only_hint"));
+
+        let monitors: Vec<(usize, String)> = self
+            .monitors
+            .iter()
+            .enumerate()
+            .map(|(idx, m)| {
+                (
+                    idx,
+                    format!(
+                        "{} ({}x{})",
+                        m.name().unwrap_or_default(),
+                        m.width().unwrap_or(0),
+                        m.height().unwrap_or(0)
+                    ),
+                )
+            })
+            .collect();
+        let monitor_selection = self.selected_monitor_idx;
+        ui.horizontal(|ui| {
+            ui.label(self.tr("mac_source_monitor"));
+            egui::ComboBox::from_id_salt("macos_monitor_select")
+                .selected_text(
+                    monitor_selection
+                        .and_then(|idx| monitors.iter().find(|(i, _)| *i == idx))
+                        .map(|(_, label)| label.clone())
+                        .unwrap_or_else(|| self.tr("mac_none").to_string()),
+                )
+                .show_ui(ui, |ui| {
+                    for (idx, label) in &monitors {
+                        if ui
+                            .selectable_label(monitor_selection == Some(*idx), label.clone())
+                            .clicked()
+                        {
+                            self.selected_monitor_idx = Some(*idx);
+                            self.selected_window_idx = None;
+                        }
+                    }
+                });
+        });
+
+        let windows: Vec<(usize, String)> = self
+            .windows
+            .iter()
+            .enumerate()
+            .map(|(idx, w)| (idx, w.title().unwrap_or_default()))
+            .collect();
+        let window_selection = self.selected_window_idx;
+        ui.horizontal(|ui| {
+            ui.label(self.tr("mac_source_window"));
+            egui::ComboBox::from_id_salt("macos_window_select")
+                .selected_text(
+                    window_selection
+                        .and_then(|idx| windows.iter().find(|(i, _)| *i == idx))
+                        .map(|(_, title)| title.clone())
+                        .unwrap_or_else(|| self.tr("mac_none").to_string()),
+                )
+                .show_ui(ui, |ui| {
+                    for (idx, title) in &windows {
+                        if ui
+                            .selectable_label(window_selection == Some(*idx), title.clone())
+                            .clicked()
+                        {
+                            self.selected_window_idx = Some(*idx);
+                            self.selected_monitor_idx = None;
+                        }
+                    }
+                });
+        });
+
+        let preset_selection = self.selected_preset;
+        ui.horizontal(|ui| {
+            ui.label(self.tr("recording_preset"));
+            egui::ComboBox::from_id_salt("macos_preset_select")
+                .selected_text(preset_selection.label)
+                .show_ui(ui, |ui| {
+                    for preset in rivulet_core::RecordingPreset::all() {
+                        if ui
+                            .selectable_label(preset_selection == *preset, preset.label)
+                            .clicked()
+                        {
+                            self.selected_preset = *preset;
+                        }
+                    }
+                });
+        });
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.show_overlay, self.tr("overlay_toggle"));
+        });
+
+        let source_selected =
+            self.selected_monitor_idx.is_some() || self.selected_window_idx.is_some();
+        if self.is_recording {
+            let elapsed = self.record_started.elapsed().as_secs();
+            let in_progress = self.tr_fmt("recording_in_progress", &[elapsed.to_string()]);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(in_progress).color(colors.active));
+                if ui
+                    .button(format!("⏹ {}", self.tr("stop_recording")))
+                    .clicked()
+                {
+                    self.stop_macos_recording();
+                    self.is_paused = false;
+                }
+            });
+        } else if ui
+            .add_enabled(
+                source_selected,
+                egui::Button::new(format!("⏺ {}", self.tr("start_recording"))),
+            )
+            .clicked()
+        {
+            self.start_macos_recording();
+        }
+        if let Some(err) = &self.last_error {
+            ui.colored_label(colors.error, err);
+        }
+        if let Some(status) = &self.record_status {
+            ui.colored_label(colors.info, status);
+        }
+    }
+}
+
 impl RivuletApp {
     /// Stop camera or game-capture recording (platform-agnostic).
     fn stop_aux_recording(&mut self) {
@@ -3619,6 +3967,10 @@ impl RivuletApp {
         }
         #[cfg(target_os = "windows")]
         if self.is_windows_recording {
+            return true;
+        }
+        #[cfg(target_os = "macos")]
+        if self.is_recording {
             return true;
         }
         self.is_aux_recording
@@ -6173,9 +6525,9 @@ impl eframe::App for RivuletApp {
             let any_recording = self.is_recording || self.is_aux_recording;
             #[cfg(target_os = "windows")]
             let any_recording = self.is_windows_recording || self.is_aux_recording;
-            // macOS has no recording engine yet; keep the hotkey block
-            // compiling with a constant so the GUI builds on all platforms.
-            #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+            #[cfg(target_os = "macos")]
+            let any_recording = self.is_recording || self.is_aux_recording;
+            #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
             let any_recording = self.is_aux_recording;
 
             // Record: toggle recording
@@ -6196,6 +6548,8 @@ impl eframe::App for RivuletApp {
                     self.start_windows_recording();
                     #[cfg(target_os = "linux")]
                     self.start_linux_recording();
+                    #[cfg(target_os = "macos")]
+                    self.start_macos_recording();
                 }
             }
 
@@ -6363,6 +6717,29 @@ impl eframe::App for RivuletApp {
             // Surface engine errors
             if let Some(err) = self.engine.take_error() {
                 self.last_error = Some(err);
+            }
+        }
+
+        // ── macOS recording drain (xcap screen/window capture) ────────
+        #[cfg(target_os = "macos")]
+        {
+            if self.is_recording {
+                self.drain_macos_frames();
+                // Surface capture/engine failures in the UI and abort when no
+                // frames arrive within the timeout (capture thread died).
+                if let Some(err) = self.engine.take_error() {
+                    self.last_error = Some(err);
+                }
+                if should_abort_for_no_frames(
+                    self.record_started,
+                    self.last_frame_at,
+                    Instant::now(),
+                    self.no_frame_timeout,
+                ) {
+                    let secs = self.no_frame_timeout.as_secs();
+                    self.last_error = Some(self.tr_fmt("recording_no_frames", &[secs.to_string()]));
+                    self.stop_macos_recording();
+                }
             }
         }
 
@@ -7576,11 +7953,10 @@ impl eframe::App for RivuletApp {
                         self.draw_browser_source_panel(ui, &colors);
                     }
 
-                    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+                    #[cfg(target_os = "macos")]
                     if self.view == AppView::Record {
-                        ui.add_space(20.0);
-                        ui.label(egui::RichText::new(self.tr("screen_recording")).strong());
-                        ui.label(self.tr("screen_recording_unavailable"));
+                        self.refresh_macos_sources();
+                        self.draw_macos_record_view(ui, &colors);
                     }
 
                     // Streaming controls are implemented in M3 and must not render
@@ -9447,6 +9823,137 @@ mod tests {
         ] {
             assert!(production.contains(needle), "missing {needle} in Settings");
         }
+    }
+
+    // ── macOS recording (M5 Windows/macOS feature parity) ──────────
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_stop_without_recording_is_a_noop() {
+        let mut app = RivuletApp::default();
+        assert!(!app.is_recording);
+        // An idle stop must not arm the finalizing status or touch the capture
+        // handle (stop_recording_background returns None for no active session).
+        app.stop_macos_recording();
+        assert!(!app.is_recording);
+        assert!(app.stop_finalizing.is_none());
+        assert!(app.stop_signal.is_none());
+        assert_eq!(
+            app.record_status.as_deref(),
+            None,
+            "an idle stop must not show a status"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_stop_arms_the_background_finalization() {
+        let mut app = RivuletApp::default();
+        app.is_recording = true;
+        app.raw_rx = Some(std_mpsc::channel::<RawFrame>().1);
+        app.stop_signal = Some(Arc::new(AtomicBool::new(false)));
+
+        app.stop_macos_recording();
+
+        // The capture thread is signalled, the receiver is dropped, and the
+        // UI shows the finalizing status until the background teardown ends.
+        assert!(!app.is_recording);
+        assert!(app.raw_rx.is_none());
+        assert!(app.stop_signal.is_none());
+        assert_eq!(
+            app.record_status.as_deref(),
+            Some(app.tr("recording_finalizing")),
+            "an active stop must show the finalizing status"
+        );
+
+        // The completion handle fires once the (no-op) background finalization
+        // ran, flipping the status to "Recording saved.".
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while app.record_status.as_deref() != Some(app.tr("recording_saved")) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "status must flip to saved after the background finalization"
+            );
+            app.poll_stop_finalization();
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(app.stop_finalizing.is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_source_refresh_resets_stale_selections() {
+        let mut app = RivuletApp::default();
+        // Selections pointing beyond the current lists must be reset by the
+        // refresh (sources come and go, e.g. a window closes or a monitor is
+        // unplugged).
+        app.selected_monitor_idx = Some(7);
+        app.selected_window_idx = Some(9);
+        app.refresh_macos_sources();
+        assert!(
+            app.selected_monitor_idx
+                .map_or(true, |idx| idx < app.monitors.len()),
+            "stale monitor selection must be reset"
+        );
+        assert!(
+            app.selected_window_idx
+                .map_or(true, |idx| idx < app.windows.len()),
+            "stale window selection must be reset"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_start_without_source_reports_it_without_a_dialog() {
+        let mut app = RivuletApp::default();
+        // No monitor/window selected: start must return before any file dialog
+        // and surface the localized hint instead.
+        app.start_macos_recording();
+        assert!(!app.is_recording);
+        assert_eq!(
+            app.record_status.as_deref(),
+            Some(app.tr("no_source_selected"))
+        );
+    }
+
+    #[test]
+    fn macos_record_view_is_wired_into_the_app() {
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let production = source
+            .split_once("#[cfg(test)]")
+            .map(|(head, _)| head)
+            .unwrap_or(&source);
+        // The macOS impl block with the capture/stop/drain/view helpers exists.
+        for needle in [
+            "fn start_macos_recording",
+            "fn stop_macos_recording",
+            "fn drain_macos_frames",
+            "fn draw_macos_record_view",
+            "fn refresh_macos_sources",
+        ] {
+            assert!(production.contains(needle), "missing {needle}");
+        }
+        // The Record view dispatches to the macOS drawer (replacing the old
+        // "screen recording unavailable" placeholder).
+        assert!(
+            production.contains("self.draw_macos_record_view(ui, &colors)"),
+            "Record view must render the macOS drawer"
+        );
+        assert!(
+            production.contains("self.refresh_macos_sources()"),
+            "Record view must refresh the source lists"
+        );
+        // The record hotkey toggles the macOS path.
+        assert!(
+            production.contains("self.start_macos_recording()"),
+            "hotkey must start the macOS recording"
+        );
+        // The view stays responsive: capture frames are drained per frame in
+        // the ui() tick, not inside a blocking loop.
+        assert!(
+            production.contains("self.drain_macos_frames()"),
+            "macOS frames must be drained from the per-frame update"
+        );
     }
 
     #[test]
