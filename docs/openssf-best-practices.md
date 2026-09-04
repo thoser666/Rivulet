@@ -154,6 +154,31 @@ evidence cannot drift out of existence:
   deliberate list change, and the schema guard accepts the full canonical
   passing key set (`METAL_PASSING_CRITERIA`).
 
+## Silver gap closures (repo-side)
+
+The repo-side artifacts that make the *silver* criteria claimable are pinned
+by `ossf_silver_gap_closures_are_pinned`:
+
+- **`governance` / `roles_responsibilities`** — [`GOVERNANCE.md`](../GOVERNANCE.md)
+  documents the governance model, maintainer/contributor/reviewer/user roles,
+  decision-making, release process, and succession.
+- **`code_of_conduct`** — [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md)
+  (Contributor Covenant 2.1) sits at the repository root, the standard
+  location GitHub surfaces on the front page.
+- **`documentation_achievements`** — the README front page carries an
+  [`Achievements`](../README.md#-achievements) section that hyperlinks the
+  OpenSSF best-practices badge (`bestpractices.dev/projects/14447`), the
+  license, and the community-rule documents.
+- **`dco`** — `CONTRIBUTING.md` documents the Developer Certificate of Origin;
+  [`scripts/check-dco.py`](../scripts/check-dco.py) verifies that every PR
+  commit carries a `Signed-off-by` trailer matching its author. The check runs
+  in CI (`ci.yml`, job `DCO (Signed-off-by)`) and in the local pre-push hook,
+  and the script has a `--self-test`.
+- **`regression_tests_added50`** — [`docs/regression-testing.md`](../docs/regression-testing.md)
+  is the formal policy and tracking mechanism (every bug fix ships a
+  regression test; exceptions must be named); it is wired into the
+  Definition of Done and the pull-request template.
+
 ## Remaining (maintainer action, not repo files)
 
 1. Register the project at <https://www.bestpractices.dev> with the GitHub

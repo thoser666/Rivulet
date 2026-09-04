@@ -553,6 +553,107 @@ fn ossf_baseline_1_gap_closures_are_pinned() {
     }
 }
 
+#[test]
+fn ossf_silver_gap_closures_are_pinned() {
+    // Silver-tier repo-side gap closures (OpenSSF metal "silver" series): the
+    // governance/conduct/roles documents, the README achievements block, the
+    // DCO automation, and the regression-test policy must stay in place so the
+    // corresponding criteria can be answered truthfully. Reverting any of
+    // them silently reopens a badge gap.
+
+    // governance / roles_responsibilities: GOVERNANCE.md documents the model,
+    // roles, and decision-making.
+    let gov = read("GOVERNANCE.md");
+    for marker in [
+        "# Rivulet Governance",
+        "## Governance model",
+        "## Roles and responsibilities",
+        "### Maintainers",
+        "### Contributors",
+        "### Reviewers",
+        "### Users",
+        "## Decision making",
+        "## Succession and bus factor",
+    ] {
+        assert!(gov.contains(marker), "GOVERNANCE.md must contain {marker}");
+    }
+
+    // code_of_conduct: the Contributor Covenant lives at the repo root (the
+    // standard location GitHub surfaces on the front page).
+    let coc = read("CODE_OF_CONDUCT.md");
+    assert!(coc.contains("Contributor Covenant Code of Conduct"));
+    assert!(coc.contains("contributor-covenant.org/version/2/1"));
+
+    // documentation_achievements: the README front page hyperlinks the
+    // OpenSSF best-practices project (badge + community-rule documents).
+    let readme = read("README.md");
+    assert!(
+        readme.contains("bestpractices.dev/projects/14447"),
+        "README must link the OpenSSF best-practices achievement"
+    );
+    assert!(
+        readme.contains("## 🏆 Achievements"),
+        "README must keep the Achievements section"
+    );
+    assert!(
+        readme.contains("CODE_OF_CONDUCT.md") && readme.contains("GOVERNANCE.md"),
+        "README must link the code of conduct and governance docs"
+    );
+
+    // dco: CONTRIBUTING documents the sign-off rule and the checker is wired
+    // into CI and the local pre-push hook.
+    let contributing = read("CONTRIBUTING.md");
+    assert!(contributing.contains("Developer Certificate of Origin"));
+    assert!(contributing.contains("developercertificate.org"));
+    assert!(contributing.contains("Signed-off-by"));
+    let dco_script = read("scripts/check-dco.py");
+    for marker in ["SIGNOFF_RE", "--self-test", "Signed-off-by"] {
+        assert!(
+            dco_script.contains(marker),
+            "scripts/check-dco.py must contain {marker}"
+        );
+    }
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("name: DCO (Signed-off-by)")
+            && ci.contains("scripts/check-dco.py --base origin/develop"),
+        "ci.yml must run the DCO check on PR branch commits"
+    );
+    let hook = read(".githooks/pre-push");
+    assert!(
+        hook.contains("scripts/check-dco.py"),
+        "the pre-push hook must run the DCO check locally"
+    );
+
+    // regression_tests_added50: policy + tracking doc exists and is wired
+    // into the Definition of Done and the PR template.
+    let regression = read("docs/regression-testing.md");
+    assert!(regression.contains("# Regression-Test Policy & Tracking"));
+    assert!(regression.contains("regression_tests_added50"));
+    let pr_template = read(".github/PULL_REQUEST_TEMPLATE.md");
+    assert!(
+        pr_template.contains("regression test")
+            && pr_template.contains("Signed-off-by")
+            && pr_template.contains("Definition of Done"),
+        "the PR template must capture the regression-test and DCO requirements"
+    );
+
+    // The evidence map must document the closures and this guard.
+    let map = read("docs/openssf-best-practices.md");
+    for marker in [
+        "ossf_silver_gap_closures_are_pinned",
+        "GOVERNANCE.md",
+        "CODE_OF_CONDUCT.md",
+        "check-dco.py",
+        "regression-testing.md",
+    ] {
+        assert!(
+            map.contains(marker),
+            "docs/openssf-best-practices.md must mention {marker}"
+        );
+    }
+}
+
 /// The metal-series passing criteria Rivulet claims as `Met` in
 /// `.bestpractices.json` — the repo-evidenced subset. Behavioral criteria
 /// (maintained, report_responses, know_secure_design, the crypto_* family,

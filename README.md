@@ -9,6 +9,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://www.rust-lang.org)
 [![Status](https://img.shields.io/badge/status-alpha%20v0.9-yellow.svg)](https://github.com/thoser666/rivulet/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](https://github.com/thoser666/rivulet)
+[![OpenSSF Best Practices](https://bestpractices.dev/projects/14447/badge)](https://www.bestpractices.dev/projects/14447)
 
 *A Rust recording and streaming engine — built for performance, safety, reliability, and embeddability*
 
@@ -29,6 +30,14 @@ licensed:
 | --- | --- | --- |
 | [`thoser666/Rivulet`](https://github.com/thoser666/Rivulet) | The application and engine: GUI, rivulet-core engine, capture/audio/streaming crates, installers, workflows, and all versioned documentation (`docs/`) | **Primary codebase, active.** Every release is built from this repository.
 | [`thoser666/Rivulet.wiki`](https://github.com/thoser666/Rivulet/wiki) | The end-user wiki (bilingual EN/DE how-tos, platform tips, FAQ) | **Documentation companion, active, not compiled into releases.** Synced from this repository by the wiki-translation workflow; boundaries with the versioned docs are defined in [`docs/wiki-content-policy.md`](docs/wiki-content-policy.md). |
+
+---
+
+## 🏆 Achievements
+
+- **OpenSSF Best Practices badge** — [Baseline-1 100% and metal *Passing* 100%](https://www.bestpractices.dev/projects/14447) (badge above; achieved 2026-09-04).
+- **MIT licensed** and built entirely with FLOSS tooling ([LICENSE](LICENSE)).
+- Community rules: [Code of Conduct](CODE_OF_CONDUCT.md) · [Governance](GOVERNANCE.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 ---
 
