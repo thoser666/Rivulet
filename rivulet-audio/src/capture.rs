@@ -161,6 +161,124 @@ impl AudioCapture {
     pub fn set_master_volume(&self, volume: f32) {
         self.inner.set_master_volume(volume);
     }
+
+    /// Human-readable note about the system-audio source that was resolved
+    /// (macOS only; empty on Linux where the PulseAudio monitor is used).
+    ///
+    /// The GUI uses this to explain why "what you hear" is or is not being
+    /// captured, e.g. that a loopback driver (BlackHole/Soundflower) must be
+    /// installed for system audio on macOS.
+    pub fn system_source_note(&self) -> &str {
+        self.inner.system_source_note()
+    }
+}
+
+// Shared DSP helpers used by the macOS backend (cpal). They are compiled on
+// every platform so their unit tests run everywhere, but only reachable from
+// `cfg(target_os = "macos")` code.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod dsp {
+    /// Map interleaved PCM samples to `f32` in `[-1.0, 1.0]`.
+    ///
+    /// Supported input formats are `f32` (identity), `i16` (÷ 32768) and `u16`
+    /// (mapped so `32768` -> `0.0`). The `stride` is the native interleaved
+    /// channel count from the capture device.
+    pub(crate) fn to_f32(sample_format: &str, samples: &[u8], stride: u16) -> Vec<f32> {
+        let mut out = Vec::with_capacity(samples.len() / 2);
+        match sample_format {
+            "f32" => {
+                for c in samples.as_chunks::<4>().0 {
+                    out.push(f32::from_ne_bytes([c[0], c[1], c[2], c[3]]));
+                }
+            }
+            "i16" => {
+                for c in samples.as_chunks::<2>().0 {
+                    out.push(f32::from(i16::from_ne_bytes([c[0], c[1]])) / 32_768.0);
+                }
+            }
+            "u16" => {
+                for c in samples.as_chunks::<2>().0 {
+                    let v = u16::from_ne_bytes([c[0], c[1]]);
+                    out.push((f32::from(v) - 32_768.0) / 32_768.0);
+                }
+            }
+            _ => {
+                let frames = samples.len() / (stride as usize * 2);
+                out.resize(frames * stride as usize, 0.0);
+            }
+        }
+        out
+    }
+
+    /// Normalise the native interleaved samples to the configured channel
+    /// count (stereo for recordings). Mono is duplicated to both channels;
+    /// more than two channels keep the first channel pair.
+    pub(crate) fn to_channels(samples: &[f32], channels: u16, out_channels: u16) -> Vec<f32> {
+        if channels == out_channels {
+            return samples.to_vec();
+        }
+        let frames = samples.len() / channels.max(1) as usize;
+        let mut out = Vec::with_capacity(frames * out_channels as usize);
+        for f in 0..frames {
+            let base = f * channels as usize;
+            let l = samples[base];
+            let r = if channels > 1 { samples[base + 1] } else { l };
+            for ch in 0..out_channels as usize {
+                if ch == 0 {
+                    out.push(l);
+                } else if ch == 1 {
+                    out.push(r);
+                } else {
+                    out.push(0.0);
+                }
+            }
+        }
+        out
+    }
+
+    /// Resample interleaved audio linearly from `input_rate` to `output_rate`.
+    ///
+    /// Linear interpolation is a pragmatic choice for a voice/game-audio
+    /// capture path (no filter state, deterministic, trivially testable).
+    /// Every output frame picks the two surrounding input frames and blends
+    /// them by the fractional position.
+    pub(crate) fn resample(
+        samples: &[f32],
+        channels: u16,
+        input_rate: u32,
+        output_rate: u32,
+    ) -> Vec<f32> {
+        if input_rate == 0 || output_rate == 0 || input_rate == output_rate {
+            return samples.to_vec();
+        }
+        let ch = channels.max(1) as usize;
+        let frames_in = samples.len() / ch;
+        if frames_in == 0 {
+            return Vec::new();
+        }
+        let ratio = output_rate as f64 / input_rate as f64;
+        let frames_out = (frames_in as f64 * ratio).floor() as usize;
+        let mut out = Vec::with_capacity(frames_out * ch);
+        for o in 0..frames_out {
+            let pos = o as f64 / ratio;
+            let i = (pos.floor() as usize).min(frames_in - 1);
+            let frac = (pos - i as f64) as f32;
+            for c in 0..ch {
+                let a = samples[i * ch + c];
+                // Linear continuation: the implied next frame extends the
+                // last segment (hold a constant slope) instead of clamping to
+                // the final sample, so up-sampled tails stay smooth.
+                let a2 = if i + 1 < frames_in {
+                    samples[(i + 1) * ch + c]
+                } else {
+                    let prev = if i > 0 { samples[(i - 1) * ch + c] } else { a };
+                    a + (a - prev)
+                };
+                out.push(a + (a2 - a) * frac);
+            }
+        }
+        out
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -478,6 +596,10 @@ mod sys_impl {
                 el.set_property("volume", f64::from(volume.clamp(0.0, 1.0)));
             }
         }
+
+        pub fn system_source_note(&self) -> &str {
+            ""
+        }
     }
 
     /// Resolve the PulseAudio monitor source of the default sink, i.e. the
@@ -693,7 +815,373 @@ mod sys_impl {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+// ─── macOS backend (cpal) ────────────────────────────────────────────────
+//
+// Captures the microphone through cpal's default input device and the system
+// audio through a virtual loopback device (BlackHole / Soundflower / VB-Cable)
+// when one is installed. Without a loopback device macOS offers no public API
+// to capture "what you hear", so system capture is disabled with a note the
+// GUI surfaces instead of silently recording silence. Filters and live
+// monitoring are not implemented on macOS (the DSP chain stays a documented
+// follow-up); volumes are applied on the raw samples before delivery.
+#[cfg(target_os = "macos")]
+mod sys_impl {
+    use super::*;
+    use anyhow::Context;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+    use std::thread::{self, JoinHandle};
+
+    /// Capture device kind: which physical source the samples come from.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum SourceKind {
+        System,
+        Mic,
+    }
+
+    /// Raw samples + native format pushed from the cpal callback.
+    struct RawSamples {
+        kind: SourceKind,
+        sample_format: &'static str,
+        bytes: Vec<u8>,
+        stride: u16,
+        input_rate: u32,
+    }
+
+    pub struct AudioCaptureInner {
+        config: AudioConfig,
+        running: Arc<AtomicBool>,
+        sys_stream: Option<cpal::Stream>,
+        mic_stream: Option<cpal::Stream>,
+        sys_thread: Option<JoinHandle<()>>,
+        mic_thread: Option<JoinHandle<()>>,
+        system_note: String,
+        sys_volume: f32,
+        mic_volume: f32,
+        master_volume: f32,
+    }
+
+    impl AudioCaptureInner {
+        pub fn new(config: &AudioConfig) -> Result<Self> {
+            let system_note = if config.capture_system {
+                match find_loopback_device() {
+                    Some(device) => {
+                        format!("System audio: {}", device.name().unwrap_or_default())
+                    }
+                    None => messages::macos_system_audio_unavailable().to_string(),
+                }
+            } else {
+                String::new()
+            };
+            Ok(Self {
+                config: config.clone(),
+                running: Arc::new(AtomicBool::new(false)),
+                sys_stream: None,
+                mic_stream: None,
+                sys_thread: None,
+                mic_thread: None,
+                system_note,
+                sys_volume: config.system_volume,
+                mic_volume: config.mic_volume,
+                master_volume: config.master_volume,
+            })
+        }
+
+        /// Whether system audio can actually be captured (a loopback device
+        /// was found and its stream could be opened).
+        fn loopback_available(&self) -> bool {
+            self.system_note.starts_with("System audio:")
+        }
+
+        /// Deliver the raw samples from both enabled sources into a single
+        /// mixed frame stream (system and mic volumes applied per source).
+        pub fn start(&mut self, on_frame: AudioFrameCallback) -> Result<()> {
+            if self.config.separate_tracks {
+                anyhow::bail!("{}", messages::separate_tracks_enabled_misuse());
+            }
+            if self.running.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+            let (raw_tx, raw_rx) = mpsc::channel::<RawSamples>();
+            let sys_volume = self.sys_volume * self.master_volume;
+            let mic_volume = self.mic_volume * self.master_volume;
+            let sample_rate = self.config.sample_rate;
+            let channels = self.config.channels;
+            let sys_enabled = self.config.capture_system && self.loopback_available();
+            if sys_enabled {
+                self.spawn_source(SourceKind::System, &raw_tx)?;
+            }
+            if self.config.capture_mic {
+                self.spawn_source(SourceKind::Mic, &raw_tx)?;
+            }
+            if !sys_enabled && !self.config.capture_mic {
+                anyhow::bail!("{}", messages::no_audio_input_sources());
+            }
+
+            let running = Arc::clone(&self.running);
+            let callback = Arc::new(Mutex::new(on_frame));
+            let handle = thread::spawn(move || {
+                while running.load(Ordering::SeqCst) {
+                    let mut any = false;
+                    while let Ok(raw) = raw_rx.try_recv() {
+                        let mut frame = to_audio_frame(raw, channels, sample_rate);
+                        apply_volume(
+                            &mut frame,
+                            if raw.kind == SourceKind::System {
+                                sys_volume
+                            } else {
+                                mic_volume
+                            },
+                        );
+                        if let Ok(mut cb) = callback.lock() {
+                            cb(frame);
+                        }
+                        any = true;
+                    }
+                    if !any {
+                        thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }
+            });
+            self.sys_thread = Some(handle);
+
+            self.running.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+
+        /// Deliver system and microphone frames on separate channels
+        /// (volumes applied per source).
+        pub fn start_separated(
+            &mut self,
+            system_cb: AudioFrameCallback,
+            mic_cb: AudioFrameCallback,
+        ) -> Result<()> {
+            if !self.config.separate_tracks {
+                anyhow::bail!("{}", messages::separate_tracks_disabled_misuse());
+            }
+            if self.running.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+            let (sys_tx, sys_rx) = mpsc::channel::<RawSamples>();
+            let (mic_tx, mic_rx) = mpsc::channel::<RawSamples>();
+            let sys_volume = self.sys_volume * self.master_volume;
+            let mic_volume = self.mic_volume * self.master_volume;
+            let sample_rate = self.config.sample_rate;
+            let channels = self.config.channels;
+            let sys_enabled = self.config.capture_system && self.loopback_available();
+            if self.config.capture_system && !sys_enabled {
+                tracing::warn!("{}", messages::macos_system_audio_unavailable());
+            }
+            if sys_enabled {
+                self.spawn_source(SourceKind::System, &sys_tx)?;
+            }
+            if self.config.capture_mic {
+                self.spawn_source(SourceKind::Mic, &mic_tx)?;
+            }
+            if !sys_enabled && !self.config.capture_mic {
+                anyhow::bail!("{}", messages::no_audio_input_sources());
+            }
+
+            let running = Arc::clone(&self.running);
+            let sys_callback = Arc::new(Mutex::new(system_cb));
+            let mic_callback = Arc::new(Mutex::new(mic_cb));
+            let handle = thread::spawn(move || {
+                while running.load(Ordering::SeqCst) {
+                    let mut any = false;
+                    if let Some(rx) = &sys_rx {
+                        while let Ok(raw) = rx.try_recv() {
+                            let mut frame = to_audio_frame(raw, channels, sample_rate);
+                            apply_volume(&mut frame, sys_volume);
+                            if let Ok(mut cb) = sys_callback.lock() {
+                                cb(frame);
+                            }
+                            any = true;
+                        }
+                    }
+                    if let Some(rx) = &mic_rx {
+                        while let Ok(raw) = rx.try_recv() {
+                            let mut frame = to_audio_frame(raw, channels, sample_rate);
+                            apply_volume(&mut frame, mic_volume);
+                            if let Ok(mut cb) = mic_callback.lock() {
+                                cb(frame);
+                            }
+                            any = true;
+                        }
+                    }
+                    if !any {
+                        thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                }
+            });
+            self.sys_thread = Some(handle);
+
+            self.running.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+
+        pub fn stop(&mut self) -> Result<()> {
+            if !self.running.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+            self.running.store(false, Ordering::SeqCst);
+            if let Some(stream) = self.sys_stream.take() {
+                stream.pause().ok();
+            }
+            if let Some(stream) = self.mic_stream.take() {
+                stream.pause().ok();
+            }
+            if let Some(handle) = self.sys_thread.take() {
+                let _ = handle.join();
+            }
+            if let Some(handle) = self.mic_thread.take() {
+                let _ = handle.join();
+            }
+            Ok(())
+        }
+
+        pub fn is_running(&self) -> bool {
+            self.running.load(Ordering::SeqCst)
+        }
+
+        pub fn skipped_filters(&self) -> &[SkippedFilter] {
+            &[]
+        }
+
+        pub fn set_system_volume(&self, volume: f32) {
+            let _ = volume;
+        }
+
+        pub fn set_mic_volume(&self, volume: f32) {
+            let _ = volume;
+        }
+
+        pub fn set_monitor_volume(&self, _volume: f32) {}
+
+        pub fn set_master_volume(&self, _volume: f32) {}
+
+        pub fn system_source_note(&self) -> &str {
+            &self.system_note
+        }
+
+        /// Open one cpal input stream for the given kind and wire its samples
+        /// into `raw_tx`. The stream object is stored on `self` so it stays
+        /// alive (and keeps producing callbacks) until [`Self::stop`].
+        fn spawn_source(
+            &mut self,
+            kind: SourceKind,
+            raw_tx: &mpsc::Sender<RawSamples>,
+        ) -> Result<()> {
+            let host = cpal::default_host();
+            let device = match kind {
+                SourceKind::System => match find_loopback_device() {
+                    Some(d) => d,
+                    None => return Ok(()),
+                },
+                SourceKind::Mic => host
+                    .default_input_device()
+                    .context(messages::macos_no_input_device())?,
+            };
+            let format = device
+                .default_input_format()
+                .context(messages::macos_no_input_format())?;
+            let sample_format = match format.sample_format {
+                cpal::SampleFormat::F32 => "f32",
+                cpal::SampleFormat::I16 => "i16",
+                cpal::SampleFormat::U16 => "u16",
+                other => {
+                    return Err(anyhow::anyhow!(
+                        "{}",
+                        messages::macos_unsupported_sample_format(&format!("{other:?}"))
+                    ))
+                }
+            };
+            let channels = format.channels.max(1);
+            let input_rate = format.sample_rate.0;
+            let kind_for_cb = kind;
+            let raw_tx = raw_tx.clone();
+
+            let stream = device
+                .build_input_stream(
+                    &format.into(),
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        // cpal delivers the device-native sample format; the f32
+                        // buffer is reinterpreted as raw bytes and converted by
+                        // `to_f32` according to the captured sample format.
+                        let bytes = unsafe {
+                            std::slice::from_raw_parts(
+                                data.as_ptr() as *const u8,
+                                data.len() * std::mem::size_of::<f32>(),
+                            )
+                        }
+                        .to_vec();
+                        let _ = raw_tx.send(RawSamples {
+                            kind: kind_for_cb,
+                            sample_format,
+                            bytes,
+                            stride: channels,
+                            input_rate,
+                        });
+                    },
+                    move |_| {},
+                    None,
+                )
+                .map_err(|e| {
+                    anyhow::anyhow!("{}", messages::macos_stream_failed(&format!("{e}")))
+                })?;
+
+            match kind {
+                SourceKind::System => self.sys_stream = Some(stream),
+                SourceKind::Mic => self.mic_stream = Some(stream),
+            }
+            Ok(())
+        }
+    }
+
+    /// Convert raw device samples into a configured [`AudioFrame`]: native
+    /// format -> f32, channel mapping to the configured count, resampling to
+    /// the configured rate.
+    fn to_audio_frame(raw: RawSamples, channels: u16, sample_rate: u32) -> AudioFrame {
+        let f32_samples = dsp::to_f32(raw.sample_format, &raw.bytes, raw.stride);
+        let mapped = dsp::to_channels(&f32_samples, raw.stride, channels);
+        let resampled = dsp::resample(&mapped, channels, raw.input_rate, sample_rate);
+        AudioFrame::new(resampled, sample_rate, channels)
+    }
+
+    /// Scale a frame in place by a linear volume factor.
+    fn apply_volume(frame: &mut AudioFrame, volume: f32) {
+        let v = volume.clamp(0.0, 1.0);
+        if (v - 1.0).abs() < f32::EPSILON {
+            return;
+        }
+        for s in &mut frame.data {
+            *s *= v;
+        }
+    }
+
+    /// Find an installed loopback capture device (BlackHole, Soundflower,
+    /// VB-Cable) among the input devices. Returns the device itself so the
+    /// caller can both name it and open a stream on it.
+    fn find_loopback_device() -> Option<cpal::Device> {
+        let host = cpal::default_host();
+        let mut devices = host.input_devices().ok()?;
+        while let Some(device) = devices.next() {
+            if let Ok(name) = device.name() {
+                let lower = name.to_lowercase();
+                if ["blackhole", "soundflower", "loopback", "vbcable"]
+                    .iter()
+                    .any(|k| lower.contains(k))
+                {
+                    return Some(device);
+                }
+            }
+        }
+        None
+    }
+}
+
+// ─── fallback for other platforms (no audio capture yet) ─────────────────
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 mod sys_impl {
     use super::*;
 
@@ -737,6 +1225,10 @@ mod sys_impl {
         pub fn set_monitor_volume(&self, _volume: f32) {}
 
         pub fn set_master_volume(&self, _volume: f32) {}
+
+        pub fn system_source_note(&self) -> &str {
+            ""
+        }
     }
 }
 
@@ -1103,9 +1595,94 @@ mod tests {
             .is_err());
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn capture_is_supported_on_macos() {
+        // Construction must not fail on macOS even when no device is present
+        // (the note is set and start() later reports the real error); the
+        // point is that the API is no longer the Linux-only stub.
+        let cap = AudioCapture::new(AudioConfig::default()).expect("macOS capture constructs");
+        // With the default config system audio is requested: either a loopback
+        // device note or the "unavailable" note is present.
+        let note = cap.system_source_note();
+        assert!(
+            note.is_empty() || note.starts_with("System audio:") || note.contains("loopback"),
+            "unexpected system note: {note}"
+        );
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     #[test]
     fn capture_is_not_supported_off_linux() {
         assert!(AudioCapture::new(AudioConfig::default()).is_err());
+    }
+
+    // ── shared DSP helpers (compiled and tested on every platform) ──
+
+    #[test]
+    fn to_f32_converts_i16_samples() {
+        // [0x0000, 0x8000] little-endian = 0 and -32768 -> 0.0 and -1.0.
+        let bytes = [0x00, 0x00, 0x00, 0x80];
+        let out = dsp::to_f32("i16", &bytes, 2);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0], 0.0);
+        assert_eq!(out[1], -1.0);
+    }
+
+    #[test]
+    fn to_f32_passes_f32_through() {
+        let bytes = 0.5f32.to_ne_bytes();
+        let out = dsp::to_f32("f32", &bytes, 1);
+        assert_eq!(out, vec![0.5]);
+    }
+
+    #[test]
+    fn to_channels_duplicates_mono_to_stereo() {
+        let out = dsp::to_channels(&[0.1, 0.2, 0.3], 1, 2);
+        assert_eq!(out, vec![0.1, 0.1, 0.2, 0.2, 0.3, 0.3]);
+    }
+
+    #[test]
+    fn to_channels_keeps_first_pair_when_downmixing() {
+        // 4-channel input (quad) -> stereo keeps L/R of each frame.
+        let out = dsp::to_channels(&[1.0, 2.0, 9.0, 9.0, 3.0, 4.0, 9.0, 9.0], 4, 2);
+        assert_eq!(out, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn to_channels_identity_when_counts_match() {
+        assert_eq!(dsp::to_channels(&[1.0, 2.0], 2, 2), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn resample_is_identity_at_same_rate() {
+        let samples = vec![0.1, 0.2, 0.3];
+        assert_eq!(dsp::resample(&samples, 1, 48_000, 48_000), samples);
+    }
+
+    #[test]
+    fn resample_down_samples_length_and_interpolates() {
+        // 4 frames at 48 kHz -> 2 frames at 24 kHz (ratio 0.5): frames 0 and 2.
+        let out = dsp::resample(&[0.0, 1.0, 2.0, 3.0], 1, 48_000, 24_000);
+        assert_eq!(out, vec![0.0, 2.0]);
+    }
+
+    #[test]
+    fn resample_up_samples_to_the_target_length() {
+        // 2 frames at 24 kHz -> 4 frames at 48 kHz (ratio 2.0): 0, 0.5, 1, 1.5.
+        let out = dsp::resample(&[0.0, 1.0], 1, 24_000, 48_000);
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0], 0.0);
+        assert_eq!(out[1], 0.5);
+        assert_eq!(out[2], 1.0);
+        assert_eq!(out[3], 1.5);
+    }
+
+    #[test]
+    fn resample_keeps_stereo_interleaving() {
+        // Stereo frames [L,R] resampled 2:1 keep the interleave intact:
+        // 2 frames in (4 samples) -> 1 frame out (2 samples).
+        let out = dsp::resample(&[0.0, 0.1, 1.0, 1.1], 2, 48_000, 24_000);
+        assert_eq!(out, vec![0.0, 0.1]);
     }
 }

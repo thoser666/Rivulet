@@ -16,9 +16,13 @@ use std::sync::{
 };
 use std::time::Instant;
 
-// --- macOS imports (xcap screen/window capture for recording) ---
+// --- macOS imports (xcap screen/window capture + cpal audio for recording) ---
 #[cfg(target_os = "macos")]
-use {std::sync::mpsc as std_mpsc, std::thread};
+use {
+    rivulet_audio::{AudioCapture, AudioConfig},
+    std::sync::mpsc as std_mpsc,
+    std::thread,
+};
 
 // --- Linux-specific imports ---
 #[cfg(target_os = "linux")]
@@ -948,11 +952,26 @@ pub struct RivuletApp {
     #[serde(skip)]
     capture_backend: Option<BackendStatus>,
 
-    // macOS Fields (xcap screen/window capture; video-only recording, M5
+    // macOS Fields (xcap screen/window capture; cpal audio capture, M5
     // Windows/macOS feature parity)
     #[cfg(target_os = "macos")]
     #[serde(skip)]
     is_recording: bool,
+    #[cfg(target_os = "macos")]
+    #[serde(skip)]
+    audio: Option<AudioCapture>,
+    #[cfg(target_os = "macos")]
+    #[serde(skip)]
+    audio_preview: bool,
+    #[cfg(target_os = "macos")]
+    #[serde(skip)]
+    audio_warning: Option<String>,
+    #[cfg(target_os = "macos")]
+    #[serde(skip)]
+    audio_system_rx: Option<std_mpsc::Receiver<AudioFrame>>,
+    #[cfg(target_os = "macos")]
+    #[serde(skip)]
+    audio_mic_rx: Option<std_mpsc::Receiver<AudioFrame>>,
     #[cfg(target_os = "macos")]
     #[serde(skip)]
     monitors: Vec<xcap::Monitor>,
@@ -1369,6 +1388,16 @@ impl Default for RivuletApp {
             capture_backend: None,
             #[cfg(target_os = "macos")]
             is_recording: false,
+            #[cfg(target_os = "macos")]
+            audio: None,
+            #[cfg(target_os = "macos")]
+            audio_preview: false,
+            #[cfg(target_os = "macos")]
+            audio_warning: None,
+            #[cfg(target_os = "macos")]
+            audio_system_rx: None,
+            #[cfg(target_os = "macos")]
+            audio_mic_rx: None,
             #[cfg(target_os = "macos")]
             monitors: Vec::new(),
             #[cfg(target_os = "macos")]
@@ -2552,9 +2581,102 @@ impl RivuletApp {
         }
     }
 
-    /// Start a macOS recording of the selected monitor or window. Video-only
-    /// (no system/mic audio capture yet); frames are captured via xcap and
-    /// pushed into the same engine recording pipeline as on Linux/Windows.
+    /// Start the macOS audio capture (cpal): the microphone via the default
+    /// input device and system audio via an installed loopback driver
+    /// (BlackHole/Soundflower/VB-Cable). Frames are delivered on separate
+    /// system/mic channels exactly like the Linux backend. Without a loopback
+    /// driver system audio is skipped with a warning instead of failing the
+    /// recording.
+    fn start_macos_audio(&mut self) {
+        self.stop_macos_audio();
+        let config = AudioConfig {
+            capture_system: true,
+            capture_mic: true,
+            system_volume: 0.8,
+            mic_volume: 1.0,
+            master_volume: 1.0,
+            separate_tracks: true,
+            ..Default::default()
+        };
+        let mut audio = match AudioCapture::new(config) {
+            Ok(audio) => audio,
+            Err(e) => {
+                self.audio_warning = Some(format!("{}", e));
+                return;
+            }
+        };
+        let (sys_tx, sys_rx) = std_mpsc::channel::<AudioFrame>();
+        let (mic_tx, mic_rx) = std_mpsc::channel::<AudioFrame>();
+        match audio.start_separated(
+            Box::new(move |frame: AudioFrame| {
+                let _ = sys_tx.send(frame);
+            }),
+            Box::new(move |frame: AudioFrame| {
+                let _ = mic_tx.send(frame);
+            }),
+        ) {
+            Ok(()) => {
+                // The backend note reports the resolved system source: either
+                // the found loopback device or the "install BlackHole…" hint.
+                // Empty when system capture is not requested.
+                let note = audio.system_source_note().to_string();
+                self.audio_warning = (!note.is_empty()).then_some(note);
+                self.audio = Some(audio);
+                self.audio_system_rx = Some(sys_rx);
+                self.audio_mic_rx = Some(mic_rx);
+                self.audio_preview = true;
+            }
+            Err(e) => {
+                self.audio_warning = Some(format!("{}", e));
+            }
+        }
+    }
+
+    /// Stop the macOS audio capture and drop the frame channels.
+    fn stop_macos_audio(&mut self) {
+        if let Some(mut audio) = self.audio.take() {
+            let _ = audio.stop();
+        }
+        self.audio_system_rx = None;
+        self.audio_mic_rx = None;
+        self.audio_preview = false;
+        self.audio_warning = None;
+    }
+
+    /// Drain the macOS audio frame channels into the engine's separate audio
+    /// tracks (system + mic). While paused or muted the frames are discarded,
+    /// matching the Linux behaviour.
+    fn drain_macos_audio(&mut self) {
+        let paused = self.is_paused;
+        let muted = self.is_muted;
+        if !self.audio_preview {
+            return;
+        }
+        if self.is_recording && !paused && !muted {
+            if let Some(rx) = &self.audio_system_rx {
+                while let Ok(frame) = rx.try_recv() {
+                    let _ = self.engine.push_audio_track(&frame, AudioTrack::System);
+                }
+            }
+            if let Some(rx) = &self.audio_mic_rx {
+                while let Ok(frame) = rx.try_recv() {
+                    let _ = self.engine.push_audio_track(&frame, AudioTrack::Microphone);
+                }
+            }
+        } else {
+            if let Some(rx) = &self.audio_system_rx {
+                while rx.try_recv().is_ok() {}
+            }
+            if let Some(rx) = &self.audio_mic_rx {
+                while rx.try_recv().is_ok() {}
+            }
+        }
+    }
+
+    /// Start a macOS recording of the selected monitor or window. Video is
+    /// captured via xcap; audio (system via loopback driver, microphone via
+    /// cpal) is started alongside and pushed into the same engine recording
+    /// pipeline as on Linux/Windows.
     fn start_macos_recording(&mut self) {
         if self.is_recording {
             return;
@@ -2604,7 +2726,10 @@ impl RivuletApp {
         self.engine.set_video_effects(self.video_effects);
         self.apply_replay_setting();
         self.apply_ndi_output();
+        self.engine.set_audio_enabled(true);
+        self.engine.set_separate_audio_tracks(true);
         self.engine.start_local_recording(path);
+        self.start_macos_audio();
 
         let (raw_tx, raw_rx) = std_mpsc::channel::<RawFrame>();
         let stop = Arc::new(AtomicBool::new(false));
@@ -2678,6 +2803,7 @@ impl RivuletApp {
             signal.store(true, Ordering::SeqCst);
         }
         self.begin_background_stop();
+        self.stop_macos_audio();
         self.raw_rx = None;
         self.stop_signal = None;
         self.is_recording = false;
@@ -2707,6 +2833,7 @@ impl RivuletApp {
             let text = self.overlay_text();
             self.engine.update_overlay_text(&text);
         }
+        self.drain_macos_audio();
     }
 
     /// Draw the macOS Record view: source selection (monitor or window),
@@ -2718,7 +2845,10 @@ impl RivuletApp {
         if self.monitors.is_empty() && self.windows.is_empty() {
             ui.small(self.tr("mac_permission_hint"));
         }
-        ui.small(self.tr("mac_video_only_hint"));
+        ui.small(self.tr("mac_audio_hint"));
+        if let Some(warning) = &self.audio_warning {
+            ui.colored_label(colors.warning, warning);
+        }
 
         let monitors: Vec<(usize, String)> = self
             .monitors
@@ -9939,6 +10069,21 @@ mod tests {
             "fn drain_macos_frames",
             "fn draw_macos_record_view",
             "fn refresh_macos_sources",
+        ] {
+            assert!(production.contains(needle), "missing {needle}");
+        }
+        // macOS audio capture (cpal): started with the recording, drained into
+        // the engine's separate system/mic tracks, stopped on stop, and the
+        // resolved loopback note surfaced in the Record view.
+        for needle in [
+            "fn start_macos_audio",
+            "fn stop_macos_audio",
+            "fn drain_macos_audio",
+            "self.engine.set_audio_enabled(true)",
+            "self.engine.set_separate_audio_tracks(true)",
+            "self.engine.push_audio_track(&frame, AudioTrack::System)",
+            "self.engine.push_audio_track(&frame, AudioTrack::Microphone)",
+            "audio.system_source_note()",
         ] {
             assert!(production.contains(needle), "missing {needle}");
         }
