@@ -179,6 +179,65 @@ fn security_policy_is_linked_from_readme_and_docs() {
 }
 
 #[test]
+fn contributing_defines_code_review_policy_and_definition_of_done() {
+    // OpenSSF Best Practices (passing): the contribution instructions must
+    // explain the contribution process and the requirements for acceptable
+    // contributions (test policy, coding standard), and the project must
+    // document how changes are reviewed. These live in CONTRIBUTING.md and
+    // must not drift out of existence, otherwise the badge evidence map in
+    // docs/openssf-best-practices.md would silently become stale.
+    let contributing = read("CONTRIBUTING.md");
+    for marker in [
+        "## Code Review Policy",
+        "Pull requests for contributors",
+        "Maintainer direct pushes",
+        "Sensitive changes always get a PR",
+        "Automated review is part of review",
+        "## Definition of Done (Acceptable Contributions)",
+        "Tests for new functionality",
+        "i18n parity",
+        "Documentation",
+        "Checks are green",
+        "Commit convention",
+        "No secrets",
+        "## Release Verification",
+        "Built from the tested commit",
+        "Notes are complete",
+        "Fixed vulnerabilities are identified",
+        "Artifacts are integrity-checked",
+        "release_notes_vulns",
+        "CVE/GHSA/RUSTSEC",
+    ] {
+        assert!(
+            contributing.contains(marker),
+            "CONTRIBUTING.md must document the OpenSSF passing-badge policy: {marker}"
+        );
+    }
+
+    // The OpenSSF evidence map must exist, carry the three mapped sections
+    // and link back to the artifacts it vouches for.
+    let map = read("docs/openssf-best-practices.md");
+    for marker in [
+        "# OpenSSF Best Practices Badge — Evidence Map",
+        "## Contribution process",
+        "## Code review policy",
+        "## Release verification",
+        "## How this page stays true",
+        "## Remaining (maintainer action, not repo files)",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "rivulet-core/tests/ci_pinning.rs",
+        "SHA256SUMS",
+        "bestpractices.dev",
+    ] {
+        assert!(
+            map.contains(marker),
+            "docs/openssf-best-practices.md must contain {marker}"
+        );
+    }
+}
+
+#[test]
 fn third_party_actions_are_pinned_to_full_commit_sha() {
     for name in WORKFLOWS {
         let content = read(&format!(".github/workflows/{name}"));

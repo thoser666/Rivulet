@@ -100,6 +100,34 @@ The CI workflow (`ci.yml`) picks up the tag, runs the full test suite, builds bi
 
 All releases are alpha until the first beta. The version in `Cargo.toml` is the single source of truth — it is automatically updated by the release workflow on every alpha release.
 
+### Release Verification
+
+Every release — alpha, beta, RC, or stable — is verified before and after it
+is published (this is also what satisfies the OpenSSF Best Practices
+`release_notes` / `release_notes_vulns` / `delivery_mitm` criteria):
+
+- **Built from the tested commit.** Releases only proceed when the CI run of
+  the release commit concluded `success`; the workflow checks out that exact
+  SHA (`workflow_run.head_sha`), so the artifact always matches the tested
+  source.
+- **Notes are complete.** The release-notes body is generated from the actual
+  commits since the previous tag and `scripts/check-release-notes.py`
+  verifies that every non-prepare commit appears before the release is
+  created — the notes are a human-readable, grouped summary, never a raw
+  `git log` dump.
+- **Fixed vulnerabilities are identified.** Security fixes use the
+  `fix(security):` prefix and MUST carry the CVE/GHSA/RUSTSEC identifier in
+  the commit subject, so the generated notes and `CHANGELOG.md` identify
+  every publicly known run-time vulnerability fixed in the release (the
+  `release_notes_vulns` criterion).
+- **Artifacts are integrity-checked.** A `SHA256SUMS` manifest over every
+  attached asset is generated and published with the release; the updater
+  downloads the manifest and verifies the installer digest before install,
+  failing closed on mismatch. Assets are distributed over HTTPS
+  (GitHub Releases), which counters MITM tampering.
+- **Stable/beta gating.** Non-alpha releases additionally require the
+  beta-gate criteria (see above) to be met before they are cut.
+
 ---
 
 ## Development Workflow
@@ -144,6 +172,59 @@ git on every push. On Windows the check prefers an explicit Git for
 Windows bash (a `bash` on PATH may be the WSL launcher) and is skipped
 locally only when no Git Bash is installed — the CI Pinning-Tests job on
 ubuntu keeps it enforced.
+
+---
+
+## Code Review Policy
+
+Every change to `develop` passes a review before it lands:
+
+1. **Pull requests for contributors.** The `develop` ruleset requires a pull
+   request plus the required status checks (`CI`, `Security`,
+   `Pinning-Tests`, `OpenSSF Scorecard`) before a merge; contributors never
+   push to `develop` directly. See the ruleset description in
+   `docs/security.md`.
+2. **Maintainer direct pushes.** Changes that the maintainer pushes directly
+   to `develop` (typical for this personal project) must pass the committed
+   pre-push hook (fmt + clippy with `-D warnings`) and the fast-guard stage
+   first; the same required checks run again on CI before any release is
+   built. Direct pushes are the exception, not the default.
+3. **Sensitive changes always get a PR.** Changes to workflows, packaging,
+   signing, the release pipeline, security policy, and shared-memory/capture
+   security code are reviewed as pull requests with an approving review
+   before merge whenever a second reviewer is available.
+4. **Automated review is part of review.** Because much of this repository is
+   single-maintainer, the executable checks are treated as reviewers too:
+   fmt, clippy `-D warnings`, the full test suite, the ci_pinning supply-
+   chain guards, actionlint, and ShellCheck all run on every push and must be
+   green before the change is considered reviewed. Release artifacts are
+   additionally verified (notes completeness, `SHA256SUMS`) as described in
+   the [Release Strategy](#release-strategy).
+
+---
+
+## Definition of Done (Acceptable Contributions)
+
+A contribution is acceptable when it meets **all** of the following:
+
+- **Tests for new functionality.** Major new functionality MUST add
+   automated tests to the relevant suite (this is the project's formal test
+   policy — see the OpenSSF Best Practices `test_policy` criterion). Tests
+   for pure-wiring and release-automation changes live in
+   `rivulet-core/tests/ci_pinning.rs` as content guards.
+- **i18n parity.** Any user-visible string must exist in **both** the EN and
+   DE locale tables (`rivulet-core/src/i18n.rs`) in the same order.
+- **Documentation.** User-visible behavior is reflected in `README.md`, the
+   relevant `docs/*.md` page, and the `CHANGELOG.md` entry for the change.
+- **Checks are green.** `cargo fmt --all --check`,
+   `cargo clippy --workspace --all-targets -- -D warnings`, and the test
+   suites pass.
+- **Commit convention.** The commit uses the Conventional Commits format
+   described above; `fix(security): ...` commits that close a publicly known
+   vulnerability MUST reference its CVE/GHSA/RUSTSEC identifier in the commit
+   subject so it surfaces in the release notes and changelog.
+- **No secrets.** Stream keys, tokens, certificates, and personal paths never
+   appear in commits, logs, docs, or issue text (see `SECURITY.md`).
 
 ## Testing
 
