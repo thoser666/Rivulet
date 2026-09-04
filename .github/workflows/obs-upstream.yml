@@ -7,6 +7,10 @@ on:
 
 permissions:
   contents: read
+  # The checker sweeps this repository's open issues (GitHub REST API) and
+  # the weekly run creates/updates the labeled review issue with the merged
+  # report and its review checklist.
+  issues: write
 
 jobs:
   check:
@@ -34,24 +38,65 @@ jobs:
           python3 -m json.tool scripts/vision-criteria.json >/dev/null
           python3 scripts/check-obs-upstream.py --self-test
 
-      - name: Check latest OBS release and update vision documentation
+      - name: Check latest OBS release, sweep Rivulet issues, update vision docs
         id: upstream
         run: |
-          python3 scripts/check-obs-upstream.py --update-doc | tee "$RUNNER_TEMP/obs-upstream-report.md"
+          python3 scripts/check-obs-upstream.py --update-doc \
+            --checklist-file "$RUNNER_TEMP/obs-checklist.md" | tee "$RUNNER_TEMP/obs-upstream-report.md"
           # Fail loudly instead of masking: the pipeline already fails on a
           # checker error (pipefail), and an empty or header-less report
           # (the silent failure mode that emptied the weekly artifact before)
-          # must abort the run too.
+          # must abort the run too. Both sections (OBS release notes and the
+          # Rivulet open-issue sweep) must be present.
           if [ ! -s "$RUNNER_TEMP/obs-upstream-report.md" ] \
-             || ! grep -q "## OBS upstream check" "$RUNNER_TEMP/obs-upstream-report.md"; then
+             || ! grep -q "## OBS upstream check" "$RUNNER_TEMP/obs-upstream-report.md" \
+             || ! grep -q "## Rivulet open issues" "$RUNNER_TEMP/obs-upstream-report.md"; then
             echo "::error::OBS upstream report is empty or malformed — no usable report produced"
             exit 1
           fi
           cp docs/obs-vision-candidates.md "$RUNNER_TEMP/obs-vision-candidates.md"
+          cp docs/community-wish-candidates.md "$RUNNER_TEMP/community-wish-candidates.md"
 
       - name: Publish report
         if: always()
         run: cat "$RUNNER_TEMP/obs-upstream-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish weekly review issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          LABEL="weekly-vision-review"
+          gh label create "$LABEL" \
+            --description "Automated weekly vision review (OBS upstream + community wishes)" \
+            --force >/dev/null 2>&1 || true
+          DATE="$(date -u +%F)"
+          TAG="$(head -1 "$RUNNER_TEMP/obs-upstream-report.md" | grep -o '[0-9][0-9.]*$' || echo 'unknown')"
+          TITLE="Weekly vision review — ${DATE} — OBS ${TAG}"
+          {
+            cat "$RUNNER_TEMP/obs-upstream-report.md"
+            printf '\n\n## Review checklist\n\n'
+            cat "$RUNNER_TEMP/obs-checklist.md"
+          } > "$RUNNER_TEMP/weekly-review.md"
+          EXISTING="$(gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open --limit 100 \
+            --json number,title --jq ".[] | select(.title | startswith(\"Weekly vision review — ${DATE}\")) | .number" \
+            | head -1 || true)"
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
+              --body-file "$RUNNER_TEMP/weekly-review.md"
+          else
+            NEW="$(gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" \
+              --body-file "$RUNNER_TEMP/weekly-review.md" --label "$LABEL")"
+            NEW_NUMBER="$(basename "$NEW")"
+            # Keep exactly one open review issue: close older weekly issues so
+            # the label list stays a rolling single review queue.
+            for N in $(gh issue list --repo "$GITHUB_REPOSITORY" --label "$LABEL" --state open \
+              --json number --jq '.[].number'); do
+              if [ "$N" != "$NEW_NUMBER" ]; then
+                gh issue close "$N" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || true
+              fi
+            done
+          fi
 
       - name: Save last-checked release state to cache
         # Saved on every run (also on failure): on a failed fetch the script
@@ -73,4 +118,5 @@ jobs:
           path: |
             ${{ runner.temp }}/obs-upstream-report.md
             ${{ runner.temp }}/obs-vision-candidates.md
+            ${{ runner.temp }}/community-wish-candidates.md
           if-no-files-found: warn

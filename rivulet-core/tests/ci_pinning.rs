@@ -1749,6 +1749,55 @@ fn obs_upstream_check_persists_checked_release_tag_across_runs() {
 }
 
 #[test]
+fn obs_upstream_weekly_check_also_reviews_rivulet_open_issues() {
+    // The weekly sweep covers Rivulet's own open issues with the same vision
+    // scoring and publishes them in the same report, so maintainers review
+    // OBS candidates and community wishes in one place.
+    let workflow = read(".github/workflows/obs-upstream.yml");
+    assert!(
+        workflow.contains("issues: write") && workflow.contains("sweep Rivulet issues"),
+        "the workflow must request issue write access and run the issue sweep"
+    );
+    assert!(
+        workflow.contains("## Rivulet open issues")
+            && workflow.contains("community-wish-candidates.md"),
+        "the common report must carry the issue section and the community doc artifact"
+    );
+    assert!(
+        workflow.contains("weekly-vision-review")
+            && workflow.contains("gh issue create")
+            && workflow.contains("--checklist-file")
+            && workflow.contains("## Review checklist"),
+        "the weekly run must publish the merged report as a labeled issue with a checklist"
+    );
+    let script = read("scripts/check-obs-upstream.py");
+    assert!(
+        script.contains("def fetch_open_issues(")
+            && script.contains("def analyze_issues(")
+            && script.contains("def issues_report(")
+            && script.contains("def update_community_doc(")
+            && script.contains("def review_checklist(")
+            && script.contains("COMMUNITY-WISH-CANDIDATES:START")
+            && script.contains("vision_fit(text, vision)"),
+        "the checker must fetch, score, report, checklist, and persist Rivulet issue wishes"
+    );
+    assert!(
+        script.contains("ROADMAP_LABELS")
+            && script.contains("def is_roadmap_tracked(")
+            && script.contains("### Roadmap-tracked"),
+        "enhancement/epic milestone work must be excluded from the wish review"
+    );
+    let doc = read("docs/community-wish-candidates.md");
+    assert!(
+        doc.contains("<!-- COMMUNITY-WISH-CANDIDATES:START -->")
+            && doc.contains("<!-- COMMUNITY-WISH-CANDIDATES:END -->")
+            && doc.contains("Review policy")
+            && doc.contains("Label taxonomy"),
+        "the community doc must keep both generation markers and the review/label policy"
+    );
+}
+
+#[test]
 fn tag_based_release_attaches_checksums_and_generated_notes() {
     // The beta/rc/stable tag path must ship the same release hygiene as the
     // alpha channel: a SHA256SUMS manifest over the attached assets (the
