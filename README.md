@@ -20,6 +20,18 @@
 
 ---
 
+## 📚 Repositories
+
+Rivulet spans more than one codebase. All repositories are public and MIT
+licensed:
+
+| Repository | Content | Status & intent |
+| --- | --- | --- |
+| [`thoser666/Rivulet`](https://github.com/thoser666/Rivulet) | The application and engine: GUI, rivulet-core engine, capture/audio/streaming crates, installers, workflows, and all versioned documentation (`docs/`) | **Primary codebase, active.** Every release is built from this repository.
+| [`thoser666/Rivulet.wiki`](https://github.com/thoser666/Rivulet/wiki) | The end-user wiki (bilingual EN/DE how-tos, platform tips, FAQ) | **Documentation companion, active, not compiled into releases.** Synced from this repository by the wiki-translation workflow; boundaries with the versioned docs are defined in [`docs/wiki-content-policy.md`](docs/wiki-content-policy.md). |
+
+---
+
 ## 🎯 Vision
 
 Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording & streaming engine written in Rust**, with a modern GUI on top. It provides the OBS core feature set (capture, encoding, audio, streaming, dual output) while turning OBS's architectural gaps into its own strengths: automation instead of interactivity, a library instead of a monolith, a modern render path instead of legacy OpenGL/D3D, and a stable plugin ABI instead of version-sensitive C DLLs.

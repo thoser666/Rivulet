@@ -26,7 +26,8 @@ during the online self-certification.
 | Static analysis | CodeQL, Cargo Audit, Cargo Deny, OpenSSF Scorecard, clippy `-D warnings` |
 | Dynamic analysis | cargo-fuzz targets (CI smoke + weekly deep campaign) |
 | Release hygiene | Generated notes + completeness check + `SHA256SUMS` + HTTPS |
-| Automation proposals | `.bestpractices.json` draft (baseline-1, schema-validated by CI) |
+| Codebases | Primary `thoser666/Rivulet` + `Rivulet.wiki` docs companion (README **Repositories** section) |
+| Automation proposals | `.bestpractices.json` (all 24 baseline-1 controls, schema-validated by CI) |
 
 ## Contribution process (`contribution`, `contribution_requirements`)
 
@@ -44,12 +45,14 @@ Evidence: [`CONTRIBUTING.md`](../CONTRIBUTING.md)
 Evidence: [`CONTRIBUTING.md`](../CONTRIBUTING.md) (**Code Review Policy**),
 [`docs/security.md`](security.md) (branch ruleset).
 
-- Contributors merge via pull requests against `develop`; the branch ruleset
-  requires the status checks (`CI`, `Security`, `Pinning-Tests`, `OpenSSF
-  Scorecard`) before merging.
-- Maintainer direct pushes are the exception and must first pass the
-  committed pre-push hook (fmt + clippy `-D warnings`) and the fast-guard
-  stage; CI re-runs the same checks.
+- Every change — contributor **and** maintainer — merges via a pull request
+  against `develop`; the branch ruleset lists **no bypass actors**, so direct
+  pushes to `develop` are rejected for every actor, administrators included
+  (`osps_ac_03_01`). The ruleset requires the status checks (`CI`,
+  `Security`, `Pinning-Tests`, `OpenSSF Scorecard`) before merging.
+- Because this is a single-maintainer repository the ruleset does not require
+  a second human approval; the committed pre-push hook (fmt + clippy
+  `-D warnings`) and the fast-guard stage still run before every push.
 - Workflow/packaging/signing/security changes get an approving PR review
   whenever a second reviewer is available.
 - Automated checks are treated as reviewers for the single-maintainer case
@@ -72,6 +75,10 @@ Evidence: [`CONTRIBUTING.md`](../CONTRIBUTING.md) (**Release Verification**),
 - A `SHA256SUMS` manifest is generated over all attached assets, published
   with the release, and verified by the updater before install — transport is
   HTTPS, so the update path counters MITM.
+- The `LICENSE` file is copied into the release asset folder before the
+  manifest is generated (release.yml alpha path and ci.yml beta/RC/stable tag
+  path), so the MIT license ships alongside every release and is covered by
+  `SHA256SUMS` (`osps_le_03_02`).
 
 ## Automation proposals (`.bestpractices.json`)
 
@@ -83,13 +90,18 @@ into 🤖 automation proposals the maintainer reviews while answering the
 questionnaire (field naming per the
 [automation-proposals](https://github.com/ossf/best-practices-badge/blob/main/docs/automation-proposals.md)
 and [bestpractices-json](https://github.com/ossf/best-practices-badge/blob/main/docs/bestpractices-json.md)
-docs). The draft proposes `Met` for the **21 of 24** baseline-1 controls the
-repo demonstrably meets; the three known gaps — `osps_ac_03_01` (admin
-bypass on the `develop` ruleset), `osps_le_03_02` (no LICENSE asset shipped
-with releases), `osps_qa_04_01` (wiki repository not listed) — are
-deliberately left unknown so they stay `?` during review and can never be
-falsely claimed. Statuses the site understands: `Met`, `Unmet`, `N/A`, `?`
-and `unknown` (`?`/`unknown` are ignored and safe as placeholders).
+docs). The file proposes `Met` for **all 24** baseline-1 controls; the former
+gaps were closed as follows:
+
+- `osps_ac_03_01` — the `develop` ruleset lists no bypass actors, so direct
+  commits are prevented for every actor (PR + required checks only).
+- `osps_le_03_02` — the release workflows ship the `LICENSE` file with every
+  release (covered by `SHA256SUMS`).
+- `osps_qa_04_01` — the README **Repositories** section lists the primary
+  codebase and the wiki companion with status and intent.
+
+Statuses the site understands: `Met`, `Unmet`, `N/A`, `?` and `unknown`
+(`?`/`unknown` are ignored and safe as placeholders).
 
 ## How this page stays true
 
@@ -106,9 +118,15 @@ evidence cannot drift out of existence:
   keep the underlying automation in place.
 - `bestpractices_json_claims_are_schema_valid_and_canonical` —
   `.bestpractices.json` must stay valid JSON, may only use canonical
-  baseline-1 criterion keys, and may only carry legal status values
-  (`Met`/`Unmet`/`N/A`/`?`/`unknown`); every concrete claim needs a
-  non-empty justification and the known gaps stay unclaimed.
+  baseline-1 criterion keys, may only carry legal status values
+  (`Met`/`Unmet`/`N/A`/`?`/`unknown`), and every one of the 24 canonical
+  criteria must have a status key (complete coverage); every concrete claim
+  needs a non-empty justification.
+- `ossf_baseline_1_gap_closures_are_pinned` — the three former gaps stay
+  closed: `.bestpractices.json` claims `osps_ac_03_01`, `osps_le_03_02` and
+  `osps_qa_04_01` as `Met`, the README keeps the multi-repo list, both
+  release workflows ship the license, and the docs keep the no-bypass
+  ruleset wording.
 
 ## Remaining (maintainer action, not repo files)
 

@@ -184,11 +184,13 @@ Every change to `develop` passes a review before it lands:
    `Pinning-Tests`, `OpenSSF Scorecard`) before a merge; contributors never
    push to `develop` directly. See the ruleset description in
    `docs/security.md`.
-2. **Maintainer direct pushes.** Changes that the maintainer pushes directly
-   to `develop` (typical for this personal project) must pass the committed
-   pre-push hook (fmt + clippy with `-D warnings`) and the fast-guard stage
-   first; the same required checks run again on CI before any release is
-   built. Direct pushes are the exception, not the default.
+2. **Maintainer direct pushes.** Direct pushes to `develop` are no longer
+   possible: the branch ruleset lists **no bypass actors**, so even repository
+   administrators are rejected. Every change — maintainer or contributor —
+   lands as a pull request whose required status checks must pass before the
+   merge. The committed pre-push hook (fmt + clippy with `-D warnings`) and
+   the fast-guard stage still run locally before any push, so the CI round-trip
+   on a pull request is the safety net, not the first line of defence.
 3. **Sensitive changes always get a PR.** Changes to workflows, packaging,
    signing, the release pipeline, security policy, and shared-memory/capture
    security code are reviewed as pull requests with an approving review
