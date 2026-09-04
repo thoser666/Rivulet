@@ -67,3 +67,7 @@ winapi = { version = "0.3", features = ["memoryapi", "winbase", "winnt", "handle
 
 [dev-dependencies]
 tempfile = "3"
+# Used by the ci_pinning test suite to validate .bestpractices.json (the
+# OpenSSF badge automation-proposal file). Already in Cargo.lock via the
+# workspace; adding it as a dev-dependency changes no locked version.
+serde_json = "1"

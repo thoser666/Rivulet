@@ -1,0 +1,71 @@
+{
+  "name": "Rivulet",
+  "description": "Modern screen recording and streaming software (OBS-style) built in Rust",
+  "license": "MIT",
+  "implementation_languages": "Rust",
+
+  "_comment": "Draft automation proposals for the OpenSSF Best Practices baseline-1 badge (OSPS v2026.08.28, 24 controls). Status values are only proposed for criteria the repository demonstrably meets today; the three known gaps (osps_ac_03_01, osps_le_03_02, osps_qa_04_01) are intentionally left unknown so the maintainer can answer them during review. See docs/openssf-best-practices.md. Field naming follows https://github.com/ossf/best-practices-badge/blob/main/docs/automation-proposals.md",
+
+  "osps_ac_01_01_status": "Met",
+  "osps_ac_01_01_justification": "Hosted on GitHub, which has required two-factor authentication for all contributors since March 2023 (https://github.com/thoser666/Rivulet).",
+
+  "osps_ac_02_01_status": "Met",
+  "osps_ac_02_01_justification": "GitHub assigns collaborators the lowest available permission by default; access is granted manually per role, never auto-escalated.",
+
+  "osps_ac_03_02_status": "Met",
+  "osps_ac_03_02_justification": "A GitHub branch ruleset on the primary branch develop enables branch deletion protection and non-fast-forward rules.",
+
+  "osps_br_01_01_status": "Met",
+  "osps_br_01_01_justification": "CI never pipes event metadata (branch names, commit messages, PR titles) into shell or scripts; release notes read commit subjects into Markdown text only (scripts/generate-release-notes.sh, scripts/check-release-notes.py).",
+
+  "osps_br_01_03_status": "Met",
+  "osps_br_01_03_justification": "Workflows triggered from fork PRs run without secrets; the only pull_request_target workflow (dependabot-auto-merge) is gated on the dependabot actor and never checks out PR code.",
+
+  "osps_br_03_01_status": "Met",
+  "osps_br_03_01_justification": "All official channels (GitHub repository, wiki, releases, docs) are served over HTTPS.",
+
+  "osps_br_03_02_status": "Met",
+  "osps_br_03_02_justification": "Release assets are distributed via GitHub Releases over TLS, and the updater verifies the SHA256SUMS digest before install (fail-closed).",
+
+  "osps_br_07_01_status": "Met",
+  "osps_br_07_01_justification": "GitHub Secret Scanning and Push Protection are enabled for the repository, .gitignore excludes secret-prone files, and a no-secrets rule is enforced in CONTRIBUTING.md.",
+
+  "osps_do_01_01_status": "Met",
+  "osps_do_01_01_justification": "User guides cover installation, configuration and usage: README.md, docs/user-guide.md, docs/macos-recording.md, docs/alerts.md, docs/twitch-chat.md and the project wiki.",
+
+  "osps_do_02_01_status": "Met",
+  "osps_do_02_01_justification": "README.md Bug reporting section and CONTRIBUTING.md point to the GitHub issue tracker (https://github.com/thoser666/Rivulet/issues) with template guidance.",
+
+  "osps_gv_02_01_status": "Met",
+  "osps_gv_02_01_justification": "Public discussion happens through GitHub Issues, pull requests and the project wiki (https://github.com/thoser666/Rivulet/wiki).",
+
+  "osps_gv_03_01_status": "Met",
+  "osps_gv_03_01_justification": "CONTRIBUTING.md documents the full contribution workflow: branch strategy, PR process against develop, code-review policy, Definition of Done and release process.",
+
+  "osps_le_02_01_status": "Met",
+  "osps_le_02_01_justification": "The source code is released under the MIT license, an OSI-approved and FSF-free license.",
+
+  "osps_le_02_02_status": "Met",
+  "osps_le_02_02_justification": "Released binaries are built from the MIT-licensed source; no different license is applied to released assets.",
+
+  "osps_le_03_01_status": "Met",
+  "osps_le_03_01_justification": "The MIT license text is maintained in the repository LICENSE file at the root.",
+
+  "osps_qa_01_01_status": "Met",
+  "osps_qa_01_01_justification": "The source repository is publicly readable at the static URL https://github.com/thoser666/Rivulet.",
+
+  "osps_qa_01_02_status": "Met",
+  "osps_qa_01_02_justification": "GitHub hosts a publicly readable commit history recording every change, its author and timestamp.",
+
+  "osps_qa_02_01_status": "Met",
+  "osps_qa_02_01_justification": "Direct dependencies are enumerated in Cargo.toml manifests with Cargo.lock pinning and deny.toml policy.",
+
+  "osps_qa_05_01_status": "Met",
+  "osps_qa_05_01_justification": "No generated executable artifacts are tracked in the repository (verified by CI hygiene checks); binaries are produced at build time in CI.",
+
+  "osps_qa_05_02_status": "Met",
+  "osps_qa_05_02_justification": "No unreviewable binary artifacts are committed; only image/text assets such as icons (rivulet-gui/assets) are tracked.",
+
+  "osps_vm_02_01_status": "Met",
+  "osps_vm_02_01_justification": "SECURITY.md documents security contacts and the coordinated-disclosure process; docs/security.md adds detail and a response timeline."
+}

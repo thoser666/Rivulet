@@ -26,6 +26,7 @@ during the online self-certification.
 | Static analysis | CodeQL, Cargo Audit, Cargo Deny, OpenSSF Scorecard, clippy `-D warnings` |
 | Dynamic analysis | cargo-fuzz targets (CI smoke + weekly deep campaign) |
 | Release hygiene | Generated notes + completeness check + `SHA256SUMS` + HTTPS |
+| Automation proposals | `.bestpractices.json` draft (baseline-1, schema-validated by CI) |
 
 ## Contribution process (`contribution`, `contribution_requirements`)
 
@@ -72,6 +73,24 @@ Evidence: [`CONTRIBUTING.md`](../CONTRIBUTING.md) (**Release Verification**),
   with the release, and verified by the updater before install — transport is
   HTTPS, so the update path counters MITM.
 
+## Automation proposals (`.bestpractices.json`)
+
+Evidence: [`.bestpractices.json`](../.bestpractices.json)
+
+When a project is registered at `bestpractices.dev`, the badge site reads a
+`.bestpractices.json` file from the repository top level and turns its fields
+into 🤖 automation proposals the maintainer reviews while answering the
+questionnaire (field naming per the
+[automation-proposals](https://github.com/ossf/best-practices-badge/blob/main/docs/automation-proposals.md)
+and [bestpractices-json](https://github.com/ossf/best-practices-badge/blob/main/docs/bestpractices-json.md)
+docs). The draft proposes `Met` for the **21 of 24** baseline-1 controls the
+repo demonstrably meets; the three known gaps — `osps_ac_03_01` (admin
+bypass on the `develop` ruleset), `osps_le_03_02` (no LICENSE asset shipped
+with releases), `osps_qa_04_01` (wiki repository not listed) — are
+deliberately left unknown so they stay `?` during review and can never be
+falsely claimed. Statuses the site understands: `Met`, `Unmet`, `N/A`, `?`
+and `unknown` (`?`/`unknown` are ignored and safe as placeholders).
+
 ## How this page stays true
 
 The following are pinned by `rivulet-core/tests/ci_pinning.rs` so the
@@ -85,6 +104,11 @@ evidence cannot drift out of existence:
   `tag_based_release_attaches_checksums_and_generated_notes`) and the
   security-policy guard (`security_policy_is_linked_from_readme_and_docs`)
   keep the underlying automation in place.
+- `bestpractices_json_claims_are_schema_valid_and_canonical` —
+  `.bestpractices.json` must stay valid JSON, may only use canonical
+  baseline-1 criterion keys, and may only carry legal status values
+  (`Met`/`Unmet`/`N/A`/`?`/`unknown`); every concrete claim needs a
+  non-empty justification and the known gaps stay unclaimed.
 
 ## Remaining (maintainer action, not repo files)
 
@@ -92,5 +116,6 @@ evidence cannot drift out of existence:
    account and answer the questionnaire (baseline-1 series is the fastest
    start; the metal "passing" series is the badge referenced above).
 2. Answer the behavioural criteria truthfully (bug/vulnerability response
-   history, maintainer security knowledge).
+   history, maintainer security knowledge); accept the 🤖 automation
+   proposals from `.bestpractices.json` as you go.
 3. Embed the badge markdown in `README.md` once the project has an ID.

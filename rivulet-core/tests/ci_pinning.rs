@@ -237,6 +237,144 @@ fn contributing_defines_code_review_policy_and_definition_of_done() {
     }
 }
 
+/// Canonical OSPS baseline-1 criterion keys (lowercase `osps_*` form used by
+/// `.bestpractices.json` and proposal URLs), from the OpenSSF Baseline
+/// criteria (`criteria/baseline_criteria.yml`, OSPS v2026.08.28 — 24 controls).
+const BASELINE_1_CRITERIA: &[&str] = &[
+    "osps_ac_01_01", // OSPS-AC-01.01 MFA on sensitive repository access
+    "osps_ac_02_01", // OSPS-AC-02.01 collaborators get least privilege
+    "osps_ac_03_01", // OSPS-AC-03.01 no direct commits to primary branch
+    "osps_ac_03_02", // OSPS-AC-03.02 primary-branch deletion protected
+    "osps_br_01_01", // OSPS-BR-01.01 untrusted metadata sanitized in CI
+    "osps_br_01_03", // OSPS-BR-01.03 untrusted code has no CI credentials
+    "osps_br_03_01", // OSPS-BR-03.01 official URIs over encrypted channels
+    "osps_br_03_02", // OSPS-BR-03.02 distribution MITM-protected
+    "osps_br_07_01", // OSPS-BR-07.01 no unencrypted secrets in VCS
+    "osps_do_01_01", // OSPS-DO-01.01 user guides for basic functionality
+    "osps_do_02_01", // OSPS-DO-02.01 defect-reporting guide
+    "osps_gv_02_01", // OSPS-GV-02.01 public discussion mechanism
+    "osps_gv_03_01", // OSPS-GV-03.01 contribution process documented
+    "osps_le_02_01", // OSPS-LE-02.01 source license OSI/FSF approved
+    "osps_le_02_02", // OSPS-LE-02.02 released-asset license OSI/FSF approved
+    "osps_le_03_01", // OSPS-LE-03.01 LICENSE file maintained in the repo
+    "osps_le_03_02", // OSPS-LE-03.02 license shipped with release assets
+    "osps_qa_01_01", // OSPS-QA-01.01 public repo at a static URL
+    "osps_qa_01_02", // OSPS-QA-01.02 public change record (who/when)
+    "osps_qa_02_01", // OSPS-QA-02.01 dependency list
+    "osps_qa_04_01", // OSPS-QA-04.01 multi-repo codebase list
+    "osps_qa_05_01", // OSPS-QA-05.01 no generated executable artifacts
+    "osps_qa_05_02", // OSPS-QA-05.02 no unreviewable binary artifacts
+    "osps_vm_02_01", // OSPS-VM-02.01 security contacts documented
+];
+
+#[test]
+fn bestpractices_json_claims_are_schema_valid_and_canonical() {
+    // `.bestpractices.json` is the draft automation-proposal file the OpenSSF
+    // badge site reads from the repository (see docs/bestpractices-json.md).
+    // Because the site silently ignores unknown field names and invalid status
+    // values, a typo'd criterion name or a misspelled status would make a
+    // claim vanish without any error — the badge would show fewer "Met" rows
+    // than the file intends. This guard makes the file's schema a CI
+    // contract: it must parse, may only use canonical baseline-1 keys, and
+    // may only carry status values the site understands.
+    let raw = read(".bestpractices.json");
+    let doc: serde_json::Value =
+        serde_json::from_str(&raw).expect(".bestpractices.json must be valid JSON");
+    let obj = doc
+        .as_object()
+        .expect(".bestpractices.json must be a JSON object");
+
+    // Non-criteria fields the site accepts in any section, plus our internal
+    // documentation comment (unknown keys are ignored by the site).
+    let headers = [
+        "name",
+        "description",
+        "license",
+        "implementation_languages",
+        "_comment",
+    ];
+    // Legal status values, case-insensitive with surrounding whitespace
+    // stripped (site rule); `?`/`unknown` mean "no information" and are
+    // ignored entirely by the site, so they are legal placeholders.
+    let legal_statuses = ["met", "unmet", "n/a", "?", "unknown"];
+
+    for (key, value) in obj {
+        if let Some(criterion) = key.strip_suffix("_status") {
+            assert!(
+                BASELINE_1_CRITERIA.contains(&criterion),
+                ".bestpractices.json: `{key}` is not a canonical baseline-1 criterion key"
+            );
+            let status = value
+                .as_str()
+                .unwrap_or_else(|| panic!(".bestpractices.json: `{key}` must be a string"));
+            let norm = status.trim().to_ascii_lowercase();
+            assert!(
+                legal_statuses.contains(&norm.as_str()),
+                ".bestpractices.json: `{key}` has illegal status value {status:?} \
+                 (expected Met, Unmet, N/A, ? or unknown)"
+            );
+        } else if let Some(criterion) = key.strip_suffix("_justification") {
+            assert!(
+                BASELINE_1_CRITERIA.contains(&criterion),
+                ".bestpractices.json: `{key}` is not a canonical baseline-1 criterion key"
+            );
+            assert!(
+                value.is_string(),
+                ".bestpractices.json: `{key}` must be a string"
+            );
+            // A justification without its paired status would be ignored by
+            // the site and mislead the reviewer about the claim it supports.
+            let status_key = format!("{criterion}_status");
+            assert!(
+                obj.contains_key(&status_key),
+                ".bestpractices.json: `{key}` has no paired `{status_key}`"
+            );
+        } else {
+            assert!(
+                headers.contains(&key.as_str()),
+                ".bestpractices.json: unexpected key `{key}` (not a canonical \
+                 baseline-1 criterion field or allowed header)"
+            );
+        }
+    }
+
+    // Every concrete claim (Met/Unmet/N/A — anything except the ignored
+    // unknown placeholders) must carry a non-empty justification, so a bare
+    // "Met" without evidence cannot silently reach the review form.
+    for (key, value) in obj {
+        let Some(criterion) = key.strip_suffix("_status") else {
+            continue;
+        };
+        let status = value.as_str().expect("status string checked above");
+        let norm = status.trim().to_ascii_lowercase();
+        if norm == "?" || norm == "unknown" {
+            continue;
+        }
+        let just_key = format!("{criterion}_justification");
+        let justification = obj
+            .get(&just_key)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        assert!(
+            !justification.trim().is_empty(),
+            ".bestpractices.json: `{key}` claims {status:?} but has no \
+             non-empty `{just_key}`"
+        );
+    }
+
+    // The evidence map must document the file and this very guard, so the
+    // schema contract cannot be deleted without a conscious doc+test change.
+    let map = read("docs/openssf-best-practices.md");
+    assert!(
+        map.contains(".bestpractices.json"),
+        "docs/openssf-best-practices.md must reference .bestpractices.json"
+    );
+    assert!(
+        map.contains("bestpractices_json_claims_are_schema_valid_and_canonical"),
+        "docs/openssf-best-practices.md must list the .bestpractices.json guard"
+    );
+}
+
 #[test]
 fn third_party_actions_are_pinned_to_full_commit_sha() {
     for name in WORKFLOWS {
