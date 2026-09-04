@@ -5,6 +5,12 @@
 //! configuration without requiring the (platform-specific) NewTek NDI runtime
 //! to be present at test time. GStreamer exposes the sender as the `ndisink`
 //! element from the `ndi` plugin.
+//!
+//! The engine embeds the sink as an extra branch of the *encoded* H.264 video
+//! whenever a recording/streaming session runs with an active output
+//! configured (recording, streaming, or dual output) — see
+//! [`crate::RivuletEngine::set_ndi_output`]. Publishing is off by default so a
+//! feed is never announced unintentionally.
 
 /// NDI output configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +76,12 @@ impl NdiOutput {
     /// current installation.
     pub fn plugin_available(&self) -> bool {
         gstreamer::ElementFactory::find(self.sink_element_name()).is_some()
+    }
+
+    /// Whether this output should actually publish: it is active **and** the
+    /// `ndisink` element exists in the current GStreamer installation.
+    pub fn should_publish(&self) -> bool {
+        self.active && self.plugin_available()
     }
 
     /// A validated GStreamer sink fragment. The name is passed as the NDI

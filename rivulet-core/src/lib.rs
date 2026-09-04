@@ -237,6 +237,11 @@ pub struct RivuletEngine {
     /// The buffer itself is written from the GStreamer streaming thread, so
     /// it lives behind an `Arc<Mutex<..>>`.
     replay: Option<Arc<Mutex<ReplayBuffer>>>,
+    /// Optional NDI (LAN) monitor feed. When set and active, every
+    /// recording/streaming session additionally publishes the encoded H.264
+    /// video as an NDI source (`ndisink` from the GStreamer `ndi` plugin).
+    /// Off by default so a feed is never announced unintentionally.
+    ndi_output: Option<NdiOutput>,
 }
 
 /// GStreamer objects and per-session state detached from the engine when a
@@ -293,6 +298,7 @@ impl Default for RivuletEngine {
             last_error: None,
             show_overlay: false,
             replay: None,
+            ndi_output: None,
         }
     }
 }
@@ -366,6 +372,27 @@ impl RivuletEngine {
                     .collect()
             })
             .unwrap_or_default();
+    }
+
+    /// Configure the optional NDI (LAN) monitor feed. When set and `active`,
+    /// every recording/streaming session also publishes the encoded H.264
+    /// video as an NDI source, discovered on the LAN as `name`.
+    ///
+    /// Requires the `ndi` GStreamer plugin (`ndisink` element, e.g. the
+    /// NewTek runtime) to actually publish; without it the pipeline start
+    /// fails with a clear "no element ndisink" error. Must be called before
+    /// the session starts. `None` disables the feed.
+    pub fn set_ndi_output(&mut self, output: Option<NdiOutput>) -> Result<(), &'static str> {
+        if let Some(output) = &output {
+            output.validate()?;
+        }
+        self.ndi_output = output;
+        Ok(())
+    }
+
+    /// The currently configured NDI monitor feed, if any.
+    pub fn ndi_output(&self) -> Option<&NdiOutput> {
+        self.ndi_output.as_ref()
     }
 
     pub fn stream_target_states(&self) -> &[StreamTargetState] {
@@ -930,6 +957,38 @@ impl RivuletEngine {
         }
     }
 
+    /// The NDI sink chain attached to an existing tee output pad, e.g.
+    /// `replay_vtee. ! queue ! h264parse ! ndisink ndi-name="..."`. Returns
+    /// `None` when no NDI output is configured or it is not active.
+    fn ndi_feed_chain(&self, tee_pad: &str) -> Option<String> {
+        let output = self.ndi_output.as_ref()?;
+        if !output.active {
+            return None;
+        }
+        let sink = output.validated_pipeline_sink_fragment().ok()?;
+        Some(format!("{tee_pad} ! queue ! h264parse ! {sink}"))
+    }
+
+    /// Tail of the encoded-video branch into the session muxer (named `mux`):
+    /// a plain queue, or a tee that additionally fans out to the replay
+    /// appsink and/or the NDI sink. The NDI branch taps the *encoded* H.264
+    /// stream before muxing, because NDI carries elementary H.264 and must not
+    /// see the FLV/container bitstream.
+    fn video_tail_fragment(&self) -> String {
+        let replay = self.replay.is_some();
+        let ndi = if replay {
+            self.ndi_feed_chain("replay_vtee.")
+        } else {
+            self.ndi_feed_chain("ndi_vtee.")
+        };
+        match (replay, ndi) {
+            (false, None) => " ! queue ! mux.".to_string(),
+            (false, Some(ndi)) => format!(" ! tee name=ndi_vtee ! queue ! mux. {ndi}"),
+            (true, None) => self.replay_video_branch().to_string(),
+            (true, Some(ndi)) => format!("{} {ndi}", self.replay_video_branch()),
+        }
+    }
+
     fn video_branch_str(&self) -> String {
         let transform = self.preset.transform_fragment();
         let caps = self
@@ -947,14 +1006,12 @@ impl RivuletEngine {
             ""
         };
         let effects = self.video_effects_fragment();
+        let tail = self.video_tail_fragment();
         if transform.is_empty() {
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
                  ! videoconvert{effects} ! {}{} ! {}{} ",
-                caps,
-                overlay,
-                encoder,
-                self.replay_video_branch()
+                caps, overlay, encoder, tail
             )
         } else {
             // Transform includes videoscale/videorate and target resolution/FPS.
@@ -964,10 +1021,7 @@ impl RivuletEngine {
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
                  ! videoconvert{effects} ! {}{} ! {}{} ",
-                transform_caps,
-                overlay,
-                encoder,
-                self.replay_video_branch()
+                transform_caps, overlay, encoder, tail
             )
         }
     }
@@ -1176,6 +1230,13 @@ impl RivuletEngine {
         // Replay capture branch (third output of the video tee).
         if self.replay.is_some() {
             s.push_str("video_tee. ! queue ! h264parse ! appsink name=replay_video_sink ");
+        }
+        // NDI monitor feed: an extra output of the same video tee so the LAN
+        // source carries the encoded H.264 elementary stream, not the FLV
+        // container of the streaming branch.
+        if let Some(ndi) = self.ndi_feed_chain("video_tee.") {
+            s.push_str(&ndi);
+            s.push(' ');
         }
         if self.audio_enabled {
             s.push_str(
@@ -3227,6 +3288,139 @@ mod tests {
         );
         engine.stop_recording();
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn ndi_feed_is_absent_by_default_and_when_inactive() {
+        let mut engine = RivuletEngine::default();
+        let path = std::env::temp_dir().join("rivulet_no_ndi_pipeline.mp4");
+        engine.start_local_recording(path.clone());
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            !pipeline_str.contains("ndisink"),
+            "pipeline must not contain an NDI sink by default: {pipeline_str}"
+        );
+        engine.stop_recording();
+
+        // Configured but inactive: still no feed (off by default guarantee).
+        engine
+            .set_ndi_output(Some(NdiOutput::new("Rivulet Monitor", false)))
+            .unwrap();
+        engine.start_local_recording(path.clone());
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            !pipeline_str.contains("ndisink"),
+            "inactive NDI must not publish: {pipeline_str}"
+        );
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn recording_pipeline_embeds_active_ndi_feed() {
+        let mut engine = RivuletEngine::default();
+        engine
+            .set_ndi_output(Some(NdiOutput::new("Rivulet Monitor", true)))
+            .unwrap();
+        let path = std::env::temp_dir().join("rivulet_ndi_recording.mp4");
+        engine.start_local_recording(path.clone());
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            pipeline_str.contains("ndisink ndi-name=\"Rivulet Monitor\""),
+            "recording pipeline must publish the NDI feed: {pipeline_str}"
+        );
+        // The feed taps the encoded stream before the container muxer via a tee.
+        assert!(
+            pipeline_str.contains("ndi_vtee"),
+            "recording pipeline must fan the encoded video into an NDI tee: {pipeline_str}"
+        );
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn streaming_pipeline_embeds_active_ndi_feed() {
+        let mut engine = RivuletEngine::default();
+        engine
+            .set_ndi_output(Some(NdiOutput::new("Rivulet Stream Monitor", true)))
+            .unwrap();
+        engine.set_stream_settings(Some(StreamSettings::custom("rtmp://localhost/live", "key")));
+        engine.start_streaming();
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            pipeline_str.contains("ndisink ndi-name=\"Rivulet Stream Monitor\""),
+            "streaming pipeline must publish the NDI feed: {pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("ndi_vtee"),
+            "streaming pipeline must fan the encoded video into an NDI tee: {pipeline_str}"
+        );
+        engine.stop_recording();
+    }
+
+    #[test]
+    fn dual_output_pipeline_embeds_active_ndi_feed() {
+        let mut engine = RivuletEngine::default();
+        engine
+            .set_ndi_output(Some(NdiOutput::new("Rivulet Dual Monitor", true)))
+            .unwrap();
+        engine.set_stream_settings(Some(StreamSettings::custom("rtmp://localhost/live", "key")));
+        let path = std::env::temp_dir().join("rivulet_ndi_dual.mp4");
+        engine.start_local_recording(path.clone());
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            pipeline_str.contains("video_tee. ! queue ! h264parse ! ndisink"),
+            "dual output must attach the NDI feed to the video tee: {pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("ndi-name=\"Rivulet Dual Monitor\""),
+            "dual output NDI feed must carry the configured name: {pipeline_str}"
+        );
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn ndi_feed_plays_alongside_the_replay_buffer() {
+        let mut engine = RivuletEngine::default();
+        engine.set_replay_duration(std::time::Duration::from_secs(30));
+        engine
+            .set_ndi_output(Some(NdiOutput::new("Rivulet + Replay", true)))
+            .unwrap();
+        let path = std::env::temp_dir().join("rivulet_ndi_replay.mp4");
+        engine.start_local_recording(path.clone());
+        let pipeline_str = engine.build_pipeline_str().unwrap();
+        assert!(
+            pipeline_str.contains("replay_video_sink"),
+            "replay capture must survive when NDI is active: {pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("ndisink ndi-name=\"Rivulet + Replay\""),
+            "NDI feed must be present next to the replay buffer: {pipeline_str}"
+        );
+        // Both branches fan out of the same tee (no second tee introduced).
+        let tees = pipeline_str.matches("replay_vtee").count();
+        assert_eq!(tees, 3, "tee element + two pad links: {pipeline_str}");
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn set_ndi_output_rejects_invalid_names_without_mutating_state() {
+        let mut engine = RivuletEngine::default();
+        assert_eq!(
+            engine.set_ndi_output(Some(NdiOutput::new("", true))),
+            Err("NDI source name must not be empty")
+        );
+        assert!(
+            engine.ndi_output().is_none(),
+            "an invalid configuration must not be stored"
+        );
+        assert_eq!(
+            engine.set_ndi_output(Some(NdiOutput::new("valid", true))),
+            Ok(())
+        );
+        assert_eq!(engine.ndi_output().map(|o| o.name.as_str()), Some("valid"));
     }
 
     #[test]

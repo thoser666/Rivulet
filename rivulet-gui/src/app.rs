@@ -1113,6 +1113,18 @@ pub struct RivuletApp {
     #[serde(skip)]
     replay_status: Option<(bool, String)>,
 
+    // NDI (LAN) monitor feed: when enabled, every recording/streaming session
+    // additionally publishes the encoded H.264 video as an NDI source (M5
+    // #77). Applied to the engine before every session start.
+    ndi_output_enabled: bool,
+    /// NDI source name announced on the LAN.
+    ndi_output_name: String,
+    /// Optional NDI group filter (e.g. VLAN workflows). Empty = no group.
+    ndi_output_group: String,
+    /// Transient, localized configuration warning (e.g. empty source name).
+    #[serde(skip)]
+    ndi_warning: Option<String>,
+
     // Codec selection
     #[serde(skip)]
     selected_codec: rivulet_core::VideoCodec,
@@ -1419,6 +1431,10 @@ impl Default for RivuletApp {
             is_muted: false,
             replay_duration_secs: Some(30),
             replay_status: None,
+            ndi_output_enabled: false,
+            ndi_output_name: "Rivulet".into(),
+            ndi_output_group: String::new(),
+            ndi_warning: None,
             selected_codec: rivulet_core::VideoCodec::default(),
             rate_mode: rivulet_core::RateControlMode::default(),
             rate_quality: 23,
@@ -1635,6 +1651,7 @@ impl RivuletApp {
             self.engine.set_video_effects(self.video_effects);
             self.engine.set_video_effects(self.video_effects);
             self.apply_replay_setting();
+            self.apply_ndi_output();
             self.engine.start_local_recording(path.clone());
 
             let (sender, receiver) = mpsc::channel();
@@ -1698,6 +1715,7 @@ impl RivuletApp {
             self.engine.set_video_effects(self.video_effects);
             self.engine.set_video_effects(self.video_effects);
             self.apply_replay_setting();
+            self.apply_ndi_output();
             self.engine.start_local_recording(path.clone());
 
             let (sender, receiver) = mpsc::channel();
@@ -1763,6 +1781,7 @@ impl RivuletApp {
             self.engine.set_video_effects(self.video_effects);
             self.engine.set_video_effects(self.video_effects);
             self.apply_replay_setting();
+            self.apply_ndi_output();
             self.engine.start_local_recording(path.clone());
 
             self.is_aux_recording = true;
@@ -1853,6 +1872,7 @@ impl RivuletApp {
             self.engine.set_video_effects(self.video_effects);
             self.engine.set_video_effects(self.video_effects);
             self.apply_replay_setting();
+            self.apply_ndi_output();
             self.engine.start_local_recording(path.clone());
 
             let config = rivulet_core::CameraConfig::default();
@@ -2140,6 +2160,7 @@ impl RivuletApp {
         self.engine.set_overlay_enabled(self.show_overlay);
         self.engine.set_video_effects(self.video_effects);
         self.apply_replay_setting();
+        self.apply_ndi_output();
         self.engine.set_audio_enabled(self.audio_preview);
         self.engine
             .set_separate_audio_tracks(self.separate_tracks && self.audio_preview);
@@ -2281,6 +2302,7 @@ impl RivuletApp {
         self.engine.set_overlay_enabled(self.show_overlay);
         self.engine.set_video_effects(self.video_effects);
         self.apply_replay_setting();
+        self.apply_ndi_output();
         self.engine.set_audio_enabled(self.audio_preview);
         self.engine
             .set_separate_audio_tracks(self.separate_tracks && self.audio_preview);
@@ -3885,6 +3907,32 @@ impl RivuletApp {
         }
     }
 
+    /// Apply the configured NDI monitor feed to the engine. Called before
+    /// every recording/streaming start so the feed branch is part of the
+    /// pipeline, and whenever the user changes the setting. An empty source
+    /// name cannot be enabled; the warning text is shown in Settings.
+    fn apply_ndi_output(&mut self) {
+        if self.ndi_output_enabled && self.ndi_output_name.trim().is_empty() {
+            self.ndi_warning = Some(self.tr("ndi_name_required").to_string());
+            let _ = self.engine.set_ndi_output(None);
+            return;
+        }
+        let output = if self.ndi_output_enabled {
+            let mut output = rivulet_core::NdiOutput::new(self.ndi_output_name.trim(), true);
+            let group = self.ndi_output_group.trim();
+            if !group.is_empty() {
+                output = output.with_group(group);
+            }
+            Some(output)
+        } else {
+            None
+        };
+        match self.engine.set_ndi_output(output) {
+            Ok(()) => self.ndi_warning = None,
+            Err(e) => self.ndi_warning = Some(e.to_string()),
+        }
+    }
+
     /// Save the currently buffered replay clip through a file dialog and
     /// report the outcome (localized) in `replay_status`.
     fn save_replay_now(&mut self) {
@@ -5024,6 +5072,7 @@ impl RivuletApp {
                     // Clear a stale error so a new stream starts from the
                     // Ready/Streaming label (mirrors the recording starts).
                     self.last_error = None;
+                    self.apply_ndi_output();
                     self.engine.start_streaming();
                     let active = self.engine.is_streaming();
                     self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
@@ -5560,6 +5609,7 @@ impl RivuletApp {
                 // Clear a stale error so a new stream starts from the
                 // Ready/Streaming label (mirrors the recording starts).
                 self.last_error = None;
+                self.apply_ndi_output();
                 self.engine.start_streaming();
                 self.stream_status_message = Some(self.tr("stream_status_connecting").to_owned());
             }
@@ -7664,6 +7714,59 @@ impl eframe::App for RivuletApp {
                         }
                         ui.small(discord_client_id_note);
 
+                        // Settings: NDI output — LAN monitor feed published
+                        // next to a recording/streaming session (M5 #77).
+                        let ndi_section = self.tr("ndi_section");
+                        let ndi_enable = self.tr("ndi_enable");
+                        let ndi_name = self.tr("ndi_name");
+                        let ndi_group = self.tr("ndi_group");
+                        let ndi_hint = self.tr("ndi_hint");
+                        let ndi_plugin_missing = self.tr("ndi_plugin_missing");
+                        ui.separator();
+                        ui.label(egui::RichText::new(ndi_section).strong());
+                        let ndi_colors = theme::StatusColors::for_ui(ui);
+                        if ui
+                            .checkbox(&mut self.ndi_output_enabled, ndi_enable)
+                            .changed()
+                        {
+                            self.apply_ndi_output();
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label(ndi_name);
+                            if ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut self.ndi_output_name)
+                                        .hint_text("Rivulet")
+                                        .desired_width(180.0),
+                                )
+                                .changed()
+                            {
+                                self.apply_ndi_output();
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(ndi_group);
+                            if ui
+                                .add(
+                                    egui::TextEdit::singleline(&mut self.ndi_output_group)
+                                        .desired_width(180.0),
+                                )
+                                .changed()
+                            {
+                                self.apply_ndi_output();
+                            }
+                        });
+                        ui.small(ndi_hint);
+                        if let Some(warning) = &self.ndi_warning {
+                            ui.colored_label(ndi_colors.error, warning);
+                        }
+                        if self.ndi_output_enabled
+                            && !rivulet_core::NdiOutput::new(self.ndi_output_name.trim(), true)
+                                .plugin_available()
+                        {
+                            ui.colored_label(ndi_colors.warning, ndi_plugin_missing);
+                        }
+
                         // Settings: hotkeys (per-action rebinding). In-app bindings
                         // apply while the app is focused on every platform; on Windows
                         // the bindings are additionally registered at the OS level so
@@ -9270,6 +9373,80 @@ mod tests {
 
         app.engine.stop_recording();
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn ndi_output_settings_apply_to_the_engine_and_warn_on_empty_name() {
+        let mut app = RivuletApp::default();
+        // Disabled by default: no NDI output configured on the engine.
+        app.apply_ndi_output();
+        assert!(app.engine.ndi_output().is_none());
+
+        // Enabled with a name + group: the engine config mirrors the fields.
+        app.ndi_output_enabled = true;
+        app.ndi_output_name = "Rivulet Monitor".into();
+        app.ndi_output_group = "studio".into();
+        app.apply_ndi_output();
+        let ndi = app.engine.ndi_output().expect("NDI config must be applied");
+        assert!(ndi.active);
+        assert_eq!(ndi.name, "Rivulet Monitor");
+        assert_eq!(ndi.group.as_deref(), Some("studio"));
+        assert!(app.ndi_warning.is_none());
+
+        // An empty name cannot be enabled: the engine keeps no feed and the
+        // Settings row shows the localized warning.
+        app.ndi_output_name.clear();
+        app.apply_ndi_output();
+        assert!(
+            app.engine.ndi_output().is_none(),
+            "an empty name must not publish a feed"
+        );
+        assert_eq!(
+            app.ndi_warning.as_deref(),
+            Some(app.tr("ndi_name_required"))
+        );
+
+        // Disabling clears the engine feed again.
+        app.ndi_output_name = "Rivulet Monitor".into();
+        app.ndi_output_enabled = false;
+        app.apply_ndi_output();
+        assert!(app.engine.ndi_output().is_none());
+        assert!(app.ndi_warning.is_none());
+    }
+
+    #[test]
+    fn ndi_output_is_applied_before_every_session_start() {
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let production = source
+            .split_once("#[cfg(test)]")
+            .map(|(head, _)| head)
+            .unwrap_or(&source);
+        assert!(
+            production.contains("fn apply_ndi_output"),
+            "apply_ndi_output helper must exist"
+        );
+        // Every recording start path and both streaming starts push the NDI
+        // config right before the engine session begins.
+        let applies = production.matches("self.apply_ndi_output();").count();
+        assert!(
+            applies >= 8,
+            "expected the helper at every session start, found {applies}"
+        );
+        // Only the helper may touch the engine setter (2 calls: disable +
+        // enable); call sites go through apply_ndi_output.
+        let direct = production.matches("self.engine.set_ndi_output(").count();
+        assert_eq!(
+            direct, 2,
+            "engine.set_ndi_output must live inside apply_ndi_output only"
+        );
+        // The Settings UI exposes the section with its localized labels.
+        for needle in [
+            "self.tr(\"ndi_section\")",
+            "self.ndi_output_enabled",
+            "ndi_plugin_missing",
+        ] {
+            assert!(production.contains(needle), "missing {needle} in Settings");
+        }
     }
 
     #[test]

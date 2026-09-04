@@ -1805,6 +1805,42 @@ fn obs_upstream_weekly_check_also_reviews_rivulet_open_issues() {
 }
 
 #[test]
+fn ndi_output_is_wired_into_the_engine_and_gui() {
+    // M5 #77: the NDI contract must actually publish — the engine embeds the
+    // `ndisink` feed into every session pipeline and the GUI exposes the
+    // destination in Settings, applied before each session start.
+    let core = read("rivulet-core/src/lib.rs");
+    assert!(
+        core.contains("ndi_output: Option<NdiOutput>")
+            && core.contains("pub fn set_ndi_output(")
+            && core.contains("fn ndi_feed_chain(")
+            && core.contains("fn video_tail_fragment("),
+        "the engine must own the NDI configuration and its pipeline branches"
+    );
+    assert!(
+        core.contains("ndi_vtee") || core.contains("video_tee. ! queue ! h264parse ! ndisink"),
+        "recording/streaming pipelines must fan the encoded video into an NDI sink"
+    );
+    let gui = read("rivulet-gui/src/app.rs");
+    let production = gui
+        .split_once("#[cfg(test)]")
+        .map(|(head, _)| head)
+        .unwrap_or(&gui);
+    assert!(
+        production.contains("fn apply_ndi_output")
+            && production.contains("ndi_output_enabled")
+            && production.contains("self.tr(\"ndi_section\")"),
+        "the GUI must expose the NDI destination in Settings via apply_ndi_output"
+    );
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.matches("\"ndi_section\"").count() == 2
+            && i18n.matches("\"ndi_plugin_missing\"").count() == 2,
+        "NDI labels must exist in both locales (EN + DE)"
+    );
+}
+
+#[test]
 fn tag_based_release_attaches_checksums_and_generated_notes() {
     // The beta/rc/stable tag path must ship the same release hygiene as the
     // alpha channel: a SHA256SUMS manifest over the attached assets (the
