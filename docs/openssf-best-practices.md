@@ -142,6 +142,12 @@ evidence cannot drift out of existence:
   `osps_qa_04_01` as `Met`, the README keeps the multi-repo list, both
   release workflows ship the license, and the docs keep the no-bypass
   ruleset wording.
+- `develop_ruleset_guard_proves_direct_pushes_are_blocked` — `osps_ac_03_01`
+  is verified live on every pull request and after every push to `develop`:
+  the Ruleset Guard workflow (`ruleset-guard.yml` +
+  `scripts/check-develop-ruleset.py`) asserts via the read-only rulesets API
+  that the `develop` ruleset stays active, lists no bypass actors, and keeps
+  its `pull_request` and required-status-check rules.
 - `bestpractices_metal_passing_claims_are_pinned` — the claimed metal
   passing criteria stay exactly in sync: every listed criterion is `Met`
   with evidence, no other metal passing criterion gains a claim without a

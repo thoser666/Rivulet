@@ -15,6 +15,7 @@ fn read(rel: &str) -> String {
 
 const WORKFLOWS: &[&str] = &[
     "ci.yml",
+    "ruleset-guard.yml",
     "release.yml",
     "nightly.yml",
     "signing-e2e.yml",
@@ -646,6 +647,75 @@ fn bestpractices_metal_passing_claims_are_pinned() {
     assert!(
         map.contains("bestpractices_metal_passing_claims_are_pinned"),
         "docs/openssf-best-practices.md must list the metal-claims guard"
+    );
+}
+
+#[test]
+fn develop_ruleset_guard_proves_direct_pushes_are_blocked() {
+    // OSPS-AC-03.01 must stay continuously verified, not merely documented:
+    // the Ruleset Guard workflow re-reads the LIVE ruleset on every pull
+    // request and after every push to develop, asserting there are no bypass
+    // actors and the pull_request/status-check rules stay active. A real push
+    // probe is avoided on purpose (a probe would land on develop exactly when
+    // the ruleset is broken) and git push --dry-run never reaches GitHub's
+    // server-side ruleset evaluation, so the read-only API check is the gate.
+    let workflow = read(".github/workflows/ruleset-guard.yml");
+    assert!(workflow.contains("name: Ruleset Guard"));
+    assert!(
+        workflow.contains("pull_request:"),
+        "the guard must run on every pull request"
+    );
+    assert!(
+        workflow.contains("branches: [develop]"),
+        "the guard must re-verify after every push to develop"
+    );
+    assert!(
+        workflow.contains("schedule:") && workflow.contains("cron:"),
+        "a scheduled backstop must exist"
+    );
+    assert!(workflow.contains("workflow_dispatch:"));
+    assert!(
+        workflow.contains("permissions:") && workflow.contains("contents: read"),
+        "the guard must be read-only so it is safe on fork PRs"
+    );
+    assert!(
+        workflow.contains("scripts/check-develop-ruleset.py")
+            && workflow.contains("GITHUB_STEP_SUMMARY"),
+        "the workflow must run the ruleset checker and publish its summary"
+    );
+
+    // The checker itself must assert the invariants that implement "no direct
+    // commits to the primary branch".
+    let script = read("scripts/check-develop-ruleset.py");
+    for marker in [
+        "refs/heads/develop",
+        "REQUIRED_RULES",
+        "pull_request",
+        "required_status_checks",
+        "no bypass actors",
+        "bypass_actors",
+        "active",
+        "Pinning-Tests",
+        "OpenSSF Scorecard",
+        "--self-test",
+    ] {
+        assert!(
+            script.contains(marker),
+            "check-develop-ruleset.py must contain {marker}"
+        );
+    }
+
+    // The operator-facing docs must point at the guard.
+    let security = read("docs/security.md");
+    assert!(
+        security.contains("scripts/check-develop-ruleset.py")
+            && security.contains("ruleset-guard.yml"),
+        "docs/security.md must document the Ruleset Guard"
+    );
+    let map = read("docs/openssf-best-practices.md");
+    assert!(
+        map.contains("check-develop-ruleset.py"),
+        "docs/openssf-best-practices.md must mention the ruleset guard"
     );
 }
 

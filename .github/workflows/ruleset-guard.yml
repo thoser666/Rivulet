@@ -1,0 +1,36 @@
+name: Ruleset Guard
+
+# Continuously verifies that the `develop` ruleset forbids direct pushes
+# (OSPS-AC-03.01): no bypass actors, pull_request + required status checks
+# active. Runs on every pull request, after every push to develop, weekly as
+# a backstop, and on demand. The check is read-only (Metadata permission,
+# anonymous-capable for a public repo) so it is safe on fork PRs too.
+#
+# Why not "push a probe commit and expect rejection"? A real push only gets
+# rejected when the ruleset works; when it is broken the probe would LAND on
+# develop, mutating the protected branch exactly in the failure case. Git
+# `--dry-run` does not reach the server-side ruleset evaluation, so the
+# authoritative read-only configuration check below is the safe gate.
+on:
+  pull_request:
+  push:
+    branches: [develop]
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  develop-ruleset:
+    name: Develop ruleset blocks direct push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify the develop ruleset forbids direct pushes
+        run: |
+          set -o pipefail
+          python3 scripts/check-develop-ruleset.py | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"

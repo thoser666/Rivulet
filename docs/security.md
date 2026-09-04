@@ -229,6 +229,25 @@ gh api repos/thoser666/rivulet/rulesets \
   --jq '.[] | select(.name == "develop") | {id, name, enforcement, bypass_actors, conditions, rules}'
 ```
 
+A **Ruleset Guard** continuously verifies this configuration instead of trusting
+it: the workflow `.github/workflows/ruleset-guard.yml` runs on every pull
+request, after every push to `develop`, weekly as a backstop, and on demand,
+executing `scripts/check-develop-ruleset.py` against the live rulesets API
+(read-only, `contents: read` — safe on fork PRs). The checker asserts that the
+`develop` ruleset is `active`, covers `refs/heads/develop`, lists **no bypass
+actors**, and still carries the `deletion`, `non_fast_forward`, `pull_request`
+(automated-review) and `required_status_checks` rules with the merge-gate
+contexts. Run it locally — no credentials are needed for the public repo:
+
+```bash
+python3 scripts/check-develop-ruleset.py           # live check
+python3 scripts/check-develop-ruleset.py --self-test  # offline logic test
+```
+
+A real push probe would be stronger but is deliberately avoided: a probe lands
+on `develop` exactly when the ruleset is broken, and `git push --dry-run` never
+reaches GitHub's server-side ruleset evaluation.
+
 Configure these settings in **Settings -> Rules -> Rulesets** or the equivalent
 branch protection UI for `develop`:
 
