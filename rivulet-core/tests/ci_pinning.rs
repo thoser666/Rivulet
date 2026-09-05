@@ -195,6 +195,36 @@ fn m5_platform_parity_evidence_is_linked_and_pinned() {
 }
 
 #[test]
+fn m6_audio_routing_is_specified_in_readme_gate_and_spec() {
+    // M6 audio routing: the README milestone block, the M6 quality gate and
+    // the feature spec must stay in sync — a silent edit to any of the three
+    // (or a lost spec) fails CI.
+    let readme = read("README.md");
+    let gates = read("docs/milestone-quality-gates.md");
+    let spec = read("docs/m6-audio-routing.md");
+    assert!(readme.contains("Multi-track audio routing"));
+    assert!(readme.contains("docs/m6-audio-routing.md"));
+    assert!(gates.contains("record/stream routing matrix"));
+    assert!(gates.contains("Mixer parity"));
+    for required in [
+        "## Problem",
+        "## Goal",
+        "## Engine changes",
+        "## GUI changes",
+        "AudioSource",
+        "record: bool",
+        "stream: bool",
+        "## i18n keys",
+        "## Quality gate (M6-specific)",
+    ] {
+        assert!(
+            spec.contains(required),
+            "M6 audio-routing spec must contain {required}"
+        );
+    }
+}
+
+#[test]
 fn security_policy_is_linked_from_readme_and_docs() {
     let readme = read("README.md");
     let policy = read("SECURITY.md");

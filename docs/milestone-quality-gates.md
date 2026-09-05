@@ -207,11 +207,20 @@ blocks:
   local recording.
 - Mobile/HTTP remote control is authenticated, bound to the LAN where
   configured, and cannot start or stop streams without explicit permission.
+- Multi-track audio routing: per-source volume/mute/filter settings and the
+  record/stream routing matrix survive a persist→restore round-trip; a source
+  routed to record never reaches the stream and vice versa; zero record-routed
+  sources starts recording with a warning and no audio tracks; per-app capture
+  degrades gracefully where the platform lacks it (macOS loopback hint).
+- Mixer parity: the same per-source controls (volume, mute, filters) are
+  reachable in the Record view, the Stream view, and the Mixer view — macOS
+  ships the same mixer controls as Windows/Linux (closes the M5 mixer follow-up).
 - Clip writes, restream fan-out, and remote sessions stay within the
   documented CPU/memory/frame-time budgets (see the resource table above).
 
 Exit evidence: clip trigger/save tests, per-target restream failure tests,
-remote-auth tests, and a resource report for active creator sessions.
+remote-auth tests, audio-routing round-trip/routing-separation tests, and a
+resource report for active creator sessions.
 
 ### M7: Automation and Determinism
 
