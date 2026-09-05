@@ -109,7 +109,7 @@ jobs:
           set -euo pipefail
           printf '%s\n' \
             'FROM dpokidov/imagemagick:7.1.2-12@sha256:87998ec1b8127b2f73f626f74f7b05e8827f9d7605fa52da5370588f7e53cee1' \
-            'RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 && apt-get install -y --no-install-recommends python3 git && rm -rf /var/lib/apt/lists/*' \
+            'RUN apt-get -o Acquire::Retries=5 -o Acquire::http::Timeout=30 -o Acquire::http::No-Cache=true update && apt-get install -y --no-install-recommends python3 git && rm -rf /var/lib/apt/lists/*' \
             > /tmp/rivulet-assets.Dockerfile
           built=0
           for attempt in 1 2 3; do
