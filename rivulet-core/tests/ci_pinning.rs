@@ -683,6 +683,29 @@ fn ossf_silver_gap_closures_are_pinned() {
             && ci.contains("needs.coverage.result"),
         "ci.yml must run the coverage gate and aggregate it"
     );
+    // The coverage job must install the same GStreamer *runtime* plugin
+    // packages as the test job: the gate runs the real pipeline/e2e tests
+    // under llvm-cov, and without x264enc/flvmux/mp4mux/etc. (dev headers
+    // alone pull only gst-plugins-base) those tests panic on missing
+    // factories ("software encoder unavailable", "pipeline must parse").
+    let cov_job = ci
+        .split("name: Statement Coverage (rivulet-core >= 80%)")
+        .nth(1)
+        .and_then(|s| s.split("name: Roadmap-Sync Check").next())
+        .unwrap_or_default();
+    for pkg in [
+        "gstreamer1.0-plugins-base",
+        "gstreamer1.0-plugins-good",
+        "gstreamer1.0-plugins-bad",
+        "gstreamer1.0-plugins-ugly",
+        "gstreamer1.0-libav",
+        "gstreamer1.0-tools",
+    ] {
+        assert!(
+            cov_job.contains(pkg),
+            "coverage job must install runtime plugin package {pkg} (dev headers alone cannot run pipeline tests)"
+        );
+    }
 
     // build_preserve_debug: the release profile preserves debug info (no
     // strip, no install -s) and documents it.
