@@ -1699,8 +1699,67 @@ impl RivuletApp {
             return;
         };
 
-        // Determine the capture source (monitor or window) and start accordingly
-        if let Some(idx) = self.selected_monitor_idx {
+        // Determine the capture source (window or monitor) and start accordingly
+        if let Some(idx) = self.selected_window_idx {
+            let Some(window) = self.windows.get(idx).cloned() else {
+                self.last_error = Some(self.tr("invalid_source").to_string());
+                return;
+            };
+
+            self.engine.set_video_codec(self.selected_codec);
+            self.engine.set_recording_container(self.selected_container);
+            self.engine.set_auto_remux(self.auto_remux);
+            self.apply_recording_file_settings();
+            self.engine.set_preset(self.selected_preset);
+            self.apply_rate_control();
+            self.apply_rate_control();
+            self.engine.set_overlay_enabled(self.show_overlay);
+            self.engine.set_video_effects(self.video_effects);
+            self.engine.set_video_effects(self.video_effects);
+            self.apply_replay_setting();
+            self.apply_ndi_output();
+            self.engine.start_local_recording(path.clone());
+
+            let (sender, receiver) = mpsc::channel();
+            self.frame_receiver = Some(receiver);
+
+            let (error_sender, error_receiver) = mpsc::channel::<String>();
+            self.error_receiver = Some(error_receiver);
+
+            let stop_signal = Arc::new(AtomicBool::new(false));
+            self.stop_signal = Some(stop_signal.clone());
+
+            let flags = (sender, stop_signal);
+
+            self.is_windows_recording = true;
+            self.last_error = None;
+            self.record_started = Instant::now();
+            self.last_frame_at = None;
+
+            thread::spawn(move || {
+                let settings = Settings::new(
+                    window,
+                    CursorCaptureSettings::Default,
+                    DrawBorderSettings::Default,
+                    SecondaryWindowSettings::Default,
+                    MinimumUpdateIntervalSettings::Default,
+                    DirtyRegionSettings::Default,
+                    ColorFormat::Rgba8,
+                    flags,
+                );
+                tracing::info!("Starting capture thread (window)");
+                if let Err(e) = CaptureHandler::start(settings) {
+                    if !e.to_string().contains("user stopped")
+                        && !e.to_string().contains("GUI channel closed")
+                    {
+                        let message = format!("Capture error: {}", e);
+                        tracing::error!("{message}");
+                        let _ = error_sender.send(message);
+                    }
+                }
+                tracing::info!("Capture thread stopped");
+            });
+        } else if let Some(idx) = self.selected_monitor_idx {
             let Some(monitor) = self.monitors.get(idx).cloned() else {
                 self.last_error = Some(self.tr("invalid_source").to_string());
                 return;
@@ -1753,65 +1812,6 @@ impl RivuletApp {
                     flags,
                 );
                 tracing::info!("Starting capture thread (monitor)");
-                if let Err(e) = CaptureHandler::start(settings) {
-                    if !e.to_string().contains("user stopped")
-                        && !e.to_string().contains("GUI channel closed")
-                    {
-                        let message = format!("Capture error: {}", e);
-                        tracing::error!("{message}");
-                        let _ = error_sender.send(message);
-                    }
-                }
-                tracing::info!("Capture thread stopped");
-            });
-        } else if let Some(idx) = self.selected_window_idx {
-            let Some(window) = self.windows.get(idx).cloned() else {
-                self.last_error = Some(self.tr("invalid_source").to_string());
-                return;
-            };
-
-            self.engine.set_video_codec(self.selected_codec);
-            self.engine.set_recording_container(self.selected_container);
-            self.engine.set_auto_remux(self.auto_remux);
-            self.apply_recording_file_settings();
-            self.engine.set_preset(self.selected_preset);
-            self.apply_rate_control();
-            self.apply_rate_control();
-            self.engine.set_overlay_enabled(self.show_overlay);
-            self.engine.set_video_effects(self.video_effects);
-            self.engine.set_video_effects(self.video_effects);
-            self.apply_replay_setting();
-            self.apply_ndi_output();
-            self.engine.start_local_recording(path.clone());
-
-            let (sender, receiver) = mpsc::channel();
-            self.frame_receiver = Some(receiver);
-
-            let (error_sender, error_receiver) = mpsc::channel::<String>();
-            self.error_receiver = Some(error_receiver);
-
-            let stop_signal = Arc::new(AtomicBool::new(false));
-            self.stop_signal = Some(stop_signal.clone());
-
-            let flags = (sender, stop_signal);
-
-            self.is_windows_recording = true;
-            self.last_error = None;
-            self.record_started = Instant::now();
-            self.last_frame_at = None;
-
-            thread::spawn(move || {
-                let settings = Settings::new(
-                    window,
-                    CursorCaptureSettings::Default,
-                    DrawBorderSettings::Default,
-                    SecondaryWindowSettings::Default,
-                    MinimumUpdateIntervalSettings::Default,
-                    DirtyRegionSettings::Default,
-                    ColorFormat::Rgba8,
-                    flags,
-                );
-                tracing::info!("Starting capture thread (window)");
                 if let Err(e) = CaptureHandler::start(settings) {
                     if !e.to_string().contains("user stopped")
                         && !e.to_string().contains("GUI channel closed")
@@ -2686,19 +2686,19 @@ impl RivuletApp {
             Monitor(xcap::Monitor),
             Window(xcap::Window),
         }
-        let source = if let Some(idx) = self.selected_monitor_idx {
-            match self.monitors.get(idx).cloned() {
-                Some(m) => Source::Monitor(m),
-                None => {
-                    self.record_status = Some(self.tr("invalid_monitor").to_string());
-                    return;
-                }
-            }
-        } else if let Some(idx) = self.selected_window_idx {
+        let source = if let Some(idx) = self.selected_window_idx {
             match self.windows.get(idx).cloned() {
                 Some(w) => Source::Window(w),
                 None => {
                     self.record_status = Some(self.tr("invalid_window").to_string());
+                    return;
+                }
+            }
+        } else if let Some(idx) = self.selected_monitor_idx {
+            match self.monitors.get(idx).cloned() {
+                Some(m) => Source::Monitor(m),
+                None => {
+                    self.record_status = Some(self.tr("invalid_monitor").to_string());
                     return;
                 }
             }
@@ -2890,12 +2890,11 @@ impl RivuletApp {
                 });
         });
 
-        let windows: Vec<(usize, String)> = self
-            .windows
-            .iter()
-            .enumerate()
-            .map(|(idx, w)| (idx, w.title().unwrap_or_default()))
-            .collect();
+        let windows: Vec<(usize, String)> =
+            windows_on_selected_monitor(&self.windows, &self.monitors, self.selected_monitor_idx)
+                .into_iter()
+                .map(|(idx, w)| (idx, w.title().unwrap_or_default()))
+                .collect();
         let window_selection = self.selected_window_idx;
         ui.horizontal(|ui| {
             ui.label(self.tr("mac_source_window"));
@@ -2913,7 +2912,6 @@ impl RivuletApp {
                             .clicked()
                         {
                             self.selected_window_idx = Some(*idx);
-                            self.selected_monitor_idx = None;
                         }
                     }
                 });
@@ -4143,10 +4141,10 @@ impl RivuletApp {
     fn ensure_source_preview(&mut self) {
         let target = if self.use_game_capture {
             None
-        } else if let Some(idx) = self.selected_monitor_idx_for_preview() {
-            self.preview_monitor_target(idx)
         } else if let Some(idx) = self.selected_window_idx_for_preview() {
             self.preview_window_target(idx)
+        } else if let Some(idx) = self.selected_monitor_idx_for_preview() {
+            self.preview_monitor_target(idx)
         } else {
             None
         };
@@ -7059,6 +7057,11 @@ impl eframe::App for RivuletApp {
                                             }
                                         }
                                     });
+                                let window_entries = windows_on_selected_monitor(
+                                    &self.windows,
+                                    &self.monitors,
+                                    self.selected_monitor_idx,
+                                );
                                 egui::ComboBox::from_id_salt("window_select")
                                     .selected_text(
                                         self.selected_window_idx
@@ -7069,16 +7072,15 @@ impl eframe::App for RivuletApp {
                                             }),
                                     )
                                     .show_ui(ui, |ui| {
-                                        for (i, window) in self.windows.iter().enumerate() {
+                                        for (i, window) in &window_entries {
                                             if ui
                                                 .selectable_label(
-                                                    self.selected_window_idx == Some(i),
+                                                    self.selected_window_idx == Some(*i),
                                                     window.title().unwrap_or_default(),
                                                 )
                                                 .clicked()
                                             {
-                                                self.selected_window_idx = Some(i);
-                                                self.selected_monitor_idx = None;
+                                                self.selected_window_idx = Some(*i);
                                                 // Region capture only applies to
                                                 // monitor capture; window capture is
                                                 // always full-window.
@@ -7565,6 +7567,11 @@ impl eframe::App for RivuletApp {
                                                 }
                                             }
                                         });
+                                    let window_entries = windows_on_selected_monitor(
+                                        &self.windows,
+                                        &self.monitors,
+                                        self.selected_monitor_idx,
+                                    );
                                     egui::ComboBox::from_id_salt("linux_window_select")
                                         .selected_text(
                                             self.selected_window_idx
@@ -7582,10 +7589,10 @@ impl eframe::App for RivuletApp {
                                                 }),
                                         )
                                         .show_ui(ui, |ui| {
-                                            for (i, w) in self.windows.iter().enumerate() {
+                                            for (i, w) in &window_entries {
                                                 if ui
                                                     .selectable_label(
-                                                        self.selected_window_idx == Some(i),
+                                                        self.selected_window_idx == Some(*i),
                                                         format!(
                                                             "\"{}\" ({}x{})",
                                                             w.title().unwrap_or_default(),
@@ -7595,8 +7602,7 @@ impl eframe::App for RivuletApp {
                                                     )
                                                     .clicked()
                                                 {
-                                                    self.selected_window_idx = Some(i);
-                                                    self.selected_monitor_idx = None;
+                                                    self.selected_window_idx = Some(*i);
                                                     // Region capture only applies to
                                                     // monitor capture; window capture is
                                                     // always full-window.
@@ -9112,6 +9118,98 @@ fn resolve_monitor_label(
     } else {
         None
     }
+}
+
+/// Compare two xcap monitors for identity, preferring the stable device id
+/// and falling back to the display rect plus name where ids are not usable.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn same_monitor(a: &xcap::Monitor, b: &xcap::Monitor) -> bool {
+    if let (Ok(ida), Ok(idb)) = (a.id(), b.id()) {
+        return ida == idb;
+    }
+    let rect = |m: &xcap::Monitor| {
+        (
+            m.x().unwrap_or(0),
+            m.y().unwrap_or(0),
+            m.width().unwrap_or(0),
+            m.height().unwrap_or(0),
+            m.name().unwrap_or_default(),
+        )
+    };
+    rect(a) == rect(b)
+}
+
+/// Keep only entries whose window resides on the selected monitor, preserving
+/// the original (global) indices so callers keep storing a selection into the
+/// unfiltered window list. When `selected_monitor_matched` is `false` (no
+/// monitor selected or the index does not resolve) every entry is kept;
+/// otherwise only entries for which `on_selected_monitor` returns `true` are
+/// kept. Pure and unit-tested: the platform wrappers below only supply the
+/// platform-specific monitor lookup.
+fn keep_on_selected_monitor<T>(
+    windows: Vec<T>,
+    selected_monitor_matched: bool,
+    on_selected_monitor: impl Fn(&T) -> bool,
+) -> Vec<(usize, T)> {
+    if !selected_monitor_matched {
+        return windows.into_iter().enumerate().collect();
+    }
+    windows
+        .into_iter()
+        .enumerate()
+        .filter(|(_, w)| on_selected_monitor(w))
+        .collect()
+}
+
+/// Build the window entries for a monitor-scoped window dropdown.
+///
+/// When a monitor is selected only windows residing on that monitor are
+/// returned (matched via `xcap::Window::current_monitor`). The returned
+/// indices are positions in the *unfiltered* `windows` slice so callers can
+/// keep `selected_window_idx` pointing into the unmodified list. With no
+/// monitor selected every window is returned.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn windows_on_selected_monitor(
+    windows: &[xcap::Window],
+    monitors: &[xcap::Monitor],
+    selected_monitor_idx: Option<usize>,
+) -> Vec<(usize, xcap::Window)> {
+    let selected_monitor = selected_monitor_idx.and_then(|idx| monitors.get(idx));
+    keep_on_selected_monitor(windows.to_vec(), selected_monitor.is_some(), |w| {
+        selected_monitor
+            .and_then(|m| w.current_monitor().ok().map(|wm| same_monitor(&wm, m)))
+            .unwrap_or(false)
+    })
+}
+
+/// Compare two windows-capture monitors for identity, preferring the device
+/// index and falling back to the friendly name where the index is unavailable.
+#[cfg(target_os = "windows")]
+fn same_backend_monitor(a: &Monitor, b: &Monitor) -> bool {
+    match (a.index(), b.index()) {
+        (Ok(a_idx), Ok(b_idx)) => a_idx == b_idx,
+        _ => a
+            .name()
+            .ok()
+            .zip(b.name().ok())
+            .is_some_and(|(x, y)| x == y),
+    }
+}
+
+/// Windows variant of `windows_on_selected_monitor` using the
+/// windows-capture backend (`Window::monitor` + `Monitor::index`).
+/// The returned indices are positions in the *unfiltered* `windows` slice so
+/// callers can keep `selected_window_idx` pointing into the unmodified list.
+#[cfg(target_os = "windows")]
+fn windows_on_selected_monitor(
+    windows: &[Window],
+    monitors: &[Monitor],
+    selected_monitor_idx: Option<usize>,
+) -> Vec<(usize, Window)> {
+    let selected_monitor = selected_monitor_idx.and_then(|idx| monitors.get(idx));
+    keep_on_selected_monitor(windows.to_vec(), selected_monitor.is_some(), |w| {
+        selected_monitor.is_some_and(|m| w.monitor().is_some_and(|wm| same_backend_monitor(m, &wm)))
+    })
 }
 
 #[cfg(test)]
@@ -10906,10 +11004,20 @@ mod tests {
 
     #[test]
     fn monitor_label_is_none_when_only_window_selected() {
-        // Regression: selecting a window clears the monitor, and the
-        // window title must NOT appear in the Source dropdown.
+        // The Window dropdown owns the window title; the Source dropdown shows
+        // its "Select Monitor" fallback when no monitor is selected.
         assert_eq!(resolve_monitor_label(None, None), None);
         assert_eq!(resolve_monitor_label(None, Some("ghost")), None);
+    }
+
+    #[test]
+    fn monitor_label_keeps_monitor_name_when_window_also_selected() {
+        // Regression: selecting a window keeps the monitor selected, so the
+        // Source dropdown must still show the monitor name.
+        assert_eq!(
+            resolve_monitor_label(Some(1), Some("Display 2")),
+            Some("Display 2".to_string())
+        );
     }
 
     #[test]
@@ -10918,6 +11026,33 @@ mod tests {
             resolve_monitor_label(Some(0), Some("")),
             Some(String::new())
         );
+    }
+
+    // ── Source window list filtering ───────────────────────────────
+
+    #[test]
+    fn keep_on_selected_monitor_keeps_all_when_no_monitor_selected() {
+        let kept = keep_on_selected_monitor(vec!["a", "b", "c"], false, |_| true);
+        assert_eq!(kept, vec![(0, "a"), (1, "b"), (2, "c")]);
+    }
+
+    #[test]
+    fn keep_on_selected_monitor_keeps_only_matching_windows_preserving_indices() {
+        let kept =
+            keep_on_selected_monitor(vec!["a", "b", "c", "d"], true, |w| *w == "b" || *w == "d");
+        assert_eq!(kept, vec![(1, "b"), (3, "d")]);
+    }
+
+    #[test]
+    fn keep_on_selected_monitor_returns_empty_when_nothing_matches() {
+        let kept = keep_on_selected_monitor(vec!["a", "b"], true, |_| false);
+        assert!(kept.is_empty());
+    }
+
+    #[test]
+    fn keep_on_selected_monitor_handles_empty_list() {
+        let kept = keep_on_selected_monitor::<&str>(Vec::new(), true, |_| true);
+        assert!(kept.is_empty());
     }
 
     // ── Scene snapshot file names ─────────────────────────────────
