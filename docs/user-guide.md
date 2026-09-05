@@ -44,6 +44,8 @@ Bei schmalen Fenstern kann die Sidebar eingeklappt werden. Alle wichtigen Aktion
 2. Wähle unter **Source** einen Monitor, ein Fenster oder eine Region.
 3. Nutze die Live-Vorschau, um das Ziel zu kontrollieren.
 4. Bei Fensteraufnahme kannst du die Liste mit **Refresh** aktualisieren.
+   Nach Auswahl eines Monitors wird die Fensterliste auf dessen Fenster eingegrenzt, und die
+   Monitor-Auswahl bleibt beim Wählen eines Fensters erhalten (aufgenommen wird dann das Fenster).
 5. Wähle bei Bedarf ein Aufnahme-Preset, einen Codec und die Bildrate.
 6. Aktiviere optional **Audio**, **Timer/FPS-Overlay** oder den Replay Buffer.
 7. Klicke **Start Recording**.
@@ -53,7 +55,7 @@ Bei schmalen Fenstern kann die Sidebar eingeklappt werden. Alle wichtigen Aktion
 ### Aufnahmequellen
 
 - **Monitor:** vollständiger Bildschirm eines ausgewählten Monitors
-- **Window:** einzelnes sichtbares Fenster; die Auswahl sollte nach einem Refresh erneut geprüft werden
+- **Window:** einzelnes sichtbares Fenster; die Auswahl sollte nach einem Refresh erneut geprüft werden. Nach Wahl eines Monitors zeigt die Liste nur Fenster dieses Monitors, und die Monitor-Auswahl bleibt beim Wählen eines Fensters bestehen (die Aufnahme verwendet das Fenster)
 - **Region:** rechteckiger Ausschnitt mit Drag-Auswahl oder X/Y/Breite/Höhe
 - **Game Capture:** Windows Graphics Capture/DXGI/Vulkan/OpenGL-Hook, sofern der jeweilige Pfad verfügbar ist; bei fehlender Unterstützung zeigt Rivulet den Fallback-Status an
 

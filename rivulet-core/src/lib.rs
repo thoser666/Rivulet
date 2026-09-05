@@ -943,17 +943,66 @@ impl RivuletEngine {
         location.replace('\\', "\\\\")
     }
 
+    /// The leg that feeds the *video* stream into a session muxer (named
+    /// `mux_name`) at the end of the encoded-video branch.
+    ///
+    /// Container muxers (mp4/mkv, `sink_%u` request pads) accept an any-pad
+    /// link through a plain queue. FLV muxers (`flvmux`) instead expose two
+    /// *named* request pads (`video`/`audio`); the video leg must target the
+    /// `video` pad explicitly because the parser cannot choose between the
+    /// request-pad templates on GStreamer <= 1.24 (see `video_branch_str` for
+    /// the `h264parse` that converts the encoder's byte-stream to AVC, which
+    /// FLV requires at runtime).
+    fn video_mux_leg(&self, mux_name: &str, flv: bool) -> String {
+        if flv {
+            format!(" ! queue ! {mux_name}.video")
+        } else {
+            format!(" ! queue ! {mux_name}.")
+        }
+    }
+
+    /// Audio counterpart of [`Self::video_mux_leg`]: container muxers take the
+    /// any-pad link, FLV muxers the named `audio` request pad (its template
+    /// already admits the AAC raw stream, so no extra caps filter is needed).
+    fn audio_mux_leg(&self, mux_name: &str, flv: bool) -> String {
+        if flv {
+            format!(" ! queue ! {mux_name}.audio")
+        } else {
+            format!(" ! queue ! {mux_name}.")
+        }
+    }
+
+    /// The `h264parse` fragment that must sit right after the H.264 video
+    /// encoder when the encoded stream feeds an FLV muxer (streaming / dual
+    /// output). It serves two purposes:
+    ///
+    /// - *Parsing*: on GStreamer <= 1.24 the pipeline parser cannot infer the
+    ///   caps of a branch that starts from an encoder emitting `byte-stream`
+    ///   H.264 (notably NVENC) once a `tee`/`queue` sits in the way, so the
+    ///   link into the muxer request pads fails (`could not link … to mux`).
+    ///   `h264parse` exposes a `video/x-h264` src template covering both
+    ///   stream formats, which lets every downstream leg parse.
+    /// - *Muxing*: FLV and mp4 require `stream-format=avc` with `codec_data`;
+    ///   `h264parse` performs the byte-stream -> AVC conversion.
+    fn h264_parse_fragment(&self) -> &'static str {
+        " ! h264parse "
+    }
+
     /// Fragment appended after the video encoder: either a plain queue into
     /// the muxer, or (when the replay buffer is enabled) a tee that also
     /// feeds a parsing appsink so encoded packets can be captured into the
     /// ring. The `h264parse` in the capture branch yields AVC caps carrying
-    /// `codec_data`, which lets a replay clip start mid-stream.
-    fn replay_video_branch(&self) -> &'static str {
+    /// `codec_data`, which lets a replay clip start mid-stream. `flv` selects
+    /// the FLV-muxer leg (named `video` request pad + explicit AVC caps).
+    fn replay_video_branch(&self, mux_name: &str, flv: bool) -> String {
+        let leg = self.video_mux_leg(mux_name, flv);
         if self.replay.is_some() {
-            " ! tee name=replay_vtee ! queue ! mux. \
-             replay_vtee. ! queue ! h264parse ! appsink name=replay_video_sink"
+            format!(
+                " ! tee name=replay_vtee{leg} \
+                 replay_vtee. ! queue ! h264parse ! appsink name=replay_video_sink"
+            )
         } else {
-            " ! queue ! mux."
+            leg
         }
     }
 
@@ -969,12 +1018,12 @@ impl RivuletEngine {
         Some(format!("{tee_pad} ! queue ! h264parse ! {sink}"))
     }
 
-    /// Tail of the encoded-video branch into the session muxer (named `mux`):
+    /// Tail of the encoded-video branch into the session muxer (`mux_name`):
     /// a plain queue, or a tee that additionally fans out to the replay
     /// appsink and/or the NDI sink. The NDI branch taps the *encoded* H.264
     /// stream before muxing, because NDI carries elementary H.264 and must not
-    /// see the FLV/container bitstream.
-    fn video_tail_fragment(&self) -> String {
+    /// see the FLV/container bitstream. `flv` selects the FLV-muxer legs.
+    fn video_tail_fragment(&self, mux_name: &str, flv: bool) -> String {
         let replay = self.replay.is_some();
         let ndi = if replay {
             self.ndi_feed_chain("replay_vtee.")
@@ -982,14 +1031,17 @@ impl RivuletEngine {
             self.ndi_feed_chain("ndi_vtee.")
         };
         match (replay, ndi) {
-            (false, None) => " ! queue ! mux.".to_string(),
-            (false, Some(ndi)) => format!(" ! tee name=ndi_vtee ! queue ! mux. {ndi}"),
-            (true, None) => self.replay_video_branch().to_string(),
-            (true, Some(ndi)) => format!("{} {ndi}", self.replay_video_branch()),
+            (false, None) => self.video_mux_leg(mux_name, flv),
+            (false, Some(ndi)) => format!(
+                " ! tee name=ndi_vtee{} {ndi}",
+                self.video_mux_leg(mux_name, flv)
+            ),
+            (true, None) => self.replay_video_branch(mux_name, flv),
+            (true, Some(ndi)) => format!("{} {ndi}", self.replay_video_branch(mux_name, flv)),
         }
     }
 
-    fn video_branch_str(&self) -> String {
+    fn video_branch_str(&self, mux_name: &str, flv: bool) -> String {
         let transform = self.preset.transform_fragment();
         let caps = self
             .video_encoder
@@ -1006,12 +1058,16 @@ impl RivuletEngine {
             ""
         };
         let effects = self.video_effects_fragment();
-        let tail = self.video_tail_fragment();
+        let tail = self.video_tail_fragment(mux_name, flv);
+        // FLV muxers need an explicit AVC stream: h264parse converts the
+        // encoder's (possibly byte-stream) H.264 so every downstream leg
+        // parses and muxes on GStreamer >= 1.20 (incl. NVENC sources).
+        let parse = if flv { self.h264_parse_fragment() } else { "" };
         if transform.is_empty() {
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert{effects} ! {}{} ! {}{} ",
-                caps, overlay, encoder, tail
+                 ! videoconvert{effects} ! {}{} ! {}{}{} ",
+                caps, overlay, encoder, parse, tail
             )
         } else {
             // Transform includes videoscale/videorate and target resolution/FPS.
@@ -1020,8 +1076,8 @@ impl RivuletEngine {
             let transform_caps = format!("{}!{}", transform.trim_end(), caps.trim_start());
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
-                 ! videoconvert{effects} ! {}{} ! {}{} ",
-                transform_caps, overlay, encoder, tail
+                 ! videoconvert{effects} ! {}{} ! {}{}{} ",
+                transform_caps, overlay, encoder, parse, tail
             )
         }
     }
@@ -1033,7 +1089,7 @@ impl RivuletEngine {
     /// When the replay buffer is enabled, every audio branch additionally
     /// feeds a tee into a dedicated appsink (`replay_audio_sink_<n>`) so the
     /// encoded AAC frames can be captured into the ring.
-    fn audio_branch_str(&self, force_mixed: bool) -> String {
+    fn audio_branch_str(&self, mux_name: &str, flv: bool, force_mixed: bool) -> String {
         if !self.audio_enabled {
             return String::new();
         }
@@ -1042,13 +1098,14 @@ impl RivuletEngine {
         let mut push_branch = |out: &mut String, appsrc_name: &str| {
             let idx = branch_idx;
             branch_idx += 1;
+            let leg = self.audio_mux_leg(mux_name, flv);
             let replay = if replay_enabled {
                 format!(
-                    " ! tee name=replay_atee{idx} ! queue ! mux. \
+                    " ! tee name=replay_atee{idx}{leg} \
                      replay_atee{idx}. ! queue ! appsink name=replay_audio_sink_{idx}"
                 )
             } else {
-                " ! queue ! mux.".to_string()
+                leg
             };
             out.push_str(&format!(
                 "appsrc name={appsrc_name} format=time is-live=true do-timestamp=true \
@@ -1112,8 +1169,8 @@ impl RivuletEngine {
     }
 
     fn build_recording_pipeline_str(&self, location: &str) -> String {
-        let mut s = self.video_branch_str();
-        s.push_str(&self.audio_branch_str(false));
+        let mut s = self.video_branch_str("mux", false);
+        s.push_str(&self.audio_branch_str("mux", false, false));
         s.push_str(&self.recording_muxer_fragment(location));
         s
     }
@@ -1128,8 +1185,8 @@ impl RivuletEngine {
             tracks = settings.multitrack_video.effective_tracks(),
             "Initializing streaming pipeline"
         );
-        let mut s = self.video_branch_str();
-        s.push_str(&self.audio_branch_str(true));
+        let mut s = self.video_branch_str("mux", true);
+        s.push_str(&self.audio_branch_str("mux", true, true));
         let delay = if settings.delay.enabled {
             format!(
                 " ! identity name=stream_delay single-segment=true sleep-time={} ",
@@ -1223,8 +1280,8 @@ impl RivuletEngine {
         };
         let mut s = String::new();
         s.push_str(&format!(
-            "{} ! tee name=video_tee ! queue ! mux_rec. \
-             video_tee. ! queue ! mux_stream. ",
+            "{} ! h264parse ! tee name=video_tee ! queue ! mux_rec. \
+             video_tee. ! queue ! mux_stream.video ",
             video_part
         ));
         // Replay capture branch (third output of the video tee).
@@ -1243,7 +1300,7 @@ impl RivuletEngine {
                 "appsrc name=audio_src format=time is-live=true do-timestamp=true \
                  ! audioconvert ! audioresample ! avenc_aac ! tee name=audio_tee \
                  ! queue ! mux_rec. \
-                 audio_tee. ! queue ! mux_stream. ",
+                 audio_tee. ! queue ! mux_stream.audio ",
             );
             if self.replay.is_some() {
                 s.push_str("audio_tee. ! queue ! appsink name=replay_audio_sink_0 ");
@@ -1892,16 +1949,37 @@ impl RivuletEngine {
         }
 
         if let Some(appsrc) = &self.appsrc {
-            let mut buffer = gst::Buffer::with_size(frame_data.len()).unwrap();
-            {
-                let buffer_ref = buffer.get_mut().expect("Buffer not writable");
-                let mut map = buffer_ref
-                    .map_writable()
-                    .expect("Failed to map buffer writable");
-                map.as_mut_slice().copy_from_slice(frame_data);
+            let make_buffer = || {
+                let mut buffer = gst::Buffer::with_size(frame_data.len()).unwrap();
+                {
+                    let buffer_ref = buffer.get_mut().expect("Buffer not writable");
+                    let mut map = buffer_ref
+                        .map_writable()
+                        .expect("Failed to map buffer writable");
+                    map.as_mut_slice().copy_from_slice(frame_data);
+                }
+                buffer
+            };
+
+            // The first frame starts the pipeline lazily; if it races the
+            // state change to PLAYING the push can fail transiently (slow
+            // starts under load or coverage instrumentation). Retry briefly
+            // instead of treating a flush/flow hiccup as fatal.
+            let mut result = appsrc.push_buffer(make_buffer());
+            if result.is_err() {
+                for _ in 0..3 {
+                    if !self.is_recording || self.pipeline.is_none() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                    result = appsrc.push_buffer(make_buffer());
+                    if result.is_ok() {
+                        break;
+                    }
+                }
             }
 
-            match appsrc.push_buffer(buffer) {
+            match result {
                 Ok(_flow) => {
                     if let Some(metrics) = self.recording_metrics.as_ref() {
                         metrics

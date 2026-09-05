@@ -638,6 +638,84 @@ fn ossf_silver_gap_closures_are_pinned() {
         "the PR template must capture the regression-test and DCO requirements"
     );
 
+    // access_continuity + bus_factor: GOVERNANCE.md documents the concrete
+    // contingency plan (backup maintainer, credential handover, 1-week
+    // recovery window).
+    assert!(
+        gov.contains("## Access continuity (bus factor)")
+            && gov.contains("Backup maintainer")
+            && gov.contains("Credential contingency")
+            && gov.contains("Recovery window")
+            && gov.contains("bus factor 1"),
+        "GOVERNANCE.md must document the access-continuity plan"
+    );
+
+    // assurance_case: the dedicated assurance-case document exists and argues
+    // the security requirements (threat model, trust boundaries, secure
+    // design, common weaknesses).
+    let assurance = read("docs/security/assurance-case.md");
+    for marker in [
+        "# Rivulet Assurance Case",
+        "Threat model",
+        "Trust boundaries",
+        "Secure-design argument",
+        "Common implementation weaknesses countered",
+        "test_statement_coverage80",
+    ] {
+        assert!(
+            assurance.contains(marker),
+            "docs/security/assurance-case.md must contain {marker}"
+        );
+    }
+
+    // test_statement_coverage80: the coverage gate script + CI job exist and
+    // require >= 80 % statement coverage on rivulet-core.
+    let gate = read("scripts/coverage-gate.sh");
+    for marker in ["rivulet-core", "--fail-under-lines", "80"] {
+        assert!(
+            gate.contains(marker),
+            "scripts/coverage-gate.sh must contain {marker}"
+        );
+    }
+    assert!(
+        ci.contains("name: Statement Coverage (rivulet-core >= 80%)")
+            && ci.contains("bash scripts/coverage-gate.sh")
+            && ci.contains("needs.coverage.result"),
+        "ci.yml must run the coverage gate and aggregate it"
+    );
+    // The coverage job must install the same GStreamer *runtime* plugin
+    // packages as the test job: the gate runs the real pipeline/e2e tests
+    // under llvm-cov, and without x264enc/flvmux/mp4mux/etc. (dev headers
+    // alone pull only gst-plugins-base) those tests panic on missing
+    // factories ("software encoder unavailable", "pipeline must parse").
+    let cov_job = ci
+        .split("name: Statement Coverage (rivulet-core >= 80%)")
+        .nth(1)
+        .and_then(|s| s.split("name: Roadmap-Sync Check").next())
+        .unwrap_or_default();
+    for pkg in [
+        "gstreamer1.0-plugins-base",
+        "gstreamer1.0-plugins-good",
+        "gstreamer1.0-plugins-bad",
+        "gstreamer1.0-plugins-ugly",
+        "gstreamer1.0-libav",
+        "gstreamer1.0-tools",
+    ] {
+        assert!(
+            cov_job.contains(pkg),
+            "coverage job must install runtime plugin package {pkg} (dev headers alone cannot run pipeline tests)"
+        );
+    }
+
+    // build_preserve_debug: the release profile preserves debug info (no
+    // strip, no install -s) and documents it.
+    let cargo = read("Cargo.toml");
+    assert!(
+        cargo.contains("Debug info is deliberately PRESERVED")
+            && cargo.contains("build_preserve_debug"),
+        "Cargo.toml must document that release debug info is preserved"
+    );
+
     // The evidence map must document the closures and this guard.
     let map = read("docs/openssf-best-practices.md");
     for marker in [
@@ -646,6 +724,9 @@ fn ossf_silver_gap_closures_are_pinned() {
         "CODE_OF_CONDUCT.md",
         "check-dco.py",
         "regression-testing.md",
+        "assurance-case.md",
+        "coverage-gate.sh",
+        "build_preserve_debug",
     ] {
         assert!(
             map.contains(marker),
@@ -1857,7 +1938,7 @@ fn develop_required_checks_have_stable_job_names() {
             && ci.contains("cargo test -p rivulet-core --test ci_pinning")
             && ci.contains("name: CI")
             && ci.contains(
-                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke, roadmap_sync]"
+                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke, coverage, roadmap_sync]"
             ),
         "CI must expose dedicated Pinning-Tests and aggregate CI checks"
     );
@@ -2968,6 +3049,35 @@ fn local_pre_push_hook_mirrors_the_ci_lints_job() {
             && contributing.contains("RIVULET_SKIP_PRE_PUSH=1 git push"),
         "CONTRIBUTING.md must document the pre-push hook, its -D warnings flags and the toggles"
     );
+}
+
+/// The Lints job's "Check generated assets are up to date" step runs the
+/// pinned ImageMagick container, which runs `apt-get update` on every run.
+/// Fresh-runner network flakes made that fail with exit 100 and no output
+/// (observed repeatedly on ubuntu-latest), so the step retries the container
+/// run and gives apt retry/timeout knobs; a future edit that removes the
+/// retry wrapper would reintroduce the flake, so pin the markers here.
+#[test]
+fn lints_assets_step_retries_the_pinned_container() {
+    let ci = read(".github/workflows/ci.yml");
+    let step = ci
+        .split("Check generated assets are up to date")
+        .nth(1)
+        .and_then(|s| s.split("Check status color contrast").next())
+        .unwrap_or_default();
+    for marker in [
+        "for attempt in 1 2 3",
+        "docker build --network host -t rivulet-assets-check",
+        "dpokidov/imagemagick:7.1.2-12",
+        "python3 git",
+        "scripts/generate-assets.sh",
+        "scripts/check-assets.py",
+    ] {
+        assert!(
+            step.contains(marker),
+            "assets step must keep the retry wrapper and pinned image ({marker})"
+        );
+    }
 }
 
 /// Bash to run the hook syntax check with. On Unix `bash` on PATH is fine

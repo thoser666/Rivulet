@@ -95,11 +95,35 @@ jobs:
         run: |
           # Run generation + comparison in a pinned ImageMagick image so the
           # check is immune to runner ImageMagick/FreeType version drift. The
-          # image is pinned by content digest (there is no official ImageMagick
-          # image) to guard against tag mutation; it is multi-arch (amd64/arm64).
+          # base image is pinned by content digest (there is no official
+          # ImageMagick image) to guard against tag mutation; it is multi-arch
+          # (amd64/arm64).
+          # The pinned base has no python3/git, and installing them at
+          # *run* time needs the network inside the container. On GitHub
+          # runners the default Docker bridge frequently has broken DNS
+          # while the host resolves fine, which failed this step on every
+          # pull_request run (push runners worked). So python3+git are
+          # baked in ONCE via `docker build --network host` (host DNS), and
+          # the runtime container then runs fully offline: no network, no
+          # flakes. The build is retried; cached layers make retries cheap.
+          set -euo pipefail
+          printf '%s\n' \
+            'FROM dpokidov/imagemagick:7.1.2-12@sha256:87998ec1b8127b2f73f626f74f7b05e8827f9d7605fa52da5370588f7e53cee1' \
+            'RUN set -eux; printf "%s\n" "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/20250901T000000Z bullseye main" "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/20250901T000000Z bullseye-security main" > /etc/apt/sources.list; rm -f /etc/apt/sources.list.d/*; apt-get -o Acquire::Retries=5 -o Acquire::Check-Valid-Until=false update; apt-get install -y --no-install-recommends python3 git; rm -rf /var/lib/apt/lists/*' \
+            > /tmp/rivulet-assets.Dockerfile
+          built=0
+          for attempt in 1 2 3; do
+            if docker build --network host -t rivulet-assets-check -f /tmp/rivulet-assets.Dockerfile .; then
+              built=1
+              break
+            fi
+            echo "assets image build failed (attempt $attempt/3); retrying in 10s..."
+            sleep 10
+          done
+          [ "$built" = 1 ] || exit 1
           docker run --rm -v "$PWD:/work" -w /work --entrypoint bash \
-            dpokidov/imagemagick:7.1.2-12@sha256:87998ec1b8127b2f73f626f74f7b05e8827f9d7605fa52da5370588f7e53cee1 \
-            -c 'apt-get update -qq && apt-get install -y -qq python3 git >/dev/null 2>&1 && git config --global --add safe.directory /work && bash scripts/generate-assets.sh && python3 scripts/check-assets.py'
+            rivulet-assets-check \
+            -c 'git config --global --add safe.directory /work && bash scripts/generate-assets.sh && python3 scripts/check-assets.py'
 
       - name: Check status color contrast (WCAG AA)
         run: python3 scripts/check-theme-contrast.py
@@ -270,6 +294,48 @@ jobs:
           if-no-files-found: ignore
 
   ################################################################
+  # STATEMENT-COVERAGE GATE (OpenSSF silver `test_statement_coverage80`)
+  # Measures `rivulet-core` line coverage with cargo-llvm-cov on Ubuntu and
+  # fails below 80%. Scope rationale (core crate, not the hook/launcher
+  # shims) is documented in scripts/coverage-gate.sh and
+  # docs/security/assurance-case.md.
+  ################################################################
+  coverage:
+    name: Statement Coverage (rivulet-core >= 80%)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libglib2.0-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            gstreamer1.0-tools
+
+      - name: Install llvm-tools and cargo-llvm-cov
+        run: |
+          rustup component add llvm-tools-preview
+          cargo install cargo-llvm-cov --locked
+
+      - name: Run statement-coverage gate (>= 80% on rivulet-core)
+        run: bash scripts/coverage-gate.sh
+
+  ################################################################
   # ROADMAP-SYNC CHECK (README milestone table + gates doc vs GitHub)
   # The milestone sequence is owned by GitHub (canonical `M<n> – Title`
   # names). This job verifies the README "Milestone overview" table and
@@ -301,7 +367,7 @@ jobs:
   ci:
     name: CI
     if: ${{ always() }}
-    needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke, roadmap_sync]
+    needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke, coverage, roadmap_sync]
     runs-on: ubuntu-latest
     steps:
       - name: Require all CI jobs to pass
@@ -317,6 +383,7 @@ jobs:
             "${{ needs.rist_receiver_smoke.result }}" \
             "${{ needs.obs_websocket_smoke.result }}" \
             "${{ needs.fuzz_smoke.result }}" \
+            "${{ needs.coverage.result }}" \
             "${{ needs.roadmap_sync.result }}"; do
             if [[ "$result" != "success" ]]; then
               echo "A required CI job finished with: $result" >&2

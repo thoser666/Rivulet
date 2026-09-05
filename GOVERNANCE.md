@@ -76,13 +76,33 @@ Release channels (alpha automatic / beta / RC / stable) are described in
 [`docs/release-platforms.md`](docs/release-platforms.md). Only maintainers tag
 non-alpha releases.
 
+## Access continuity (bus factor)
+
+The project MUST be able to continue with minimal interruption if any one
+person becomes unavailable. Concretely:
+
+- **Backup maintainer.** The project actively seeks a second maintainer with
+  the same rights (write access, release tagging). Onboarding is a public,
+  reviewable decision tracked in the issue tracker. Until one is added, this
+  criterion is acknowledged as not yet fully met in the OpenSSF Best Practices
+  entry.
+- **Credential contingency.** Every maintainer keeps a private succession note
+  (kept outside the repository) listing how repository, package-registry,
+  codesigning, and DNS access can be transferred: where the secrets live, who
+  can revoke/recover them, and the legal rights needed to continue the project.
+- **Recovery window.** If a maintainer becomes unavailable, the remaining
+  maintainers (or, while single-maintainer, the designated backup via the
+  succession note) must be able to create/close issues, accept changes, and
+  release software within **one week** of confirmation of the loss.
+
 ## Succession and bus factor
 
-- Every maintainer should document, in a private succession note, how
-  repository, package, and signing access can be transferred if they become
-  unavailable (keys, credentials, and rights).
+- Every maintainer keeps the private succession note described above current.
 - The project explicitly welcomes a second maintainer; onboarding happens via
   the issue tracker / discussion so it is a public, reviewable decision.
+- Current status: single maintainer (`thoser666`) — bus factor 1. The
+  governance, the public onboarding path, and the credential-contingency
+  procedure above are the mitigation until a second maintainer joins.
 
 ## Scope and non-goals
 
