@@ -95,27 +95,35 @@ jobs:
         run: |
           # Run generation + comparison in a pinned ImageMagick image so the
           # check is immune to runner ImageMagick/FreeType version drift. The
-          # image is pinned by content digest (there is no official ImageMagick
-          # image) to guard against tag mutation; it is multi-arch (amd64/arm64).
-          # The container runs apt-get update on a freshly pulled image on every
-          # run; transient runner/registry network failures made that fail
-          # with exit 100 and no output (observed repeatedly on ubuntu-latest),
-          # so the container run is retried, apt gets its own retry/timeout
-          # knobs, and the container shares the host network: on GitHub
+          # base image is pinned by content digest (there is no official
+          # ImageMagick image) to guard against tag mutation; it is multi-arch
+          # (amd64/arm64).
+          # The pinned base has no python3/git, and installing them at
+          # *run* time needs the network inside the container. On GitHub
           # runners the default Docker bridge frequently has broken DNS
-          # while the host resolves fine (--network host fixes exactly
-          # that; the mount and entrypoint behavior are unchanged).
+          # while the host resolves fine, which failed this step on every
+          # pull_request run (push runners worked). So python3+git are
+          # baked in ONCE via `docker build --network host` (host DNS), and
+          # the runtime container then runs fully offline: no network, no
+          # flakes. The build is retried; cached layers make retries cheap.
           set -euo pipefail
+          printf '%s\n' \
+            'FROM dpokidov/imagemagick:7.1.2-12@sha256:87998ec1b8127b2f73f626f74f7b05e8827f9d7605fa52da5370588f7e53cee1' \
+            'RUN apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=30 && apt-get install -y --no-install-recommends python3 git && rm -rf /var/lib/apt/lists/*' \
+            > /tmp/rivulet-assets.Dockerfile
+          built=0
           for attempt in 1 2 3; do
-            if docker run --rm --network host -v "$PWD:/work" -w /work --entrypoint bash \
-                dpokidov/imagemagick:7.1.2-12@sha256:87998ec1b8127b2f73f626f74f7b05e8827f9d7605fa52da5370588f7e53cee1 \
-                -c 'apt-get update -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=20 && apt-get install -y -qq python3 git >/dev/null 2>&1 && git config --global --add safe.directory /work && bash scripts/generate-assets.sh && python3 scripts/check-assets.py'; then
-              exit 0
+            if docker build --network host -t rivulet-assets-check -f /tmp/rivulet-assets.Dockerfile .; then
+              built=1
+              break
             fi
-            echo "assets docker run failed (attempt $attempt/3); retrying in 10s..."
+            echo "assets image build failed (attempt $attempt/3); retrying in 10s..."
             sleep 10
           done
-          exit 1
+          [ "$built" = 1 ] || exit 1
+          docker run --rm -v "$PWD:/work" -w /work --entrypoint bash \
+            rivulet-assets-check \
+            -c 'git config --global --add safe.directory /work && bash scripts/generate-assets.sh && python3 scripts/check-assets.py'
 
       - name: Check status color contrast (WCAG AA)
         run: python3 scripts/check-theme-contrast.py
