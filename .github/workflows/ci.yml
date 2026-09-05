@@ -97,9 +97,22 @@ jobs:
           # check is immune to runner ImageMagick/FreeType version drift. The
           # image is pinned by content digest (there is no official ImageMagick
           # image) to guard against tag mutation; it is multi-arch (amd64/arm64).
-          docker run --rm -v "$PWD:/work" -w /work --entrypoint bash \
-            dpokidov/imagemagick:7.1.2-12@sha256:87998ec1b8127b2f73f626f74f7b05e8827f9d7605fa52da5370588f7e53cee1 \
-            -c 'apt-get update -qq && apt-get install -y -qq python3 git >/dev/null 2>&1 && git config --global --add safe.directory /work && bash scripts/generate-assets.sh && python3 scripts/check-assets.py'
+          # The container runs apt-get update on a freshly pulled image on every
+          # run; a transient runner/registry network failure made that fail
+          # with exit 100 and no output (observed repeatedly on ubuntu-latest),
+          # so the whole container run is retried and apt gets its own
+          # retry/timeout knobs -- a network blip must not fail the Lints job.
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if docker run --rm -v "$PWD:/work" -w /work --entrypoint bash \
+                dpokidov/imagemagick:7.1.2-12@sha256:87998ec1b8127b2f73f626f74f7b05e8827f9d7605fa52da5370588f7e53cee1 \
+                -c 'apt-get update -qq -o Acquire::Retries=3 -o Acquire::http::Timeout=20 && apt-get install -y -qq python3 git >/dev/null 2>&1 && git config --global --add safe.directory /work && bash scripts/generate-assets.sh && python3 scripts/check-assets.py'; then
+              exit 0
+            fi
+            echo "assets docker run failed (attempt $attempt/3); retrying in 10s..."
+            sleep 10
+          done
+          exit 1
 
       - name: Check status color contrast (WCAG AA)
         run: python3 scripts/check-theme-contrast.py

@@ -3051,6 +3051,35 @@ fn local_pre_push_hook_mirrors_the_ci_lints_job() {
     );
 }
 
+/// The Lints job's "Check generated assets are up to date" step runs the
+/// pinned ImageMagick container, which runs `apt-get update` on every run.
+/// Fresh-runner network flakes made that fail with exit 100 and no output
+/// (observed repeatedly on ubuntu-latest), so the step retries the container
+/// run and gives apt retry/timeout knobs; a future edit that removes the
+/// retry wrapper would reintroduce the flake, so pin the markers here.
+#[test]
+fn lints_assets_step_retries_the_pinned_container() {
+    let ci = read(".github/workflows/ci.yml");
+    let step = ci
+        .split("Check generated assets are up to date")
+        .nth(1)
+        .and_then(|s| s.split("Check status color contrast").next())
+        .unwrap_or_default();
+    for marker in [
+        "for attempt in 1 2 3",
+        "Acquire::Retries=3",
+        "Acquire::http::Timeout=20",
+        "dpokidov/imagemagick:7.1.2-12",
+        "scripts/generate-assets.sh",
+        "scripts/check-assets.py",
+    ] {
+        assert!(
+            step.contains(marker),
+            "assets step must keep the retry wrapper and pinned image ({marker})"
+        );
+    }
+}
+
 /// Bash to run the hook syntax check with. On Unix `bash` on PATH is fine
 /// (CI ubuntu enforces the check there). On Windows, `bash` on PATH may
 /// resolve to the WSL launcher (`C:\Windows\System32\bash.exe`), which
