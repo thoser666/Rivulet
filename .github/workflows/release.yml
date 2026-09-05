@@ -332,7 +332,6 @@ jobs:
           body_path: release-notes.md
           files: |
             release-assets/*
-            release-assets/SHA256SUMS
             docs/opengraph.png
             docs/social-preview.png
             docs/assets/rivulet-app-icon-512.png
