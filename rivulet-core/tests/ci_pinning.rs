@@ -158,6 +158,43 @@ fn m3_completion_report_is_linked_and_records_follow_ups() {
 }
 
 #[test]
+fn m5_platform_parity_evidence_is_linked_and_pinned() {
+    // M5 gate (docs/milestone-quality-gates.md): platform parity requires a
+    // platform feature matrix as exit evidence, and the OBS compatibility mode
+    // must be explicitly marked as a compatibility/risk boundary. Pinning the
+    // markers here fails CI if either document loses its evidence or the
+    // README/gate links drift away.
+    let readme = read("README.md");
+    let gates = read("docs/milestone-quality-gates.md");
+    let matrix = read("docs/platform-feature-matrix.md");
+    let obs = read("docs/obs-websocket.md");
+    assert!(readme.contains("docs/platform-feature-matrix.md"));
+    assert!(gates.contains("platform-feature-matrix.md"));
+    for required in [
+        "Platform feature matrix (M5 exit evidence)",
+        "Windows",
+        "Linux",
+        "macOS",
+        "## Explicit platform limitations (summary)",
+        "docs/milestone-quality-gates.md",
+    ] {
+        assert!(matrix.contains(required), "matrix must contain {required}");
+    }
+    assert!(
+        obs.contains("## Compatibility / risk boundary (M5 gate)"),
+        "OBS doc must carry the compatibility/risk boundary marker"
+    );
+    for required in [
+        "**not** an OBS Studio",
+        "127.0.0.1",
+        "UnknownRequestType",
+        "Authentication is optional",
+    ] {
+        assert!(obs.contains(required), "OBS doc must contain {required}");
+    }
+}
+
+#[test]
 fn security_policy_is_linked_from_readme_and_docs() {
     let readme = read("README.md");
     let policy = read("SECURITY.md");

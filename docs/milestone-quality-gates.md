@@ -191,7 +191,7 @@ Review trust, permissions, installation, and cross-platform consistency:
   platform-specific limitations.
 - Accessibility, locale coverage, and diagnostics are checked in each package.
 
-Exit evidence: platform feature matrix, installer/update recordings, and plugin
+Exit evidence: [platform feature matrix](platform-feature-matrix.md), installer/update recordings, and plugin
 trust/permission review.
 
 ### M6: Creator Toolkit and Interactivity

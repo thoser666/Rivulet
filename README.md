@@ -155,6 +155,9 @@ werden.
 > accessibility-scanning backlog are tracked in [`docs/ui-audit.md`](docs/ui-audit.md).
 > The cross-cutting resource goal and measurement method are documented in
 > [`docs/resource-efficiency-goal.md`](docs/resource-efficiency-goal.md).
+> The M5 platform coverage — Windows/macOS/Linux feature parity and the
+> explicitly labelled platform limitations — is documented in
+> [`docs/platform-feature-matrix.md`](docs/platform-feature-matrix.md).
 
 ### Milestone overview
 
