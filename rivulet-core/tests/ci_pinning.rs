@@ -3067,6 +3067,7 @@ fn lints_assets_step_retries_the_pinned_container() {
         .unwrap_or_default();
     for marker in [
         "for attempt in 1 2 3",
+        "--network host",
         "Acquire::Retries=3",
         "Acquire::http::Timeout=20",
         "dpokidov/imagemagick:7.1.2-12",
