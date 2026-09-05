@@ -2166,6 +2166,25 @@ fn updater_verifies_release_checksums_before_install() {
         workflow.contains("release-assets/SHA256SUMS"),
         "the generated manifest must be attached to the release"
     );
+    // Regression (v0.65.0-alpha.138): the files list named SHA256SUMS twice
+    // (`release-assets/*` glob AND the explicit `release-assets/SHA256SUMS`
+    // line), so softprops uploaded the same asset twice concurrently; one
+    // upload won, the duplicate hit "Not Found" on update and failed the
+    // release job AFTER most uploads - leaving the release without the
+    // manifest the updater requires. The glob alone covers the manifest.
+    let files_block = workflow
+        .split("Create GitHub Release")
+        .nth(1)
+        .unwrap_or_default();
+    assert!(
+        files_block.contains("release-assets/*"),
+        "the release files list must keep the release-assets/* glob (covers SHA256SUMS)"
+    );
+    assert!(
+        !files_block.contains("release-assets/SHA256SUMS"),
+        "SHA256SUMS must be attached exactly once (the glob already covers it); \
+         a duplicate files: entry double-uploads the asset and can fail the release"
+    );
 
     let gui = read("rivulet-gui/src/app.rs");
     assert!(
