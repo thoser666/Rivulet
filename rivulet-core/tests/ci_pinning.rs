@@ -3522,10 +3522,11 @@ fn windows_ci_installs_one_consistent_gstreamer_version() {
     // strategy: the mirror release first, freedesktop.org as fallback.
     // A drift here means e.g. the release binaries are built and tested
     // against a different GStreamer than nightly, or one path silently
-    // stays on an EOL version while the rest moved on (1.24 is EOL, the
-    // current mirror default is 1.26.11; the 1.28 series ships a unified
-    // .exe installer instead of per-component MSIs and needs its own
-    // install step before it can be adopted).
+    // stays on an EOL version while the rest moved on (1.24 is EOL; the
+    // current pin is 1.26.11 — the newest version still shipping the
+    // classic MSI pair; the >= 1.28 unified Inno Setup .exe generation
+    // is supported by the shared helper, so moving the pin is a
+    // one-line change plus a mirror run). See docs/gstreamer-ci.md.
     let ci = read(".github/workflows/ci.yml");
     let build_package = read(".github/workflows/build-package.yml");
     let nightly = read(".github/workflows/nightly.yml");
@@ -3561,13 +3562,52 @@ fn windows_ci_installs_one_consistent_gstreamer_version() {
         "the build-package.yml Windows cache key must encode the GStreamer version"
     );
     // The mirror-first download strategy must stay intact (CI resilience
-    // against freedesktop.org 503s).
+    // against freedesktop.org 503s): all three Windows paths must route
+    // the installation through the shared helper, which owns the
+    // cache -> mirror -> freedesktop fallback and the SHA256 verification
+    // against the official freedesktop .sha256sum (the >= 1.28 installers
+    // are NOT Authenticode-signed, so the digest is the only anchor).
+    for (name, content) in [
+        ("ci.yml", ci.as_str()),
+        ("build-package.yml", build_package.as_str()),
+        ("nightly.yml", nightly.as_str()),
+    ] {
+        assert!(
+            content.contains("packaging/windows/install-gstreamer.ps1 -Version"),
+            "{name} must install GStreamer through the shared helper so the \
+             download strategy and integrity checks stay in one place"
+        );
+    }
+    // The helper must keep covering BOTH installer generations so the
+    // version pin can move to 1.28.x later: classic MSI pair (<= 1.26)
+    // and the unified Inno Setup .exe (>= 1.28, which replaced the
+    // per-component MSIs upstream).
+    let helper = read("packaging/windows/install-gstreamer.ps1");
+    for needle in [
+        "$exeInstaller = \"gstreamer-1.0-msvc-x86_64-$Version.exe\"",
+        "$runtimeMsi = \"gstreamer-1.0-msvc-x86_64-$Version.msi\"",
+        "$develMsi = \"gstreamer-1.0-devel-msvc-x86_64-$Version.msi\"",
+        "/VERYSILENT",
+        "/TYPE=devel",
+        "/DIR=`\"$InstallRoot`\"",
+        "Get-FileHash",
+        "GSTREAMER_1_0_ROOT_MSVC_X86_64",
+    ] {
+        assert!(
+            helper.contains(needle),
+            "install-gstreamer.ps1 must keep the {needle} contract (format \
+             detection, silent install, digest verification, env export)"
+        );
+    }
+    // The mirror script must auto-detect the .exe generation so future
+    // 1.28.x versions can be mirrored without CI changes.
+    let mirror = read("scripts/mirror-gstreamer-msi.sh");
     assert!(
-        build_package.contains("gstreamer-msi-$version"),
-        "build-package.yml must keep trying the mirrored release first"
+        mirror.contains("EXE_INSTALLER=\"gstreamer-1.0-msvc-x86_64-${VERSION}.exe\""),
+        "the mirror script must handle the unified .exe installer generation"
     );
     assert!(
-        ci.contains("gstreamer-msi-$version"),
-        "ci.yml must keep trying the mirrored release first"
+        mirror.contains("FORMAT=\"exe\""),
+        "the mirror script must branch on the detected installer format"
     );
 }
