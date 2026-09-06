@@ -76,6 +76,34 @@ pinned ref with `git ls-remote`; each request has a 30-second timeout so a
 GitHub/network outage cannot hang the workflow indefinitely. It reports a
 newer major separately from same-major staleness.
 
+### Code scanning alert management
+
+GitHub Code Scanning (CodeQL + Scorecard SARIF) reports alerts under
+`Security → Code scanning`. The policy for new alerts: fix them on `develop`
+through a pull request, and pin the fix in `rivulet-core/tests/ci_pinning.rs`
+so the pattern cannot regress. Dismiss only when the alert is not a real
+vulnerability, using one of the canonical GitHub reasons.
+
+Current state:
+
+- **Workflow hardening (#79/#80, `DangerousWorkflowID` / "untrusted code
+  checkout"):** `.github/workflows/release.yml` previously checked out
+  `github.event.workflow_run.head_sha` in a `workflow_run`-triggered
+  workflow with `contents: write`. A fork whose PR source branch is named
+  `develop` would pass the `branches: [develop]` filter, and the release job
+  would then execute fork code with the repository token and secrets (pwn
+  request). Both release jobs now check out the protected default branch by
+  default instead, and gate on the triggering run's repository ownership
+  (`head_repository.full_name == github.repository`). Pinned by the ci_pinning
+  guard `code_scanning_alerts_are_resolved_and_pinned`.
+- **Test fixtures (#70–#78, `rust/hard-coded-cryptographic-value`):** all nine
+  alerts point at deterministic OBS auth handshake test vectors (scripted
+  password/salt/challenge pairs feeding `compute_secret`/`compute_auth_response`
+  in `rivulet-obs-websocket`). They are confined to `#[cfg(test)]` modules and
+  integration tests and are dismissed with the canonical `used in tests`
+  reason so the dismissed state stays auditable. The vectors are not
+  credentials and are never installed as secrets.
+
 ### Cargo dependency policy
 
 The lockfile is checked for yanked crates in CI. When RustSec reports a yanked

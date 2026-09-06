@@ -69,16 +69,26 @@ jobs:
   check:
     name: Check for releasable commit
     runs-on: ubuntu-latest
+    # Security delimiter (code-scanning alert #79/#80, DangerousWorkflowID):
+    # a workflow_run-triggered job runs with the target repository's token and
+    # secrets, so NEVER check out the triggering run's head here. The branch
+    # filter `workflow_run.branches: [develop]` alone is not enough — a fork
+    # whose PR source branch is named "develop" would pass it. Require the
+    # triggering run to originate from this exact repository (base + fork PRs
+    # run CI under the fork's head_repository, so only real develop runs match)
+    # and check out the protected default branch by default below.
+    if: ${{ github.event.workflow_run.head_repository.full_name == github.repository || github.event_name == 'workflow_dispatch' }}
     outputs:
       should_release: ${{ steps.detect.outputs.should_release }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # workflow_run payloads carry the triggering run's head_sha; the
-          # generic github.sha points at the default branch and must not be
-          # used for the release decision.
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          # No ref: actions/checkout resolves the default branch (develop)
+          # for workflow_run and github.sha for workflow_dispatch, both fully
+          # protected/reviewed. The previous `ref: workflow_run.head_sha` was
+          # an untrusted-code checkout (CI-green code is identical in practice,
+          # but the pattern is the #1 pwn-request vector).
           # Full history so the releasable-commit detection below can compute
           # the range since the last tag exactly like scripts/release-version.sh.
           fetch-depth: 0
@@ -149,7 +159,10 @@ jobs:
   version:
     name: Determine version & tag
     needs: check
-    if: ${{ needs.check.outputs.should_release == 'true' }}
+    # Same repository-ownership delimiter as the check job: this job carries
+    # `contents: write` and pushes a release branch, so it must only ever run
+    # for a triggering CI run that came from this repository's own develop.
+    if: ${{ (github.event.workflow_run.head_repository.full_name == github.repository || github.event_name == 'workflow_dispatch') && needs.check.outputs.should_release == 'true' }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.bump.outputs.version }}
@@ -161,10 +174,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Release the CI-verified commit, not the current default-branch
-          # head (for workflow_run events github.sha points at develop's tip,
-          # which may have moved past the tested commit).
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          # No ref — see the check job: checkout of workflow_run head_sha was
+          # an untrusted-code-checkout pattern (code-scanning #79/#80); the
+          # default-branch checkout is protected and CI-reviewed.
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 

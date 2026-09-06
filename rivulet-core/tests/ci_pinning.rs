@@ -225,6 +225,42 @@ fn m6_audio_routing_is_specified_in_readme_gate_and_spec() {
 }
 
 #[test]
+fn code_scanning_alerts_are_resolved_and_pinned() {
+    // Alerts #79/#80 (DangerousWorkflowID / untrusted code checkout): the
+    // release workflow must never check out a workflow_run event head — a
+    // fork PR source branch named "develop" would slip through the branch
+    // filter and run fork code with the release token. The branch must
+    // instead checkout the protected default branch and gate both release
+    // jobs on the triggering run's repository ownership.
+    let release = read(".github/workflows/release.yml");
+    assert!(
+        !release.contains("ref: ${{ github.event.workflow_run.head_sha || github.sha }}"),
+        "release.yml must not check out the workflow_run event head_sha (pwn-request vector)"
+    );
+    assert!(
+        release
+            .contains("github.event.workflow_run.head_repository.full_name == github.repository"),
+        "release.yml jobs must gate on the triggering run's repository ownership"
+    );
+    assert!(
+        release.contains("if: ${{ github.event.workflow_run.head_repository.full_name == github.repository || github.event_name == 'workflow_dispatch' }}"),
+        "the check job must carry the repository-ownership guard"
+    );
+    assert!(
+        release.contains("needs.check.outputs.should_release == 'true'"),
+        "the version job must keep its release-decision dependency"
+    );
+    // Alerts #70..#78 (rust/hard-coded-cryptographic-value): deterministic
+    // OBS auth-handshake fixtures confined to tests, dismissed `used in
+    // tests`. The docs must keep documenting that policy so the dismissal
+    // stays auditable.
+    let security_docs = read("docs/security.md");
+    assert!(security_docs.contains("Code scanning alert management"));
+    assert!(security_docs.contains("used in tests"));
+    assert!(security_docs.contains("OBS auth handshake"));
+}
+
+#[test]
 fn security_policy_is_linked_from_readme_and_docs() {
     let readme = read("README.md");
     let policy = read("SECURITY.md");
@@ -2473,9 +2509,9 @@ fn alpha_release_gates_on_ci_conclusion_and_auto_resumes() {
          document the rerun-green auto-resume path"
     );
     assert!(
-        workflow.contains("github.event.workflow_run.head_sha"),
-        "release.yml must checkout the CI-tested commit (workflow_run.head_sha), \
-         not the default-branch tip, so a release always builds the tested SHA"
+        !workflow.contains("ref: ${{ github.event.workflow_run.head_sha || github.sha }}"),
+        "release.yml must checkout the protected default branch, NOT the \
+         workflow_run event head_sha (untrusted code checkout / pwn-request vector)"
     );
     assert!(
         !workflow.contains("on:\n  push:\n    branches: [ develop ]"),
