@@ -155,6 +155,9 @@ werden.
 > accessibility-scanning backlog are tracked in [`docs/ui-audit.md`](docs/ui-audit.md).
 > The cross-cutting resource goal and measurement method are documented in
 > [`docs/resource-efficiency-goal.md`](docs/resource-efficiency-goal.md).
+> The M5 platform coverage — Windows/macOS/Linux feature parity and the
+> explicitly labelled platform limitations — is documented in
+> [`docs/platform-feature-matrix.md`](docs/platform-feature-matrix.md).
 
 ### Milestone overview
 
@@ -390,6 +393,7 @@ must not be implied by beta parity.
 
 - [ ] **Chat-driven auto-clips** — save replay-buffer highlight clips automatically when chat activity spikes (message-rate or emote bursts, configurable thresholds) or on a chat command (`!clip`); builds on the shipped chat dock (Twitch/Kick/YouTube) and M4 replay buffer; per-channel enable/disable, cooldown, and duration
 - [ ] **Multi-platform restream** — one pipeline to Twitch, YouTube, and Kick simultaneously with per-platform keys/bitrate and independent health (extends M3 multi-target fan-out and the M5 platform presets to the simultaneous "restream" workflow)
+- [ ] **Multi-track audio routing** — capture individual app audio streams (game, Spotify, Discord) as separate named sources with independent filters and volume; route each source independently to Record and/or Stream outputs via a checkbox matrix; persists across restarts with i18n (EN+DE); per-platform capture: WASAPI per-app (Windows), PipeWire/PulseAudio per-app (Linux), system loopback fallback (macOS); see [`docs/m6-audio-routing.md`](docs/m6-audio-routing.md)
 - [ ] **Mobile & HTTP remote companion** — drive scenes, record, and stream from the phone or a browser on the LAN, building on the shipped obs-websocket v5 server (M5) with optional auth
 
 **Goal:** The creator workflows that make a streamer choose Rivulet — clips appear when chat pops off, the stream reaches every platform at once, and the setup is controllable from the couch.

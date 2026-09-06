@@ -158,6 +158,73 @@ fn m3_completion_report_is_linked_and_records_follow_ups() {
 }
 
 #[test]
+fn m5_platform_parity_evidence_is_linked_and_pinned() {
+    // M5 gate (docs/milestone-quality-gates.md): platform parity requires a
+    // platform feature matrix as exit evidence, and the OBS compatibility mode
+    // must be explicitly marked as a compatibility/risk boundary. Pinning the
+    // markers here fails CI if either document loses its evidence or the
+    // README/gate links drift away.
+    let readme = read("README.md");
+    let gates = read("docs/milestone-quality-gates.md");
+    let matrix = read("docs/platform-feature-matrix.md");
+    let obs = read("docs/obs-websocket.md");
+    assert!(readme.contains("docs/platform-feature-matrix.md"));
+    assert!(gates.contains("platform-feature-matrix.md"));
+    for required in [
+        "Platform feature matrix (M5 exit evidence)",
+        "Windows",
+        "Linux",
+        "macOS",
+        "## Explicit platform limitations (summary)",
+        "docs/milestone-quality-gates.md",
+    ] {
+        assert!(matrix.contains(required), "matrix must contain {required}");
+    }
+    assert!(
+        obs.contains("## Compatibility / risk boundary (M5 gate)"),
+        "OBS doc must carry the compatibility/risk boundary marker"
+    );
+    for required in [
+        "**not** an OBS Studio",
+        "127.0.0.1",
+        "UnknownRequestType",
+        "Authentication is optional",
+    ] {
+        assert!(obs.contains(required), "OBS doc must contain {required}");
+    }
+}
+
+#[test]
+fn m6_audio_routing_is_specified_in_readme_gate_and_spec() {
+    // M6 audio routing: the README milestone block, the M6 quality gate and
+    // the feature spec must stay in sync — a silent edit to any of the three
+    // (or a lost spec) fails CI.
+    let readme = read("README.md");
+    let gates = read("docs/milestone-quality-gates.md");
+    let spec = read("docs/m6-audio-routing.md");
+    assert!(readme.contains("Multi-track audio routing"));
+    assert!(readme.contains("docs/m6-audio-routing.md"));
+    assert!(gates.contains("record/stream routing matrix"));
+    assert!(gates.contains("Mixer parity"));
+    for required in [
+        "## Problem",
+        "## Goal",
+        "## Engine changes",
+        "## GUI changes",
+        "AudioSource",
+        "record: bool",
+        "stream: bool",
+        "## i18n keys",
+        "## Quality gate (M6-specific)",
+    ] {
+        assert!(
+            spec.contains(required),
+            "M6 audio-routing spec must contain {required}"
+        );
+    }
+}
+
+#[test]
 fn security_policy_is_linked_from_readme_and_docs() {
     let readme = read("README.md");
     let policy = read("SECURITY.md");
@@ -2186,6 +2253,27 @@ fn updater_verifies_release_checksums_before_install() {
          a duplicate files: entry double-uploads the asset and can fail the release"
     );
 
+    // Same contract for the tag-based (beta/rc/stable) release path in ci.yml.
+    // ci.yml contains the needle twice (job NAME at the job header and the
+    // step name), so take the segment after the LAST occurrence — otherwise
+    // the slice spans the manifest step's legitimate `mv`/`cat` lines that
+    // must keep naming release-assets/SHA256SUMS.
+    let ci_workflow = read(".github/workflows/ci.yml");
+    let ci_files_block = ci_workflow
+        .rsplit("Create GitHub Release")
+        .next()
+        .unwrap_or_default();
+    assert!(
+        ci_files_block.contains("release-assets/*"),
+        "the tag-based release files list must keep the release-assets/* glob \
+         (covers SHA256SUMS)"
+    );
+    assert!(
+        !ci_files_block.contains("release-assets/SHA256SUMS"),
+        "the tag-based release path must also attach SHA256SUMS exactly once; \
+         the alpha.138 double-upload failure applies there identically"
+    );
+
     let gui = read("rivulet-gui/src/app.rs");
     assert!(
         gui.contains("verify_downloaded_asset"),
@@ -3360,5 +3448,69 @@ fn alert_overlay_import_is_wired_through_browser_source() {
     assert!(
         docs.contains("# Stream Alerts") && docs.contains("streamelements.com/overlay/"),
         "alert import must be documented"
+    );
+}
+
+#[test]
+fn build_package_artifacts_have_platform_unique_basenames() {
+    // Regression (v0.65.0-alpha.138): the Linux and macOS build jobs both
+    // staged (and uploaded) a bare binary named "rivulet-gui". The release
+    // job's actions/download-artifact runs with merge-multiple: true, which
+    // collapses same-named files from different artifacts into ONE file —
+    // so the release contained a single "rivulet-gui" asset and SHA256SUMS
+    // listed it once, silently dropping one platform's bare binary. Every
+    // bare-binary upload path must therefore be platform-qualified so no
+    // two artifacts contribute the same basename to the merged download.
+    let build_package = read(".github/workflows/build-package.yml");
+
+    // The upload list must not contain the colliding bare name.
+    let upload_block = build_package
+        .split("Upload artifacts")
+        .nth(1)
+        .unwrap_or_default();
+    assert!(
+        !upload_block.contains("staging/rivulet-gui\n"),
+        "the bare rivulet-gui upload must stay removed from build-package.yml; \
+         platform-qualified copies (rivulet-<target>-gui) take its place"
+    );
+    for qualified in [
+        "staging/rivulet-linux-x86_64-gui",
+        "staging/rivulet-macos-aarch64-gui",
+    ] {
+        assert!(
+            upload_block.contains(qualified),
+            "the upload list must include the platform-qualified bare binary {qualified}"
+        );
+    }
+
+    // Each platform's stage step must create its qualified copy from the
+    // shared rivulet-gui build (packaging steps keep reading the bare name).
+    let linux_stage = build_package
+        .split("Stage binary (Linux)")
+        .nth(1)
+        .unwrap_or_default();
+    let macos_stage = build_package
+        .split("Stage binary (macOS)")
+        .nth(1)
+        .unwrap_or_default();
+    assert!(
+        linux_stage.contains("cp staging/rivulet-gui staging/rivulet-linux-x86_64-gui"),
+        "the Linux stage step must create the platform-qualified upload copy"
+    );
+    assert!(
+        macos_stage.contains("cp staging/rivulet-gui staging/rivulet-macos-aarch64-gui"),
+        "the macOS stage step must create the platform-qualified upload copy"
+    );
+
+    // Windows bare names are already unique (exe suffixes), and the Windows
+    // stage renames the launcher to rivulet.exe — but pin the exe uploads
+    // too so a future rename cannot reintroduce a cross-platform collision.
+    assert!(
+        upload_block.contains("staging/rivulet-gui.exe"),
+        "the Windows bare GUI binary upload must stay in the list"
+    );
+    assert!(
+        upload_block.contains("staging/rivulet.exe"),
+        "the Windows launcher upload must stay in the list"
     );
 }

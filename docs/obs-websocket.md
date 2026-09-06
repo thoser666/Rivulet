@@ -10,6 +10,10 @@ against OBS Studio.
 - Crate: `rivulet-obs-websocket` (new workspace member)
 - Wire format reference: <https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md>
 
+> **Compatibility / risk boundary:** this is a protocol-compatible surface for
+> ecosystem tooling (Stream Deck, TouchPortal), **not** an OBS Studio
+> equivalent — see [Compatibility / risk boundary](#compatibility--risk-boundary-m5-gate).
+
 ## What is implemented
 
 | Area | Requests / events |
@@ -203,6 +207,36 @@ contains one result per request in order.
   parallel execution. Such request names return `UnknownRequestType`.
 - `GetInputList` reports source *names* with a fixed `inputKind`
   (`rivulet_source`); it does not currently report per-scene scene items.
+
+## Compatibility / risk boundary (M5 gate)
+
+Rivulet's OBS WebSocket server is a **compatibility surface, not an OBS parity
+mode** (M5 gate item "OBS compatibility mode is explicitly marked as a
+compatibility/risk boundary", `docs/milestone-quality-gates.md`). It exists so
+ecosystem tools keep working against Rivulet; it deliberately does not
+implement everything OBS Studio exposes:
+
+- **Wire-format conformance only.** Requests outside the implemented subset
+  (source-parameter editing, filters, transitions, replay buffer, screenshots,
+  parallel `RequestBatch`) are rejected honestly with `UnknownRequestType`
+  (204). A workflow that works in OBS Studio is not guaranteed to exist here.
+- **Local-only control.** The server binds to `127.0.0.1` only and is not
+  reachable from other machines; remote access requires an explicit
+  tunnel/SSH forward.
+- **Authentication is optional.** With an empty password, **any local process**
+  can switch scenes or start/stop recording/streaming. On shared machines set a
+  password; never expose the port without one.
+- **State is Rivulet state.** `SetCurrentProgramScene`/recording/streaming act
+  on Rivulet's own `SceneManager`/engine through `ObsBackend` and return honest
+  errors (e.g. `501 "no source selected"`) instead of pretending success.
+- **Protocol drift.** The server pins the upstream obs-websocket **v5** RPC
+  (`rpcVersion 1`) and the CI smoke test drives the real handshake over TCP;
+  a future upstream protocol change must be validated against the pinned
+  reference, not assumed compatible.
+
+This boundary marker, the matrix in `docs/platform-feature-matrix.md`, and their
+README links are pinned by `rivulet-core/tests/ci_pinning.rs` so the documents
+cannot drift out of the M5 gate evidence.
 
 ## Verification
 

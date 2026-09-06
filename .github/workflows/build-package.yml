@@ -154,6 +154,15 @@ jobs:
           mkdir -p staging
           cp target/${{ inputs.target }}/release/rivulet-gui staging/
           strip staging/rivulet-gui
+          # Platform-qualified copy for the bare-binary upload: Linux and macOS
+          # would both upload a file named "rivulet-gui", and the release job's
+          # actions/download-artifact (merge-multiple: true) collapses same-
+          # named files from different artifacts into ONE release asset,
+          # silently dropping one platform's binary (observed on alpha.138,
+          # where SHA256SUMS listed "rivulet-gui" exactly once). The packaging
+          # steps below keep reading staging/rivulet-gui; only the upload list
+          # references the qualified copy.
+          cp staging/rivulet-gui staging/rivulet-linux-x86_64-gui
 
       - name: Stage binary (macOS)
         if: runner.os == 'macOS'
@@ -162,6 +171,9 @@ jobs:
           mkdir -p staging
           cp target/${{ inputs.target }}/release/rivulet-gui staging/
           strip staging/rivulet-gui
+          # Platform-qualified upload copy (see the Linux stage step for the
+          # merge-multiple collision rationale).
+          cp staging/rivulet-gui staging/rivulet-macos-aarch64-gui
 
       - name: Stage binary (Windows)
         if: runner.os == 'Windows'
@@ -258,9 +270,10 @@ jobs:
         with:
           name: ${{ inputs.artifact_name }}
           path: |
-            staging/rivulet-gui
             staging/rivulet-gui.exe
             staging/rivulet.exe
+            staging/rivulet-linux-x86_64-gui
+            staging/rivulet-macos-aarch64-gui
             staging/rivulet-linux-x86_64.AppImage
             staging/rivulet-macos-aarch64.dmg
             staging/rivulet-windows-x86_64-portable.zip
