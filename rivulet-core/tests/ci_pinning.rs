@@ -3514,3 +3514,60 @@ fn build_package_artifacts_have_platform_unique_basenames() {
         "the Windows launcher upload must stay in the list"
     );
 }
+
+#[test]
+fn windows_ci_installs_one_consistent_gstreamer_version() {
+    // All Windows CI paths (test matrix, release packaging, nightly) must
+    // install the SAME GStreamer MSVC version from the same download
+    // strategy: the mirror release first, freedesktop.org as fallback.
+    // A drift here means e.g. the release binaries are built and tested
+    // against a different GStreamer than nightly, or one path silently
+    // stays on an EOL version while the rest moved on (1.24 is EOL, the
+    // current mirror default is 1.26.11; the 1.28 series ships a unified
+    // .exe installer instead of per-component MSIs and needs its own
+    // install step before it can be adopted).
+    let ci = read(".github/workflows/ci.yml");
+    let build_package = read(".github/workflows/build-package.yml");
+    let nightly = read(".github/workflows/nightly.yml");
+    let mirror = read("scripts/mirror-gstreamer-msi.sh");
+
+    let version = "1.26.11";
+    for (name, content) in [
+        ("ci.yml", ci.as_str()),
+        ("build-package.yml", build_package.as_str()),
+        ("nightly.yml", nightly.as_str()),
+    ] {
+        assert!(
+            content.contains(version),
+            "{name} must pin the Windows GStreamer runtime to {version}"
+        );
+        assert!(
+            !content.contains("1.24.13"),
+            "{name} must not reference the EOL 1.24.13 runtime anymore"
+        );
+    }
+    assert!(
+        mirror.contains("VERSION=\"${1:-1.26.11}\""),
+        "the mirror script default must match the CI-pinned version"
+    );
+    // Cache keys must carry the version so stale 1.24 MSIs cannot be
+    // restored after the bump.
+    assert!(
+        ci.contains("gstreamer-msvc-1.26.11"),
+        "the ci.yml Windows cache key must encode the GStreamer version"
+    );
+    assert!(
+        build_package.contains("gstreamer-msvc-1.26.11"),
+        "the build-package.yml Windows cache key must encode the GStreamer version"
+    );
+    // The mirror-first download strategy must stay intact (CI resilience
+    // against freedesktop.org 503s).
+    assert!(
+        build_package.contains("gstreamer-msi-$version"),
+        "build-package.yml must keep trying the mirrored release first"
+    );
+    assert!(
+        ci.contains("gstreamer-msi-$version"),
+        "ci.yml must keep trying the mirrored release first"
+    );
+}

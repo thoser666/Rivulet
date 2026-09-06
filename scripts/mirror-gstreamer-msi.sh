@@ -3,7 +3,7 @@
 #
 # Usage:
 #   scripts/mirror-gstreamer-msi.sh                  # mirror default version
-#   scripts/mirror-gstreamer-msi.sh 1.24.13          # mirror specific version
+#   scripts/mirror-gstreamer-msi.sh 1.26.11          # mirror specific version
 #
 # Requires: gh CLI authenticated, curl
 #
@@ -13,7 +13,10 @@
 
 set -euo pipefail
 
-VERSION="${1:-1.24.13}"
+#   1.26 series. The 1.28 series replaced the per-component MSIs with a
+#   unified cerbero .exe installer, which CI cannot install silently in the
+#   same way — moving to 1.28.x needs its own install step first.
+VERSION="${1:-1.26.11}"
 REPO="thoser666/Rivulet"
 TAG="gstreamer-msi-${VERSION}"
 BASE_URL="https://gstreamer.freedesktop.org/data/pkg/windows/${VERSION}/msvc"

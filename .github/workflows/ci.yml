@@ -515,7 +515,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: C:/gstreamer-cache
-          key: gstreamer-msvc-1.24.13
+          key: gstreamer-msvc-1.26.11
 
       # --- Install Windows dependencies ---
       - name: Install Windows dependencies (if applicable)
@@ -534,7 +534,7 @@ jobs:
           # Strategy: (a) local cache, (b) our mirrored GitHub release,
           # (c) freedesktop.org direct download. This avoids the frequent
           # 503 errors from freedesktop.org's Varnish CDN.
-          $version = "1.24.13"
+          $version = "1.26.11"
           $gstCacheDir = "C:/gstreamer-cache"
           if (-not (Test-Path $gstCacheDir)) { New-Item -ItemType Directory -Path $gstCacheDir -Force | Out-Null }
           $runtimeMsi = Join-Path $gstCacheDir "gstreamer-1.0-msvc-x86_64-$version.msi"

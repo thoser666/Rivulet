@@ -130,7 +130,7 @@ jobs:
           choco install msys2 --params "/NoUpdate /InstallDir:C:/msys64"
           C:/msys64/usr/bin/bash -lc "pacman -S --noconfirm mingw-w64-x86_64-pkg-config"
           echo "C:/msys64/mingw64/bin" >> $env:GITHUB_PATH
-          $version = "1.24.13"
+          $version = "1.26.11"
           $base = "https://gstreamer.freedesktop.org/data/pkg/windows/$version/msvc"
           $runtimeMsi = Join-Path $env:TEMP "gstreamer-runtime-$version.msi"
           $develMsi = Join-Path $env:TEMP "gstreamer-devel-$version.msi"
