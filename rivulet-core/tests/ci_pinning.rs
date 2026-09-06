@@ -195,6 +195,59 @@ fn m5_platform_parity_evidence_is_linked_and_pinned() {
 }
 
 #[test]
+fn m5_source_delete_hotkey_is_wired_and_pinned() {
+    // M5 roadmap "Source delete hotkey" (OBS 32.2 parity): the action must
+    // live in the hotkey registry, be rebindable in the Hotkeys settings, stay
+    // honest about scope (destructive, deliberately app-local) and be pinned
+    // across the README, the roadmap, the hotkey docs and the GUI wiring so a
+    // silent regression fails CI instead of drifting.
+    let readme = read("README.md");
+    let roadmap = read("docs/obs-vision-roadmap.md");
+    let hotkeys_docs = read("docs/hotkeys.md");
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        readme.contains("- [x] **Source delete hotkey**"),
+        "M5 README bullet must be checked"
+    );
+    assert!(
+        readme.contains("delete_source"),
+        "README must document the delete_source action name"
+    );
+    assert!(
+        roadmap.contains("Source delete hotkey"),
+        "roadmap must keep the Source delete hotkey row"
+    );
+    assert!(
+        roadmap.contains("**Done** — "),
+        "roadmap row must be marked done"
+    );
+    assert!(
+        hotkeys_docs.contains("| `delete_source`"),
+        "hotkeys doc must list the delete_source action"
+    );
+    assert!(
+        hotkeys_docs.contains("destructive") && hotkeys_docs.contains("in-app only"),
+        "hotkeys doc must document the app-local destructive scope"
+    );
+    assert!(
+        gui.contains("\"delete_source\" => self.delete_source = binding,"),
+        "GUI hotkey registry must expose delete_source for rebinding"
+    );
+    assert!(
+        gui.contains("self.delete_selected_composition_source()"),
+        "GUI must wire the delete dispatch"
+    );
+    assert!(
+        gui.contains("\"record\", \"pause\", \"mute\", \"save_replay\", \"delete_source\"]"),
+        "Hotkeys settings must list delete_source for rebinding"
+    );
+    assert!(
+        gui.contains("is deliberately NOT registered here"),
+        "delete_source must stay absent from the OS-global binding list"
+    );
+}
+
+#[test]
 fn m6_audio_routing_is_specified_in_readme_gate_and_spec() {
     // M6 audio routing: the README milestone block, the M6 quality gate and
     // the feature spec must stay in sync — a silent edit to any of the three
