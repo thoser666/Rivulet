@@ -2253,6 +2253,27 @@ fn updater_verifies_release_checksums_before_install() {
          a duplicate files: entry double-uploads the asset and can fail the release"
     );
 
+    // Same contract for the tag-based (beta/rc/stable) release path in ci.yml.
+    // ci.yml contains the needle twice (job NAME at the job header and the
+    // step name), so take the segment after the LAST occurrence — otherwise
+    // the slice spans the manifest step's legitimate `mv`/`cat` lines that
+    // must keep naming release-assets/SHA256SUMS.
+    let ci_workflow = read(".github/workflows/ci.yml");
+    let ci_files_block = ci_workflow
+        .rsplit("Create GitHub Release")
+        .next()
+        .unwrap_or_default();
+    assert!(
+        ci_files_block.contains("release-assets/*"),
+        "the tag-based release files list must keep the release-assets/* glob \
+         (covers SHA256SUMS)"
+    );
+    assert!(
+        !ci_files_block.contains("release-assets/SHA256SUMS"),
+        "the tag-based release path must also attach SHA256SUMS exactly once; \
+         the alpha.138 double-upload failure applies there identically"
+    );
+
     let gui = read("rivulet-gui/src/app.rs");
     assert!(
         gui.contains("verify_downloaded_asset"),
@@ -3427,5 +3448,69 @@ fn alert_overlay_import_is_wired_through_browser_source() {
     assert!(
         docs.contains("# Stream Alerts") && docs.contains("streamelements.com/overlay/"),
         "alert import must be documented"
+    );
+}
+
+#[test]
+fn build_package_artifacts_have_platform_unique_basenames() {
+    // Regression (v0.65.0-alpha.138): the Linux and macOS build jobs both
+    // staged (and uploaded) a bare binary named "rivulet-gui". The release
+    // job's actions/download-artifact runs with merge-multiple: true, which
+    // collapses same-named files from different artifacts into ONE file —
+    // so the release contained a single "rivulet-gui" asset and SHA256SUMS
+    // listed it once, silently dropping one platform's bare binary. Every
+    // bare-binary upload path must therefore be platform-qualified so no
+    // two artifacts contribute the same basename to the merged download.
+    let build_package = read(".github/workflows/build-package.yml");
+
+    // The upload list must not contain the colliding bare name.
+    let upload_block = build_package
+        .split("Upload artifacts")
+        .nth(1)
+        .unwrap_or_default();
+    assert!(
+        !upload_block.contains("staging/rivulet-gui\n"),
+        "the bare rivulet-gui upload must stay removed from build-package.yml; \
+         platform-qualified copies (rivulet-<target>-gui) take its place"
+    );
+    for qualified in [
+        "staging/rivulet-linux-x86_64-gui",
+        "staging/rivulet-macos-aarch64-gui",
+    ] {
+        assert!(
+            upload_block.contains(qualified),
+            "the upload list must include the platform-qualified bare binary {qualified}"
+        );
+    }
+
+    // Each platform's stage step must create its qualified copy from the
+    // shared rivulet-gui build (packaging steps keep reading the bare name).
+    let linux_stage = build_package
+        .split("Stage binary (Linux)")
+        .nth(1)
+        .unwrap_or_default();
+    let macos_stage = build_package
+        .split("Stage binary (macOS)")
+        .nth(1)
+        .unwrap_or_default();
+    assert!(
+        linux_stage.contains("cp staging/rivulet-gui staging/rivulet-linux-x86_64-gui"),
+        "the Linux stage step must create the platform-qualified upload copy"
+    );
+    assert!(
+        macos_stage.contains("cp staging/rivulet-gui staging/rivulet-macos-aarch64-gui"),
+        "the macOS stage step must create the platform-qualified upload copy"
+    );
+
+    // Windows bare names are already unique (exe suffixes), and the Windows
+    // stage renames the launcher to rivulet.exe — but pin the exe uploads
+    // too so a future rename cannot reintroduce a cross-platform collision.
+    assert!(
+        upload_block.contains("staging/rivulet-gui.exe"),
+        "the Windows bare GUI binary upload must stay in the list"
+    );
+    assert!(
+        upload_block.contains("staging/rivulet.exe"),
+        "the Windows launcher upload must stay in the list"
     );
 }

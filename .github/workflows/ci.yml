@@ -787,13 +787,17 @@ jobs:
           body_path: release-notes.md
           files: |
             release-assets/*
-            release-assets/SHA256SUMS
             docs/opengraph.png
             docs/social-preview.png
             docs/assets/rivulet-app-icon-512.png
             docs/assets/rivulet-rich-presence-1024.png
             docs/activity-status.md
           fail_on_unmatched_files: true
+          # SHA256SUMS is deliberately NOT listed here: the release-assets/*
+          # glob already covers it, and naming it again would upload the same
+          # asset twice concurrently (one upload wins, the duplicate update
+          # request 404s) — the exact failure that hit alpha.138 on the alpha
+          # channel and was fixed there (PR #106).
           # Mark beta/rc tags (and alpha tags) as pre-release,
           # stable tags (e.g. v1.0.0) as a full release.
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
