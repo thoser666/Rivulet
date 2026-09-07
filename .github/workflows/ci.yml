@@ -88,6 +88,11 @@ jobs:
       - name: Check release-notes completeness checker
         run: python3 scripts/check-release-notes.py --self-test
 
+      - name: Check user-guide freshness (AppView + feature coverage)
+        run: |
+          python3 scripts/check-user-guide-freshness.py --self-test
+          python3 scripts/check-user-guide-freshness.py
+
       - name: Check action pin table is up to date
         run: python3 scripts/generate-action-pins.py --check
 
