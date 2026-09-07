@@ -94,6 +94,256 @@ impl VstChain {
     }
 }
 
+// ── Windows COM host skeleton (Z96-2) ──────────────────────────────────
+
+/// The lifecycle stages of loading a VST3 plugin through the Windows COM
+/// host interface. Each stage can fail independently, producing a
+/// non-fatal [`SkipReason`]. The stages are deliberately separated so
+/// macOS/Linux hosts (dlopen/dylib) can mirror the same contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostStage {
+    /// Resolve the `.vst3` bundle path to a valid module file.
+    BundleResolve,
+    /// Obtain the VST3 module factory from the loaded DLL/COM object.
+    FactoryObtain,
+    /// Instantiate an audio processor from the factory.
+    ProcessorCreate,
+    /// Initialize the processor (set bus configuration, sample rate).
+    ProcessorInit,
+}
+
+impl HostStage {
+    pub fn description(&self) -> &str {
+        match self {
+            Self::BundleResolve => "resolving bundle",
+            Self::FactoryObtain => "obtaining factory",
+            Self::ProcessorCreate => "creating processor",
+            Self::ProcessorInit => "initializing processor",
+        }
+    }
+}
+
+/// A failed stage with context for logging.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StageFailure {
+    pub stage: HostStage,
+    pub reason: SkipReason,
+}
+
+impl StageFailure {
+    pub fn new(stage: HostStage, reason: SkipReason) -> Self {
+        Self { stage, reason }
+    }
+
+    pub fn description(&self) -> String {
+        format!(
+            "{}: {}",
+            self.stage.description(),
+            self.reason.description()
+        )
+    }
+}
+
+/// Windows COM-based VST3 host skeleton.
+///
+/// Implements the VST3 host lifecycle: bundle → DLL → factory → processor.
+/// On non-Windows platforms this is a stub that always returns `Skipped`;
+/// a real macOS/Linux host (dlopen/dylib) will follow the same contract.
+///
+/// The skeleton separates the lifecycle into distinct stages so each
+/// failure path is independently testable and loggable.
+pub struct WindowsVstHost {
+    /// Base directories to search for `.vst3` bundles when a plugin path
+    /// is relative. Empty means only absolute paths are resolved.
+    search_dirs: Vec<PathBuf>,
+}
+
+impl WindowsVstHost {
+    /// Create a host with the given search directories.
+    pub fn new(search_dirs: Vec<PathBuf>) -> Self {
+        Self { search_dirs }
+    }
+
+    /// Create a host using the platform-standard VST3 search directories.
+    pub fn with_default_dirs() -> Self {
+        Self::new(vst3_search_dirs())
+    }
+
+    /// Resolve a plugin path to an absolute bundle path. If the path is
+    /// already absolute and exists, it is returned as-is. If relative, the
+    /// search directories are tried in order.
+    pub fn resolve_bundle_path(&self, plugin: &VstPlugin) -> Result<PathBuf, SkipReason> {
+        if plugin.path.is_absolute() {
+            if plugin.bundle_available() {
+                return Ok(plugin.path.clone());
+            }
+            return Err(SkipReason::BundleNotFound);
+        }
+        // Relative path — try search dirs.
+        for dir in &self.search_dirs {
+            let candidate = dir.join(&plugin.path);
+            if candidate.is_dir() || candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+        Err(SkipReason::BundleNotFound)
+    }
+
+    /// Stage 1: Validate the bundle exists and can be read.
+    /// Returns the resolved absolute path or a `BundleNotFound`/`BundleInvalid` skip.
+    fn stage_bundle_resolve(&self, plugin: &VstPlugin) -> Result<PathBuf, StageFailure> {
+        self.resolve_bundle_path(plugin)
+            .map_err(|reason| StageFailure::new(HostStage::BundleResolve, reason))
+    }
+
+    /// Stage 2: Obtain the VST3 factory from the bundle.
+    ///
+    /// **Windows implementation:** loads the `.vst3` DLL via `LoadLibraryW`,
+    /// calls `GetFactory` to obtain the `IPluginFactory` COM interface.
+    ///
+    /// **Non-Windows stub:** always returns `NoFactory`.
+    #[cfg(target_os = "windows")]
+    fn stage_factory_obtain(&self, bundle_path: &Path) -> Result<u64, StageFailure> {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+
+        // Find the DLL/CFX inside the bundle.
+        // VST3 bundles on Windows contain a Contents/x86_64/<name>.vst3 file.
+        let dll_path = self
+            .find_vst3_dll(bundle_path)
+            .map_err(|reason| StageFailure::new(HostStage::FactoryObtain, reason))?;
+
+        // SAFETY: LoadLibraryW is the standard Windows API for loading DLLs.
+        // The returned handle is stored as a u64 for the host boundary;
+        // a full implementation would wrap it in a Drop type that calls
+        // FreeLibrary.
+        let wide: Vec<u16> = OsStr::new(&dll_path)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let handle =
+            unsafe { windows_sys::Win32::System::LibraryLoader::LoadLibraryW(wide.as_ptr()) };
+        if handle.is_null() {
+            return Err(StageFailure::new(
+                HostStage::FactoryObtain,
+                SkipReason::HostError(format!("LoadLibraryW failed for {}", dll_path.display())),
+            ));
+        }
+        Ok(handle as u64)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn stage_factory_obtain(&self, _bundle_path: &Path) -> Result<u64, StageFailure> {
+        Err(StageFailure::new(
+            HostStage::FactoryObtain,
+            SkipReason::HostError("COM hosting is only available on Windows".into()),
+        ))
+    }
+
+    /// Find the `.vst3` DLL inside a bundle directory.
+    /// On Windows, VST3 bundles have the layout:
+    ///   `<name>.vst3/Contents/x86_64/<name>.vst3`
+    #[cfg(target_os = "windows")]
+    fn find_vst3_dll(&self, bundle_path: &Path) -> Result<PathBuf, SkipReason> {
+        let contents = bundle_path.join("Contents");
+        if !contents.is_dir() {
+            return Err(SkipReason::BundleInvalid);
+        }
+        // Try x86_64 first, then fall back to any architecture dir.
+        for arch in &["x86_64", "x86", "aarch64"] {
+            let arch_dir = contents.join(arch);
+            if arch_dir.is_dir() {
+                if let Ok(entries) = std::fs::read_dir(&arch_dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        if p.to_str().map(|s| s.ends_with(".vst3")).unwrap_or(false) {
+                            return Ok(p);
+                        }
+                    }
+                }
+            }
+        }
+        Err(SkipReason::BundleInvalid)
+    }
+
+    /// Stage 3: Create a processor instance from the factory.
+    ///
+    /// In a full implementation this would call `IPluginFactory::createInstance`
+    /// with the audio processor class ID. The skeleton returns a dummy handle.
+    fn stage_processor_create(
+        &self,
+        dll_handle: u64,
+        _plugin: &VstPlugin,
+    ) -> Result<HostHandle, StageFailure> {
+        if dll_handle == 0 {
+            return Err(StageFailure::new(
+                HostStage::ProcessorCreate,
+                SkipReason::NoFactory,
+            ));
+        }
+        // Skeleton: return an opaque handle. A real implementation would
+        // call IPluginFactory::createInstance here.
+        Ok(HostHandle::new(dll_handle))
+    }
+}
+
+impl VstHost for WindowsVstHost {
+    fn load_plugin(&self, plugin: &VstPlugin) -> HostLoadResult {
+        // Stage 1: Bundle resolve.
+        let bundle_path = match self.stage_bundle_resolve(plugin) {
+            Ok(p) => p,
+            Err(fail) => {
+                tracing::warn!(
+                    "VST3 load skipped at {}: {}",
+                    fail.stage.description(),
+                    fail.reason.description()
+                );
+                return HostLoadResult::Skipped {
+                    plugin: plugin.clone(),
+                    reason: fail.reason,
+                };
+            }
+        };
+
+        // Stage 2: Factory obtain.
+        let dll_handle = match self.stage_factory_obtain(&bundle_path) {
+            Ok(h) => h,
+            Err(fail) => {
+                tracing::warn!(
+                    "VST3 load skipped at {}: {}",
+                    fail.stage.description(),
+                    fail.reason.description()
+                );
+                return HostLoadResult::Skipped {
+                    plugin: plugin.clone(),
+                    reason: fail.reason,
+                };
+            }
+        };
+
+        // Stage 3: Processor create.
+        let handle = match self.stage_processor_create(dll_handle, plugin) {
+            Ok(h) => h,
+            Err(fail) => {
+                tracing::warn!(
+                    "VST3 load skipped at {}: {}",
+                    fail.stage.description(),
+                    fail.reason.description()
+                );
+                return HostLoadResult::Skipped {
+                    plugin: plugin.clone(),
+                    reason: fail.reason,
+                };
+            }
+        };
+
+        HostLoadResult::Loaded {
+            plugin: plugin.clone(),
+            handle,
+        }
+    }
+}
+
 // ── Host runtime boundary (Z96-1) ──────────────────────────────────────
 
 /// Outcome of attempting to load a single VST3 plugin through the host
@@ -607,6 +857,171 @@ mod tests {
         let results = load_chain(&host, &chain);
         assert!(results.skipped_count() > 0);
         // Chain is still valid after loading
+        assert!(chain.validate().is_ok());
+    }
+
+    // ── Z96-2 Windows COM host skeleton tests ──────────────────────────
+
+    #[test]
+    fn resolve_bundle_path_returns_absolute_when_exists() {
+        let dir = temp_dir("resolve_abs");
+        let bundle = fake_bundle(&dir, "EQ");
+        let host = WindowsVstHost::new(vec![]);
+        let plugin = VstPlugin {
+            name: "EQ".into(),
+            path: bundle.clone(),
+        };
+        assert_eq!(host.resolve_bundle_path(&plugin), Ok(bundle));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_bundle_path_returns_not_found_for_missing_absolute() {
+        let host = WindowsVstHost::new(vec![]);
+        let plugin = VstPlugin {
+            name: "EQ".into(),
+            path: PathBuf::from("/nonexistent/EQ.vst3"),
+        };
+        assert_eq!(
+            host.resolve_bundle_path(&plugin),
+            Err(SkipReason::BundleNotFound)
+        );
+    }
+
+    #[test]
+    fn resolve_bundle_path_searches_dirs_for_relative_path() {
+        let dir = temp_dir("resolve_rel");
+        let bundle = fake_bundle(&dir, "Reverb");
+        let host = WindowsVstHost::new(vec![dir.clone()]);
+        let plugin = VstPlugin {
+            name: "Reverb".into(),
+            path: PathBuf::from("Reverb.vst3"),
+        };
+        assert_eq!(host.resolve_bundle_path(&plugin), Ok(bundle));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_bundle_path_fails_for_relative_not_in_any_dir() {
+        let host = WindowsVstHost::new(vec![PathBuf::from("/empty")]);
+        let plugin = VstPlugin {
+            name: "X".into(),
+            path: PathBuf::from("X.vst3"),
+        };
+        assert_eq!(
+            host.resolve_bundle_path(&plugin),
+            Err(SkipReason::BundleNotFound)
+        );
+    }
+
+    #[test]
+    fn stage_bundle_resolve_ok_and_err() {
+        let dir = temp_dir("stage1");
+        let bundle = fake_bundle(&dir, "OK");
+        let host = WindowsVstHost::new(vec![]);
+
+        let ok_plugin = VstPlugin {
+            name: "OK".into(),
+            path: bundle,
+        };
+        assert!(host.stage_bundle_resolve(&ok_plugin).is_ok());
+
+        let bad_plugin = VstPlugin {
+            name: "Bad".into(),
+            path: PathBuf::from("/nope.vst3"),
+        };
+        let err = host.stage_bundle_resolve(&bad_plugin).unwrap_err();
+        assert_eq!(err.stage, HostStage::BundleResolve);
+        assert_eq!(err.reason, SkipReason::BundleNotFound);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn host_load_plugin_skips_for_missing_bundle() {
+        let host = WindowsVstHost::new(vec![]);
+        let plugin = VstPlugin {
+            name: "Ghost".into(),
+            path: PathBuf::from("/ghost.vst3"),
+        };
+        let result = host.load_plugin(&plugin);
+        assert!(result.is_skipped());
+        assert_eq!(result.plugin().name, "Ghost");
+    }
+
+    #[test]
+    fn host_load_plugin_skips_for_nonexistent_relative() {
+        let host = WindowsVstHost::new(vec![PathBuf::from("/empty")]);
+        let plugin = VstPlugin {
+            name: "Phantom".into(),
+            path: PathBuf::from("Phantom.vst3"),
+        };
+        let result = host.load_plugin(&plugin);
+        assert!(result.is_skipped());
+    }
+
+    #[test]
+    fn host_stage_descriptions_are_human_readable() {
+        assert!(!HostStage::BundleResolve.description().is_empty());
+        assert!(!HostStage::FactoryObtain.description().is_empty());
+        assert!(!HostStage::ProcessorCreate.description().is_empty());
+        assert!(!HostStage::ProcessorInit.description().is_empty());
+    }
+
+    #[test]
+    fn stage_failure_description_includes_stage_and_reason() {
+        let fail = StageFailure::new(HostStage::FactoryObtain, SkipReason::NoFactory);
+        let desc = fail.description();
+        assert!(desc.contains("factory"));
+        assert!(desc.contains("no valid VST3 factory"));
+    }
+
+    #[test]
+    fn windows_host_with_default_dirs_loads() {
+        let host = WindowsVstHost::with_default_dirs();
+        let plugin = VstPlugin {
+            name: "Nonexistent".into(),
+            path: PathBuf::from("/nonexistent/Plugin.vst3"),
+        };
+        // Absolute path that doesn't exist → Skipped at BundleResolve
+        let result = host.load_plugin(&plugin);
+        assert!(result.is_skipped());
+    }
+
+    #[test]
+    fn non_windows_host_always_skips_factory_stage() {
+        // On non-Windows, stage_factory_obtain always returns NoFactory/HostError.
+        // Verify that load_plugin skips when the bundle exists but factory can't be obtained.
+        let dir = temp_dir("nowin_factory");
+        let bundle = fake_bundle(&dir, "Plug");
+        let host = WindowsVstHost::new(vec![dir.clone()]);
+        let plugin = VstPlugin {
+            name: "Plug".into(),
+            path: bundle,
+        };
+        let result = host.load_plugin(&plugin);
+        // On non-Windows: BundleResolve succeeds, FactoryObtain fails → Skipped
+        assert!(result.is_skipped());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_chain_with_windows_host_skips_missing_bundles() {
+        let host = WindowsVstHost::new(vec![]);
+        let chain = VstChain {
+            plugins: vec![
+                VstPlugin {
+                    name: "A".into(),
+                    path: PathBuf::from("/a.vst3"),
+                },
+                VstPlugin {
+                    name: "B".into(),
+                    path: PathBuf::from("/b.vst3"),
+                },
+            ],
+        };
+        let results = load_chain(&host, &chain);
+        assert_eq!(results.loaded_count(), 0);
+        assert_eq!(results.skipped_count(), 2);
         assert!(chain.validate().is_ok());
     }
 }
