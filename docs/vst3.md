@@ -37,8 +37,13 @@ Die Host-Runtime ist in zwei Subtasks aufgeteilt:
 - Non-Windows Stubs: Kein Laden möglich, alle Plugins werden übersprungen
 - `discover_vst3_plugins()`: Findet `.vst3`-Bundles in Suchverzeichnisse
 
-**Offen (Z96-3 + Z96-4):**
-- Z96-3: Missing/broken-bundle skip path + host-boundary tests (ohne Plugin-Binary)
+**Z96-3 — Host-Boundary Skip-Path Tests** (done):
+- 8 Tests für alle `SkipReason`-Varianten (BundleNotFound/BundleInvalid/NoFactory/NoProcessor/HostError)
+- Mock-Hosts testen Skip-Logik ohne echtes Plugin-Binary
+- Chain bleibt immer validierbar, auch wenn alle Plugins übersprungen werden
+- Deterministisch, erweiterbar für spätere echte Plugin-Binaries
+
+**Offen (Z96-4):**
 - Z96-4: Doku Hosting-Contract, Plattform-Matrix, Gating
 
 追踪在 [issue #96](https://github.com/thoser666/Rivulet/issues/96) (M5).
