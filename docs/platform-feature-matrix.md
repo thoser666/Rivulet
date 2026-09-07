@@ -27,7 +27,7 @@ Legend:
 | Per-source volume sliders + live monitoring | ✅ | ✅ | ✖️ | Mixer UI on Windows/Linux; **macOS: not implemented yet** (follow-up). |
 | Recording live preview + performance metrics | ✅ | ✅ | ✅ | Throttled preview thumbnail; live FPS, encoder load, file size via GStreamer pad probes. |
 | Streaming (RTMP/RTMPS, WHIP/SRT/RIST) + health stats | ✅ | ✅ | ✅ | M3 flow: FLV/RTMP(S) publish, stream health (`Connecting/Good/Warning/Poor`) with drop/sent counters. Multitrack protocol list per `docs/m3-streaming-completion-report.md`. |
-| Hotkeys (global, remappable) | ✅ | ✅ | ✅ | F9/F10/F11 defaults, global bindings, conflict-free remapping (`docs/hotkeys.md`). |
+| Hotkeys (global, remappable) + source delete | ✅ | ✅ | ✅ | F9/F10/F11/F12 defaults + `delete_source` on `Delete` (OBS 32.2 parity); global bindings + conflict-free remapping; delete stays in-app only (destructive guard) everywhere (`docs/hotkeys.md`). |
 | Auto-update + installers | ✅ | ✅ | ✅ | MSI (+ portable ZIP) / AppImage / DMG built by CI; updater downloads the matching platform package; Windows uses the detached `rivulet-updater` watchdog. `docs/release-platforms.md`. |
 | Internationalized UI | ✅ | ✅ | ✅ | Locale files (EN default, DE included), EN/DE parity check on every platform. |
 | Activity status + Discord Rich Presence | ✅ | ✅ | ✅ | Privacy-safe status model; opt-out, non-blocking Discord adapter; no stream keys/URLs/paths/window titles. `docs/activity-status.md`. |

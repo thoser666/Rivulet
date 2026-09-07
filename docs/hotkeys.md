@@ -6,13 +6,14 @@ working while the app is unfocused.
 
 ## Actions
 
-| Action            | Default | Meaning                         |
-| ----------------- | ------- | ------------------------------- |
-| `record`          | `F9`    | Start / stop recording          |
-| `pause`           | `F10`   | Pause / resume recording        |
-| `mute`            | `F11`   | Mute / unmute capture audio     |
-| `save_replay`     | `F12`   | Save the replay buffer as clip  |
-| Scene hotkeys     | —       | Switch to a scene (assigned per scene) |
+| Action            | Default  | Meaning                         |
+| ----------------- | -------- | ------------------------------- |
+| `record`          | `F9`     | Start / stop recording          |
+| `pause`           | `F10`    | Pause / resume recording        |
+| `mute`            | `F11`    | Mute / unmute capture audio     |
+| `save_replay`     | `F12`    | Save the replay buffer as clip  |
+| `delete_source`   | `Delete` | Delete the selected source/scene item (locked sources are kept) |
+| Scene hotkeys     | —        | Switch to a scene (assigned per scene) |
 
 ## Rebinding
 
@@ -32,6 +33,15 @@ from the next frame and survive a restart.
   used by the in-app path, so recording toggles, replay save and scene switching
   keep working while Rivulet is not the foreground window. Bindings are
   re-registered in place whenever the config changes.
+- **`delete_source` is in-app only, deliberately.** It is destructive and
+  repeat-sensitive: like OBS, the remove-item shortcut is app-local and is
+  never registered with the OS, so an unfocused Rivulet cannot delete sources
+  while you press Delete in another application. It also shares the text-input
+  guard (it never fires while a text field is focused), so `Delete` keeps doing
+  its ordinary editing job in rename fields and chat input. It is still fully
+  rebindable through Settings → Hotkeys and deletes the selected source in the
+  active scene (Studio Mode Preview when enabled); scene-locked sources are
+  kept.
 
 ## Platform matrix (honest)
 
@@ -40,6 +50,10 @@ from the next frame and survive a restart.
 | Windows  | ✅               | ✅ (`RegisterHotKey`)    |
 | Linux    | ✅               | ⏳ not yet (needs X11 grab / Wayland shortcuts portal) |
 | macOS    | ✅               | ⏳ not yet (needs Carbon `RegisterEventHotKey`)         |
+
+`delete_source` is a deliberate exception to OS-level registration on every
+platform (in-app only), because a global, unguarded `Delete` is a destructive
+footgun — see the note above. It is still rebindable everywhere.
 
 The GUI falls back cleanly: on platforms without OS registration the bindings
 still fire whenever the app is focused, and there is no visual or functional

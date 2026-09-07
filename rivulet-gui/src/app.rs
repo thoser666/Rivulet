@@ -393,6 +393,13 @@ impl Default for HotkeyBinding {
     }
 }
 
+/// Serde fallback for hotkey configs saved before `delete_source` existed:
+/// old files must migrate to the OBS-parity `Delete` default instead of the
+/// generic placeholder binding.
+fn default_delete_binding() -> HotkeyBinding {
+    HotkeyBinding::plain(egui::Key::Delete)
+}
+
 /// Keyboard shortcut sequence definition (serde-friendly; each enum is matched
 /// by name in tests).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -401,6 +408,8 @@ struct HotkeyConfig {
     pause: HotkeyBinding,
     mute: HotkeyBinding,
     save_replay: HotkeyBinding,
+    #[serde(default = "default_delete_binding")]
+    delete_source: HotkeyBinding,
     #[serde(default)]
     scene_hotkeys: std::collections::BTreeMap<uuid::Uuid, HotkeyBinding>,
 }
@@ -412,6 +421,7 @@ impl Default for HotkeyConfig {
             pause: HotkeyBinding::plain(egui::Key::F10),
             mute: HotkeyBinding::plain(egui::Key::F11),
             save_replay: HotkeyBinding::plain(egui::Key::F12),
+            delete_source: HotkeyBinding::plain(egui::Key::Delete),
             scene_hotkeys: std::collections::BTreeMap::new(),
         }
     }
@@ -436,6 +446,7 @@ fn key_name(key: egui::Key) -> &'static str {
         egui::Key::Enter => "Enter",
         egui::Key::Escape => "Esc",
         egui::Key::Tab => "Tab",
+        egui::Key::Delete => "Delete",
         egui::Key::ArrowUp => "↑",
         egui::Key::ArrowDown => "↓",
         egui::Key::ArrowLeft => "←",
@@ -498,6 +509,7 @@ fn vk_code(key: egui::Key) -> Option<u32> {
         Space => 0x20,
         Enter => 0x0D,
         Tab => 0x09,
+        Delete => 0x2E,
         ArrowUp => 0x26,
         ArrowDown => 0x28,
         ArrowLeft => 0x25,
@@ -516,6 +528,7 @@ impl HotkeyConfig {
             "pause" => Some(self.pause),
             "mute" => Some(self.mute),
             "save_replay" => Some(self.save_replay),
+            "delete_source" => Some(self.delete_source),
             _ => None,
         }
     }
@@ -526,6 +539,7 @@ impl HotkeyConfig {
             "pause" => self.pause = binding,
             "mute" => self.mute = binding,
             "save_replay" => self.save_replay = binding,
+            "delete_source" => self.delete_source = binding,
             _ => return false,
         }
         true
@@ -3857,6 +3871,12 @@ impl RivuletApp {
                                 self.selected_composition_source = Some(new_id);
                             }
                         }
+                        if theme::accent_button(ui, self.tr("composition_delete_source"))
+                            .on_hover_text(self.tr("composition_delete_hint"))
+                            .clicked()
+                        {
+                            self.delete_selected_composition_source();
+                        }
                     });
                 }
             });
@@ -5372,6 +5392,10 @@ impl RivuletApp {
     /// egui keys to Windows virtual-key codes where they exist. Bindings whose
     /// key has no VK equivalent (or is modifier-only) are skipped so the OS is
     /// never asked to register something invalid.
+    ///
+    /// `delete_source` is deliberately NOT registered here: it is a destructive,
+    /// repeat-sensitive action (OBS keeps it app-local too), and a global Delete
+    /// would fire while the user types Delete in any other application.
     fn current_global_bindings(&self) -> Vec<GlobalBinding> {
         let mut out = Vec::new();
         for (action, binding) in [
@@ -5887,7 +5911,51 @@ impl RivuletApp {
             "save_replay" if any_recording => {
                 self.save_replay_now();
             }
+            "delete_source" => {
+                self.delete_selected_composition_source();
+            }
             _ => {}
+        }
+    }
+
+    /// The scene whose composition the Scenes view edits: the Studio Mode
+    /// Preview when active, otherwise the active scene.
+    fn active_composition_scene(&self) -> Option<uuid::Uuid> {
+        if self.studio_mode.enabled() {
+            self.studio_mode.preview()
+        } else {
+            self.scenes.active()
+        }
+    }
+
+    /// Delete the selected composition source and all its scene bindings.
+    ///
+    /// Respects the scene-local lock (locked sources are never removed) and
+    /// clears the selection so draw code never references a removed source.
+    fn delete_selected_composition_source(&mut self) {
+        let Some(scene_id) = self.active_composition_scene() else {
+            return;
+        };
+        let Some(source_id) = self.selected_composition_source else {
+            return;
+        };
+        let locked = self
+            .source_manager
+            .scene_sources(scene_id)
+            .into_iter()
+            .any(|binding| binding.source_id == source_id && binding.locked);
+        if locked {
+            self.scene_status = Some(self.tr("composition_source_locked").to_owned());
+            return;
+        }
+        let name = self
+            .source_manager
+            .get_source(source_id)
+            .map(|source| source.name.clone())
+            .unwrap_or_default();
+        if self.source_manager.remove_source(source_id).is_some() {
+            self.selected_composition_source = None;
+            self.scene_status = Some(self.tr_fmt("composition_source_deleted", &[name]));
         }
     }
 
@@ -6980,6 +7048,13 @@ impl eframe::App for RivuletApp {
                     if binding.pressed_in(i) {
                         self.scenes.switch_to(*scene_id);
                     }
+                }
+                // Delete the selected composition source. Destructive and
+                // repeat-sensitive: it is in-app only (never OS-global) and
+                // shares the text-input guard so Delete keeps working for
+                // ordinary text editing (rename fields, chat input).
+                if self.hotkeys.delete_source.pressed_in(i) {
+                    self.delete_selected_composition_source();
                 }
             }
 
@@ -8569,7 +8644,7 @@ impl eframe::App for RivuletApp {
                         let modifier_shift = self.tr("modifier_shift");
                         ui.separator();
                         ui.label(egui::RichText::new(hotkeys_section).strong());
-                        for action in ["record", "pause", "mute", "save_replay"] {
+                        for action in ["record", "pause", "mute", "save_replay", "delete_source"] {
                             self.draw_hotkey_rebind_row(ui, action);
                         }
                         ui.small(hotkeys_hint);
@@ -11272,6 +11347,157 @@ mod tests {
         assert_eq!(record.key, KeyCode(0x78)); // F9
         assert_eq!(record.mods, ModMask(0)); // no modifiers by default
         assert_eq!(bindings.len(), 4); // record, pause, mute, save_replay
+    }
+
+    // ── source delete hotkey (OBS 32.2 parity) ───────────────────
+
+    #[test]
+    fn delete_source_hotkey_defaults_to_delete_and_is_rebindable() {
+        let mut hotkeys = HotkeyConfig::default();
+        assert_eq!(
+            hotkeys.delete_source,
+            HotkeyBinding::plain(egui::Key::Delete)
+        );
+        assert_eq!(
+            hotkeys.binding_for_action("delete_source"),
+            Some(HotkeyBinding::plain(egui::Key::Delete))
+        );
+        assert_eq!(hotkeys.label_for("delete_source"), "Delete");
+        let rebound = HotkeyBinding::plain(egui::Key::F8);
+        assert!(hotkeys.set_binding_for_action("delete_source", rebound));
+        assert_eq!(hotkeys.binding_for_action("delete_source"), Some(rebound));
+        assert_eq!(hotkeys.label_for("delete_source"), "F8");
+        assert_eq!(vk_code(egui::Key::Delete), Some(0x2E));
+    }
+
+    #[test]
+    fn delete_source_hotkey_roundtrip_and_migrates_legacy_configs() {
+        let hotkeys = HotkeyConfig::default();
+        let json = serde_json::to_string(&hotkeys).expect("serialize hotkeys");
+        let restored: HotkeyConfig = serde_json::from_str(&json).expect("deserialize hotkeys");
+        assert_eq!(restored.delete_source, hotkeys.delete_source);
+        assert_eq!(
+            restored.delete_source,
+            HotkeyBinding::plain(egui::Key::Delete)
+        );
+        // Configs saved before the field existed must migrate to Delete, not
+        // to the generic placeholder binding.
+        let mut legacy = serde_json::to_value(hotkeys).expect("serialize hotkeys");
+        legacy
+            .as_object_mut()
+            .expect("hotkey config object")
+            .remove("delete_source");
+        let migrated: HotkeyConfig =
+            serde_json::from_value(legacy).expect("deserialize legacy hotkeys");
+        assert_eq!(
+            migrated.delete_source,
+            HotkeyBinding::plain(egui::Key::Delete)
+        );
+    }
+
+    #[test]
+    fn delete_source_is_deliberately_not_a_global_binding() {
+        // Destructive and repeat-sensitive: never registered at the OS level,
+        // so an unfocused Rivulet cannot delete sources while the user types
+        // Delete in some other application.
+        let app = RivuletApp::default();
+        let bindings = app.current_global_bindings();
+        assert!(
+            !bindings.iter().any(|b| b.action == "delete_source"),
+            "delete_source must not be OS-global"
+        );
+        assert_eq!(
+            bindings.len(),
+            4,
+            "destructive actions are app-local; only record/pause/mute/save_replay are global"
+        );
+    }
+
+    #[test]
+    fn delete_source_dispatch_removes_the_selected_composition_source() {
+        let mut app = RivuletApp::default();
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+        let source_id = app.source_manager.add_source(rivulet_core::Source::new(
+            "Cam".to_owned(),
+            rivulet_core::SourceKind::Webcam,
+        ));
+        app.source_manager.bind_source(source_id, scene_id, None);
+        app.selected_composition_source = Some(source_id);
+
+        app.dispatch_hotkey_action("delete_source");
+
+        assert!(app.source_manager.get_source(source_id).is_none());
+        assert!(app.source_manager.sources().is_empty());
+        assert_eq!(app.selected_composition_source, None);
+        assert_eq!(app.scene_status.as_deref(), Some("Source \"Cam\" deleted."));
+    }
+
+    #[test]
+    fn delete_source_dispatch_respects_the_scene_lock() {
+        let mut app = RivuletApp::default();
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+        let source_id = app.source_manager.add_source(rivulet_core::Source::new(
+            "Banner".to_owned(),
+            rivulet_core::SourceKind::Image,
+        ));
+        app.source_manager.bind_source(source_id, scene_id, None);
+        app.source_manager.set_locked(source_id, scene_id, true);
+        app.selected_composition_source = Some(source_id);
+
+        app.dispatch_hotkey_action("delete_source");
+
+        assert!(
+            app.source_manager.get_source(source_id).is_some(),
+            "locked sources must survive the delete hotkey"
+        );
+        assert_eq!(app.selected_composition_source, Some(source_id));
+        assert_eq!(app.scene_status.as_deref(), Some("Source is locked."));
+    }
+
+    #[test]
+    fn delete_source_dispatch_ignored_without_a_scene_or_selection() {
+        let mut app = RivuletApp::default();
+        app.dispatch_hotkey_action("delete_source");
+        assert!(app.source_manager.sources().is_empty());
+        assert_eq!(app.scene_status, None);
+
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+        let source_id = app.source_manager.add_source(rivulet_core::Source::new(
+            "Cam".to_owned(),
+            rivulet_core::SourceKind::Webcam,
+        ));
+        app.source_manager.bind_source(source_id, scene_id, None);
+        app.selected_composition_source = None;
+        app.dispatch_hotkey_action("delete_source");
+        assert!(
+            app.source_manager.get_source(source_id).is_some(),
+            "no selection means nothing to delete"
+        );
+    }
+
+    #[test]
+    fn delete_source_hotkey_is_wired_and_guarded_against_text_input() {
+        // The action must be rebindable through the Settings hotkey list, live
+        // in the shared dispatch, and fire only outside the text-input guard so
+        // Delete keeps working for ordinary text editing.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        assert!(
+            source.contains("\"record\", \"pause\", \"mute\", \"save_replay\", \"delete_source\"]")
+        );
+        let in_app_delete = source
+            .find("self.hotkeys.delete_source.pressed_in(i)")
+            .unwrap_or(0);
+        let text_guard = source
+            .find("if !wants_keyboard_input {")
+            .unwrap_or(usize::MAX);
+        assert!(
+            text_guard < in_app_delete,
+            "in-app delete dispatch must live inside the text-input guard"
+        );
+        assert!(source.contains("self.delete_selected_composition_source()"));
     }
 
     // ── Source (monitor) dropdown label ───────────────────────────
