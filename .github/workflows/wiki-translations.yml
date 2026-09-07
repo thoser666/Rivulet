@@ -32,6 +32,13 @@ jobs:
         run: python3 scripts/check-wiki-translations.py .freebuff-rivulet-wiki
       - name: Check wiki links and translation drift
         run: python3 scripts/sync-wiki-translations.py --check .freebuff-rivulet-wiki
+      - name: Fetch develop for origin-referenced audits
+        # PR checkouts are shallow refs/pull/N/merge without an origin/develop
+        # ref, so `git show origin/develop:<file>` in --develop-from-origin
+        # mode would fail for every repo-doc link. Fetch the branch ref
+        # explicitly (scheduled runs on develop already have it).
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --depth=1 origin develop
       - name: Audit wiki links (interwiki, repo-docs, external URLs, repo-doc wiki refs)
         run: python3 scripts/audit-wiki-links.py .freebuff-rivulet-wiki --develop-from-origin --check-repo-docs
       - name: Staleness report (repo docs mirrored in the wiki)
