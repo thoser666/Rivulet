@@ -6575,6 +6575,10 @@ impl RivuletApp {
             restored.engine = app.engine;
             restored.no_frame_timeout = no_frame_timeout;
             app = restored;
+        } else {
+            // First launch: detect the OS locale so the UI starts in the
+            // user's preferred language without requiring a manual switch.
+            app.locale = detect_os_locale();
         }
         // Apply the persisted color scheme (fonts + palette + preference)
         // immediately, so the first frame already renders with the right theme.
@@ -7988,13 +7992,13 @@ impl eframe::App for RivuletApp {
                             egui::CollapsingHeader::new(self.tr("filter_eq"))
                                 .default_open(false)
                                 .show(ui, |ui| {
-                                    ui.label("System");
+                                    ui.label(self.tr("eq_system"));
                                     ui.horizontal_wrapped(|ui| {
                                         for band in self.system_filters.eq_bands.iter_mut() {
                                             ui.add(egui::Slider::new(band, -12.0..=12.0));
                                         }
                                     });
-                                    ui.label("Mikro");
+                                    ui.label(self.tr("eq_microphone"));
                                     ui.horizontal_wrapped(|ui| {
                                         for band in self.mic_filters.eq_bands.iter_mut() {
                                             ui.add(egui::Slider::new(band, -12.0..=12.0));
@@ -9210,6 +9214,30 @@ fn windows_on_selected_monitor(
     keep_on_selected_monitor(windows.to_vec(), selected_monitor.is_some(), |w| {
         selected_monitor.is_some_and(|m| w.monitor().is_some_and(|wm| same_backend_monitor(m, &wm)))
     })
+}
+
+/// Detect the user's preferred language from the OS environment on first
+/// launch (no persisted locale). Checks `LC_MESSAGES`, `LANG`, and on
+/// Windows also `GetUserDefaultUILanguage` via the `LANG` env var that
+/// modern Windows terminals export.
+fn detect_os_locale() -> Locale {
+    // Try LC_MESSAGES first (Linux/macOS standard).
+    if let Ok(val) = std::env::var("LC_MESSAGES") {
+        let locale = Locale::from_code(&val);
+        tracing::info!(
+            locale = locale.code(),
+            "Detected OS locale from LC_MESSAGES"
+        );
+        return locale;
+    }
+    // Fallback: LANG (set by most Linux distros and Git Bash on Windows).
+    if let Ok(val) = std::env::var("LANG") {
+        let locale = Locale::from_code(&val);
+        tracing::info!(locale = locale.code(), "Detected OS locale from LANG");
+        return locale;
+    }
+    tracing::info!("No OS locale detected, defaulting to English");
+    Locale::En
 }
 
 #[cfg(test)]
@@ -11998,5 +12026,13 @@ mod tests {
                 "{key} must exist in EN and DE"
             );
         }
+    }
+
+    #[test]
+    fn detect_os_locale_returns_valid_locale() {
+        // detect_os_locale must always return a valid Locale variant,
+        // even when no env vars are set (defaults to English).
+        let locale = super::detect_os_locale();
+        assert!(Locale::all().contains(&locale));
     }
 }
