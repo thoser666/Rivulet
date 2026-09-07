@@ -1024,4 +1024,223 @@ mod tests {
         assert_eq!(results.skipped_count(), 2);
         assert!(chain.validate().is_ok());
     }
+
+    // ── Z96-3 host-boundary skip-path tests ─────────────────────────
+
+    /// Mock host that returns BundleInvalid for every plugin.
+    struct MockInvalidBundleHost;
+    impl VstHost for MockInvalidBundleHost {
+        fn load_plugin(&self, plugin: &VstPlugin) -> HostLoadResult {
+            HostLoadResult::Skipped {
+                plugin: plugin.clone(),
+                reason: SkipReason::BundleInvalid,
+            }
+        }
+    }
+
+    /// Mock host that returns NoFactory for every plugin.
+    struct MockNoFactoryHost;
+    impl VstHost for MockNoFactoryHost {
+        fn load_plugin(&self, plugin: &VstPlugin) -> HostLoadResult {
+            HostLoadResult::Skipped {
+                plugin: plugin.clone(),
+                reason: SkipReason::NoFactory,
+            }
+        }
+    }
+
+    /// Mock host that returns NoProcessor for every plugin.
+    struct MockNoProcessorHost;
+    impl VstHost for MockNoProcessorHost {
+        fn load_plugin(&self, plugin: &VstPlugin) -> HostLoadResult {
+            HostLoadResult::Skipped {
+                plugin: plugin.clone(),
+                reason: SkipReason::NoProcessor,
+            }
+        }
+    }
+
+    /// Mock host that returns HostError for every plugin.
+    struct MockHostErrorHost;
+    impl VstHost for MockHostErrorHost {
+        fn load_plugin(&self, plugin: &VstPlugin) -> HostLoadResult {
+            HostLoadResult::Skipped {
+                plugin: plugin.clone(),
+                reason: SkipReason::HostError("test error".into()),
+            }
+        }
+    }
+
+    #[test]
+    fn skip_bundle_invalid_does_not_load_plugin() {
+        let host = MockInvalidBundleHost;
+        let chain = VstChain {
+            plugins: vec![test_plugin("EQ"), test_plugin("Comp")],
+        };
+        let results = load_chain(&host, &chain);
+        assert_eq!(results.loaded_count(), 0);
+        assert_eq!(results.skipped_count(), 2);
+        assert!(results
+            .skipped_plugins()
+            .iter()
+            .all(|p| p.name == "EQ" || p.name == "Comp"));
+        // Chain remains validatable despite all skips
+        assert!(chain.validate().is_ok());
+    }
+
+    #[test]
+    fn skip_no_factory_does_not_load_plugin() {
+        let host = MockNoFactoryHost;
+        let chain = VstChain {
+            plugins: vec![test_plugin("Reverb")],
+        };
+        let results = load_chain(&host, &chain);
+        assert_eq!(results.loaded_count(), 0);
+        assert_eq!(results.skipped_count(), 1);
+        assert_eq!(results.results[0].plugin().name, "Reverb");
+        assert!(chain.validate().is_ok());
+    }
+
+    #[test]
+    fn skip_no_processor_does_not_load_plugin() {
+        let host = MockNoProcessorHost;
+        let chain = VstChain {
+            plugins: vec![test_plugin("Delay"), test_plugin("Chorus")],
+        };
+        let results = load_chain(&host, &chain);
+        assert_eq!(results.loaded_count(), 0);
+        assert_eq!(results.skipped_count(), 2);
+        assert!(chain.validate().is_ok());
+    }
+
+    #[test]
+    fn skip_host_error_does_not_load_plugin() {
+        let host = MockHostErrorHost;
+        let chain = VstChain {
+            plugins: vec![test_plugin("Distortion")],
+        };
+        let results = load_chain(&host, &chain);
+        assert_eq!(results.loaded_count(), 0);
+        assert_eq!(results.skipped_count(), 1);
+        assert!(chain.validate().is_ok());
+    }
+
+    #[test]
+    fn all_skip_reasons_chain_always_produces_results() {
+        // Even when every plugin is skipped with different reasons,
+        // load_chain always produces a result per plugin.
+        struct MultiReasonHost;
+        impl VstHost for MultiReasonHost {
+            fn load_plugin(&self, plugin: &VstPlugin) -> HostLoadResult {
+                // Use name length to pick a deterministic reason
+                let reason = match plugin.name.len() % 5 {
+                    0 => SkipReason::BundleNotFound,
+                    1 => SkipReason::BundleInvalid,
+                    2 => SkipReason::NoFactory,
+                    3 => SkipReason::NoProcessor,
+                    _ => SkipReason::HostError("crash".into()),
+                };
+                HostLoadResult::Skipped {
+                    plugin: plugin.clone(),
+                    reason,
+                }
+            }
+        }
+        let chain = VstChain {
+            plugins: vec![
+                test_plugin("A"),
+                test_plugin("BB"),
+                test_plugin("CCC"),
+                test_plugin("DDDD"),
+                test_plugin("EEEEE"),
+            ],
+        };
+        let results = load_chain(&MultiReasonHost, &chain);
+        // One result per plugin, all skipped
+        assert_eq!(results.results.len(), 5);
+        assert_eq!(results.loaded_count(), 0);
+        assert_eq!(results.skipped_count(), 5);
+        // Chain is still validatable
+        assert!(chain.validate().is_ok());
+        // All plugins accounted for
+        assert_eq!(results.skipped_plugins().len(), 5);
+    }
+
+    #[test]
+    fn partial_skip_preserves_loaded_and_skipped_separation() {
+        // Mixed chain: some load, some skip with different reasons.
+        // Loaded plugins are NOT in the skipped list.
+        struct PartialHost;
+        impl VstHost for PartialHost {
+            fn load_plugin(&self, plugin: &VstPlugin) -> HostLoadResult {
+                if plugin.name == "Good" {
+                    HostLoadResult::Loaded {
+                        plugin: plugin.clone(),
+                        handle: HostHandle::new(1),
+                    }
+                } else if plugin.name == "BadBundle" {
+                    HostLoadResult::Skipped {
+                        plugin: plugin.clone(),
+                        reason: SkipReason::BundleInvalid,
+                    }
+                } else {
+                    HostLoadResult::Skipped {
+                        plugin: plugin.clone(),
+                        reason: SkipReason::NoFactory,
+                    }
+                }
+            }
+        }
+        let chain = VstChain {
+            plugins: vec![
+                test_plugin("BadBundle"),
+                test_plugin("Good"),
+                test_plugin("NoFac"),
+            ],
+        };
+        let results = load_chain(&PartialHost, &chain);
+        assert_eq!(results.loaded_count(), 1);
+        assert_eq!(results.skipped_count(), 2);
+        // Loaded plugin is NOT in skipped list
+        let skipped_names: Vec<_> = results
+            .skipped_plugins()
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert!(!skipped_names.contains(&"Good"));
+        assert!(skipped_names.contains(&"BadBundle"));
+        assert!(skipped_names.contains(&"NoFac"));
+        // Order preserved
+        assert_eq!(results.results[1].plugin().name, "Good");
+        assert!(results.results[1].is_loaded());
+        // Chain still validatable
+        assert!(chain.validate().is_ok());
+    }
+
+    #[test]
+    fn skip_path_is_non_fatal_for_single_plugin_chain() {
+        // A chain with a single plugin that gets skipped is still valid.
+        let host = MockSkipHost;
+        let chain = VstChain {
+            plugins: vec![test_plugin("LonePlugin")],
+        };
+        let results = load_chain(&host, &chain);
+        assert_eq!(results.loaded_count(), 0);
+        assert_eq!(results.skipped_count(), 1);
+        assert!(!results.all_loaded());
+        // Chain validation is independent of load results
+        assert!(chain.validate().is_ok());
+    }
+
+    #[test]
+    fn empty_chain_loads_zero_and_is_all_loaded() {
+        let host = MockSkipHost;
+        let chain = VstChain::default();
+        let results = load_chain(&host, &chain);
+        assert_eq!(results.loaded_count(), 0);
+        assert_eq!(results.skipped_count(), 0);
+        assert!(results.all_loaded());
+        assert!(results.results.is_empty());
+        assert!(chain.validate().is_ok());
+    }
 }
