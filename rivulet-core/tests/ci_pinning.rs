@@ -3066,6 +3066,51 @@ fn chat_dock_supports_kick_and_youtube() {
 }
 
 #[test]
+fn restream_multitarget_fanout_is_wired_and_documented() {
+    // M6 multi-platform restream: the engine already has MultistreamSettings
+    // with per-target fan-out, but the GUI must expose add/remove controls,
+    // wire MultistreamSettings before streaming starts, and the feature must
+    // be localized and documented.
+    let core = read("rivulet-core/src/stream.rs");
+    assert!(
+        core.contains("pub struct MultistreamSettings")
+            && core.contains("pub struct StreamTarget")
+            && core.contains("pub fn add_target")
+            && core.contains("MAX_TARGETS"),
+        "stream.rs must expose MultistreamSettings with add_target and MAX_TARGETS"
+    );
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(
+        app.contains("restream_targets") && app.contains("RestreamTargetConfig"),
+        "the GUI must have restream target fields and config type"
+    );
+    assert!(
+        app.contains("apply_restream_targets") && app.contains("set_multistream_settings"),
+        "the GUI must wire MultistreamSettings into the engine before streaming"
+    );
+    assert!(
+        app.contains("draw_restream_section"),
+        "the GUI must draw a restream section in the stream view"
+    );
+    assert!(
+        app.contains("restream_add_target") && app.contains("restream_remove_target"),
+        "the GUI must offer add/remove target controls with i18n keys"
+    );
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.contains("(\"restream_section\", ")
+            && i18n.contains("(\"restream_add_target\", ")
+            && i18n.contains("(\"restream_target_key\", "),
+        "restream i18n keys must exist in both locales"
+    );
+    let readme = read("README.md");
+    assert!(
+        readme.contains("Multi-platform restream") && readme.contains("restream"),
+        "README must reference the multi-platform restream feature"
+    );
+}
+
+#[test]
 fn chat_outbound_is_rate_limited_per_platform() {
     // The bot must never burst against a platform limit: every outbound chat
     // send passes through a shared token-bucket limiter in core. Twitch's

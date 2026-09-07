@@ -505,7 +505,7 @@ pub fn parse_whip_response(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum StreamPlatform {
     Twitch,
     Kick,
