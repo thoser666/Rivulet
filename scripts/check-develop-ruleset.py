@@ -146,6 +146,14 @@ def run_live() -> int:
     try:
         payloads = _ruleset_payloads(token)
     except urllib.error.HTTPError as exc:
+        if exc.code == 403 and not token:
+            # On pull_request events the GITHUB_TOKEN lacks administration:read
+            # so the rulesets API returns 403 for unauthenticated callers.
+            # The same check runs on push to develop (where the token is
+            # available), so this is safe to skip.
+            print("SKIP: rulesets API returned HTTP 403 (unauthenticated on PR)")
+            print("The check runs on push to develop where the token is available.")
+            return 0
         print(f"FATAL: rulesets API returned HTTP {exc.code} for {REPO}")
         return 2
     except urllib.error.URLError as exc:
