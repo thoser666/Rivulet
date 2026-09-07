@@ -372,7 +372,7 @@ must not be implied by beta parity.
 - [x] Code signing (signing automation present, secrets needed)
 - [ ] Telemetry (opt-in, privacy-friendly)
 - [x] **Discord Rich Presence adapter** — non-blocking activity updates using the Rivulet status model; explicit opt-out (persisted Settings toggle), no stream keys/URLs/paths/window titles, and graceful operation when Discord is unavailable (see [`docs/activity-status.md`](docs/activity-status.md)).
-- [ ] Multi-language support (locale files fully wired)
+- [x] **Multi-language support** — all UI strings driven by locale tables (EN/DE, 461 keys each), Settings → Language picker with OS auto-detection on first launch, parity test prevents key drift (see [`docs/i18n.md`](docs/i18n.md))
 - [x] **MIDI device support** — map controllers like the Korg NanoKontrol to scene switches, master-volume faders (CC 0-127), mute, and chroma-key toggles, with **learn mode** (capture the next moved control) and **per-device presets** (see [`docs/midi.md`](docs/midi.md)); the mapping/parse core is hardware-free and unit-tested, the GUI owns the `midir` device bridge
 - [x] **Global hotkeys & remapping UI** — OBS-style hotkey settings: per-action rebinding (Settings → Hotkeys), OS-level registration that keeps working while the app is unfocused on Windows, with an honest platform matrix (see [`docs/hotkeys.md`](docs/hotkeys.md)) *[#80](https://github.com/thoser666/Rivulet/issues/80)*
 - [ ] **Multi-channel distribution rollout** — tracked in [`docs/release-platforms.md`](docs/release-platforms.md):
@@ -550,7 +550,7 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Cloud & telemetry | Partial (M4 S3 SigV4 PUT upload after stop; multipart + GUI settings open) |
 | Discord Rich Presence | Implemented (optional, privacy-safe activity status; M5, see docs/activity-status.md) |
 | Chat dock & alerts | Partial (M5: Twitch IRC + Kick WebSocket + YouTube polling chat in the Stream workspace, see docs/twitch-chat.md; follow/sub/donation alerts open, see docs/obs-vision-roadmap.md) |
-| Multi-language support | Partial (DE/EN wired) |
+| Multi-language support | Implemented (EN/DE, 461 keys, parity-tested; see docs/i18n.md) |
 | Platform parity (Windows/macOS) | Open |
 | AI chat assistant | Open (M10) |
 

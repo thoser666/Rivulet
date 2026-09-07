@@ -383,6 +383,8 @@ impl Locale {
                 ("filter_expander", "Exp (System)"),
                 ("filter_gain", "Gain (dB)"),
                 ("filter_eq", "10-band EQ"),
+                ("eq_system", "System"),
+                ("eq_microphone", "Mic"),
                 ("audio_monitoring", "Monitoring"),
                 ("monitoring_system", "Monitor system audio"),
                 ("monitoring_microphone", "Monitor microphone"),
@@ -921,6 +923,8 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("filter_expander", "Exp (System)"),
                 ("filter_gain", "Verstärkung (dB)"),
                 ("filter_eq", "10-Band-EQ"),
+                ("eq_system", "System"),
+                ("eq_microphone", "Mikro"),
                 ("audio_monitoring", "Monitoring"),
                 ("monitoring_system", "Systemaudio abhören"),
                 ("monitoring_microphone", "Mikrofon abhören"),
@@ -1684,5 +1688,38 @@ mod tests {
         assert_eq!(Locale::De.tr("filter_gain"), "Verstärkung (dB)");
         assert_eq!(Locale::De.tr("filter_eq"), "10-Band-EQ");
         assert_eq!(Locale::En.tr("filter_gain"), "Gain (dB)");
+    }
+
+    #[test]
+    fn all_keys_present_in_all_locales() {
+        // Every key in EN must also exist in DE and vice-versa.
+        // Missing keys would cause the UI to show the raw key instead of a
+        // translated string, so this is a parity gate.
+        let en_keys: Vec<&str> = Locale::En.strings().iter().map(|(k, _)| *k).collect();
+        let de_keys: Vec<&str> = Locale::De.strings().iter().map(|(k, _)| *k).collect();
+
+        for key in &en_keys {
+            assert!(
+                de_keys.contains(key),
+                "Key '{}' is in EN but missing in DE",
+                key
+            );
+        }
+        for key in &de_keys {
+            assert!(
+                en_keys.contains(key),
+                "Key '{}' is in DE but missing in EN",
+                key
+            );
+        }
+        assert_eq!(en_keys.len(), de_keys.len());
+    }
+
+    #[test]
+    fn eq_labels_translate_in_both_locales() {
+        assert_eq!(Locale::En.tr("eq_system"), "System");
+        assert_eq!(Locale::En.tr("eq_microphone"), "Mic");
+        assert_eq!(Locale::De.tr("eq_system"), "System");
+        assert_eq!(Locale::De.tr("eq_microphone"), "Mikro");
     }
 }
