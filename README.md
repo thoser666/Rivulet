@@ -391,8 +391,8 @@ must not be implied by beta parity.
 
 *Differentiation: streamer-facing creator features that OBS leaves to third-party SaaS — chat-triggered clips, one-pipeline restreaming, and remote control — built on shipped building blocks (chat dock, replay buffer, obs-websocket, multi-target fan-out).*
 
-- [ ] **Chat-driven auto-clips** — save replay-buffer highlight clips automatically when chat activity spikes (message-rate or emote bursts, configurable thresholds) or on a chat command (`!clip`); builds on the shipped chat dock (Twitch/Kick/YouTube) and M4 replay buffer; per-channel enable/disable, cooldown, and duration
-- [ ] **Multi-platform restream** — one pipeline to Twitch, YouTube, and Kick simultaneously with per-platform keys/bitrate and independent health (extends M3 multi-target fan-out and the M5 platform presets to the simultaneous "restream" workflow)
+- [x] **Chat-driven auto-clips** — save replay-buffer highlight clips automatically when chat activity spikes (sliding-window message-rate detector, configurable threshold + window + cooldown) or on a `!clip` command (customizable command name); builds on the shipped chat dock (Twitch/Kick/YouTube) and M4 replay buffer; auto-clip toggle and settings in the Stream view, i18n (EN/DE)
+- [x] **Multi-platform restream** — one pipeline to Twitch, YouTube, and Kick simultaneously via the Stream view restream section: add/remove targets with per-platform name, platform selector, ingest URL, and stream key (persisted), independent health per target (Connecting/Live/Degraded/Failed), wired into `MultistreamSettings` before every stream start; max 4 targets, duplicate-name protection, i18n (EN/DE)
 - [ ] **Multi-track audio routing** — capture individual app audio streams (game, Spotify, Discord) as separate named sources with independent filters and volume; route each source independently to Record and/or Stream outputs via a checkbox matrix; persists across restarts with i18n (EN+DE); per-platform capture: WASAPI per-app (Windows), PipeWire/PulseAudio per-app (Linux), system loopback fallback (macOS); see [`docs/m6-audio-routing.md`](docs/m6-audio-routing.md)
 - [ ] **Mobile & HTTP remote companion** — drive scenes, record, and stream from the phone or a browser on the LAN, building on the shipped obs-websocket v5 server (M5) with optional auth
 
@@ -539,7 +539,7 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Remux & file management | Done (M4: remux after stop, split, patterns, auto-record) |
 | Virtual camera | Partial (M4 platform-neutral contract + lifecycle; driver integration open) |
 | Streaming (RTMP/RTMPS, platforms) | Partial (RTMPS Twitch/Kick/YouTube; validated presets and key handling) |
-| Multistreaming | Partial (multi-target fan-out wired; per-target reconnect supervisor and UI remain open) |
+| Multistreaming | Implemented (per-target fan-out + GUI add/remove targets, independent health; see Stream view → Restream section) |
 | Adaptive bitrate | Partial (bounded policy implemented; live encoder reconfiguration remains open) |
 | WebRTC/WHIP, SRT/RIST, NDI | WHIP session/lifecycle+DELETE; SRT/RIST contracts done, NDI output wired into recording/streaming/dual pipelines as a selectable destination; live SFU/ICE/DTLS handshake + real NDI LAN interop verification open (needs the NewTek NDI runtime) |
 | VOD track | Done (config model clean; per-track mux routing follow-up, M3) |

@@ -47,6 +47,8 @@ pub use camera::{CameraConfig, CameraDevice, CameraFrame};
 pub mod game_capture;
 pub use game_capture::{GameCaptureConfig, GameCaptureFrame, GameWindow};
 
+pub mod autoclip;
+pub use autoclip::{AutoClipConfig, SpikeDetector};
 pub mod replay;
 pub use replay::{save_replay, ReplayBuffer, ReplaySegment, ReplaySnapshot};
 

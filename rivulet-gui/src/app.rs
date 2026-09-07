@@ -622,6 +622,49 @@ enum BackendMessage {
     Error(anyhow::Error),
 }
 
+/// A restream target configuration persisted in the GUI state.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct RestreamTargetConfig {
+    pub name: String,
+    pub platform: StreamPlatform,
+    pub ingest_url: String,
+    pub stream_key: String,
+    pub enabled: bool,
+}
+
+impl Default for RestreamTargetConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            platform: StreamPlatform::Twitch,
+            ingest_url: String::new(),
+            stream_key: String::new(),
+            enabled: true,
+        }
+    }
+}
+
+impl RestreamTargetConfig {
+    /// Convert to a [`rivulet_core::StreamTarget`] for engine consumption.
+    pub fn to_stream_target(&self) -> Option<rivulet_core::StreamTarget> {
+        if !self.enabled || self.stream_key.trim().is_empty() {
+            return None;
+        }
+        let url = if self.ingest_url.trim().is_empty() {
+            self.platform
+                .default_ingest_url()
+                .unwrap_or("rtmps://live.twitch.tv/app")
+                .to_owned()
+        } else {
+            self.ingest_url.clone()
+        };
+        Some(rivulet_core::StreamTarget::new(
+            &self.name,
+            rivulet_core::StreamSettings::new(self.platform, url, &self.stream_key),
+        ))
+    }
+}
+
 /// The main application structure.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -1127,6 +1170,14 @@ pub struct RivuletApp {
     #[serde(skip)]
     private_test_stream: rivulet_core::PrivateTestStream,
 
+    // Restream (M6) — additional multistream targets beyond the primary.
+    #[serde(default)]
+    restream_targets: Vec<RestreamTargetConfig>,
+    #[serde(skip)]
+    restream_add_requested: bool,
+    #[serde(skip)]
+    restream_status: Option<String>,
+
     // Auto-update
     #[serde(skip)]
     update_ui: std::sync::Arc<std::sync::Mutex<UpdateUi>>,
@@ -1156,6 +1207,14 @@ pub struct RivuletApp {
     /// Transient, localized outcome of the last replay save (ok?, message).
     #[serde(skip)]
     replay_status: Option<(bool, String)>,
+
+    // Auto-clip (M6): chat-driven replay saves on spike / !clip command.
+    #[serde(default)]
+    auto_clip_config: rivulet_core::AutoClipConfig,
+    #[serde(skip)]
+    auto_clip_detector: rivulet_core::SpikeDetector,
+    #[serde(skip)]
+    auto_clip_status: Option<String>,
 
     // NDI (LAN) monitor feed: when enabled, every recording/streaming session
     // additionally publishes the encoded H.264 video as an NDI source (M5
@@ -1484,6 +1543,9 @@ impl Default for RivuletApp {
                 3,
                 std::time::Duration::from_secs(30),
             ),
+            restream_targets: Vec::new(),
+            restream_add_requested: false,
+            restream_status: None,
 
             update_ui: std::sync::Arc::new(std::sync::Mutex::new(UpdateUi::default())),
             update_auto_checked: false,
@@ -1497,6 +1559,12 @@ impl Default for RivuletApp {
             is_muted: false,
             replay_duration_secs: Some(30),
             replay_status: None,
+            auto_clip_config: rivulet_core::AutoClipConfig::default(),
+            auto_clip_detector: rivulet_core::SpikeDetector::new(
+                rivulet_core::AutoClipConfig::default(),
+            ),
+            auto_clip_status: None,
+
             ndi_output_enabled: false,
             ndi_output_name: "Rivulet".into(),
             ndi_output_group: String::new(),
@@ -4284,6 +4352,177 @@ impl RivuletApp {
 
     /// Draw transport health and delay telemetry without relying on color
     /// alone. Queue counters are cumulative for the active stream and are
+    /// Draw the restream targets section: a collapsible list of additional
+    /// platforms to stream to simultaneously, with add/remove controls.
+    fn draw_restream_section(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new(self.tr("restream_section"))
+            .id_salt("restream_targets")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.label(self.tr("restream_hint"));
+
+                let target_count = self.restream_targets.len();
+                // Show existing targets using index-based access to avoid
+                // borrow conflicts between iter_mut() and self.tr().
+                if target_count == 0 {
+                    ui.label(self.tr("restream_no_targets"));
+                } else {
+                    let mut remove_idx: Option<usize> = None;
+                    for idx in 0..target_count {
+                        let platform = self.restream_targets[idx].platform;
+                        ui.group(|ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.checkbox(&mut self.restream_targets[idx].enabled, "");
+                                ui.label(self.tr("restream_target_name"));
+                                ui.add(
+                                    egui::TextEdit::singleline(
+                                        &mut self.restream_targets[idx].name,
+                                    )
+                                    .desired_width(100.0),
+                                );
+                            });
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(self.tr("restream_target_platform"));
+                                egui::ComboBox::from_id_salt(format!("restream_platform_{idx}"))
+                                    .selected_text(platform.label())
+                                    .show_ui(ui, |ui| {
+                                        for p in [
+                                            StreamPlatform::Twitch,
+                                            StreamPlatform::YouTube,
+                                            StreamPlatform::Kick,
+                                            StreamPlatform::Custom,
+                                        ] {
+                                            if ui
+                                                .selectable_label(platform == p, p.label())
+                                                .clicked()
+                                            {
+                                                self.restream_targets[idx].platform = p;
+                                                if let Some(url) = p.default_ingest_url() {
+                                                    self.restream_targets[idx].ingest_url =
+                                                        url.to_owned();
+                                                }
+                                            }
+                                        }
+                                    });
+                            });
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(self.tr("restream_target_url"));
+                                ui.add_enabled(
+                                    platform.requires_manual_ingest_url(),
+                                    egui::TextEdit::singleline(
+                                        &mut self.restream_targets[idx].ingest_url,
+                                    )
+                                    .desired_width(200.0),
+                                );
+                            });
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(self.tr("restream_target_key"));
+                                ui.add(
+                                    egui::TextEdit::singleline(
+                                        &mut self.restream_targets[idx].stream_key,
+                                    )
+                                    .password(true),
+                                );
+                                if ui.button(self.tr("restream_remove_target")).clicked() {
+                                    remove_idx = Some(idx);
+                                }
+                            });
+                        });
+                    }
+                    if let Some(idx) = remove_idx {
+                        let removed = self.restream_targets.remove(idx);
+                        self.restream_status =
+                            Some(self.tr_fmt("restream_target_removed", &[removed.name]));
+                    }
+                }
+
+                // Add target button
+                if target_count < rivulet_core::MultistreamSettings::MAX_TARGETS {
+                    if ui.button(self.tr("restream_add_target")).clicked() {
+                        let n = target_count + 1;
+                        self.restream_targets.push(RestreamTargetConfig {
+                            name: format!("Target {n}"),
+                            ..Default::default()
+                        });
+                        self.restream_status =
+                            Some(self.tr_fmt("restream_target_added", &[format!("Target {n}")]));
+                    }
+                } else {
+                    ui.label(self.tr_fmt(
+                        "restream_max_targets",
+                        &[rivulet_core::MultistreamSettings::MAX_TARGETS.to_string()],
+                    ));
+                }
+
+                if let Some(status) = &self.restream_status {
+                    ui.label(status.as_str());
+                }
+            });
+    }
+
+    /// Draw the auto-clip section: toggle, threshold, command name, and
+    /// status display for chat-driven replay saves.
+    fn draw_auto_clip_section(&mut self, ui: &mut egui::Ui) {
+        // Pre-compute translated strings to avoid borrow conflicts with
+        // mutable access to auto_clip_config.
+        let section_title = self.tr("autoclip_section").to_owned();
+        let hint = self.tr("autoclip_hint").to_owned();
+        let label_enabled = self.tr("autoclip_enabled").to_owned();
+        let label_threshold = self.tr("autoclip_spike_threshold").to_owned();
+        let label_window = self.tr("autoclip_spike_window").to_owned();
+        let label_cooldown = self.tr("autoclip_cooldown").to_owned();
+        let label_command = self.tr("autoclip_command").to_owned();
+        let status = self.auto_clip_status.clone();
+
+        egui::CollapsingHeader::new(&section_title)
+            .id_salt("auto_clip")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.label(&hint);
+                ui.horizontal_wrapped(|ui| {
+                    ui.checkbox(&mut self.auto_clip_config.enabled, &label_enabled);
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(&label_threshold);
+                    ui.add(
+                        egui::DragValue::new(&mut self.auto_clip_config.spike_threshold)
+                            .range(1..=100),
+                    );
+                    ui.label(&label_window);
+                    let mut window_secs = self.auto_clip_config.window.as_secs();
+                    ui.add(
+                        egui::DragValue::new(&mut window_secs)
+                            .range(1..=300)
+                            .suffix("s"),
+                    );
+                    self.auto_clip_config.window = std::time::Duration::from_secs(window_secs);
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(&label_cooldown);
+                    let mut cooldown_secs = self.auto_clip_config.cooldown.as_secs();
+                    ui.add(
+                        egui::DragValue::new(&mut cooldown_secs)
+                            .range(1..=300)
+                            .suffix("s"),
+                    );
+                    self.auto_clip_config.cooldown = std::time::Duration::from_secs(cooldown_secs);
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(&label_command);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.auto_clip_config.clip_command)
+                            .desired_width(80.0),
+                    );
+                });
+                // Sync detector config when user changes settings
+                self.auto_clip_detector
+                    .set_config(self.auto_clip_config.clone());
+                if let Some(s) = &status {
+                    ui.label(s.as_str());
+                }
+            });
+    }
+
     /// intentionally shown next to their labels for screen-reader-friendly
     /// diagnostics.
     fn draw_stream_health_panel(&mut self, ui: &mut egui::Ui, colors: theme::StatusColors) {
@@ -4412,6 +4651,27 @@ impl RivuletApp {
         match self.engine.set_ndi_output(output) {
             Ok(()) => self.ndi_warning = None,
             Err(e) => self.ndi_warning = Some(e.to_string()),
+        }
+    }
+
+    /// Apply configured restream targets to the engine before streaming
+    /// starts. Builds a [`rivulet_core::MultistreamSettings`] from the GUI
+    /// target list and passes it to the engine, or clears it when no
+    /// targets are enabled.
+    fn apply_restream_targets(&mut self) {
+        let targets: Vec<rivulet_core::StreamTarget> = self
+            .restream_targets
+            .iter()
+            .filter_map(|cfg| cfg.to_stream_target())
+            .collect();
+        if targets.is_empty() {
+            self.engine.set_multistream_settings(None);
+        } else {
+            let mut ms = rivulet_core::MultistreamSettings::default();
+            for target in targets {
+                let _ = ms.add_target(target);
+            }
+            self.engine.set_multistream_settings(Some(ms));
         }
     }
 
@@ -5555,6 +5815,7 @@ impl RivuletApp {
                     // Ready/Streaming label (mirrors the recording starts).
                     self.last_error = None;
                     self.apply_ndi_output();
+                    self.apply_restream_targets();
                     self.engine.start_streaming();
                     let active = self.engine.is_streaming();
                     self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
@@ -6092,6 +6353,7 @@ impl RivuletApp {
                 // Ready/Streaming label (mirrors the recording starts).
                 self.last_error = None;
                 self.apply_ndi_output();
+                self.apply_restream_targets();
                 self.engine.start_streaming();
                 self.stream_status_message = Some(self.tr("stream_status_connecting").to_owned());
             }
@@ -6220,6 +6482,13 @@ impl RivuletApp {
                 });
             });
         ui.small(self.tr("stream_m3_note"));
+
+        // ── Restream targets (M6): additional platforms streamed
+        //    simultaneously via the multi-target fan-out. ──
+        self.draw_restream_section(ui);
+
+        // ── Auto-clip (M6): chat-driven replay saves on spike / !clip. ──
+        self.draw_auto_clip_section(ui);
 
         // ── Workspace: chat dock (left) | stream information (right). The
         //    chat is bounded in height so it behaves like a docked panel on
@@ -12034,5 +12303,53 @@ mod tests {
         // even when no env vars are set (defaults to English).
         let locale = super::detect_os_locale();
         assert!(Locale::all().contains(&locale));
+    }
+
+    #[test]
+    fn restream_target_config_converts_to_stream_target() {
+        let config = super::RestreamTargetConfig {
+            name: "My Twitch".to_owned(),
+            platform: StreamPlatform::Twitch,
+            ingest_url: "rtmps://live.twitch.tv/app".to_owned(),
+            stream_key: "test_key_123".to_owned(),
+            enabled: true,
+        };
+        let target = config.to_stream_target().expect("should produce a target");
+        assert_eq!(target.name, "My Twitch");
+        assert_eq!(target.settings.platform, StreamPlatform::Twitch);
+        assert_eq!(target.settings.stream_key, "test_key_123");
+    }
+
+    #[test]
+    fn restream_target_config_disabled_produces_none() {
+        let config = super::RestreamTargetConfig {
+            enabled: false,
+            stream_key: "key".to_owned(),
+            ..Default::default()
+        };
+        assert!(config.to_stream_target().is_none());
+    }
+
+    #[test]
+    fn restream_target_config_empty_key_produces_none() {
+        let config = super::RestreamTargetConfig {
+            enabled: true,
+            stream_key: String::new(),
+            ..Default::default()
+        };
+        assert!(config.to_stream_target().is_none());
+    }
+
+    #[test]
+    fn restream_target_config_uses_platform_default_url_when_empty() {
+        let config = super::RestreamTargetConfig {
+            name: "YT".to_owned(),
+            platform: StreamPlatform::YouTube,
+            ingest_url: String::new(),
+            stream_key: "yt_key".to_owned(),
+            enabled: true,
+        };
+        let target = config.to_stream_target().expect("should produce target");
+        assert!(target.settings.ingest_url.contains("youtube.com"));
     }
 }
