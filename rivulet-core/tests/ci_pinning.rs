@@ -3203,6 +3203,43 @@ fn autoclip_chat_driven_replay_save_is_wired() {
 }
 
 #[test]
+fn vst3_host_boundary_and_skeleton_are_wired() {
+    // Z96-1 + Z96-2: the VST3 module must expose the host boundary trait,
+    // the Windows host skeleton, and the skip-on-error contract.
+    let vst3 = read("rivulet-core/src/vst3.rs");
+    for marker in [
+        "pub trait VstHost",
+        "pub struct WindowsVstHost",
+        "pub fn resolve_bundle_path",
+        "pub enum HostLoadResult",
+        "pub enum SkipReason",
+        "pub struct HostHandle",
+        "pub struct ChainLoadResults",
+        "fn load_chain",
+        "impl VstHost for WindowsVstHost",
+        "fn stage_bundle_resolve",
+        "fn stage_factory_obtain",
+        "fn stage_processor_create",
+    ] {
+        assert!(vst3.contains(marker), "vst3.rs must provide {marker}");
+    }
+    // Windows-only: LoadLibraryW / find_vst3_dll (behind #[cfg(target_os = "windows")])
+    assert!(
+        vst3.contains("LoadLibraryW") && vst3.contains("find_vst3_dll"),
+        "vst3.rs must use LoadLibraryW and find_vst3_dll for Windows DLL loading"
+    );
+    // The boundary doc must exist.
+    let doc = read("docs/vst3-host-boundary.md");
+    assert!(
+        doc.contains("VstHost") && doc.contains("HostLoadResult"),
+        "docs/vst3-host-boundary.md must document the host boundary"
+    );
+    // README M5 must mention VST3 hosting.
+    let readme = read("README.md");
+    assert!(readme.contains("VST3"));
+}
+
+#[test]
 fn chat_outbound_is_rate_limited_per_platform() {
     // The bot must never burst against a platform limit: every outbound chat
     // send passes through a shared token-bucket limiter in core. Twitch's

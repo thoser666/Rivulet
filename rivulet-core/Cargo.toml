@@ -64,6 +64,10 @@ libc = "0.2"
 # -  winuser: global hotkeys (global_hotkey.rs — RegisterHotKey/UnregisterHotKey
 #    behind a message pump).
 winapi = { version = "0.3", features = ["memoryapi", "winbase", "winnt", "handleapi", "fileapi", "namedpipeapi", "winuser"] }
+# VST3 host skeleton: LoadLibraryW / FreeLibrary for plugin DLL loading
+# (vst3.rs — only the LibraryLoader feature is enabled, keeping the
+# attack surface minimal).
+windows-sys = { version = "0.59", features = ["Win32_System_LibraryLoader"] }
 
 [dev-dependencies]
 tempfile = "3"
