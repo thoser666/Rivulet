@@ -1208,6 +1208,14 @@ pub struct RivuletApp {
     #[serde(skip)]
     replay_status: Option<(bool, String)>,
 
+    // Auto-clip (M6): chat-driven replay saves on spike / !clip command.
+    #[serde(default)]
+    auto_clip_config: rivulet_core::AutoClipConfig,
+    #[serde(skip)]
+    auto_clip_detector: rivulet_core::SpikeDetector,
+    #[serde(skip)]
+    auto_clip_status: Option<String>,
+
     // NDI (LAN) monitor feed: when enabled, every recording/streaming session
     // additionally publishes the encoded H.264 video as an NDI source (M5
     // #77). Applied to the engine before every session start.
@@ -1551,6 +1559,12 @@ impl Default for RivuletApp {
             is_muted: false,
             replay_duration_secs: Some(30),
             replay_status: None,
+            auto_clip_config: rivulet_core::AutoClipConfig::default(),
+            auto_clip_detector: rivulet_core::SpikeDetector::new(
+                rivulet_core::AutoClipConfig::default(),
+            ),
+            auto_clip_status: None,
+
             ndi_output_enabled: false,
             ndi_output_name: "Rivulet".into(),
             ndi_output_group: String::new(),
@@ -4446,6 +4460,69 @@ impl RivuletApp {
             });
     }
 
+    /// Draw the auto-clip section: toggle, threshold, command name, and
+    /// status display for chat-driven replay saves.
+    fn draw_auto_clip_section(&mut self, ui: &mut egui::Ui) {
+        // Pre-compute translated strings to avoid borrow conflicts with
+        // mutable access to auto_clip_config.
+        let section_title = self.tr("autoclip_section").to_owned();
+        let hint = self.tr("autoclip_hint").to_owned();
+        let label_enabled = self.tr("autoclip_enabled").to_owned();
+        let label_threshold = self.tr("autoclip_spike_threshold").to_owned();
+        let label_window = self.tr("autoclip_spike_window").to_owned();
+        let label_cooldown = self.tr("autoclip_cooldown").to_owned();
+        let label_command = self.tr("autoclip_command").to_owned();
+        let status = self.auto_clip_status.clone();
+
+        egui::CollapsingHeader::new(&section_title)
+            .id_salt("auto_clip")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.label(&hint);
+                ui.horizontal_wrapped(|ui| {
+                    ui.checkbox(&mut self.auto_clip_config.enabled, &label_enabled);
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(&label_threshold);
+                    ui.add(
+                        egui::DragValue::new(&mut self.auto_clip_config.spike_threshold)
+                            .range(1..=100),
+                    );
+                    ui.label(&label_window);
+                    let mut window_secs = self.auto_clip_config.window.as_secs();
+                    ui.add(
+                        egui::DragValue::new(&mut window_secs)
+                            .range(1..=300)
+                            .suffix("s"),
+                    );
+                    self.auto_clip_config.window = std::time::Duration::from_secs(window_secs);
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(&label_cooldown);
+                    let mut cooldown_secs = self.auto_clip_config.cooldown.as_secs();
+                    ui.add(
+                        egui::DragValue::new(&mut cooldown_secs)
+                            .range(1..=300)
+                            .suffix("s"),
+                    );
+                    self.auto_clip_config.cooldown = std::time::Duration::from_secs(cooldown_secs);
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(&label_command);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.auto_clip_config.clip_command)
+                            .desired_width(80.0),
+                    );
+                });
+                // Sync detector config when user changes settings
+                self.auto_clip_detector
+                    .set_config(self.auto_clip_config.clone());
+                if let Some(s) = &status {
+                    ui.label(s.as_str());
+                }
+            });
+    }
+
     /// intentionally shown next to their labels for screen-reader-friendly
     /// diagnostics.
     fn draw_stream_health_panel(&mut self, ui: &mut egui::Ui, colors: theme::StatusColors) {
@@ -6409,6 +6486,9 @@ impl RivuletApp {
         // ── Restream targets (M6): additional platforms streamed
         //    simultaneously via the multi-target fan-out. ──
         self.draw_restream_section(ui);
+
+        // ── Auto-clip (M6): chat-driven replay saves on spike / !clip. ──
+        self.draw_auto_clip_section(ui);
 
         // ── Workspace: chat dock (left) | stream information (right). The
         //    chat is bounded in height so it behaves like a docked panel on

@@ -3111,6 +3111,45 @@ fn restream_multitarget_fanout_is_wired_and_documented() {
 }
 
 #[test]
+fn autoclip_chat_driven_replay_save_is_wired() {
+    // M6 chat-driven auto-clips: the autoclip module must expose a config
+    // type, a spike detector, and a !clip command parser; the GUI must offer
+    // settings controls, and the feature must be localized.
+    let core = read("rivulet-core/src/lib.rs");
+    assert!(
+        core.contains("pub mod autoclip") && core.contains("pub use autoclip"),
+        "the autoclip module must be exported from core"
+    );
+    let autoclip = read("rivulet-core/src/autoclip.rs");
+    assert!(
+        autoclip.contains("pub struct AutoClipConfig")
+            && autoclip.contains("pub struct SpikeDetector")
+            && autoclip.contains("pub fn handle_clip_command"),
+        "autoclip.rs must expose config, spike detector and clip command parser"
+    );
+    assert!(
+        autoclip.contains("spike_threshold") && autoclip.contains("cooldown"),
+        "config must have spike_threshold and cooldown fields"
+    );
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(
+        app.contains("auto_clip_config") && app.contains("auto_clip_detector"),
+        "the GUI must have auto-clip config and detector fields"
+    );
+    assert!(
+        app.contains("draw_auto_clip_section"),
+        "the GUI must draw an auto-clip section in the stream view"
+    );
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.contains("(\"autoclip_section\", ")
+            && i18n.contains("(\"autoclip_enabled\", ")
+            && i18n.contains("(\"autoclip_spike_threshold\", "),
+        "auto-clip i18n keys must exist in both locales"
+    );
+}
+
+#[test]
 fn chat_outbound_is_rate_limited_per_platform() {
     // The bot must never burst against a platform limit: every outbound chat
     // send passes through a shared token-bucket limiter in core. Twitch's
