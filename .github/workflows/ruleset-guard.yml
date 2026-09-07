@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  administration: read
 
 jobs:
   develop-ruleset:
@@ -31,6 +32,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Verify the develop ruleset forbids direct pushes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
           python3 scripts/check-develop-ruleset.py | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
