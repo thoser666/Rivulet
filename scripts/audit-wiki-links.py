@@ -84,6 +84,18 @@ def load_repo_file(repo_root: Path, rel: str, from_git: bool) -> str | None:
         return None
 
 
+def last_commit_date(repo: Path, rev: str) -> str | None:
+    """ISO date (YYYY-MM-DD) of the newest commit touching `rev`, else None."""
+    result = subprocess.run(
+        ["git", "log", "-1", "--format=%as", "--", rev],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    out = result.stdout.strip() if result.returncode == 0 else ""
+    return out or None
+
+
 def heading_anchors(markdown: str) -> set[str]:
     anchors: set[str] = set()
     used: set[str] = set()
@@ -150,6 +162,18 @@ def main() -> int:
         action="store_true",
         help="also audit repo docs (docs/*.md, README, CONTRIBUTING) for "
         "references to wiki pages that do not exist",
+    )
+    parser.add_argument(
+        "--stale",
+        action="store_true",
+        help="report staleness: repo docs that mirror wiki pages are flagged "
+        "when the wiki page was updated more recently than the repo doc "
+        "(non-fatal informational report; combine with --strict to fail)",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="fail (exit 1) when --stale finds outdated repo docs",
     )
     args = parser.parse_args()
 
@@ -290,10 +314,47 @@ def main() -> int:
     if args.check_repo_docs:
         summary += f", {wiki_refs} wiki reference(s) in repo docs"
     print(summary)
+
+    stale_docs: list[str] = []
+    if args.stale:
+        # Staleness: explicit mirror map from repo doc -> wiki page. The wiki
+        # uses its own page names (Aufnahme-Anleitung, Streaming, ...), so a
+        # slug match alone would find nothing; this map lists every repo doc
+        # whose content is mirrored in a wiki page. A mirror is flagged when
+        # the wiki page changed more recently than the repo doc — wiki-first
+        # editing means the repo mirror lags, and the report makes that lag
+        # visible instead of silently drifting.
+        mirrors = {
+            "docs/user-guide.md": "Aufnahme-Anleitung",
+            "docs/first-stream-checklist.md": "Getting-Started",
+            "docs/update-troubleshooting.md": "Troubleshooting-und-FAQ",
+        }
+        for rel, page_name in sorted(mirrors.items()):
+            if not (repo_root / rel).is_file() or page_name not in pages:
+                continue
+            doc_date = last_commit_date(repo_root, rel)
+            page_date = last_commit_date(wiki, f"{page_name}.md")
+            if not doc_date or not page_date:
+                continue
+            if page_date > doc_date:
+                stale_docs.append(
+                    f"{rel} (repo {doc_date}) is older than wiki page "
+                    f"{page_name}.md ({page_date})"
+                )
+        if stale_docs:
+            print(f"\nstaleness report ({len(stale_docs)} outdated repo doc(s)):")
+            for item in stale_docs:
+                print(f"- {item}")
+        else:
+            print("staleness report: no outdated repo docs")
+
     if broken:
         print("wiki link audit FAILED:")
         for item in broken:
             print(f"- {item}")
+        return 1
+    if args.stale and args.strict and stale_docs:
+        print("wiki staleness check FAILED (--strict):")
         return 1
     print("wiki link audit passed")
     return 0

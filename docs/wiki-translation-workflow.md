@@ -12,8 +12,45 @@ python3 scripts/sync-wiki-translations.py --check
 
 Die Prüfung schlägt fehl, wenn eine englische Markdown-Seite keine passende
 `*-de.md`-Seite oder keinen Sprachumschalter besitzt. Der Workflow
-`.github/workflows/wiki-translations.yml` führt die Prüfung wöchentlich und
-manuell aus.
+`.github/workflows/wiki-translations.yml` führt die Prüfung wöchentlich,
+manuell **und bei jedem PR aus, der `docs/`, README oder CONTRIBUTING
+ändert**.
+
+### Weitere Sprachen
+
+Die Liste der geprüften Sprachen ist konfigurierbar:
+
+```bash
+python3 scripts/check-wiki-translations.py --locales de,es,fr
+```
+
+Englisch ist immer die kanonische Ausgangsbasis; jede zusätzliche Sprache
+braucht ein `<Seite>-<sprache>.md`-Paar mit Sprachumschaltern in beide
+Richtungen. Neue Locales werden in `LOCALE_LINK_WORDS` des Skripts ergänzt.
+
+### Frische-Prüfung (Staleness)
+
+Wiki-first gepflegte Seiten haben einen Spiegel im Repo (z. B.
+`docs/user-guide.md` ↔ Wiki **Aufnahme-Anleitung**). Der Auditor vergleicht
+per `--stale` das letzte Änderungsdatum beider Seiten und meldet Repo-Dokumente,
+die älter sind als ihr Wiki-Pendant:
+
+```bash
+python3 scripts/audit-wiki-links.py .freebuff-rivulet-wiki --skip-external --stale
+```
+
+Der Report ist informativ (exit 0); mit `--strict` schlägt er fehl. Die
+Spiegel-Map (`mirrors`) steht im Skript und wird ergänzt, wenn neue
+Wiki-Spiegel entstehen.
+
+### Benutzerhandbuch-Frische
+
+Die Bedienungsanleitung (`docs/user-guide.md`) wird gegen die GUI-Quelle
+geprüft: `scripts/check-user-guide-freshness.py` leitet die Navigation aus
+dem `AppView`-Enum ab und verlangt, dass jede Ansicht und jede ausgelieferte
+Funktion (Multistream, Auto-Clip, MIDI, Discord, obs-websocket, Sprache, …)
+dokumentiert ist. Der Check läuft in jedem CI-Lauf und schlägt fehl, wenn ein
+neues Feature undokumentiert bleibt.
 
 ## Synchronisierung
 

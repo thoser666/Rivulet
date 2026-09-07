@@ -129,6 +129,51 @@ Eine Vorschau ist eine Zielkontrolle, kein Qualitätsnachweis für den finalen E
 
 Für Twitch, YouTube und Kick sollten nach Möglichkeit TLS-geschützte `rtmps://`-Endpunkte verwendet werden. Der Stream-Key gehört nicht in Commits, Screenshots, Issues oder Chatnachrichten.
 
+### Multistream (Restream)
+
+Rivulet kann gleichzeitig zu mehreren Plattformen streamen. Im Stream-Tab findest du den aufklappbaren Abschnitt **Restream**:
+
+1. **Ziel hinzufügen** erzeugt einen weiteren Eintrag mit Name, Plattform (Twitch, YouTube, Kick oder Custom), Ingest-URL und Stream-Key.
+2. Jedes Ziel wird beim Streamstart an die Engine übergeben und hat einen eigenen Status in der Stream-Diagnose (FPS, Queue, Reconnects).
+3. Ziele werden in den App-Einstellungen persistiert; bis zu 4 zusätzliche Ziele sind möglich, doppelte Namen werden abgelehnt.
+4. Ein fehlerhaftes Ziel stoppt die gesunden Ziele nicht – du siehst pro Ziel, was passiert.
+
+### Chat
+
+Im Stream-Tab ist der Chat-Dock integriert. Er verbindet sich mit Twitch, Kick und YouTube:
+
+- Anonymes Lesen ist ohne Login möglich; mit OAuth-Token (Berechtigung `chat:send`) kannst du auch selbst schreiben.
+- Die Eingabezeile unten im Dock sendet in den verbundenen Kanal; über **Antworten** beantwortest du eine bestimmte Nachricht.
+- Über der Eingabezeile zeigt Rivulet das verbleibende Sendekontingent (z. B. „20 Nachrichten pro 30 s“) und die Plattform, für die das Limit gilt – Plattform-Limits werden pro Kanal separat durchgesetzt.
+
+### Auto-Clips (!clip)
+
+Rivulet kann automatisch Replay-Buffer-Speicherungen auslösen, wenn der Chat „explodiert“:
+
+1. Aktiviere **Auto-Clip** im Stream-Tab und stelle Schwellwert (Nachrichten pro Zeitfenster), Zeitfenster und Abklingzeit ein.
+2. Der Befehlsname ist konfigurierbar (Standard `!clip`) – Chatter können damit manuell einen Clip anstoßen.
+3. Steigt die Nachrichtenrate über den Schwellwert oder tippt jemand `!clip`, speichert Rivulet den Replay-Buffer als Clip. Abklingzeit verhindert Clip-Fluten.
+
+### Discord-Status (Rich Presence)
+
+Rivulet zeigt seinen Status in deinem Discord-Profil an (siehe [`activity-status.md`](activity-status.md) und das Wiki **Discord-Setup**):
+
+- Voraussetzung ist eine eigene Discord-Anwendung mit Rich Presence; die Application Client ID trägst du unter **Settings → Discord** ein.
+- Die Karte zeigt Zeile 1 „Rivulet · <Status>“ (Bereit, Aufnahme, Streamt, …), Zeile 2 den Spiel-/Quellennamen und bei aktivierter Aufnahme die verstrichene Zeit.
+- Erscheint der Status nicht, bietet der Stream-Tab bei „Nicht verbunden“ einen **Erneut verbinden**-Knopf; Details stehen im Wiki unter Discord-Troubleshooting.
+
+### MIDI-Controller
+
+Unter **Settings → MIDI** kannst du MIDI-Geräte verbinden und Aktionen auf Controller-Elemente legen:
+
+- Mappings verbinden Szenenwechsel, Aufnahme/Stream-Start und -Stopp, Filter-Toggles und Fader mit Note-/CC-Nummern eines Kanals.
+- Der **Learn-Mode** nimmt Mappings auf, indem du das Controller-Element bedienst – kein manuelles Eintippen von Nummern nötig.
+- Mappings lassen sich als Presets pro Gerät speichern und wieder laden.
+
+### Fernsteuerung per obs-websocket
+
+Rivulet bietet einen OBS-WebSocket-v5-kompatiblen Server (siehe [`obs-websocket.md`](obs-websocket.md)). Damit lassen sich Rivulet-Steuerungen wie Streamdeck oder Touch Portal anschließen, und das Protokoll ist mit bestehenden OBS-Tools kompatibel. Der Server lauscht standardmäßig auf `127.0.0.1` und kann mit einem Passwort geschützt werden.
+
 ### Stream-Diagnose
 
 Pro Ziel werden Status, FPS/Rate, Queue-Füllstand, Underflows, Overflows und – sofern verfügbar – Sink-Latenz angezeigt. Ein einzelnes fehlerhaftes Ziel sollte gesunde Ziele nicht stoppen. Bei Reconnects zeigt der Status den Zielzustand; Retry-Intervalle sind begrenzt.
@@ -140,6 +185,10 @@ SRT/RIST und WHIP/WebRTC befinden sich in der Integrationsphase. Ein vorhandener
 Unter **Settings** kannst du zwischen **System**, **Dark** und **Light** wählen. Die Auswahl wird beim Beenden gespeichert und beim nächsten Start wiederhergestellt. Wenn sich ein Theme nicht ändert, öffne die Settings erneut und prüfe, ob der Speicherort der Anwendung beschreibbar ist.
 
 Dort findest du außerdem Sprache, Codec, Aufnahme-Preset, Ausgabeordner, Hotkeys, Replay Buffer und Update-Prüfung.
+
+### Sprache
+
+Rivulet ist auf Deutsch und Englisch verfügbar. Unter **Settings → Sprache** stellst du die Oberflächensprache um; **System** übernimmt die Betriebssystem-Sprache beim ersten Start. Die Umschaltung wirkt sofort, ohne Neustart. Alle Oberflächentexte werden gepflegt und per Test darauf geprüft, dass keine Übersetzung fehlt.
 
 ## 9. Updates
 
@@ -172,7 +221,7 @@ Wenn die GUI startet, aber nicht reagiert:
 - WHIP benötigt noch den vollständigen ICE/DTLS/SRTP- und SFU-End-to-End-Nachweis.
 - Der VOD-Track (Twitch-Workflow) ist als deterministische Konfiguration vorhanden; die eigentliche pro-Track-GStreamer-Routing- und UI-Integration folgt noch.
 - NDI-Output ist als Konfigurationsvertrag vorhanden; eine echte LAN-Interoperabilität über den NewTek-NDI-Runtime ist noch nicht verifiziert.
-- VST 3.x ist als Konfigurations-/Entdeckungs-Contract vorhanden; das eigentliche Laden (Hosting) von VST3-Modulen in den Audio-Graph folgt noch.
+- VST 3.x: Konfiguration, Entdeckung und der Host-Vertrag (inkl. Windows-Skelett) sind vorhanden; das tatsächliche Audio-Routing durch geladene Plugins (Z96-4) folgt noch.
 - Cloud-Recordings: Der S3-`PUT`-Upload (AWS SigV4) nach `stop_recording` ist implementiert; Multipart für sehr große Dateien und GUI-Einstellungen folgen noch.
 - RIST/SRT-Smoke-Tests prüfen die CI-Interoperabilität, ersetzen aber keinen Test gegen den produktiven Receiver.
 - macOS- und Linux-Funktionen können durch Berechtigungen, Wayland-Portale oder fehlende GStreamer-Plugins eingeschränkt sein.
@@ -187,3 +236,9 @@ Wenn die GUI startet, aber nicht reagiert:
 - [Security- und CI-Hinweise](security.md)
 - [Cloud-Recordings (S3-kompatibel)](cloud-recordings.md)
 - [VST 3.x-Support](vst3.md)
+- [obs-websocket-Server](obs-websocket.md)
+- [Discord-Activity-Status](activity-status.md)
+- [MIDI-Mapping](midi.md)
+- [Twitch-/Multi-Platform-Chat](twitch-chat.md)
+- [Alert-Overlays](alerts.md)
+- [Mehrsprachigkeit (i18n)](i18n.md)

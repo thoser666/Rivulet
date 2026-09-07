@@ -2016,6 +2016,88 @@ fn wiki_repo_doc_link_audit_is_wired_up() {
 }
 
 #[test]
+fn docs_freshness_is_ci_enforced() {
+    // "Wiki and user manual (all languages) always current" is enforced by
+    // three mechanisms; this guard pins them so they cannot silently rot:
+    //
+    // 1. The user guide must cover the shipped feature surface (nav views
+    //    + major features) — checked by the freshness script against the
+    //    GUI source of truth (AppView) and a required-topics list.
+    // 2. Wiki locale pairs are configurable (--locales) so adding a language
+    //    extends checking without touching the script.
+    // 3. Repo docs mirrored in the wiki get a staleness report (--stale,
+    //    optional --strict) in the weekly AND per-PR wiki job.
+    let freshness = read("scripts/check-user-guide-freshness.py");
+    for marker in [
+        "enum AppView",
+        "REQUIRED_TOPICS",
+        "--self-test",
+        "docs/user-guide.md",
+    ] {
+        assert!(
+            freshness.contains(marker),
+            "user-guide freshness script must provide {marker}"
+        );
+    }
+    // The guide must actually cover every AppView variant and feature topic.
+    let guide = read("docs/user-guide.md");
+    for view in [
+        "Record",
+        "Mixer",
+        "Scenes",
+        "Stream",
+        "Assistant",
+        "Settings",
+    ] {
+        assert!(
+            guide.contains(view),
+            "user guide navigation must mention the {view} view"
+        );
+    }
+    assert!(
+        guide.contains("Hilfe"),
+        "user guide must document the Help entry (AppView::Help)"
+    );
+    for topic in [
+        "Multistream",
+        "Auto-Clip",
+        "MIDI",
+        "Discord",
+        "obs-websocket",
+        "Sprache",
+    ] {
+        assert!(guide.contains(topic), "user guide must document {topic}");
+    }
+    // Locale list configurable for future languages.
+    let pair_check = read("scripts/check-wiki-translations.py");
+    assert!(
+        pair_check.contains("--locales") && pair_check.contains("--self-test"),
+        "wiki pair check must accept a configurable locale list and self-test"
+    );
+    // Staleness report is wired into the workflow (weekly + PR).
+    let auditor = read("scripts/audit-wiki-links.py");
+    assert!(
+        auditor.contains("--stale") && auditor.contains("mirrors"),
+        "the auditor must support the staleness report with an explicit mirror map"
+    );
+    let workflow = read(".github/workflows/wiki-translations.yml");
+    assert!(
+        workflow.contains("pull_request") && workflow.contains("docs/**"),
+        "the wiki job must also run on PRs touching docs"
+    );
+    assert!(
+        workflow.contains("--stale"),
+        "the wiki job must run the staleness report"
+    );
+    // The freshness script runs in CI (its own job, self-tested).
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("check-user-guide-freshness.py"),
+        "CI must run the user-guide freshness check"
+    );
+}
+
+#[test]
 fn resource_efficiency_gate_is_wired_up() {
     let checker = read("scripts/resource-efficiency-check.py");
     let fixture = read("scripts/resource-efficiency-sample.json");
