@@ -1330,9 +1330,11 @@ fn code_signing_automation_is_wired_up() {
         "SIGNPATH_PROJECT_SLUG",
         "SIGNPATH_SIGNING_POLICY_SLUG",
     ] {
+        // Static message on purpose: interpolating the secret name into the
+        // panic message trips CodeQL's clear-text-logging rule.
         assert!(
             build.contains(secret) && build.contains(&format!("${secret}")),
-            "build-package.yml must read and gate the {secret} secret"
+            "build-package.yml must read and gate every SignPath secret"
         );
     }
     assert!(
