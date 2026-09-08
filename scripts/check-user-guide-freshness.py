@@ -2,10 +2,18 @@
 """Verify docs/user-guide.md still describes the current application.
 
 The user guide goes stale silently: a new sidebar view or a shipped feature
-does not remind anyone to document it. This check derives the navigation
-surface from the GUI source of truth (the `AppView` enum in
-rivulet-gui/src/app.rs) and asserts the guide mentions every view, plus a
-curated list of feature topics that must stay documented once shipped.
+does not remind anyone to document it. This check derives the required
+coverage from the GUI source of truth (rivulet-gui/src/app.rs):
+
+1. Navigation surface — the `AppView` enum variants must all appear.
+2. Feature topics — automatically derived from the i18n keys the GUI uses:
+   every `.tr("...")`/`.tr_fmt("...")` key is grouped by its first-underscore
+   prefix, and any prefix with at least MIN_KEYS_PER_TOPIC distinct keys
+   becomes a required topic (unless it is generic UI vocabulary, see
+   GENERIC_PREFIXES). A new GUI feature with its own i18n key namespace
+   therefore extends this check automatically — no script edit needed.
+3. REQUIRED_TOPICS is an explicit floor on top of the derived topics, for
+   features whose keys do not follow the prefix convention.
 
 Exit codes: 0 = guide is current; 1 = guide is missing required coverage;
 2 = usage/environment error.
@@ -19,9 +27,46 @@ import sys
 
 APP_VIEW_RE = re.compile(r"enum AppView\s*\{(.*?)\}", re.DOTALL)
 ENUM_VARIANT_RE = re.compile(r"^\s*([A-Z][A-Za-z0-9]*)\s*,")
+TR_CALL_RE = re.compile(r"\.tr(?:_fmt)?\(\s*\"([a-z0-9_]+)\"")
 
-# Feature topics that must appear in the guide once shipped. Word-level
-# matching (case-insensitive) so "Auto-Clip" matches "Auto-Clips" too.
+# A GUI prefix must own at least this many distinct i18n keys before it is
+# treated as a feature topic. Below the threshold it is plumbing vocabulary
+# (a single label or error message), not something the guide must document.
+MIN_KEYS_PER_TOPIC = 5
+
+# Prefixes that are generic UI vocabulary rather than a feature topic. A new
+# generic prefix can be added here when a derivation turns out to be noise;
+# everything else is derived automatically.
+GENERIC_PREFIXES = frozenset(
+    {
+        "select", "invalid", "no", "not", "unknown", "section", "back",
+        "cancel", "save", "refresh", "stop", "start", "next", "done",
+        "check", "running", "paused", "stopped", "seconds", "file", "quit",
+        "muted", "powered", "presence", "output", "source", "screen",
+        "camera", "capture", "split", "system", "theme", "help", "nav",
+        "multi", "auto", "updates", "scene", "rate",
+    }
+)
+
+# Human-readable guide labels for prefixes whose capitalized form would be
+# awkward or ambiguous. Everything else derives as prefix.capitalize().
+LABEL_OVERRIDES = {
+    "obs": "obs-websocket",
+    "autoclip": "Auto-Clip",
+    "ndi": "NDI",
+    "vf": "Video",
+}
+
+# Acceptable alternative spellings for a topic (like VIEW_ALIASES). Used when
+# the guide documents the feature under its localized or colloquial name.
+TOPIC_ALIASES = {
+    "Composition": ("Quellen", "Sources"),
+}
+
+# Feature topics that must appear in the guide once shipped, independent of
+# the i18n-key derivation (floor for features whose keys do not follow the
+# prefix convention). Word-level matching (case-insensitive) so "Auto-Clip"
+# matches "Auto-Clips" too.
 REQUIRED_TOPICS = [
     "Multistream",
     "Auto-Clip",
@@ -58,6 +103,27 @@ def parse_app_views(app_rs: str) -> list[str]:
     return views
 
 
+def derive_required_topics(app_rs: str) -> list[str]:
+    """Derive guide topics from the i18n keys the GUI actually uses.
+
+    Every static `.tr`/`.tr_fmt` key is grouped by its first-underscore
+    prefix. Prefixes owning at least MIN_KEYS_PER_TOPIC distinct keys are
+    feature topics; GENERIC_PREFIXES filters plumbing vocabulary and
+    LABEL_OVERRIDES fixes awkward labels.
+    """
+    keys = set(TR_CALL_RE.findall(app_rs))
+    counts: dict[str, int] = {}
+    for key in keys:
+        prefix = key.split("_", 1)[0]
+        counts[prefix] = counts.get(prefix, 0) + 1
+    topics: list[str] = []
+    for prefix in sorted(counts):
+        if counts[prefix] < MIN_KEYS_PER_TOPIC or prefix in GENERIC_PREFIXES:
+            continue
+        topics.append(LABEL_OVERRIDES.get(prefix, prefix.capitalize()))
+    return topics
+
+
 def check(guide_path: Path, app_rs_path: Path) -> list[str]:
     errors: list[str] = []
     guide = guide_path.read_text(encoding="utf-8")
@@ -76,10 +142,23 @@ def check(guide_path: Path, app_rs_path: Path) -> list[str]:
                 f"(derived from AppView in rivulet-gui/src/app.rs)"
             )
 
-    for topic in REQUIRED_TOPICS:
-        pattern = re.escape(topic).replace(r"\-", r"[\-\s]?")
-        if not re.search(pattern, guide, re.IGNORECASE):
-            errors.append(f"user guide does not cover feature topic '{topic}'")
+    derived = derive_required_topics(app_rs)
+    topics = list(dict.fromkeys([*REQUIRED_TOPICS, *derived]))
+    derived_set = set(derived)
+    for topic in topics:
+        candidates = [topic, *TOPIC_ALIASES.get(topic, ())]
+        if not any(
+            re.search(re.escape(c).replace(r"\-", r"[\-\s]?"), guide, re.IGNORECASE)
+            for c in candidates
+        ):
+            origin = (
+                "derived from GUI i18n keys"
+                if topic in derived_set
+                else "required topics floor"
+            )
+            errors.append(
+                f"user guide does not cover feature topic '{topic}' ({origin})"
+            )
 
     return errors
 
@@ -102,6 +181,20 @@ def self_test() -> int:
             "    Settings,\n"
             "    Help,\n"
             "}\n"
+            # A shipped feature with its own key namespace: 6 distinct keys.
+            "    self.tr(\"widget_section\");\n"
+            "    self.tr(\"widget_hint\");\n"
+            "    self.tr(\"widget_enabled\");\n"
+            "    self.tr_fmt(\"widget_count\", &[n]);\n"
+            "    self.tr(\"widget_reset\");\n"
+            "    self.tr(\"widget_theme\");\n"
+            # Generic plumbing vocabulary must not derive a topic.
+            "    self.tr(\"select_monitor\");\n"
+            "    self.tr(\"select_window\");\n"
+            "    self.tr(\"select_device\");\n"
+            "    self.tr(\"select_scene\");\n"
+            "    self.tr(\"select_preset\");\n"
+            "    self.tr(\"select_output\");\n"
         )
         (root / "app.rs").write_text(app_rs, encoding="utf-8")
         views = parse_app_views(app_rs)
@@ -109,22 +202,43 @@ def self_test() -> int:
             "Record", "Mixer", "Scenes", "Stream", "Assistant", "Settings", "Help"
         ], views
 
+        # The new feature prefix derives automatically; generics do not.
+        topics = derive_required_topics(app_rs)
+        assert "Widget" in topics, topics
+        assert "Select" not in topics, topics
+        assert "Self" not in topics, topics
+
+        # The topic alias lets the guide use the localized feature name.
+        topics = derive_required_topics(app_rs)
+        assert "Widget" in topics, topics
+        assert "Composition" not in topics, topics  # below threshold here
+        assert TOPIC_ALIASES["Composition"] == ("Quellen", "Sources")
+
         good = root / "good.md"
         good.write_text(
             "# Guide\n\n## Navigation\nRecord, Mixer, Scenes, Stream, Assistant, "
             "Settings, Hilfe\n\n## Features\nMultistream (Restream), Auto-Clips, "
             "MIDI-Controller, Discord-Status, obs-websocket, Sprache, "
-            "Replay Buffer, Hotkeys\n",
+            "Replay Buffer, Hotkeys, Widget-Panel\n",
             encoding="utf-8",
         )
         assert check(good, root / "app.rs") == [], check(good, root / "app.rs")
 
+        # A guide missing the auto-derived feature topic fails — this is the
+        # whole point: a new GUI feature extends the check with no script edit.
         stale = root / "stale.md"
-        stale.write_text("# Guide\n\nRecord und Mixer only.\n", encoding="utf-8")
+        stale.write_text(
+            "# Guide\n\n## Navigation\nRecord, Mixer, Scenes, Stream, Assistant, "
+            "Settings, Hilfe\n\n## Features\nMultistream, Auto-Clips, MIDI, "
+            "Discord, obs-websocket, Sprache, Replay, Hotkeys\n",
+            encoding="utf-8",
+        )
         errors = check(stale, root / "app.rs")
-        assert any("Scenes" in e for e in errors), errors
-        assert any("Multistream" in e for e in errors), errors
-        assert len(errors) > 5, errors
+        assert any("Widget" in e and "derived" in e for e in errors), errors
+        # The stale guide mentions "Quellen" but not "Composition" — the alias
+        # must NOT silently satisfy a missing topic in the failing case either
+        # way: here the guide omits both the topic and its aliases.
+        assert all("Composition" not in e for e in errors), errors
 
         # Broken AppView source is reported as an error, not a crash.
         (root / "broken.rs").write_text("no enum here", encoding="utf-8")
@@ -160,8 +274,9 @@ def main() -> int:
         print("\n".join(f"- {e}" for e in errors))
         print(
             "\nUpdate docs/user-guide.md to cover the missing views/topics, "
-            "or extend REQUIRED_TOPICS in scripts/check-user-guide-freshness.py "
-            "deliberately."
+            "add a LABEL_OVERRIDES/GENERIC_PREFIXES entry in "
+            "scripts/check-user-guide-freshness.py if the derivation is wrong, "
+            "or extend REQUIRED_TOPICS deliberately."
         )
         return 1
     print("user guide freshness check passed")

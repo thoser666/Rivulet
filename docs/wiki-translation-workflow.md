@@ -48,9 +48,15 @@ Wiki-Spiegel entstehen.
 Die Bedienungsanleitung (`docs/user-guide.md`) wird gegen die GUI-Quelle
 geprüft: `scripts/check-user-guide-freshness.py` leitet die Navigation aus
 dem `AppView`-Enum ab und verlangt, dass jede Ansicht und jede ausgelieferte
-Funktion (Multistream, Auto-Clip, MIDI, Discord, obs-websocket, Sprache, …)
-dokumentiert ist. Der Check läuft in jedem CI-Lauf und schlägt fehl, wenn ein
-neues Feature undokumentiert bleibt.
+Funktion dokumentiert ist. Die Funktions-Themen werden **automatisch aus den
+i18n-Keys der GUI abgeleitet**: jeder `.tr()`/`.tr_fmt()`-Key wird nach seinem
+Präfix gruppiert, und ein Präfix mit mindestens fünf eigenen Keys wird zum
+Pflichtthema (generische UI-Vokabeln stehen in `GENERIC_PREFIXES`, Label-
+Korrekturen in `LABEL_OVERRIDES`, akzeptierte Alternativschreibweisen in
+`TOPIC_ALIASES`). Ein neues GUI-Feature mit eigenem Key-Namespace erweitert
+den Doku-Check damit **ohne Skript-Änderung** — vergisst der PR die Doku,
+schlägt der CI-Lauf fehl. `REQUIRED_TOPICS` bleibt als explizites Minimum für
+Features ohne Präfix-Konvention bestehen. Der Check läuft in jedem CI-Lauf.
 
 ## Synchronisierung
 
