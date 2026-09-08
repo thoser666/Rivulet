@@ -118,9 +118,16 @@ def check_workflow(text: str) -> list[str]:
     if count_gated < 5:
         problems.append(f"too few signpath_enabled gates (found {count_gated}, expect >= 5)")
 
-    # 9. actions: read permission present (artifact download).
-    if "actions: read" not in text:
-        problems.append("workflow needs actions: read for the artifact download")
+    # 9. The permissions block must NOT grant `actions:`: GitHub rejects a
+    #    workflow_call file with that top-level permission at startup
+    #    (observed as CI startup_failure), and on public repos the default
+    #    token downloads artifacts without it. Match the YAML mapping
+    #    (start-of-line key), not prose comments that merely mention it.
+    if re.search(r"(?m)^\s{2}actions:\s*read\b", text):
+        problems.append(
+            "workflow must not set permissions.actions: read (GitHub rejects it in reusable workflows at startup; "
+            "public repos do not need it)"
+        )
 
     return problems
 

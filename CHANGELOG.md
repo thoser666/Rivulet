@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+- fix(signing): remove `permissions.actions: read` from build-package.yml —
+  GitHub rejects a reusable workflow_call file with that top-level
+  permission at startup (bisected as the root cause of the CI
+  startup_failure on PR #124: with the permission, every CI run died before
+  starting; without it, CI starts normally). It is also unnecessary here:
+  on public repositories the default `github.token` downloads workflow
+  artifacts without extra permission. The pinning guard and
+  `scripts/test-signpath-config.py` now assert the permission is ABSENT so
+  it cannot silently return; `docs/code-signing.md` gains a
+  "Free signing options for open source" comparison table (SignPath
+  Foundation free vs Azure Artifact Signing $9.99/mo vs purchased OV/EV
+  certificates vs self-signed vs Apple's $99/yr with no free route vs free
+  Linux GPG) with an explicit Rivulet recommendation
 - feat(signing): SignPath Foundation Windows signing path — Windows
   artifacts (the three executables + the MSI) can now be signed via
   SignPath Foundation (free OV-level Authenticode for open source)

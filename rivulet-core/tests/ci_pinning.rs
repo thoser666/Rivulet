@@ -1359,9 +1359,17 @@ fn code_signing_automation_is_wired_up() {
         build.contains("steps.signing.outputs.signpath_enabled != 'true'"),
         "PFX steps must be skipped when the SignPath path is active (precedence)"
     );
+    // The permissions block must NOT grant `actions:`: GitHub rejects a
+    // workflow_call file with that top-level permission at startup (bisected
+    // startup_failure), and on public repos the default token can download
+    // artifacts without it. Match the YAML mapping, not prose that mentions it.
+    let has_actions_read = build.lines().any(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("actions:") && trimmed.contains("read")
+    });
     assert!(
-        build.contains("actions: read"),
-        "build-package.yml needs actions: read for the SignPath artifact download"
+        !has_actions_read,
+        "build-package.yml must not set permissions.actions: read (GitHub rejects it in reusable workflows at startup)"
     );
 
     let signpath_check = read("scripts/test-signpath-config.py");

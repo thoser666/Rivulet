@@ -25,12 +25,14 @@ on:
         required: true
         type: string
 
+# NOTE: no `actions: read` here on purpose. GitHub rejects a reusable
+# workflow_call file whose top-level permissions include `actions:` at
+# startup (CI start-up failure, bisected on test/ci-startup-bisect).
+# It is also unnecessary for this repository: on PUBLIC repos the default
+# `github.token` can download workflow artifacts without extra permission
+# (SignPath's docs require `actions: read` only for private repositories).
 permissions:
   contents: read
-  # The SignPath submit-signing-request action downloads the workflow
-  # artifact with the workflow token (needs `actions: read` when the
-  # SignPath GitHub App is not installed or the repository is private).
-  actions: read
 
 jobs:
   build:

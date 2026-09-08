@@ -18,6 +18,54 @@ SignPath Foundation path is used and the PFX path is skipped (they are
 mutually exclusive). Otherwise, when the two PFX secrets are configured,
 signtool signs locally. With neither, Windows artifacts stay unsigned.
 
+## Free signing options for open source
+
+Not every platform has a free route — macOS deliberately has none. The
+honest comparison (prices verified September 2026):
+
+| Option | Platform | Cost | Certificate level | Caveats |
+|---|---|---|---|---|
+| **SignPath Foundation** | Windows | **Free** for qualifying OSS | OV Authenticode | Application + build review required; signing is file-based via their API (the free tier does not expose hash-based Crypto Providers — that is the paid Code Signing Gateway); SmartScreen reputation still needs download volume; certificate stays in SignPath's HSM |
+| **Azure Artifact Signing** (formerly Trusted Signing) | Windows | **$9.99/month** Basic (no free tier; ~$200 one-time Azure trial credit is a trial, not permanent) | OV (non-EV) | EV restricted to businesses registered 3+ years in US/CA/EU; identity service managed by Microsoft |
+| **Purchased OV certificate** (Sectigo, Certum, …) | Windows | ≈ **$100–200/year** | OV | SmartScreen reputation builds over downloads; may require re-validation per year |
+| **Purchased EV certificate** (DigiCert, GlobalSign, …) | Windows | ≈ **$300/year** | EV | Immediate SmartScreen reputation; requires hardware token or cloud HSM, which complicates CI |
+| **Self-signed certificate** | Windows | Free | none (untrusted) | No SmartScreen improvement — every user sees "unknown publisher"; useful only for local smoke tests (this is what `signing-e2e.yml` uses) |
+| **Apple Developer Program** | macOS | **$99/year** — no free route | Developer ID | Gatekeeper blocks unsigned apps entirely; notarization is tied to the paid membership. There is no self-signed workaround that users can open |
+| **GPG key pair** | Linux | **Free** | OpenPGP | Already implemented (`sign-gpg.sh`); generate a key, set one secret, done |
+
+**Recommendation for Rivulet:** apply at **SignPath Foundation** (free,
+OV-level, Microsoft-documented for open source) for Windows, keep macOS on
+the paid Apple Developer Program when beta approaches (unavoidable platform
+tax), and stay on the existing free GPG signing for Linux.
+
+**SignPath artifacts:** `rivulet-windows-unsigned-exe-<run_id>` (ZIP with
+the three executables) and `rivulet-windows-unsigned-msi-<run_id>` — the
+signed files are downloaded back into `staging/` and shipped as usual.
+
+#### What a maintainer must set up (SignPath Foundation)
+
+1. Apply at [signpath.org](https://signpath.org) (open-source project,
+   public repository, open build system). Approved projects start with a
+   test certificate and receive a production certificate after a build
+   review.
+2. In the SignPath portal: create a **project** (slug →
+   `SIGNPATH_PROJECT_SLUG`) with an **artifact configuration** matching the
+   uploaded ZIP layout, and a **signing policy** (slug →
+   `SIGNPATH_SIGNING_POLICY_SLUG`).
+3. Create an **API token** for a CI user with *Submitter* permission (→
+   `SIGNPATH_API_TOKEN`) and note the **organization ID** (→
+   `SIGNPATH_ORGANIZATION_ID`).
+4. Add the four secrets under **Settings → Secrets and variables →
+   Actions**. The workflow activates the SignPath path only when all four
+   are present.
+5. Recommended: install the **SignPath GitHub App** and allow repository
+   access so SignPath can verify workflow provenance (needed for the
+   production certificate review).
+
+Users can verify a signed release the usual way: Windows shows the publisher
+in the file properties; `Get-AuthenticodeSignature <file>` in PowerShell
+prints `Valid`.
+
 The automation itself is smoke-tested on every push **without any secrets**
 (`.github/workflows/signing-e2e.yml`): Windows via a committed self-signed
 certificate + Pester, macOS via a freshly generated self-signed identity,
