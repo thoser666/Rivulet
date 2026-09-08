@@ -43,11 +43,66 @@ Die Host-Runtime ist in zwei Subtasks aufgeteilt:
 - Chain bleibt immer validierbar, auch wenn alle Plugins übersprungen werden
 - Deterministisch, erweiterbar für spätere echte Plugin-Binaries
 
-**Offen (Z96-4):**
-- Z96-4: Doku Hosting-Contract, Plattform-Matrix, Gating
+## Z96-4 — Hosting-Contract, Plattform-Matrix und Gating (dieses Dokument)
 
-追踪在 [issue #96](https://github.com/thoser666/Rivulet/issues/96) (M5).
+Dieser Abschnitt ist die verbindliche Dokumentation des Hosting-Stands und
+dokumentiert ehrlich, was Hosting **heute** bedeutet und was nicht.
+
+### Was das `vst3`-Modul heute tut
+
+- **Config/Entdeckung/Probe** (M4): `VstPlugin`/`VstChain`-Konfigurationsvertrag,
+  deterministische Bundle-Entdeckung aus den plattformüblichen Suchpfaden,
+  dateisystembasierter Verfügbarkeits-Probe — alles ohne Plugin-Binary testbar.
+- **Host-Vertrag** (Z96-1): `VstHost`-Trait, `HostLoadResult` (Loaded/Skipped),
+  `SkipReason`-Enum, `HostHandle`, `ChainLoadResults`/`load_chain()` — der
+  Skip-on-Error-Vertrag (nie fatal, Muster wie `SkippedFilter`) ist normativ in
+  [`docs/vst3-host-boundary.md`](vst3-host-boundary.md) beschrieben.
+- **Windows-Host-Skelett** (Z96-2): `WindowsVstHost` mit
+  Bundle-Resolution (`LoadLibraryW` via `windows-sys 0.59`, Null-Handle-Guard)
+  und Vier-Stufen-Dispatch BundleResolve → FactoryObtain → ProcessorCreate →
+  Loaded; Non-Windows-Stubs überspringen alle Plugins.
+- **Skip-Path-Tests** (Z96-3): alle `SkipReason`-Varianten durch Mock-Hosts
+  abgedeckt, deterministisch, ohne Plugin-Binary.
+
+### Was ausdrücklich NICHT dabei ist
+
+- **Vollständiger Plugin-Stack**: Es findet noch keine Audio-Verarbeitung in
+  geladenen Plugins statt — kein Process-Call, kein Parameter-Routing, kein
+  Bus-/Layout-Handling. Z96-2 ist ein Host-**Skelett** (Laden/Handshake-Stufen),
+  kein funktionierender Effekt.
+- **GUI-Panel pro Spur**: Die Plugin-Auswahl/Reihenfolge pro Eingangsspur
+  (basiert auf der Discovery) ist ein offener Follow-up (siehe unten).
+- **macOS/Linux-Host**: dlopen/dylib-Hosts sind Follow-up; Non-Windows wird
+  derzeit durch Stubs abgedeckt, die sauber überspringen.
+- **UI-Plugins (Qt)**: aus Scope, wie im M5-Roadmap-Bullet festgelegt.
+
+### Plattform-Matrix und Gating
+
+| Plattform | Host-Runtime | Stand |
+|---|---|---|
+| Windows | COM-Skelett (`WindowsVstHost`, Z96-2) | Skelett gelandet; echter Audio-Durchsatz offen |
+| macOS | dlopen/dylib | Follow-up (Stubs überspringen sauber) |
+| Linux | dlopen/dylib | Follow-up (Stubs überspringen sauber) |
+
+Gating-Regeln, die so in CI abgesichert sind:
+
+- Der Pinning-Guard `vst3_host_boundary_and_skeleton_are_wired`
+  (`rivulet-core/tests/ci_pinning.rs`) pinnt Host-Vertrag, Windows-Skelett und
+  Skip-Path-Tests an die Quell- und Doku-Dateien — ein stiller Rückbau schlägt
+  CI fehl.
+- Die Skip-on-Error-Semantik ist durch Z96-3-Tests abgesichert: ein fehlendes
+  oder kaputtes Bundle kann die Kette niemals invalidieren oder die Pipeline
+  zum Absturz bringen.
+- Die Plattform-Feature-Matrix im README führt VST 3.x ehrlich als
+  „Konfigurationsvertrag + Entdeckung; Host-Skelett gelandet, Audio-Routing
+  offen“.
+
+Referenzen: [issue #96](https://github.com/thoser666/Rivulet/issues/96) (M5),
+Subtask-Doku [`docs/issues/96-vst3-hosting-subtasks.md`](issues/96-vst3-hosting-subtasks.md),
+Host-Vertrag [`docs/vst3-host-boundary.md`](vst3-host-boundary.md).
 
 ## Offen (Follow-up)
 
 - GUI: Plugin-Auswahl/Reihenfolge pro Spur (basiert dann auf der Discovery).
+- Echter Audio-Durchsatz durch geladene Plugins (Process-Call in die Engine-
+  Kette) — baut auf dem Z96-2-Skelett auf.
