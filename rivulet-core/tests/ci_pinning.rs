@@ -2039,6 +2039,21 @@ fn docs_freshness_is_ci_enforced() {
             "user-guide freshness script must provide {marker}"
         );
     }
+    // Feature topics are derived automatically from the GUI i18n keys, so a
+    // new GUI feature extends the doc check without editing the script.
+    for marker in [
+        "derive_required_topics",
+        "MIN_KEYS_PER_TOPIC",
+        "GENERIC_PREFIXES",
+        "LABEL_OVERRIDES",
+        "TOPIC_ALIASES",
+        ".tr(?:_fmt)?",
+    ] {
+        assert!(
+            freshness.contains(marker),
+            "user-guide freshness script must auto-derive topics ({marker})"
+        );
+    }
     // The guide must actually cover every AppView variant and feature topic.
     let guide = read("docs/user-guide.md");
     for view in [
