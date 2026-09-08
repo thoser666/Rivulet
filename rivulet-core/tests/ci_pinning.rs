@@ -3325,15 +3325,51 @@ fn vst3_host_boundary_and_skeleton_are_wired() {
         vst3.contains("LoadLibraryW") && vst3.contains("find_vst3_dll"),
         "vst3.rs must use LoadLibraryW and find_vst3_dll for Windows DLL loading"
     );
-    // The boundary doc must exist.
+    // The boundary doc must exist and carry the honest platform matrix
+    // (Z96-4): Windows skeleton shipped, macOS/Linux as follow-up, and the
+    // CI gating note.
     let doc = read("docs/vst3-host-boundary.md");
     assert!(
         doc.contains("VstHost") && doc.contains("HostLoadResult"),
         "docs/vst3-host-boundary.md must document the host boundary"
     );
-    // README M5 must mention VST3 hosting.
+    for marker in [
+        "Skeleton shipped",
+        "Follow-up (stubs skip cleanly)",
+        "vst3_host_boundary_and_skeleton_are_wired",
+    ] {
+        assert!(
+            doc.contains(marker),
+            "docs/vst3-host-boundary.md platform matrix must state {marker}"
+        );
+    }
+    // Z96-4: docs/vst3.md must document what hosting means today and what it
+    // explicitly does NOT include, with the platform matrix and gating rules.
+    let vst3_doc = read("docs/vst3.md");
+    for marker in [
+        "Z96-4",
+        "NICHT dabei",
+        "Plattform-Matrix und Gating",
+        "vst3_host_boundary_and_skeleton_are_wired",
+    ] {
+        assert!(
+            vst3_doc.contains(marker),
+            "docs/vst3.md must contain the Z96-4 marker {marker}"
+        );
+    }
+    // README M5 must state the honest VST3 status (contract + skeleton, audio
+    // routing open) and link the docs.
     let readme = read("README.md");
     assert!(readme.contains("VST3"));
+    assert!(
+        readme.contains("Hosting contract shipped")
+            && readme.contains("Windows COM host skeleton shipped"),
+        "README M5 VST3 bullet must state the Z96-1/Z96-2 status"
+    );
+    assert!(
+        readme.contains("audio routing through loaded plugins") && readme.contains("docs/vst3.md"),
+        "README must name the open follow-up and link docs/vst3.md"
+    );
 }
 
 #[test]

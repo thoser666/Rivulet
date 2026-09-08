@@ -99,6 +99,12 @@ The skip-on-error contract mirrors `SkippedFilter`:
 
 | Platform | Host Runtime | Status |
 |---|---|---|
-| Windows | COM (Z96-2) | Next subtask |
-| macOS | dlopen/dylib | Follow-up |
-| Linux | dlopen/dylib | Follow-up |
+| Windows | COM (`WindowsVstHost`, Z96-2) | Skeleton shipped (load stages); real audio routing open |
+| macOS | dlopen/dylib | Follow-up (stubs skip cleanly) |
+| Linux | dlopen/dylib | Follow-up (stubs skip cleanly) |
+
+Gating: the `vst3_host_boundary_and_skeleton_are_wired` pinning guard in
+`rivulet-core/tests/ci_pinning.rs` pins this contract, the Windows skeleton
+and the skip-path tests to source and docs — silent regressions fail CI. The
+skip-on-error semantics are enforced by the Z96-3 tests: a missing or broken
+bundle can never invalidate the chain or crash the pipeline.
