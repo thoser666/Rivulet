@@ -245,7 +245,74 @@ def self_test() -> int:
         errors = check(good, root / "broken.rs")
         assert len(errors) == 1 and "cannot derive" in errors[0], errors
 
+        # The --report-topics split: derived topics carry [derived], floor-only
+        # topics carry [floor], and the summary line adds up correctly.
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = report_topics(root / "app.rs")
+        assert code == 0, code
+        out = buf.getvalue()
+        assert "- Widget [derived]" in out, out
+        for floor_topic in REQUIRED_TOPICS:
+            assert f"- {floor_topic} [floor]" in out, out
+        summary = out.strip().splitlines()[-1]
+        assert summary.startswith("total: "), out
+        derived_n = len([l for l in out.splitlines() if l.endswith("[derived]")])
+        floor_n = len([l for l in out.splitlines() if l.endswith("[floor]")])
+        assert (derived_n, floor_n) == (1, 8), (derived_n, floor_n)
+        assert (
+            summary
+            == f"total: {derived_n} derived + {floor_n} floor = "
+            f"{derived_n + floor_n} required topics"
+        ), summary
+
+        # A broken app source exits 2 with an error, not a crash.
+        import contextlib
+
+        err = io.StringIO()
+        with redirect_stdout(err), contextlib.redirect_stderr(io.StringIO()):
+            code = report_topics(root / "broken.rs")
+        assert code == 2, code
+
     print("self-test OK")
+    return 0
+
+
+def report_topics(app_rs_path: Path) -> int:
+    """Print the derived vs. floor topic split for the wiki job's report.
+
+    Never fails on coverage (that is the check mode's job); exits 2 only on
+    environment errors. The split makes the weekly wiki report show which
+    topics were auto-derived from GUI i18n keys and which come from the
+    REQUIRED_TOPICS floor, so a maintainer can see the derivation working
+    (and spot GENERIC_PREFIXES/LABEL_OVERRIDES entries that need review).
+    """
+    if not app_rs_path.is_file():
+        print(f"error: app source not found: {app_rs_path}", file=sys.stderr)
+        return 2
+    app_rs = app_rs_path.read_text(encoding="utf-8")
+    try:
+        # Validate the AppView enum first so a broken GUI source is reported
+        # (exit 2) instead of silently reporting an empty topic list.
+        parse_app_views(app_rs)
+        derived = derive_required_topics(app_rs)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    floor = [t for t in REQUIRED_TOPICS if t not in derived]
+    print("user-guide topics: derived (from GUI i18n keys)")
+    for topic in derived:
+        print(f"- {topic} [derived]")
+    print("user-guide topics: floor (REQUIRED_TOPICS only)")
+    for topic in floor:
+        print(f"- {topic} [floor]")
+    print(
+        f"total: {len(derived)} derived + {len(floor)} floor = "
+        f"{len(derived) + len(floor)} required topics"
+    )
     return 0
 
 
@@ -254,10 +321,17 @@ def main() -> int:
     parser.add_argument("--guide", default="docs/user-guide.md")
     parser.add_argument("--app-rs", default="rivulet-gui/src/app.rs")
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument(
+        "--report-topics",
+        action="store_true",
+        help="print the derived vs. floor topic split and exit 0",
+    )
     args = parser.parse_args()
 
     if args.self_test:
         return self_test()
+    if args.report_topics:
+        return report_topics(Path(args.app_rs))
 
     guide = Path(args.guide)
     app_rs = Path(args.app_rs)

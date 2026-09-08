@@ -29,7 +29,7 @@ jobs:
           path: .freebuff-rivulet-wiki
           fetch-depth: 1
       - name: Validate language pairs
-        run: python3 scripts/check-wiki-translations.py .freebuff-rivulet-wiki
+        run: python3 scripts/check-wiki-translations.py .freebuff-rivulet-wiki --locales de,es
       - name: Check wiki links and translation drift
         run: python3 scripts/sync-wiki-translations.py --check .freebuff-rivulet-wiki
       - name: Fetch develop for origin-referenced audits
@@ -43,6 +43,12 @@ jobs:
         run: python3 scripts/audit-wiki-links.py .freebuff-rivulet-wiki --develop-from-origin --check-repo-docs
       - name: Staleness report (repo docs mirrored in the wiki)
         run: python3 scripts/audit-wiki-links.py .freebuff-rivulet-wiki --develop-from-origin --skip-external --stale
+      - name: User-guide topic report (derived vs. floor)
+        # Informational: shows which required user-guide topics were
+        # auto-derived from GUI i18n keys and which come from the explicit
+        # REQUIRED_TOPICS floor. Coverage enforcement itself runs in CI
+        # (check-user-guide-freshness.py without --report-topics).
+        run: python3 scripts/check-user-guide-freshness.py --report-topics
       - name: Publish synchronized wiki changes
         if: github.event_name == 'schedule' && github.repository_owner == 'thoser666' && env.WIKI_SYNC_TOKEN != ''
         env:
