@@ -140,6 +140,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
         run: |
           if [[ -n "$WINDOWS_CERT_BASE64" && -n "$WINDOWS_CERT_PASSWORD" ]]; then
             echo "windows_enabled=true" >> "$GITHUB_OUTPUT"
@@ -150,6 +151,11 @@ jobs:
             echo "macos_enabled=true" >> "$GITHUB_OUTPUT"
           else
             echo "macos_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "$LINUX_GPG_PRIVATE_KEY" ]]; then
+            echo "linux_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "linux_enabled=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Sign Windows executable (if credentials configured)
@@ -166,6 +172,15 @@ jobs:
         shell: bash
         run: |
           bash packaging/linux/build-appimage.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-linux-x86_64.AppImage"
+
+      - name: Sign Linux AppImage with GPG (if credentials configured)
+        if: runner.os == 'Linux' && steps.signing.outputs.linux_enabled == 'true'
+        shell: bash
+        env:
+          LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
+          LINUX_GPG_PASSPHRASE: ${{ secrets.LINUX_GPG_PASSPHRASE }}
+        run: |
+          bash packaging/linux/sign-gpg.sh "$(pwd)/staging/rivulet-linux-x86_64.AppImage"
 
       - name: Build macOS app bundle
         if: runner.os == 'macOS'
@@ -220,6 +235,7 @@ jobs:
             staging/rivulet-linux-x86_64-gui
             staging/rivulet-macos-aarch64-gui
             staging/rivulet-linux-x86_64.AppImage
+            staging/rivulet-linux-x86_64.AppImage.asc
             staging/rivulet-macos-aarch64.dmg
             staging/rivulet-windows-x86_64-portable.zip
             staging/rivulet-windows-x86_64.msi

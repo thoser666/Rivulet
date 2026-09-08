@@ -75,9 +75,16 @@ def load_repo_file(repo_root: Path, rel: str, from_git: bool) -> str | None:
             cwd=repo_root,
             capture_output=True,
         )
-        if result.returncode != 0:
+        if result.returncode == 0:
+            return result.stdout.decode("utf-8", errors="replace")
+        # The file may simply be NEW on the branch under review (it does not
+        # exist on origin/develop yet). Fall back to the working tree so a
+        # first-time doc is audited in the PR that introduces it instead of
+        # failing as "unreadable".
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
             return None
-        return result.stdout.decode("utf-8", errors="replace")
     try:
         return path.read_text(encoding="utf-8")
     except OSError:

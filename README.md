@@ -935,8 +935,18 @@ working for forks and for the unsigned development builds.
   - `APPLE_ID` — Apple ID used for notarization.
   - `APPLE_APP_PASSWORD` — app-specific password for the Apple ID.
   - `APPLE_TEAM_ID` — Apple Developer Team ID.
+- **Linux** (`packaging/linux/sign-gpg.sh`): the AppImage is signed with a
+  detached GPG signature (`rivulet-linux-x86_64.AppImage.asc`), as expected
+  by distributions and package managers. Secrets:
+  - `LINUX_GPG_PRIVATE_KEY` — ASCII-armored (or base64-encoded) GPG private
+    key (`gpg --armor --export-secret-key <key-id>`).
+  - `LINUX_GPG_PASSPHRASE` — passphrase of the key, if it has one
+    (optional).
 
-Add the secrets under **Settings → Secrets and variables → Actions**.
+Add the secrets under **Settings → Secrets and variables → Actions**. Full
+maintainer setup steps (certificate export, Apple notarization, GPG key
+creation, verification, troubleshooting) are in
+[`docs/code-signing.md`](docs/code-signing.md).
 
 ### Setting up the signing secrets
 
