@@ -31,6 +31,7 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | `github/codeql-action/init` | `v4.37.9` | `cdf488f595d80d6e07e03d4674febd5ab45fa938` | security.yml |
 | `github/codeql-action/upload-sarif` | `v4.37.9` | `cdf488f595d80d6e07e03d4674febd5ab45fa938` | scorecard.yml |
 | `ossf/scorecard-action` | `v2.4.4` | `2d1146689b8cda280b9bc96326124645441f03bc` | scorecard.yml |
+| `signpath/github-action-submit-signing-request` | `v2.3` | `c92b958760219087e01f8d67a1669ed57afe2627` | build-package.yml |
 | `softprops/action-gh-release` | `v3.0.3` | `efb35369e0ad2afab669f228072c1b0d510eae64` | ci.yml, release.yml |
 <!-- action-pins-table:end -->
 
