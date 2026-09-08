@@ -1290,6 +1290,84 @@ fn beta_gate_checker_is_wired_up() {
 }
 
 #[test]
+fn code_signing_automation_is_wired_up() {
+    // Issue #50: release packages are signed when the matching secrets are
+    // configured (Windows Authenticode, macOS codesign + notarization, Linux
+    // GPG). This pins the whole surface so a signing regression (removed
+    // secret, dropped e2e job, missing doc) fails CI instead of silently
+    // shipping unsigned packages.
+    let build = read(".github/workflows/build-package.yml");
+    assert!(
+        build.contains("WINDOWS_CERT_BASE64") && build.contains("WINDOWS_CERT_PASSWORD"),
+        "build-package.yml must read the Windows signing secrets"
+    );
+    assert!(
+        build.contains("MACOS_CERT_BASE64")
+            && build.contains("APPLE_ID")
+            && build.contains("APPLE_APP_PASSWORD")
+            && build.contains("APPLE_TEAM_ID"),
+        "build-package.yml must read the macOS signing secrets"
+    );
+    assert!(
+        build.contains("LINUX_GPG_PRIVATE_KEY") && build.contains("linux_enabled"),
+        "build-package.yml must gate Linux GPG signing on LINUX_GPG_PRIVATE_KEY"
+    );
+    assert!(
+        build.contains("Sign Linux AppImage with GPG")
+            && build.contains("packaging/linux/sign-gpg.sh"),
+        "build-package.yml must run the Linux GPG signing script"
+    );
+    assert!(
+        build.contains("AppImage.asc"),
+        "build-package.yml must upload the detached .asc signature"
+    );
+
+    let e2e = read(".github/workflows/signing-e2e.yml");
+    assert!(
+        e2e.contains("Linux GPG signing") && e2e.contains("packaging/linux/test-gpg-signing.sh"),
+        "signing-e2e.yml must smoke-test Linux GPG signing without secrets"
+    );
+
+    let sign_script = read("packaging/linux/sign-gpg.sh");
+    assert!(
+        sign_script.contains("LINUX_GPG_PRIVATE_KEY")
+            && sign_script.contains("LINUX_GPG_PASSPHRASE")
+            && sign_script.contains("detach-sign"),
+        "sign-gpg.sh must require the key secret and produce detached signatures"
+    );
+
+    let doc = read("docs/code-signing.md");
+    for secret in [
+        "WINDOWS_CERT_BASE64",
+        "WINDOWS_CERT_PASSWORD",
+        "MACOS_CERT_BASE64",
+        "MACOS_CERT_PASSWORD",
+        "APPLE_ID",
+        "APPLE_APP_PASSWORD",
+        "APPLE_TEAM_ID",
+        "LINUX_GPG_PRIVATE_KEY",
+        "LINUX_GPG_PASSPHRASE",
+    ] {
+        assert!(
+            doc.contains(secret),
+            "docs/code-signing.md must document the {secret} secret"
+        );
+    }
+    assert!(
+        doc.contains("packaging/linux/sign-gpg.sh")
+            && doc.contains("packaging/macos/sign-notarize.sh")
+            && doc.contains("packaging/windows/sign.ps1"),
+        "docs/code-signing.md must reference all three platform signing scripts"
+    );
+
+    let readme = read("README.md");
+    assert!(
+        readme.contains("docs/code-signing.md") && readme.contains("LINUX_GPG_PRIVATE_KEY"),
+        "README must link the code-signing doc and document the Linux GPG secret"
+    );
+}
+
+#[test]
 fn dependabot_auto_merge_workflow_is_wired_up() {
     let wf = read(".github/workflows/dependabot-auto-merge.yml");
     assert!(

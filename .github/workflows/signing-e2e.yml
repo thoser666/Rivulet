@@ -39,3 +39,15 @@ jobs:
       - name: Smoke-test codesign
         shell: bash
         run: bash packaging/macos/test-signing.sh
+
+  linux:
+    name: Linux GPG signing (throwaway key)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Smoke-test GPG signing
+        shell: bash
+        run: bash packaging/linux/test-gpg-signing.sh
