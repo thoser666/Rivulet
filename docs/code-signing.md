@@ -6,11 +6,17 @@ forks and development builds keep working). Signing never fails a release —
 it is a best-effort enrichment of the alpha channel and a hard requirement
 of the [Beta-Gate](../README.md#beta-gate) (criterion 4) for beta/RC/stable.
 
-| Platform | Artifact | Script | Secrets |
+| Platform | Artifact | Script / Action | Secrets |
 |---|---|---|---|
-| Windows | `rivulet-gui.exe`, `rivulet.exe`, `rivulet-updater.exe`, `.msi` | `packaging/windows/sign.ps1` (signtool) | `WINDOWS_CERT_BASE64`, `WINDOWS_CERT_PASSWORD` |
+| Windows (PFX) | `rivulet-gui.exe`, `rivulet.exe`, `rivulet-updater.exe`, `.msi` | `packaging/windows/sign.ps1` (signtool) | `WINDOWS_CERT_BASE64`, `WINDOWS_CERT_PASSWORD` |
+| Windows (SignPath) | `rivulet-gui.exe`, `rivulet.exe`, `rivulet-updater.exe`, `.msi` | `signpath/github-action-submit-signing-request@v2.3` (file-based) | `SIGNPATH_API_TOKEN`, `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG` |
 | macOS | `.app` (hardened runtime), `.dmg` (notarized + stapled) | `packaging/macos/codesign-app.sh`, `packaging/macos/sign-notarize.sh` | `MACOS_CERT_BASE64`, `MACOS_CERT_PASSWORD`, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` |
 | Linux | `.AppImage` (detached `.asc` signature) | `packaging/linux/sign-gpg.sh` (GPG) | `LINUX_GPG_PRIVATE_KEY` (optional `LINUX_GPG_PASSPHRASE`) |
+
+**Windows precedence:** when the four SignPath secrets are configured, the
+SignPath Foundation path is used and the PFX path is skipped (they are
+mutually exclusive). Otherwise, when the two PFX secrets are configured,
+signtool signs locally. With neither, Windows artifacts stay unsigned.
 
 The automation itself is smoke-tested on every push **without any secrets**
 (`.github/workflows/signing-e2e.yml`): Windows via a committed self-signed
@@ -56,6 +62,51 @@ reports exactly which secrets are still missing (criterion 4 of the Beta-Gate).
    packaging (so the portable ZIP and MSI embed signed binaries) and signs
    the MSI afterwards. Timestamping uses DigiCert by default;
    `WINDOWS_TIMESTAMP_URL` overrides it (`off` disables it).
+
+### Windows — SignPath Foundation (free for open source, `SIGNPATH_*`)
+
+SignPath Foundation (signpath.org) gives qualifying open-source projects a
+**free OV-level Authenticode certificate**. The certificate lives in
+SignPath's HSM and never leaves their vault — the build workflow submits a
+*signing request* and downloads the signed artifact. This is the preferred
+Windows path when configured (it takes precedence over the PFX path).
+
+**Hash-based vs. file-based — honest distinction.** Rivulet uses SignPath's
+**file-based** signing request flow (the official
+`signpath/github-action-submit-signing-request@v2.3` action): the unsigned
+artifacts are uploaded, SignPath signs them, and the signed artifacts are
+downloaded back. SignPath's true **hash-based** signing (private key stays
+in the HSM while only digests cross the wire, via the Crypto Providers
+KSP/Cryptoki) is part of the paid **Code Signing Gateway** product tier;
+the free Foundation program does not expose it. In both cases the private
+key never leaves SignPath's HSM — the security property is the same, only
+the transport differs.
+
+1. **Apply** at signpath.org for the Foundation program (open-source
+   project, public repository, open build system). Approved projects get a
+test certificate first and a production certificate after a build
+   review.
+2. **Create the SignPath project and signing policy** in the SignPath
+   portal. The project needs an **artifact configuration** whose root
+   matches what the workflow uploads: the EXEs are uploaded as a GitHub
+   artifact (a ZIP containing `rivulet-gui.exe`, `rivulet.exe`,
+   `rivulet-updater.exe`) and the MSI as a separate artifact. Configure
+   the artifact configuration accordingly (e.g. a `<zip-file>` root for
+   the EXE bundle, `<msi-file>` for the installer) and note the **project
+   slug** and **signing policy slug**.
+3. **Create an API token** for a CI user with *Submitter* permission on the
+   signing policy; note it as the API token.
+4. **Create the four secrets**: `SIGNPATH_API_TOKEN`, `SIGNPATH_ORGANIZATION_ID`,
+   `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG`. The workflow
+   only activates the SignPath path when **all four** are present.
+5. Optional: install the **SignPath GitHub App** and allow access to the
+   repository so SignPath can verify the workflow provenance and the
+   artifact's origin (recommended for the production certificate; the
+   action also needs `actions: read` permission, which is already set in
+   `build-package.yml`).
+
+When both the SignPath and PFX secret groups are configured, SignPath wins
+(see the precedence note above).
 
 ### macOS — Developer ID + notarization (`MACOS_CERT_*` + `APPLE_*`)
 
@@ -108,7 +159,11 @@ the AppImage. The workflow produces `rivulet-linux-x86_64.AppImage.asc`.
 
 - `gh secret list` shows which names are configured.
 - `scripts/check-beta-gate.py` (with a token that can read secrets) reports
-  which secrets are missing — criterion 4 of the Beta-Gate.
+  which secrets are missing — criterion 4 of the Beta-Gate. Windows is
+  satisfied by **either** the PFX pair **or** the SignPath set.
+- `python3 scripts/test-signpath-config.py` validates the SignPath wiring in
+  `build-package.yml` (secrets, action pin, upload → submit → copy-back
+  round trips, precedence); `--self-test` verifies the checker itself.
 - With all secrets present, the next release build signs the packages; the
   signed artifacts are listed in the release’s `SHA256SUMS` manifest.
 
@@ -128,3 +183,8 @@ the AppImage. The workflow produces `rivulet-linux-x86_64.AppImage.asc`.
 - **Secrets are set but the release is still unsigned** — every platform
   requires its **full** secret set (see the table); a single missing secret
   disables that platform’s signing for that release.
+- **SignPath signing request fails** — check the four secrets are all set,
+  the API token has *Submitter* permission on the signing policy, and the
+  artifact configuration matches the uploaded ZIP layout (see step 2
+  above). The action logs the signing-request URL; open it in the SignPath
+  portal for the exact rejection reason.

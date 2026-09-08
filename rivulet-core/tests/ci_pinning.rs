@@ -1322,6 +1322,62 @@ fn code_signing_automation_is_wired_up() {
         "build-package.yml must upload the detached .asc signature"
     );
 
+    // SignPath Foundation path: all four secrets gated, pinned action,
+    // upload -> submit -> copy-back round trips, precedence over PFX.
+    for secret in [
+        "SIGNPATH_API_TOKEN",
+        "SIGNPATH_ORGANIZATION_ID",
+        "SIGNPATH_PROJECT_SLUG",
+        "SIGNPATH_SIGNING_POLICY_SLUG",
+    ] {
+        assert!(
+            build.contains(secret) && build.contains(&format!("${secret}")),
+            "build-package.yml must read and gate the {secret} secret"
+        );
+    }
+    assert!(
+        build.contains("signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627"),
+        "build-package.yml must pin the SignPath action to the reviewed SHA"
+    );
+    assert!(
+        build.contains("wait-for-completion: true") && build.contains("output-artifact-directory"),
+        "SignPath submits must wait for completion and download the signed artifact"
+    );
+    assert!(
+        build.contains("steps.signpath-upload-exe.outputs.artifact-id")
+            && build.contains("steps.signpath-upload-msi.outputs.artifact-id"),
+        "SignPath submits must consume the uploaded artifact ids"
+    );
+    assert!(
+        build.contains("Copy-Item \"signpath-signed/exe/rivulet-gui.exe\"")
+            && build.contains("Copy-Item \"signpath-signed/msi/rivulet-windows-x86_64.msi\""),
+        "signed EXEs and MSI must be copied back into staging"
+    );
+    assert!(
+        build.contains("steps.signing.outputs.signpath_enabled != 'true'"),
+        "PFX steps must be skipped when the SignPath path is active (precedence)"
+    );
+    assert!(
+        build.contains("actions: read"),
+        "build-package.yml needs actions: read for the SignPath artifact download"
+    );
+
+    let signpath_check = read("scripts/test-signpath-config.py");
+    assert!(
+        signpath_check.contains("c92b958760219087e01f8d67a1669ed57afe2627")
+            && signpath_check.contains("signpath_enabled")
+            && signpath_check.contains("--self-test"),
+        "test-signpath-config.py must pin the action SHA and offer --self-test"
+    );
+
+    let beta_gate = read("scripts/check-beta-gate.py");
+    assert!(
+        beta_gate.contains("SIGNPATH_API_TOKEN")
+            && beta_gate.contains("WINDOWS_SIGNPATH_SECRETS")
+            && beta_gate.contains("windows_signing_satisfied"),
+        "check-beta-gate.py must accept the SignPath set as Windows signing"
+    );
+
     let e2e = read(".github/workflows/signing-e2e.yml");
     assert!(
         e2e.contains("Linux GPG signing") && e2e.contains("packaging/linux/test-gpg-signing.sh"),
@@ -1349,6 +1405,10 @@ fn code_signing_automation_is_wired_up() {
         "APPLE_TEAM_ID",
         "LINUX_GPG_PRIVATE_KEY",
         "LINUX_GPG_PASSPHRASE",
+        "SIGNPATH_API_TOKEN",
+        "SIGNPATH_ORGANIZATION_ID",
+        "SIGNPATH_PROJECT_SLUG",
+        "SIGNPATH_SIGNING_POLICY_SLUG",
     ] {
         assert!(
             doc.contains(secret),
@@ -1358,14 +1418,21 @@ fn code_signing_automation_is_wired_up() {
     assert!(
         doc.contains("packaging/linux/sign-gpg.sh")
             && doc.contains("packaging/macos/sign-notarize.sh")
-            && doc.contains("packaging/windows/sign.ps1"),
-        "docs/code-signing.md must reference all three platform signing scripts"
+            && doc.contains("packaging/windows/sign.ps1")
+            && doc.contains("signpath/github-action-submit-signing-request"),
+        "docs/code-signing.md must reference all signing scripts and the SignPath action"
+    );
+    assert!(
+        doc.contains("Hash-based vs. file-based"),
+        "docs/code-signing.md must document the hash-vs-file-based distinction"
     );
 
     let readme = read("README.md");
     assert!(
-        readme.contains("docs/code-signing.md") && readme.contains("LINUX_GPG_PRIVATE_KEY"),
-        "README must link the code-signing doc and document the Linux GPG secret"
+        readme.contains("docs/code-signing.md")
+            && readme.contains("LINUX_GPG_PRIVATE_KEY")
+            && readme.contains("SIGNPATH_API_TOKEN"),
+        "README must link the code-signing doc and document the Linux GPG + SignPath secrets"
     );
 }
 

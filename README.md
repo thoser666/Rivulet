@@ -948,6 +948,16 @@ maintainer setup steps (certificate export, Apple notarization, GPG key
 creation, verification, troubleshooting) are in
 [`docs/code-signing.md`](docs/code-signing.md).
 
+**Free for open source:** instead of buying a Windows certificate, apply at
+[SignPath Foundation](https://signpath.org) — qualifying open-source
+projects get a free OV-level Authenticode certificate. Configure the four
+`SIGNPATH_API_TOKEN`, `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`,
+`SIGNPATH_SIGNING_POLICY_SLUG` secrets and the workflow signs the Windows
+executables and MSI via a signing request (the certificate stays in
+SignPath's HSM); the SignPath path takes precedence over the PFX path when
+both are configured. The Beta-Gate (criterion 4) accepts either the PFX
+pair or the SignPath set for Windows.
+
 ### Setting up the signing secrets
 
 All seven secrets are a [Beta-Gate](#beta-gate) criterion (criterion 4): CI
