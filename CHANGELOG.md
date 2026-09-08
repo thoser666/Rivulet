@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+- feat(wiki): Spanish as third wiki language — 11 new Spanish wiki pages
+  (Home, Getting Started, Recording guide, Streaming, Troubleshooting,
+  Windows/Linux/macOS, Discord Setup + Troubleshooting, Development
+  Workflow) published to the GitHub wiki; every EN/DE page's
+  language-switch line gains the Español link, `Languages.md` lists the
+  new language; `check-wiki-translations.py` accepts `--locales de,es`
+  (the workflow now checks EN/DE/ES pairs), translated pages are
+  recognized by any known locale suffix regardless of configuration (a
+  Spanish page is never mistaken for a canonical English page), and both
+  sync scripts share the locale list via the new
+  `scripts/check_wiki_locales.py` single source of truth (de, es, fr
+  pre-registered — adding a language is now a purely mechanical step);
+  `sync-wiki-translations.py` skips every translated stem, not just `-de`
 - fix(signing): remove `permissions.actions: read` from build-package.yml —
   GitHub rejects a reusable workflow_call file with that top-level
   permission at startup (bisected as the root cause of the CI

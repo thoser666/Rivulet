@@ -17,6 +17,8 @@ from pathlib import Path
 import re
 import sys
 
+from check_wiki_locales import KNOWN_LOCALES
+
 # Language-switch link on a canonical page: "[Deutsch](Page-de)" etc.
 SWITCH_LINK_RE = re.compile(
     r"\[([^\]]+)\]\(([^)#?\s]+)\)", re.IGNORECASE
@@ -90,9 +92,7 @@ def _has_locale_suffix(stem: str, locales: list[str]) -> bool:
     # Any known-locale suffix marks a translated page, even when that locale
     # is not currently configured — a Spanish page must never be mistaken for
     # a canonical English page just because only German checking is enabled.
-    return any(
-        stem.endswith(f"-{locale}") for locale in LOCALE_LINK_WORDS if locale != "en"
-    )
+    return any(stem.endswith(f"-{locale}") for locale in KNOWN_LOCALES)
 
 
 def self_test() -> int:

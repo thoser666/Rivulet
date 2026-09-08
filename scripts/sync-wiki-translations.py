@@ -56,7 +56,9 @@ def verify_remote(root: Path) -> None:
 def sync(root: Path, check_only: bool) -> list[str]:
     findings: list[str] = []
     for source in sorted(root.glob("*.md")):
-        if source.stem.endswith("-de") or source.name == "Languages.md":
+        # Translated pages (any known locale suffix) are never canonical:
+        # only locale-free pages get a German mirror check here.
+        if _is_translated(source.stem) or source.name == "Languages.md":
             continue
         target = root / f"{source.stem}-de.md"
         if not target.exists():
@@ -71,6 +73,13 @@ def sync(root: Path, check_only: bool) -> list[str]:
                     encoding="utf-8",
                 )
     return findings
+
+
+def _is_translated(stem: str) -> bool:
+    """True when the stem carries a known locale suffix (-de, -es, -fr, ...)."""
+    from check_wiki_locales import KNOWN_LOCALES
+
+    return any(stem.endswith(f"-{loc}") for loc in KNOWN_LOCALES if loc != "en")
 
 
 def main() -> int:
