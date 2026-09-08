@@ -1337,6 +1337,8 @@ fn code_signing_automation_is_wired_up() {
     );
 
     let doc = read("docs/code-signing.md");
+    // Static message on purpose: a `{secret}` format arg would flow the
+    // secret name into a format sink, which CodeQL flags as secret logging.
     for secret in [
         "WINDOWS_CERT_BASE64",
         "WINDOWS_CERT_PASSWORD",
@@ -1350,7 +1352,7 @@ fn code_signing_automation_is_wired_up() {
     ] {
         assert!(
             doc.contains(secret),
-            "docs/code-signing.md must document the {secret} secret"
+            "docs/code-signing.md must document every code-signing secret"
         );
     }
     assert!(
