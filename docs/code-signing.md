@@ -133,7 +133,8 @@ the transport differs.
 1. **Apply** at signpath.org for the Foundation program (open-source
    project, public repository, open build system). Approved projects get a
 test certificate first and a production certificate after a build
-   review.
+   review. A ready-to-submit application draft lives in
+   [signpath-application-draft.md](signpath-application-draft.md).
 2. **Create the SignPath project and signing policy** in the SignPath
    portal. The project needs an **artifact configuration** whose root
    matches what the workflow uploads: the EXEs are uploaded as a GitHub
