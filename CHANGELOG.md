@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+- fix(signing): remove `permissions.actions: read` from build-package.yml —
+  GitHub rejects a reusable workflow_call file with that top-level
+  permission at startup (bisected as the root cause of the CI
+  startup_failure on PR #124: with the permission, every CI run died before
+  starting; without it, CI starts normally). It is also unnecessary here:
+  on public repositories the default `github.token` downloads workflow
+  artifacts without extra permission. The pinning guard and
+  `scripts/test-signpath-config.py` now assert the permission is ABSENT so
+  it cannot silently return; `docs/code-signing.md` gains a
+  "Free signing options for open source" comparison table (SignPath
+  Foundation free vs Azure Artifact Signing $9.99/mo vs purchased OV/EV
+  certificates vs self-signed vs Apple's $99/yr with no free route vs free
+  Linux GPG) with an explicit Rivulet recommendation
+- feat(signing): SignPath Foundation Windows signing path — Windows
+  artifacts (the three executables + the MSI) can now be signed via
+  SignPath Foundation (free OV-level Authenticode for open source)
+  through the official `signpath/github-action-submit-signing-request`
+  action (pinned `c92b9587`, v2.3) instead of a locally held PFX: the
+  unsigned files are uploaded as a GitHub artifact, signed in SignPath's
+  HSM (the certificate never leaves the vault) and downloaded back into
+  staging. `build-package.yml` gates the path on all four `SIGNPATH_*`
+  secrets, gives it precedence over the PFX path (mutually exclusive) and
+  adds `actions: read` for the artifact download; `scripts/check-beta-gate.py`
+  criterion 4 now accepts **either** the PFX pair **or** the SignPath set
+  for Windows (`missing_signing_secrets` / `windows_signing_satisfied`);
+  new `scripts/test-signpath-config.py` validates the wiring (secrets,
+  pin, upload → submit → copy-back round trips, precedence, wait flag)
+  with 5 self-test cases; `docs/code-signing.md` gains the SignPath
+  section with the honest hash-vs-file-based distinction (hash-based
+  signing is a paid Code Signing Gateway feature); README updated
 - feat(signing): Linux GPG signing + maintainer setup doc (issue #50) — the
   release pipeline now signs the Linux AppImage with a detached GPG signature
   (`rivulet-linux-x86_64.AppImage.asc`) when `LINUX_GPG_PRIVATE_KEY` is

@@ -65,15 +65,43 @@ OS_LIST_RE = re.compile(r"^\s*os:\s*\[\s*(.+?)\s*\]\s*$")
 GITHUB_REMOTE_RE = re.compile(r"github\.com[/:]([^/]+)/([^/]+?)(?:\.git)?$")
 
 # All secrets the signing automation needs (README → Releases → Code signing).
-REQUIRED_SECRETS = [
-    "WINDOWS_CERT_BASE64",
-    "WINDOWS_CERT_PASSWORD",
+# Windows signing is satisfied by EITHER the PFX/signtool pair OR the SignPath
+# Foundation secrets (free for open source, file-based signing request); macOS
+# always needs the Apple set. Linux GPG is optional for the beta gate.
+WINDOWS_PFX_SECRETS = ["WINDOWS_CERT_BASE64", "WINDOWS_CERT_PASSWORD"]
+WINDOWS_SIGNPATH_SECRETS = [
+    "SIGNPATH_API_TOKEN",
+    "SIGNPATH_ORGANIZATION_ID",
+    "SIGNPATH_PROJECT_SLUG",
+    "SIGNPATH_SIGNING_POLICY_SLUG",
+]
+MACOS_SECRETS = [
     "MACOS_CERT_BASE64",
     "MACOS_CERT_PASSWORD",
     "APPLE_ID",
     "APPLE_APP_PASSWORD",
     "APPLE_TEAM_ID",
 ]
+REQUIRED_SECRETS = WINDOWS_PFX_SECRETS + WINDOWS_SIGNPATH_SECRETS + MACOS_SECRETS
+
+
+def windows_signing_satisfied(present):
+    """Windows signing is configured with the PFX pair OR the SignPath set."""
+    return all(s in present for s in WINDOWS_PFX_SECRETS) or all(
+        s in present for s in WINDOWS_SIGNPATH_SECRETS
+    )
+
+
+def missing_signing_secrets(present):
+    """Return the secrets still missing. Windows is satisfied by EITHER path:
+    when one Windows alternative is complete, the other's secrets are NOT
+    reported missing (only macOS is always mandatory)."""
+    missing: list[str] = []
+    if not windows_signing_satisfied(present):
+        missing += [s for s in WINDOWS_PFX_SECRETS if s not in present]
+        missing += [s for s in WINDOWS_SIGNPATH_SECRETS if s not in present]
+    missing += [s for s in MACOS_SECRETS if s not in present]
+    return missing
 
 BLOCKER_LABEL = "release-blocker"
 
@@ -176,12 +204,14 @@ def gh_api(token, repo, path):
 
 
 def check_secrets(token, repo):
-    """Return the list of missing signing secrets, or None if unverifiable."""
+    """Return ``(present, missing)`` signing secrets, or ``(None, None)`` if
+    unverifiable. Windows is satisfied by either the PFX pair or the SignPath
+    Foundation set; macOS secrets are always mandatory."""
     data = gh_api(token, repo, "actions/secrets")
     if data is None or not isinstance(data, dict) or "secrets" not in data:
-        return None
+        return None, None
     present = {s["name"] for s in data["secrets"]}
-    return [s for s in REQUIRED_SECRETS if s not in present]
+    return present, missing_signing_secrets(present)
 
 
 def check_ci_green(token, repo, ref):
@@ -265,7 +295,7 @@ def evaluate(repo, ref, token):
     ]
 
     if token:
-        missing = check_secrets(token, repo)
+        present, missing = check_secrets(token, repo)
         if missing is None:
             results.append(
                 {
@@ -285,12 +315,19 @@ def evaluate(repo, ref, token):
                 }
             )
         else:
+            windows = (
+                "PFX"
+                if all(s in present for s in WINDOWS_PFX_SECRETS)
+                else "SignPath"
+                if all(s in present for s in WINDOWS_SIGNPATH_SECRETS)
+                else "none"
+            )
             results.append(
                 {
                     "criterion": 4,
                     "name": "Code-signing secrets configured",
                     "status": "met",
-                    "detail": "all " + str(len(REQUIRED_SECRETS)) + " signing secrets present",
+                    "detail": f"Windows signing via {windows}, macOS signing secrets complete",
                 }
             )
 

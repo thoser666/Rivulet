@@ -25,6 +25,12 @@ on:
         required: true
         type: string
 
+# NOTE: no `actions: read` here on purpose. GitHub rejects a reusable
+# workflow_call file whose top-level permissions include `actions:` at
+# startup (CI start-up failure, bisected on test/ci-startup-bisect).
+# It is also unnecessary for this repository: on PUBLIC repos the default
+# `github.token` can download workflow artifacts without extra permission
+# (SignPath's docs require `actions: read` only for private repositories).
 permissions:
   contents: read
 
@@ -141,6 +147,10 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           LINUX_GPG_PRIVATE_KEY: ${{ secrets.LINUX_GPG_PRIVATE_KEY }}
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
         run: |
           if [[ -n "$WINDOWS_CERT_BASE64" && -n "$WINDOWS_CERT_PASSWORD" ]]; then
             echo "windows_enabled=true" >> "$GITHUB_OUTPUT"
@@ -157,9 +167,59 @@ jobs:
           else
             echo "linux_enabled=false" >> "$GITHUB_OUTPUT"
           fi
+          # SignPath Foundation (free for open source) takes precedence over
+          # the PFX path: the certificate stays in SignPath's HSM and the
+          # artifacts are signed file-based via a signing request. All four
+          # secrets must be present for the path to activate.
+          if [[ -n "$SIGNPATH_API_TOKEN" && -n "$SIGNPATH_ORGANIZATION_ID" && -n "$SIGNPATH_PROJECT_SLUG" && -n "$SIGNPATH_SIGNING_POLICY_SLUG" ]]; then
+            echo "signpath_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signpath_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Sign Windows executable (if credentials configured)
-        if: runner.os == 'Windows' && steps.signing.outputs.windows_enabled == 'true'
+      # ------------------------------------------------------------------
+      # WINDOWS SIGNING — SignPath Foundation (free for open source) takes
+      # precedence over the PFX path; the two are mutually exclusive. The
+      # SignPath action signs artifacts file-based: the unsigned files are
+      # uploaded as a GitHub artifact, SignPath signs them in its HSM (the
+      # certificate never leaves the vault) and the signed artifact is
+      # downloaded back into staging.
+      # ------------------------------------------------------------------
+      - name: Upload Windows EXEs for SignPath signing
+        if: runner.os == 'Windows' && steps.signing.outputs.signpath_enabled == 'true'
+        id: signpath-upload-exe
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rivulet-windows-unsigned-exe-${{ github.run_id }}
+          path: |
+            staging/rivulet-gui.exe
+            staging/rivulet.exe
+            staging/rivulet-updater.exe
+
+      - name: Submit SignPath signing request (EXEs)
+        if: runner.os == 'Windows' && steps.signing.outputs.signpath_enabled == 'true'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.signpath-upload-exe.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signpath-signed/exe
+          parameters: |
+            version: "${{ inputs.version }}"
+
+      - name: Copy signed EXEs back into staging
+        if: runner.os == 'Windows' && steps.signing.outputs.signpath_enabled == 'true'
+        shell: pwsh
+        run: |
+          Copy-Item "signpath-signed/exe/rivulet-gui.exe" staging/rivulet-gui.exe -Force
+          Copy-Item "signpath-signed/exe/rivulet.exe" staging/rivulet.exe -Force
+          Copy-Item "signpath-signed/exe/rivulet-updater.exe" staging/rivulet-updater.exe -Force
+
+      - name: Sign Windows executable (PFX, if credentials configured)
+        if: runner.os == 'Windows' && steps.signing.outputs.windows_enabled == 'true' && steps.signing.outputs.signpath_enabled != 'true'
         shell: pwsh
         env:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
@@ -204,8 +264,36 @@ jobs:
       # ------------------------------------------------------------------
       # CODE SIGNING (only if the secrets are configured)
       # ------------------------------------------------------------------
-      - name: Sign Windows MSI (if credentials configured)
-        if: runner.os == 'Windows' && steps.signing.outputs.windows_enabled == 'true'
+      - name: Upload MSI for SignPath signing
+        if: runner.os == 'Windows' && steps.signing.outputs.signpath_enabled == 'true'
+        id: signpath-upload-msi
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rivulet-windows-unsigned-msi-${{ github.run_id }}
+          path: staging/rivulet-windows-x86_64.msi
+
+      - name: Submit SignPath signing request (MSI)
+        if: runner.os == 'Windows' && steps.signing.outputs.signpath_enabled == 'true'
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.signpath-upload-msi.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signpath-signed/msi
+          parameters: |
+            version: "${{ inputs.version }}"
+
+      - name: Copy signed MSI back into staging
+        if: runner.os == 'Windows' && steps.signing.outputs.signpath_enabled == 'true'
+        shell: pwsh
+        run: |
+          Copy-Item "signpath-signed/msi/rivulet-windows-x86_64.msi" staging/rivulet-windows-x86_64.msi -Force
+
+      - name: Sign Windows MSI (PFX, if credentials configured)
+        if: runner.os == 'Windows' && steps.signing.outputs.windows_enabled == 'true' && steps.signing.outputs.signpath_enabled != 'true'
         shell: pwsh
         env:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
