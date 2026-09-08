@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- docs(signing): SignPath Foundation application draft
+  (`docs/signpath-application-draft.md`) — ready-to-submit application text
+  (project description, repo links, build-system openness, security
+  posture), linked from `docs/code-signing.md`
 - feat(wiki): Spanish as third wiki language — 11 new Spanish wiki pages
   (Home, Getting Started, Recording guide, Streaming, Troubleshooting,
   Windows/Linux/macOS, Discord Setup + Troubleshooting, Development
