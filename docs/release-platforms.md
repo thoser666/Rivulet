@@ -10,6 +10,7 @@ support costs. The canonical source remains [GitHub Releases](https://github.com
 | --- | --- | --- | --- | --- | --- |
 | 1 | M5, supported by M7 | GitHub Releases | Windows, macOS, Linux | Keep as the source of truth for release notes, checksums, and updater downloads. | Active: MSI/portable ZIP, DMG, and AppImage are built by CI. |
 | 2 | M5, supported by M7 | WinGet | Windows | Add after the MSI product identity and signing are stable. It provides native discovery and upgrades without another binary hosting system. | Manifest generation/validation are wired (packaging/windows/generate-winget-manifest.ps1 + dry-run job); submission to `microsoft/winget-pkgs` is still open (external review). |
+| 2 | M5, supported by M7 | Scoop | Windows | Add now: Scoop requires no code signing, so this is the only native Windows package manager available before signing lands. The bucket repo hosts a generated, hash-pinned manifest. | Active: bucket `thoser666/scoop-bucket` (`scoop bucket add rivulet https://github.com/thoser666/scoop-bucket`); manifest generated + byte-verified by the **Distribution Readiness → scoop** dry-run job. |
 | 2 | M5, supported by M7 | Flathub | Linux | Prefer this over maintaining distribution-specific packages. It gives Linux users a familiar, sandboxed, updateable installation. | Open: a Flatpak manifest, permissions review, and Flathub submission are needed. |
 | 3 | M5 | Homebrew Cask | macOS | Useful for developer-oriented installs; publish only signed/notarized DMGs. | Readiness workflow validates the DMG; cask/tap submission is still open. |
 | 3 | M5 | Steam | Windows, macOS | Worth preparing for the gaming-streamer audience, but treat it as a secondary channel rather than the update authority. | Open: Steam App ID, depots, SteamPipe credentials, store metadata, and a Steam-specific package layout. |
@@ -63,6 +64,27 @@ release asset `rivulet-windows-x86_64.msi` with its SHA-256, the MSI
    a PR to `microsoft/winget-pkgs` and let the community validation run.
 6. Add an opt-in PR/dispatch workflow that submits only reviewed manifest
    changes; never upload unsigned binaries.
+
+### Scoop
+
+The only native Windows package manager that does **not** require code
+signing — the channel is usable before SignPath approval lands. The manifest
+(`bucket/rivulet.json` in [thoser666/scoop-bucket](https://github.com/thoser666/scoop-bucket))
+consumes the portable ZIP asset with its SHA-256; the SHA-256 is taken from
+the release's own `SHA256SUMS` asset, so a manifest can never reference an
+unverified binary.
+
+1. Trigger the **Distribution Readiness → scoop** workflow on a release tag:
+   it runs the Pester tests (`generate-scoop-manifest.tests.ps1`), renders
+   `rivulet.json` from the real release (SHA-256 via `SHA256SUMS`), and
+   byte-verifies the render.
+2. Copy the generated `rivulet.json` into the bucket repo's `bucket/`
+   directory and push — publishing is a git commit, no external review.
+3. Users install with `scoop bucket add rivulet
+   https://github.com/thoser666/scoop-bucket` and `scoop install
+   rivulet/rivulet`; updates come from `checkver.github`.
+4. When winget goes live later, keep both: Scoop serves portable users and
+   no-admin installs, winget serves MSI users.
 
 ### Flathub
 
