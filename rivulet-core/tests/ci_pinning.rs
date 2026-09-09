@@ -2619,6 +2619,7 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
     assert!(
         workflow.contains("platform:")
             && workflow.contains("- winget")
+            && workflow.contains("- scoop")
             && workflow.contains("- flathub")
             && workflow.contains("- homebrew")
             && workflow.contains("- steam")
@@ -2630,6 +2631,39 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
             && workflow.contains("contents: read")
             && !workflow.contains("contents: write"),
         "distribution preparation must not publish or request write access"
+    );
+
+    // Scoop channel (no signing required): the generator takes the portable
+    // ZIP SHA-256 from the release's own SHA256SUMS asset, and the CI job
+    // re-verifies the rendered manifest byte-exact. The bucket repo carries
+    // the generated manifest; the docs must stay in sync with the wiring.
+    let scoop_gen = read("packaging/windows/generate-scoop-manifest.ps1");
+    assert!(
+        scoop_gen.contains("SHA256SUMS")
+            && scoop_gen.contains("rivulet-windows-x86_64-portable.zip")
+            && scoop_gen.contains("-ValidateOnly"),
+        "scoop manifest generator must hash-pin the portable ZIP from SHA256SUMS and support re-verification"
+    );
+    assert!(
+        read("packaging/windows/generate-scoop-manifest.tests.ps1").contains("Invoke-Pester")
+            || scoop_gen.contains("Pester"),
+        "scoop manifest generator must be covered by Pester tests"
+    );
+    assert!(
+        workflow.contains("prepare-scoop")
+            && workflow.contains("generate-scoop-manifest.ps1")
+            && workflow.contains("generate-scoop-manifest.tests.ps1"),
+        "distribution workflow must run the scoop Pester tests and generator"
+    );
+    assert!(
+        workflow.contains("thoser666/scoop-bucket"),
+        "the scoop plan must point at the live bucket repository"
+    );
+    let release_doc = read("docs/release-platforms.md");
+    assert!(
+        release_doc.contains("thoser666/scoop-bucket")
+            && release_doc.contains("scoop bucket add rivulet"),
+        "release-platforms docs must document the live scoop bucket"
     );
 }
 

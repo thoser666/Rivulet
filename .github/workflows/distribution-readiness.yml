@@ -19,6 +19,7 @@ on:
         options:
           - github
           - winget
+          - scoop
           - flathub
           - homebrew
           - steam
@@ -84,6 +85,11 @@ jobs:
               require_asset rivulet-windows-x86_64.msi
               require_asset rivulet-windows-x86_64-portable.zip
               echo "winget readiness: package artifacts exist; manifest generation and validation are wired in the prepare-winget job."
+              ;;
+            scoop)
+              require_asset rivulet-windows-x86_64-portable.zip
+              require_asset SHA256SUMS
+              echo "scoop readiness: portable ZIP + SHA256SUMS exist; manifest generation and validation are wired in the prepare-scoop job."
               ;;
             flathub)
               require_asset rivulet-linux-x86_64.AppImage
@@ -199,4 +205,74 @@ jobs:
 
           Submission is external: open a PR against microsoft/winget-pkgs carrying the generated
           Rivulet.Rivulet/$env:MSI_VERSION/Rivulet.Rivulet.yaml folder. No external store was modified.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  prepare-scoop:
+    name: Prepare Scoop manifest (dry run)
+    if: inputs.platform == 'scoop'
+    needs: validate-release
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Derive version from the release tag
+        shell: bash
+        run: echo "SCOOP_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Run the scoop manifest Pester tests
+        shell: pwsh
+        run: |
+          $env:NO_COLOR = "1"
+          Invoke-Pester -CI -Path packaging/windows/generate-scoop-manifest.tests.ps1 -Output Detailed
+
+      - name: Generate the scoop manifest (real release, SHA-256 from SHA256SUMS)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-scoop-manifest.ps1" `
+            -Version "$env:SCOOP_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG" `
+            -OutDir "$env:RUNNER_TEMP/scoop-manifests"
+
+      - name: Verify the generated manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Re-render (deterministic) and compare byte-for-byte, so a drifted
+          # or hand-edited manifest can never pass validation.
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-scoop-manifest.ps1" `
+            -ValidateOnly `
+            -ManifestPath "$env:RUNNER_TEMP/scoop-manifests/rivulet.json" `
+            -Version "$env:SCOOP_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG"
+
+      - name: Publish Scoop plan
+        shell: pwsh
+        run: |
+          if ("$env:DRY_RUN" -eq "false") {
+            Write-Error "Publishing is intentionally not enabled: the bucket repository push and its manifest PR are external."
+            exit 1
+          }
+          $manifest = "$env:RUNNER_TEMP/scoop-manifests/rivulet.json"
+          $sha = (Select-String -LiteralPath $manifest -Pattern '"hash":\s*"([0-9a-f]{64})"').Matches.Groups[1].Value
+          @"
+          ## Scoop readiness
+          - Release: $env:RELEASE_TAG (version $env:SCOOP_VERSION)
+          - Mode: dry run
+          - Generated manifest: $manifest
+          - Portable ZIP SHA-256: $sha (verified against the release SHA256SUMS)
+          - Bucket: thoser666/scoop-bucket (bucket/rivulet.json)
+
+          Installation for users once the bucket is live:
+            scoop bucket add rivulet https://github.com/thoser666/scoop-bucket
+            scoop install rivulet/rivulet
+
+          Publishing is external: copy the generated rivulet.json into the bucket repo's
+          bucket/ directory (commit + push). Scoop requires no code signing, so this
+          channel is available already. No external store was modified.
           "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

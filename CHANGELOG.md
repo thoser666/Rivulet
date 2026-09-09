@@ -2,7 +2,19 @@
 
 ## [Unreleased]
 
-- feat(signing): CI notice for automatic SignPath activation — once all
+- feat(distribution): Scoop bucket — the first native Windows package channel,
+  available already because Scoop (unlike winget) requires no code signing:
+  deterministic manifest generator `packaging/windows/generate-scoop-manifest.ps1`
+  renders `bucket/rivulet.json` from a release tag with the portable-ZIP
+  SHA-256 taken from the release's own `SHA256SUMS` (a manifest can never
+  reference an unverified binary; `[ordered]` throughout so re-renders are
+  byte-stable and `-ValidateOnly` re-verification catches drift), Pester tests
+  (5), a **Distribution Readiness → scoop** dry-run job, the live bucket
+  repository [thoser666/scoop-bucket](https://github.com/thoser666/scoop-bucket)
+  seeded with the v0.65.0-alpha.163 manifest (install:
+  `scoop bucket add rivulet https://github.com/thoser666/scoop-bucket` &&
+  `scoop install rivulet/rivulet`), ci_pinning guard, and
+  `docs/release-platforms.md` Scoop section- feat(signing): CI notice for automatic SignPath activation — once all
   four `SIGNPATH_*` secrets exist, `check-beta-gate.py` appends "the next
   release signs automatically via SignPath Foundation" to the Beta-Gate
   step summary on every push (pure information, verdict-neutral); notice
