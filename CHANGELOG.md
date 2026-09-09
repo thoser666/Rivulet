@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- feat(distribution): weekly release promotion — the slow lane for
+  package-manager channels: the scheduled **Weekly release promotion**
+  workflow (`.github/workflows/weekly-promotion.yml`, Mondays 07:09 UTC,
+  manual dispatch with an explicit tag supported) picks the newest published
+  (== green; check-runs re-verified) release, moves the `weekly-latest` tag
+  onto it (deliberately **no** release of its own — the in-app updater reads
+  `/releases` and must keep following the fast lane), generates one digest
+  changelog for everything since the previous promotion, and updates the
+  Scoop bucket via `SCOOP_BUCKET_TOKEN` (falls back to manifest-as-artifact
+  with a warning). `scripts/generate-release-notes.sh` gained `--from-tag
+  <tag>` (promoted-range notes) and `--digest` (features listed, everything
+  else rolled into per-section counts) with two new self-test cases; pinned
+  by `weekly_release_promotion_is_scheduled_and_safe` in ci_pinning and
+  documented under "Promotion cadence" in `docs/release-platforms.md`.
+
 - feat(distribution): Scoop bucket — the first native Windows package channel,
   available already because Scoop (unlike winget) requires no code signing:
   deterministic manifest generator `packaging/windows/generate-scoop-manifest.ps1`

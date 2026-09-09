@@ -3086,6 +3086,69 @@ fn alpha_release_notes_are_generated_from_commits_since_last_tag() {
 }
 
 #[test]
+fn weekly_release_promotion_is_scheduled_and_safe() {
+    // The slow lane for Stage-2/4 distribution channels (Scoop, WinGet,
+    // Chocolatey): a scheduled workflow promotes the newest green release
+    // to the `weekly-latest` tag once a week instead of channels consuming
+    // the per-push alpha firehose. The guard pins the three safety
+    // invariants that make the pointer move trustworthy.
+    let promo = read(".github/workflows/weekly-promotion.yml");
+    assert!(
+        promo.contains("schedule:") && promo.contains("9 7 * * 1"),
+        "the weekly promotion must run on a Monday-morning schedule"
+    );
+    assert!(
+        promo.contains("workflow_dispatch:") && promo.contains("release_tag:"),
+        "the promotion must be manually triggerable with an explicit tag"
+    );
+    assert!(
+        promo.contains("isDraft == false"),
+        "promotion must only pick actually published (== green) releases"
+    );
+    assert!(
+        promo.contains("check-runs"),
+        "promotion must assert the release commit has no failed check runs before moving the pointer"
+    );
+    assert!(
+        promo.contains("git tag -f weekly-latest") && promo.contains("git push -f origin refs/tags/weekly-latest"),
+        "promotion must move the weekly-latest tag (never create a release — the in-app updater reads /releases and must keep following the fast lane)"
+    );
+    assert!(
+        !promo.contains("gh release create"),
+        "promotion must never create a release of its own"
+    );
+    assert!(
+        promo.contains("--from-tag") && promo.contains("--digest"),
+        "the weekly changelog must use the generator's promoted-range digest modes"
+    );
+    assert!(
+        promo.contains("generate-scoop-manifest.ps1") && promo.contains("-ValidateOnly"),
+        "the promotion must render and re-verify the Scoop manifest for the promoted release"
+    );
+    assert!(
+        promo.contains("SCOOP_BUCKET_TOKEN") && promo.contains("warning::"),
+        "without the bucket token the promotion must warn + publish the manifest as an artifact instead of failing"
+    );
+    assert!(
+        !promo.contains("permissions:\n      actions: read"),
+        "no actions: read permission — GitHub rejects workflow_call files carrying it at startup"
+    );
+
+    // The flag modes the promotion relies on must be real, tested generator
+    // surface, not just strings the workflow happens to pass.
+    let notes = read("scripts/generate-release-notes.sh");
+    assert!(
+        notes.contains("self_test_from_tag") && notes.contains("self_test_digest"),
+        "--from-tag and --digest must each have a self-test in the generator"
+    );
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("generate-release-notes.sh --self-test"),
+        "the generator self-test (now including the flag modes) must run in CI"
+    );
+}
+
+#[test]
 fn obs_upstream_candidates_doc_keeps_both_generation_markers() {
     // The OBS upstream workflow rewrites the candidates doc between its
     // START/END markers on every run. An earlier version dropped the END
