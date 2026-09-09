@@ -4248,3 +4248,63 @@ fn windows_ci_installs_one_consistent_gstreamer_version() {
         "the mirror script must branch on the detected installer format"
     );
 }
+
+#[test]
+fn m5_winget_stage2_is_prepared_and_pinned() {
+    // M5 distribution rollout Stage 2 (WinGet): a deterministic manifest
+    // generator must stay wired so the winget-pkgs payload stays canonical
+    // (GitHub asset URL + SHA-256 + MSI ProductCode/UpgradeCode), covered by
+    // Pester tests, exercised by a dry-run readiness job, and honestly
+    // documented (external review remains the gate, never a bot).
+    let generator = read("packaging/windows/generate-winget-manifest.ps1");
+    let pester = read("packaging/windows/generate-winget-manifest.tests.ps1");
+    let workflow = read(".github/workflows/distribution-readiness.yml");
+    let readme = read("README.md");
+    let platforms = read("docs/release-platforms.md");
+    let changelog = read("CHANGELOG.md");
+    for required in [
+        "PackageIdentifier: ",
+        "ManifestType: singleton",
+        "ManifestVersion: 1.6.0",
+        "InstallerType: wix",
+        "Scope: machine",
+        "InstallerUrl",
+        "InstallerSha256",
+        "A5C1E5E8-7A3B-4C9D-B6E2-9F1D4C7A8B90",
+        "ValidateOnly",
+        "Read-MsiProductCode",
+    ] {
+        assert!(
+            generator.contains(required),
+            "winget manifest generator must contain {required:?}"
+        );
+    }
+    assert!(
+        pester.contains("Invoke-Generator") && pester.contains("ValidateOnly"),
+        "Pester tests must cover generation and validation mode"
+    );
+    assert!(
+        workflow.contains("prepare-winget") && workflow.contains("generate-winget-manifest.ps1"),
+        "distribution-readiness must contain the prepare-winget job"
+    );
+    assert!(
+        workflow.contains("Invoke-Pester") && workflow.contains("validate-release"),
+        "the prepare-winget job must run the Pester tests after asset validation"
+    );
+    assert!(
+        readme.contains("WinGet preparation") && readme.contains("generate-winget-manifest.ps1"),
+        "README must document the WinGet preparation state"
+    );
+    assert!(
+        readme.contains("- [ ] **Flathub**"),
+        "README must keep Flathub honestly open"
+    );
+    assert!(
+        platforms.contains("generate-winget-manifest.ps1") && platforms.contains("Rivulet.Rivulet"),
+        "release-platforms must document the generator and the stable package identity"
+    );
+    assert!(
+        changelog.contains("feat(distribution)") || changelog.contains("winget"),
+        "CHANGELOG must record the WinGet Stage 2 preparation"
+    );
+}

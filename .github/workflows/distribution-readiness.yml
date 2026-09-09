@@ -83,7 +83,7 @@ jobs:
             winget)
               require_asset rivulet-windows-x86_64.msi
               require_asset rivulet-windows-x86_64-portable.zip
-              echo "winget readiness: package artifacts exist; the manifest still needs a winget-pkgs submission."
+              echo "winget readiness: package artifacts exist; manifest generation and validation are wired in the prepare-winget job."
               ;;
             flathub)
               require_asset rivulet-linux-x86_64.AppImage
@@ -126,3 +126,77 @@ jobs:
             echo
             echo "No external store submission was performed. See the release-platforms guide in the repository for activation prerequisites."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  prepare-winget:
+    name: Prepare WinGet manifest (dry run)
+    if: inputs.platform == 'winget'
+    needs: validate-release
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Derive MSI version from the release tag
+        shell: bash
+        run: echo "MSI_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Download the MSI release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p msi
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern rivulet-windows-x86_64.msi \
+            --dir msi
+
+      - name: Run the winget manifest Pester tests
+        shell: pwsh
+        run: |
+          $env:NO_COLOR = "1"
+          Invoke-Pester -CI -Path packaging/windows/generate-winget-manifest.tests.ps1 -Output Detailed
+
+      - name: Generate the winget manifest (dry run, real MSI metadata)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-winget-manifest.ps1" `
+            -Version "$env:MSI_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG" `
+            -MsiPath "$env:GITHUB_WORKSPACE/msi/rivulet-windows-x86_64.msi" `
+            -OutDir "$env:RUNNER_TEMP/winget-manifests"
+
+      - name: Verify the generated manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-winget-manifest.ps1" `
+            -ValidateOnly `
+            -ManifestPath "$env:RUNNER_TEMP/winget-manifests/Rivulet.Rivulet/$env:MSI_VERSION/Rivulet.Rivulet.yaml" `
+            -Version "$env:MSI_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG"
+
+      - name: Publish WinGet plan
+        shell: pwsh
+        run: |
+          if ("$env:DRY_RUN" -eq "false") {
+            Write-Error "Publishing is intentionally not enabled: a winget-pkgs submission PR and its reviewer approval are external."
+            exit 1
+          }
+          $manifest = "$env:RUNNER_TEMP/winget-manifests/Rivulet.Rivulet/$env:MSI_VERSION/Rivulet.Rivulet.yaml"
+          $sha = (Select-String -LiteralPath $manifest -Pattern "InstallerSha256:\s*([0-9A-F]{64})").Matches.Groups[1].Value
+          @"
+          ## WinGet readiness
+          - Release: $env:RELEASE_TAG (MSI version $env:MSI_VERSION)
+          - Mode: dry run
+          - Generated manifest: $manifest
+          - Installer SHA-256: $sha
+          - Winget package identity: Rivulet.Rivulet (publisher Rivulet)
+
+          Submission is external: open a PR against microsoft/winget-pkgs carrying the generated
+          Rivulet.Rivulet/$env:MSI_VERSION/Rivulet.Rivulet.yaml folder. No external store was modified.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
