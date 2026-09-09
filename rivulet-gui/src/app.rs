@@ -746,6 +746,9 @@ pub struct RivuletApp {
     /// never captured (and never sent by the shipped build, which wires no
     /// transport sink) unless the user opts in.
     telemetry_enabled: bool,
+    /// Alerts: master switch for the local chat-dock ingestion queue. Persisted
+    /// (on by default — the queue is purely local and never transmits).
+    alert_ingest_enabled: bool,
     /// Telemetry: runtime collector (bounded queue + optional sink). Not
     /// persisted; recreated empty and disabled on restore.
     #[serde(skip)]
@@ -788,6 +791,16 @@ pub struct RivuletApp {
     /// Chat dock: last connection state shown to the user. Not persisted.
     #[serde(skip)]
     chat_state: rivulet_core::ChatConnState,
+
+    /// Alerts: bounded local ingestion queue drained into the chat dock.
+    /// Not persisted (ephemeral, mirrors the chat-message list). `#[serde(skip)]`
+    /// so a session restore can never replay or log alert entries.
+    #[serde(skip)]
+    alert_ingest: rivulet_core::AlertIngest,
+    /// Alerts: generated sample entries to demo the chat-dock surfacing.
+    /// Not persisted.
+    #[serde(skip)]
+    alert_preview_dirty: bool,
 
     /// Set when any hotkey binding changes through the Settings UI (or scene
     /// hotkey assignment), so the OS-level global hotkeys are re-registered
@@ -1350,6 +1363,7 @@ impl Default for RivuletApp {
             discord_client_id_warning: None,
             discord_payload_warning: None,
             telemetry_enabled: false,
+            alert_ingest_enabled: true,
             telemetry: rivulet_core::TelemetryReporter::default(),
             telemetry_startup_reported: false,
             chat_channel: String::new(),
@@ -1361,6 +1375,8 @@ impl Default for RivuletApp {
             chat_action_pending: None,
             chat_platform: rivulet_core::ChatPlatform::default(),
             chat_state: rivulet_core::ChatConnState::Off,
+            alert_ingest: rivulet_core::AlertIngest::default(),
+            alert_preview_dirty: false,
             global_hotkeys_dirty: false,
             global_hotkeys: None,
             obs_ws_enabled: false,
@@ -5292,6 +5308,111 @@ impl RivuletApp {
                 }
             }
         }
+
+        // Surface pending local alert events in the chat dock, newest first.
+        // There is no network receiver in the shipped build (like telemetry,
+        // ingestion is offline by default); the preview button queues samples.
+        // Surface pending local alert events in the chat dock, newest first.
+        // There is no network receiver in the shipped build (like telemetry,
+        // ingestion is offline by default); the preview button queues samples.
+        if self.alert_preview_dirty {
+            self.queue_alert_preview();
+            self.alert_preview_dirty = false;
+        }
+        for event in self.alert_ingest.drain() {
+            self.chat_messages
+                .push(self.alert_event_to_chat_message(&event));
+            if self.chat_messages.len() > MAX_CHAT_MESSAGES {
+                let overflow = self.chat_messages.len() - MAX_CHAT_MESSAGES;
+                self.chat_messages.drain(..overflow);
+            }
+        }
+    }
+
+    /// Render a localized chat-dock line for an alert event. The line carries
+    /// the acting viewer's name, a provider-neutral description and (for
+    /// donations) the amount; everything stays in the local list and is never
+    /// persisted or serialized (no data leaves the app).
+    fn alert_event_to_chat_message(
+        &self,
+        event: &rivulet_core::AlertEvent,
+    ) -> rivulet_core::ChatMessage {
+        use rivulet_core::AlertKind;
+        let kind = event.kind.i18n_key();
+        let text = match event.kind {
+            AlertKind::Follow => self.tr_fmt(kind, std::slice::from_ref(&event.user)),
+            AlertKind::Subscribe => {
+                let tier = event.tier.clone().unwrap_or_default();
+                self.tr_fmt(kind, &[event.user.clone(), tier])
+            }
+            AlertKind::GiftSub => {
+                let count = event.count.to_string();
+                self.tr_fmt(kind, &[event.user.clone(), count])
+            }
+            AlertKind::Donation => {
+                let amount = match (event.amount, event.currency.as_deref()) {
+                    (Some(a), Some(c)) => format!("{a:.2} {c}"),
+                    (Some(a), None) => format!("{a:.2}"),
+                    (None, Some(c)) => c.to_owned(),
+                    (None, None) => String::new(),
+                };
+                self.tr_fmt(kind, &[event.user.clone(), amount])
+            }
+            AlertKind::Raid => {
+                let viewers = event.count.to_string();
+                self.tr_fmt(kind, &[event.user.clone(), viewers])
+            }
+        };
+        rivulet_core::ChatMessage {
+            user: event.user.clone(),
+            text,
+            action: true,
+            color: Some("#e0a458".to_owned()),
+            badges: Vec::new(),
+            broadcaster: false,
+            id: None,
+            timestamp: event.timestamp,
+        }
+    }
+
+    /// Push one deterministic sample of every alert kind into the local queue
+    /// (chat-dock "Preview" button) so the surfacing can be verified without a
+    /// live stream and the wiring is GUI-testable.
+    fn queue_alert_preview(&mut self) {
+        let events = vec![
+            rivulet_core::AlertEvent::sample_follow(),
+            rivulet_core::AlertEvent {
+                kind: rivulet_core::AlertKind::Subscribe,
+                user: "SubFan".to_owned(),
+                tier: Some("Tier 3".to_owned()),
+                count: 12,
+                ..rivulet_core::AlertEvent::sample_follow()
+            },
+            rivulet_core::AlertEvent {
+                kind: rivulet_core::AlertKind::GiftSub,
+                user: "Gifter".to_owned(),
+                count: 5,
+                ..rivulet_core::AlertEvent::sample_follow()
+            },
+            rivulet_core::AlertEvent {
+                kind: rivulet_core::AlertKind::Donation,
+                user: "Donor".to_owned(),
+                amount: Some(20.0),
+                currency: Some("EUR".to_owned()),
+                message: Some("for the next stream".to_owned()),
+                ..rivulet_core::AlertEvent::sample_follow()
+            },
+            rivulet_core::AlertEvent {
+                kind: rivulet_core::AlertKind::Raid,
+                user: "RaidLeader".to_owned(),
+                count: 42,
+                ..rivulet_core::AlertEvent::sample_follow()
+            },
+        ];
+        self.alert_ingest.set_enabled(true);
+        for event in events {
+            self.alert_ingest.push(event);
+        }
     }
 
     /// Send a chat message through the running worker. Twitch rejects
@@ -6021,6 +6142,17 @@ impl RivuletApp {
         }
     }
 
+    /// Mirror the persisted alert-ingestion toggle into the runtime queue.
+    /// Turning it off discards any pending entries (like telemetry: disabling
+    /// clears what was queued). The queue is purely local — nothing is ever
+    /// transmitted, so the default is on.
+    fn apply_alerts_policy(&mut self) {
+        if !self.alert_ingest_enabled {
+            self.alert_ingest.drain();
+        }
+        self.alert_ingest.set_enabled(self.alert_ingest_enabled);
+    }
+
     /// Classify one finished recording session for telemetry. `healthy` is
     /// best-effort at the moment the session ends (`last_error` empty); events
     /// are only collected while the user opted in and never leave the device
@@ -6216,6 +6348,17 @@ impl RivuletApp {
         };
         ui.small(note);
         ui.add_space(4.0);
+
+        // Alerts: the local ingestion queue is surfaced as chat entries.
+        // There is no network receiver in the shipped build, so a preview
+        // button queues one deterministic sample per alert kind — letting the
+        // streamer check the dock layout and the GUI tests verify the wiring.
+        ui.horizontal_wrapped(|ui| {
+            if ui.button(self.tr("alert_preview_button")).clicked() {
+                self.alert_preview_dirty = true;
+            }
+            ui.small(self.tr("alert_dock_hint"));
+        });
 
         // Twitch-only server requirement surfaced as soon as the worker sees
         // the notice: the bot account must be phone-verified before it can
@@ -6978,6 +7121,8 @@ impl RivuletApp {
         // (disabled by default) and report the once-per-session Startup event
         // when the user opted in.
         app.apply_telemetry_policy();
+        // Mirror the persisted alert-ingestion toggle into the local queue.
+        app.apply_alerts_policy();
         app
     }
 }
@@ -8642,6 +8787,23 @@ impl eframe::App for RivuletApp {
                         }
                         ui.small(telemetry_note);
 
+                        // Settings: native alert ingestion (follows/subs/
+                        // donations/raids) surfaced in the chat dock. Purely
+                        // local and never transmitted; see docs/alerts-ingest.md
+                        // for the honest scope (no network receiver yet).
+                        let alert_section = self.tr("alert_section");
+                        let alert_enable = self.tr("alert_enable");
+                        let alert_note = self.tr("alert_note");
+                        ui.separator();
+                        ui.label(egui::RichText::new(alert_section).strong());
+                        if ui
+                            .checkbox(&mut self.alert_ingest_enabled, alert_enable)
+                            .changed()
+                        {
+                            self.apply_alerts_policy();
+                        }
+                        ui.small(alert_note);
+
                         // Settings: NDI output — LAN monitor feed published
                         // next to a recording/streaming session (M5 #77).
                         let ndi_section = self.tr("ndi_section");
@@ -9896,6 +10058,110 @@ mod tests {
         assert!(
             source.contains(".checkbox(&mut self.telemetry_enabled, telemetry_enable)"),
             "Settings must wire the opt-in toggle"
+        );
+    }
+
+    // ── Native alert ingestion (M5, follows/subs/donations/raids) ──
+
+    #[test]
+    fn alert_ingest_defaults_to_enabled_and_local() {
+        let app = RivuletApp::default();
+        assert!(
+            app.alert_ingest_enabled,
+            "local alert queue is on by default"
+        );
+        assert!(app.alert_ingest.enabled());
+        assert!(app.alert_ingest.is_empty());
+    }
+
+    #[test]
+    fn apply_alerts_policy_mirrors_toggle_and_clears_on_disable() {
+        let mut app = RivuletApp::default();
+        app.alert_ingest
+            .push(rivulet_core::AlertEvent::sample_follow());
+        assert_eq!(app.alert_ingest.len(), 1);
+
+        app.alert_ingest_enabled = false;
+        app.apply_alerts_policy();
+        assert!(
+            !app.alert_ingest.enabled(),
+            "disabling must turn the runtime queue off"
+        );
+        assert!(
+            app.alert_ingest.is_empty(),
+            "disabling must discard pending entries"
+        );
+
+        // Re-enabling accepts new events again.
+        app.alert_ingest_enabled = true;
+        app.apply_alerts_policy();
+        assert!(app.alert_ingest.enabled());
+        assert!(app
+            .alert_ingest
+            .push(rivulet_core::AlertEvent::sample_follow()));
+    }
+
+    #[test]
+    fn alert_events_surface_into_the_chat_dock() {
+        let mut app = RivuletApp::default();
+        app.queue_alert_preview();
+        assert_eq!(
+            app.alert_ingest.len(),
+            5,
+            "preview must queue one sample per alert kind"
+        );
+        app.reconcile_chat();
+        assert_eq!(
+            app.chat_messages.len(),
+            5,
+            "drained entries must land in the chat list"
+        );
+        let texts: Vec<&str> = app.chat_messages.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "PreviewViewer followed the channel",
+                "SubFan subscribed (Tier 3)",
+                "Gifter gifted 5 subs",
+                "Donor donated 20.00 EUR",
+                "RaidLeader raided with 42 viewers",
+            ]
+        );
+        assert!(
+            app.chat_messages.iter().all(|m| m.action && m.id.is_none()),
+            "alert entries render as in-dock actions without a reply target"
+        );
+        assert!(
+            app.chat_messages
+                .iter()
+                .all(|m| m.color.as_deref() == Some("#e0a458")),
+            "alert entries carry a distinct accent color"
+        );
+    }
+
+    #[test]
+    fn alert_ingestion_is_wired_into_settings_and_chat_dock() {
+        // Text-pins the M5 alert wiring: a persisted Settings toggle, an
+        // honest local-only ingestion path draining into the bounded chat
+        // list, a preview path for testing/settus without a live stream, and
+        // the startup policy mirror.
+        let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/app.rs"));
+        for required in [
+            "fn queue_alert_preview",
+            "fn alert_event_to_chat_message",
+            "fn apply_alerts_policy",
+            ".checkbox(&mut self.alert_ingest_enabled, alert_enable)",
+            "self.alert_ingest.drain()",
+            "app.apply_alerts_policy();",
+        ] {
+            assert!(
+                source.contains(required),
+                "alert wiring must be present: {required}"
+            );
+        }
+        assert!(
+            source.contains("alert_preview_button"),
+            "settings/chat-dock must expose the preview action"
         );
     }
 

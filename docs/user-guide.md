@@ -146,6 +146,15 @@ Im Stream-Tab ist der Chat-Dock integriert. Er verbindet sich mit Twitch, Kick u
 - Die Eingabezeile unten im Dock sendet in den verbundenen Kanal; über **Antworten** beantwortest du eine bestimmte Nachricht.
 - Über der Eingabezeile zeigt Rivulet das verbleibende Sendekontingent (z. B. „20 Nachrichten pro 30 s“) und die Plattform, für die das Limit gilt – Plattform-Limits werden pro Kanal separat durchgesetzt.
 
+### Alerts
+
+Rivulet kann Engagement-Events (Follows, Abos, Geschenk-Abos, Spenden, Raids) **nativ im Chat-Dock** anzeigen — ohne dass ein Overlay-Dienst (Streamlabs/StreamElements-Browser-URL, siehe [`alerts.md`](alerts.md)) geladen werden muss:
+
+- **Settings → Alerts** aktiviert die lokale Erfassung (standardmäßig an). Eingänge werden nur lokal verarbeitet — es wird **nichts übertragen**, und es wird nie ein Token oder Secret gespeichert oder geloggt.
+- Im Chat-Dock erscheinen erfasste Events als Chat-Einträge mit eigener Farbe, z. B. „Kira hat 20.00 EUR gespendet“ oder „Boosted ist mit 42 Zuschauern geraidet“.
+- Über **Alerts-Vorschau** kannst du die Darstellung ohne laufenden Stream prüfen (ein Beispiel pro Event-Typ).
+- Unterstützt werden derzeit Streamlabs-Spenden-Webhooks und Twitch-EventSub-Notifications (`channel.follow`, `channel.subscribe`, `channel.subscription.gift`, `channel.raid`) inkl. HMAC-SHA-256-Signaturprüfung. Der Netzwerk-Empfänger, auf dem diese Payloads ankommen, ist noch nicht eingebaut (geplanter Folgeschritt); Details stehen in [`alerts-ingest.md`](alerts-ingest.md).
+
 ### Auto-Clips (!clip)
 
 Rivulet kann automatisch Replay-Buffer-Speicherungen auslösen, wenn der Chat „explodiert“:

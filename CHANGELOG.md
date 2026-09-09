@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+- feat(alerts): native alert ingestion for the chat dock (M5) — new
+  `rivulet-core::alerts_ingest` contract: `AlertEvent`/`AlertKind` (Follow,
+  Subscribe, GiftSub, Donation, Raid), Streamlabs donation + Twitch EventSub
+  follow/subscribe/gift/raid JSON parsers, Twitch EventSub HMAC-SHA-256
+  signature verification (`verify_twitch_eventsub_signature`, pinned test
+  vector, constant-time compare) and a bounded local `AlertIngest` queue
+  (default capacity 64, oldest dropped, `Debug` never leaks entry contents);
+  `AlertEvent` has no `Serialize` impl and `sanitize_message` strips control
+  chars so events stay privacy-safe; GUI surfaces ingested events as
+  color-accented chat-dock entries (Settings → Alerts toggle, honest
+  local-only note, Preview button queueing one sample per kind, drain into the
+  bounded chat list); honest scope: **no network receiver in the shipped
+  build** (parsers/verifier/queue ship; the webhook/EventSub transport stays a
+  documented follow-up like telemetry); i18n DE/EN (471 keys), GUI + core
+  tests, docs `docs/alerts-ingest.md`, roadmap M5 Alerts row marked **Done**,
+  ci_pinning guard `m5_alerts_ingest_is_native_localized_and_pinned`
 - feat(telemetry): M5 opt-in, privacy-first usage telemetry — Settings → Telemetry
   toggle (off by default, persisted; opting out clears pending events);
   identifier-free event model in `rivulet-core::telemetry` (enums/codes/booleans
