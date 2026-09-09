@@ -1407,6 +1407,17 @@ fn beta_gate_checker_is_wired_up() {
         checker.contains("--fail"),
         "check-beta-gate.py must offer --fail to turn unmet criteria into exit 1"
     );
+    // SignPath auto-signing notice: once all four SIGNPATH_* secrets exist,
+    // the beta-gate dashboard must announce that the next release signs
+    // automatically — so the maintainer learns the good news from CI, not
+    // from reading workflow YAML. The notice must be logic-tested (self-test)
+    // and CI must run that self-test.
+    assert!(
+        checker.contains("def signpath_note")
+            && checker.contains("signs automatically")
+            && checker.contains("--self-test"),
+        "check-beta-gate.py must expose the SignPath notice with a self-test"
+    );
 
     // The gate itself lives in the roadmap; the README must define it.
     let readme = read("README.md");
@@ -1419,6 +1430,10 @@ fn beta_gate_checker_is_wired_up() {
     assert!(
         ci.contains("check-beta-gate.py"),
         "the CI workflow must run the beta-gate checker"
+    );
+    assert!(
+        ci.contains("check-beta-gate.py --self-test"),
+        "CI must run the beta-gate checker self-test"
     );
     assert!(
         ci.contains("GITHUB_STEP_SUMMARY"),
@@ -1517,6 +1532,39 @@ fn code_signing_automation_is_wired_up() {
         "test-signpath-config.py must pin the action SHA and offer --self-test"
     );
 
+    // The paste-in artifact configuration (SignPath portal setup) must stay
+    // in sync with what the workflow actually uploads: a ZIP with exactly
+    // the three EXEs, plus the MSI as a whole-file request. If either side
+    // changes, this pin forces the other to change with it.
+    let signpath_config = read("packaging/signpath/artifact-configuration.xml");
+    assert!(
+        signpath_config.contains("http://signpath.io/artifact-configuration/v1"),
+        "artifact-configuration.xml must use the SignPath v1 schema namespace"
+    );
+    assert!(
+        signpath_config.contains("<zip-file>") && signpath_config.contains("<msi-file>"),
+        "artifact-configuration.xml must define both request shapes (EXE ZIP + MSI)"
+    );
+    for exe in ["rivulet-gui.exe", "rivulet.exe", "rivulet-updater.exe"] {
+        assert!(
+            build.contains(&format!("staging/{exe}"))
+                && signpath_config.contains(&format!("path=\"{exe}\"")),
+            "SignPath artifact configuration and workflow upload must both cover the EXEs"
+        );
+    }
+    assert!(
+        build.contains("staging/rivulet-windows-x86_64.msi"),
+        "build-package.yml must upload the MSI for SignPath signing"
+    );
+    assert!(
+        signpath_config.contains("name=\"version\"") && signpath_config.contains("required=\"true\""),
+        "artifact-configuration.xml must declare the version parameter the workflow passes on every submit"
+    );
+    assert!(
+        !build.contains("artifact-configuration-slug"),
+        "submit steps rely on automatic artifact-configuration selection; if slugs are pinned, update the portal setup docs"
+    );
+
     let beta_gate = read("scripts/check-beta-gate.py");
     assert!(
         beta_gate.contains("SIGNPATH_API_TOKEN")
@@ -1568,6 +1616,10 @@ fn code_signing_automation_is_wired_up() {
             && doc.contains("packaging/windows/sign.ps1")
             && doc.contains("signpath/github-action-submit-signing-request"),
         "docs/code-signing.md must reference all signing scripts and the SignPath action"
+    );
+    assert!(
+        doc.contains("packaging/signpath/artifact-configuration.xml"),
+        "docs/code-signing.md must point to the paste-in artifact configuration"
     );
     assert!(
         doc.contains("Hash-based vs. file-based"),

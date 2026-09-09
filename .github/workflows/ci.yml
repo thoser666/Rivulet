@@ -421,6 +421,7 @@ jobs:
           # beta-readiness status is visible on every push. pipefail keeps the
           # step red if the checker itself crashes.
           set -o pipefail
+          python3 scripts/check-beta-gate.py --self-test
           python3 scripts/check-beta-gate.py --comment | tee -a "$GITHUB_STEP_SUMMARY"
 
   ################################################################
