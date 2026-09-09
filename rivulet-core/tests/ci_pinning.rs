@@ -318,14 +318,16 @@ fn m5_telemetry_opt_in_is_privacy_safe_and_pinned() {
 fn m5_alerts_ingest_is_native_localized_and_pinned() {
     // M5 roadmap "Alerts (follows/subs/donations)": event ingestion is a
     // local, provider-neutral contract mapped to localized chat-dock entries.
-    // The shipped build wires no network receiver (like telemetry), so the
-    // honest scope, the bounded queue, the EventSub/Streamlabs parsers and
-    // the HMAC verification must stay pinned across README, roadmap, docs and
+    // The shipped build wires a bounded LOOPBACK webhook receiver (Streamlabs
+    // + Twitch EventSub with HMAC verification); public HTTPS delivery always
+    // needs a forwarder/terminator, and the honest scope, queue, parsers and
+    // signature checks must stay pinned across README, roadmap, docs and
     // wiring.
     let readme = read("README.md");
     let roadmap = read("docs/obs-vision-roadmap.md");
     let alerts_docs = read("docs/alerts-ingest.md");
     let core = read("rivulet-core/src/alerts_ingest.rs");
+    let webhook = read("rivulet-core/src/alerts_webhook.rs");
     let gui = read("rivulet-gui/src/app.rs");
     let i18n = read("rivulet-core/src/i18n.rs");
     let changelog = read("CHANGELOG.md");
@@ -343,7 +345,8 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
     );
     for required in [
         "Honest scope",
-        "no network receiver",
+        "loopback",
+        "127.0.0.1",
         "EventSub",
         "HMAC-SHA-256",
         "bounded",
@@ -367,16 +370,35 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
         );
     }
     for required in [
+        "AlertsReceiver",
+        "AlertsReceiverConfig",
+        "DEFAULT_ALERTS_RECEIVER_PORT",
+        "handle_webhook",
+    ] {
+        assert!(
+            webhook.contains(required),
+            "alerts_webhook module must define {required}"
+        );
+    }
+    for required in [
         "alert_ingest: rivulet_core::AlertIngest",
         "alert_ingest_enabled",
+        "alerts_receiver_enabled",
+        "alerts_twitch_secret",
+        "rivulet_core::AlertsReceiver",
         "fn queue_alert_preview",
         "fn alert_event_to_chat_message",
+        "fn apply_alerts_receiver",
     ] {
         assert!(gui.contains(required), "GUI must wire {required}");
     }
     assert!(
         i18n.matches("\"alert_kind_follow\"").count() >= 2,
         "alert kind keys must be localized in both locales"
+    );
+    assert!(
+        i18n.matches("\"alert_receiver_enable\"").count() >= 2,
+        "receiver settings keys must be localized in both locales"
     );
     assert!(
         changelog.contains("feat(alerts)"),

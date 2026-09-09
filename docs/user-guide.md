@@ -150,10 +150,10 @@ Im Stream-Tab ist der Chat-Dock integriert. Er verbindet sich mit Twitch, Kick u
 
 Rivulet kann Engagement-Events (Follows, Abos, Geschenk-Abos, Spenden, Raids) **nativ im Chat-Dock** anzeigen — ohne dass ein Overlay-Dienst (Streamlabs/StreamElements-Browser-URL, siehe [`alerts.md`](alerts.md)) geladen werden muss:
 
-- **Settings → Alerts** aktiviert die lokale Erfassung (standardmäßig an). Eingänge werden nur lokal verarbeitet — es wird **nichts übertragen**, und es wird nie ein Token oder Secret gespeichert oder geloggt.
+- **Settings → Alerts** aktiviert die lokale Erfassung (standardmäßig an). Eingänge werden nur lokal verarbeitet — es wird **nichts übertragen**, und Alert-Ereignisse enthalten nie Tokens oder Secrets (ein EventSub-Geheimnis bleibt in den Einstellungen und dient nur der Signaturprüfung).
 - Im Chat-Dock erscheinen erfasste Events als Chat-Einträge mit eigener Farbe, z. B. „Kira hat 20.00 EUR gespendet“ oder „Boosted ist mit 42 Zuschauern geraidet“.
 - Über **Alerts-Vorschau** kannst du die Darstellung ohne laufenden Stream prüfen (ein Beispiel pro Event-Typ).
-- Unterstützt werden derzeit Streamlabs-Spenden-Webhooks und Twitch-EventSub-Notifications (`channel.follow`, `channel.subscribe`, `channel.subscription.gift`, `channel.raid`) inkl. HMAC-SHA-256-Signaturprüfung. Der Netzwerk-Empfänger, auf dem diese Payloads ankommen, ist noch nicht eingebaut (geplanter Folgeschritt); Details stehen in [`alerts-ingest.md`](alerts-ingest.md).
+- **Settings → Webhook-Empfänger** (standardmäßig aus) startet einen lokalen Empfänger auf **`127.0.0.1`** für Streamlabs-Spenden-Webhooks (`/webhook/streamlabs`) und Twitch-EventSub-Notifications (`/eventsub/twitch`) inkl. HMAC-SHA-256-Signaturprüfung gegen ein maskiert hinterlegtes Secret. Echte Lieferungen der Dienste kommen über öffentliches HTTPS — setze dafür einen lokalen HTTPS-Terminator oder Tunnel davor, der an diesen Port weiterleitet (Details in [`alerts-ingest.md`](alerts-ingest.md)).
 
 ### Auto-Clips (!clip)
 

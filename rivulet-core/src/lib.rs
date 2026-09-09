@@ -33,6 +33,11 @@ pub use alerts_ingest::{
     parse_streamlabs_webhook, parse_twitch_eventsub_notification, verify_twitch_eventsub_signature,
     AlertEvent, AlertIngest, AlertIngestError, AlertKind,
 };
+pub mod alerts_webhook;
+pub use alerts_webhook::{
+    handle_webhook, AlertsReceiver, AlertsReceiverConfig, WebhookReject, WebhookRequest,
+    DEFAULT_ALERTS_RECEIVER_PORT,
+};
 pub mod rate_limit;
 pub use rate_limit::{RateLimitConfig, RateLimiter};
 pub mod global_hotkey;
