@@ -1,11 +1,9 @@
-# SignPath Foundation Application — ready-to-submit draft
+# SignPath Foundation Application — submitted
 
-Copy each field into the application form at <https://signpath.org/products/foundation>
-(Foundation → *Apply*). Fields marked **[fill in]** need your personal data;
-everything else is verified against the repo as of Sep 2026. Submitting grants
-SignPath the usual Foundation terms: free OV-level Authenticode signing for
-qualifying OSS, test certificate first, production certificate after a
-build-system review.
+**Status: submitted (September 2026).** The text below was sent as-is through
+the form at <https://signpath.org/apply>; the fields marked **[fill in]** were
+completed with the maintainer's personal data at submission time. The
+**Application status** section at the bottom tracks what happens next.
 
 ---
 
@@ -107,3 +105,28 @@ containing the three EXEs, `<msi-file>` for the installer), create a CI API
 token with *Submitter* permission, then set the four secrets
 `SIGNPATH_API_TOKEN`, `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`,
 `SIGNPATH_SIGNING_POLICY_SLUG`. The next release signs automatically.
+
+---
+
+## Application status
+
+| Step | State | Notes |
+| --- | --- | --- |
+| Application submitted | **done** (Sep 2026) | via signpath.org/apply, including the reputation text below |
+| Initial review / test certificate | open | SignPath verifies "project reputation and control" (see their terms); expected turnaround: days to a few weeks |
+| Build-system review → production certificate | open | they inspect the public pipeline; our summary lives in the "Build system and its openness" section above |
+| Portal setup (project, policy, artifact configuration, API token) | open | step-by-step in `docs/code-signing.md` § SignPath |
+| Secrets set (`SIGNPATH_*`) | open | four secrets; the workflow activates automatically once all four exist |
+| First signed release | open | `scripts/check-beta-gate.py` criterion 4 flips to met |
+
+### Reputation text (as submitted)
+
+> Rivulet is a free, open-source screen recording and streaming app for
+> Windows/macOS/Linux (MIT, Rust + GStreamer), developed publicly on GitHub
+> for about a year with a fully automated release pipeline. Verifiable trust
+> signals: OpenSSF Best Practices badge at **passing** level (project
+> #14447), CI on every push across three platforms, releases built
+> exclusively by public GitHub Actions with SHA-pinned actions and SHA256SUMS
+> manifests, CodeQL, dependency review and fuzz targets for untrusted
+> parsers. 30 automated releases to date; the repository is
+> github.com/thoser666/rivulet.
