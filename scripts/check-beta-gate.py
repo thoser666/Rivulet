@@ -240,8 +240,29 @@ def check_no_blockers(token, repo):
     return len(blockers) == 0
 
 
+def signpath_note(present):
+    """Return the auto-signing notice if all four SIGNPATH_* secrets exist.
+
+    ``present`` is the set of configured secret names (or None when the
+    secrets list could not be read). Returns ``None`` when the notice does
+    not apply — notably when the PFX path is configured instead, or when
+    only some SignPath secrets are set (the workflow stays disabled then).
+    """
+    if present and all(s in present for s in WINDOWS_SIGNPATH_SECRETS):
+        return (
+            "🖋️ All four SIGNPATH_* secrets are set — the next release "
+            "signs automatically via SignPath Foundation (EXEs + MSI)."
+        )
+    return None
+
+
 def evaluate(repo, ref, token):
-    """Return ``(results, verdict)`` for the six criteria."""
+    """Return ``(results, verdict, notes)`` for the six criteria.
+
+    ``notes`` carries informational one-liners for the dashboard (e.g. the
+    SignPath auto-signing notice) — they never affect the verdict.
+    """
+    notes: list[str] = []
     readme = README.read_text(encoding="utf-8")
 
     m1_open, m1_done = count_checkboxes(
@@ -378,6 +399,14 @@ def evaluate(repo, ref, token):
                     ),
                 }
             )
+
+        # SignPath notice: the moment all four SIGNPATH_* secrets exist, the
+        # release workflow activates the SignPath path (it takes precedence
+        # over the PFX path) and the next release signs automatically. This
+        # note must never affect the verdict — it is pure good news.
+        note = signpath_note(present)
+        if note:
+            notes.append(note)
     else:
         for criterion, name in (
             (4, "Code-signing secrets configured"),
@@ -401,7 +430,7 @@ def evaluate(repo, ref, token):
         verdict = "READY (unverified items)"
     else:
         verdict = "READY"
-    return results, verdict
+    return results, verdict, notes
 
 
 def redact_sensitive_details(results):
@@ -415,7 +444,7 @@ def redact_sensitive_details(results):
     return redacted
 
 
-def render_comment(results, verdict, repo, ref):
+def render_comment(results, verdict, repo, ref, notes=()):
     """Return a compact Markdown dashboard for the step summary / an issue."""
     lines = ["## 🚦 Beta-Gate status", ""]
     if verdict == "READY":
@@ -432,7 +461,75 @@ def render_comment(results, verdict, repo, ref):
     for r in results:
         if r["status"] != "met":
             lines.append(f"- **{r['name']}:** {r['detail']}")
+    if notes:
+        lines += [""]
+        lines += [f"- {n}" for n in notes]
     return "\n".join(lines) + "\n"
+
+
+def run_self_test():
+    """Verify the SignPath notice logic and the dashboard wiring locally.
+
+    Returns 0 when all cases pass, 1 otherwise. Kept dependency-free so it
+    runs the same way on a laptop and in CI.
+    """
+    failures = 0
+
+    def case(name, ok):
+        nonlocal failures
+        print(("PASS" if ok else "FAIL") + f" [{name}]")
+        if not ok:
+            failures += 1
+
+    # 1. All four SignPath secrets set -> notice fires.
+    note = signpath_note(set(WINDOWS_SIGNPATH_SECRETS))
+    case(
+        "all four SIGNPATH secrets",
+        note is not None and "signs automatically" in note,
+    )
+
+    # 2. Only some SignPath secrets -> workflow stays disabled, no notice.
+    case(
+        "partial SIGNPATH secrets",
+        signpath_note({"SIGNPATH_API_TOKEN"}) is None,
+    )
+
+    # 3. PFX path configured instead -> no notice.
+    case(
+        "pfx instead of signpath",
+        signpath_note(set(WINDOWS_PFX_SECRETS)) is None,
+    )
+
+    # 4. Secrets unreadable -> no notice, and no crash.
+    case("unreadable secrets list", signpath_note(None) is None)
+
+    # 5. The notice renders into the dashboard and never into a status cell.
+    sample = render_comment(
+        [
+            {
+                "criterion": 4,
+                "name": "Code-signing secrets configured",
+                "status": "met",
+                "detail": "Windows signing via SignPath, macOS signing secrets complete",
+            }
+        ],
+        "READY",
+        "r/rivulet",
+        "develop",
+        notes=["note-a", "note-b"],
+    )
+    case(
+        "notice renders as dashboard bullet",
+        "note-a" in sample.split("| # | Criterion |", 1)[1]
+        and "- note-b" in sample
+        and sample.splitlines()[-1] == "- note-b",
+    )
+
+    if failures:
+        print(f"{failures} self-test case(s) FAILED")
+        return 1
+    print("All self-test cases passed.")
+    return 0
 
 
 def main():
@@ -440,6 +537,8 @@ def main():
     if "--help" in args or "-h" in args:
         print(__doc__.strip())
         return 0
+    if "--self-test" in args:
+        return run_self_test()
 
     fail = "--fail" in args
     as_json = "--json" in args
@@ -449,7 +548,7 @@ def main():
     token = next((args[i + 1] for i, a in enumerate(args) if a == "--token"), None)
     token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
 
-    results, verdict = evaluate(repo, ref, token)
+    results, verdict, notes = evaluate(repo, ref, token)
     safe_results = redact_sensitive_details(results)
     not_met = [r for r in safe_results if r["status"] == "not-met"]
     unverified = [r for r in safe_results if r["status"] == "unverified"]
@@ -466,15 +565,18 @@ def main():
                     "ref": ref,
                     "token_present": bool(token),
                     "criteria": safe_results,
+                    "notes": list(notes),
                 },
                 indent=2,
             )
         )
     elif as_comment:
-        print(render_comment(safe_results, verdict, repo, ref))
+        print(render_comment(safe_results, verdict, repo, ref, notes))
     else:
         for r in safe_results:
             print(f"[{r['criterion']}] {r['name']}: {r['status']} — {r['detail']}")
+        for note in notes:
+            print(note)
         print(
             f"\nVerdict: {verdict} ({len(not_met)} not met, "
             f"{len(unverified)} unverified, on {repo} @ {ref})",

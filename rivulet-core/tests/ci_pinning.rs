@@ -1407,6 +1407,17 @@ fn beta_gate_checker_is_wired_up() {
         checker.contains("--fail"),
         "check-beta-gate.py must offer --fail to turn unmet criteria into exit 1"
     );
+    // SignPath auto-signing notice: once all four SIGNPATH_* secrets exist,
+    // the beta-gate dashboard must announce that the next release signs
+    // automatically — so the maintainer learns the good news from CI, not
+    // from reading workflow YAML. The notice must be logic-tested (self-test)
+    // and CI must run that self-test.
+    assert!(
+        checker.contains("def signpath_note")
+            && checker.contains("signs automatically")
+            && checker.contains("--self-test"),
+        "check-beta-gate.py must expose the SignPath notice with a self-test"
+    );
 
     // The gate itself lives in the roadmap; the README must define it.
     let readme = read("README.md");
@@ -1419,6 +1430,10 @@ fn beta_gate_checker_is_wired_up() {
     assert!(
         ci.contains("check-beta-gate.py"),
         "the CI workflow must run the beta-gate checker"
+    );
+    assert!(
+        ci.contains("check-beta-gate.py --self-test"),
+        "CI must run the beta-gate checker self-test"
     );
     assert!(
         ci.contains("GITHUB_STEP_SUMMARY"),

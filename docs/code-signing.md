@@ -157,7 +157,12 @@ test certificate first and a production certificate after a build
    signing policy; note it as the API token.
 4. **Create the four secrets**: `SIGNPATH_API_TOKEN`, `SIGNPATH_ORGANIZATION_ID`,
    `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG`. The workflow
-   only activates the SignPath path when **all four** are present.
+   only activates the SignPath path when **all four** are present. As soon
+   as they are, the Beta-Gate dashboard in every CI run announces it:
+   *“All four SIGNPATH_* secrets are set — the next release signs
+   automatically via SignPath Foundation (EXEs + MSI).”* (See the
+   Beta-Gate step summary on any push; the notice comes from
+   `scripts/check-beta-gate.py`.)
 5. Optional: install the **SignPath GitHub App** and allow access to the
    repository so SignPath can verify the workflow provenance and the
    artifact's origin (recommended for the production certificate). No

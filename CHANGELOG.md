@@ -2,7 +2,12 @@
 
 ## [Unreleased]
 
-- feat(signing): paste-in SignPath artifact configuration
+- feat(signing): CI notice for automatic SignPath activation — once all
+  four `SIGNPATH_*` secrets exist, `check-beta-gate.py` appends "the next
+  release signs automatically via SignPath Foundation" to the Beta-Gate
+  step summary on every push (pure information, verdict-neutral); notice
+  logic extracted into `signpath_note()` with a `--self-test` run by the
+  beta-gate CI job and pinned by `beta_gate_checker_is_wired_up`- feat(signing): paste-in SignPath artifact configuration
   (`packaging/signpath/artifact-configuration.xml`) matching the release
   workflow's two upload shapes — a `<zip-file>` root Authenticode-signing
   `rivulet-gui.exe`, `rivulet.exe` and `rivulet-updater.exe`, and an
