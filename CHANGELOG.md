@@ -14,6 +14,10 @@
   stop path (Windows/Linux/macOS/aux); i18n DE/EN; docs in
   `docs/telemetry.md` + security policy section; ci_pinning guard
   `m5_telemetry_opt_in_is_privacy_safe_and_pinned`
+- docs(signing): SignPath Foundation application **submitted** (Sep 2026);
+  `docs/signpath-application-draft.md` now records the submission state and
+  tracks review / production certificate / portal setup / secrets / first
+  signed release as a checklist, and includes the reputation text as sent
 - docs(signing): SignPath Foundation application draft
   (`docs/signpath-application-draft.md`) — ready-to-submit application text
   (project description, repo links, build-system openness, security
