@@ -315,6 +315,76 @@ fn m5_telemetry_opt_in_is_privacy_safe_and_pinned() {
 }
 
 #[test]
+fn m5_alerts_ingest_is_native_localized_and_pinned() {
+    // M5 roadmap "Alerts (follows/subs/donations)": event ingestion is a
+    // local, provider-neutral contract mapped to localized chat-dock entries.
+    // The shipped build wires no network receiver (like telemetry), so the
+    // honest scope, the bounded queue, the EventSub/Streamlabs parsers and
+    // the HMAC verification must stay pinned across README, roadmap, docs and
+    // wiring.
+    let readme = read("README.md");
+    let roadmap = read("docs/obs-vision-roadmap.md");
+    let alerts_docs = read("docs/alerts-ingest.md");
+    let core = read("rivulet-core/src/alerts_ingest.rs");
+    let gui = read("rivulet-gui/src/app.rs");
+    let i18n = read("rivulet-core/src/i18n.rs");
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        readme.contains("docs/alerts-ingest.md"),
+        "README must link the alerts-ingest doc"
+    );
+    assert!(
+        readme.contains("ingest") && readme.contains("chat dock"),
+        "README feature row must state native chat-dock ingestion"
+    );
+    assert!(
+        roadmap.contains("| Alerts (follows/subs/donations) |") && roadmap.contains("**Done**"),
+        "roadmap Alerts row must be marked Done"
+    );
+    for required in [
+        "Honest scope",
+        "no network receiver",
+        "EventSub",
+        "HMAC-SHA-256",
+        "bounded",
+        "Streamlabs",
+        "ci_pinning guard",
+    ] {
+        assert!(
+            alerts_docs.contains(required),
+            "docs/alerts-ingest.md must contain {required}"
+        );
+    }
+    for required in [
+        "AlertIngest",
+        "AlertKind",
+        "verify_twitch_eventsub_signature",
+        "parse_streamlabs_webhook",
+    ] {
+        assert!(
+            core.contains(required),
+            "alerts_ingest module must define {required}"
+        );
+    }
+    for required in [
+        "alert_ingest: rivulet_core::AlertIngest",
+        "alert_ingest_enabled",
+        "fn queue_alert_preview",
+        "fn alert_event_to_chat_message",
+    ] {
+        assert!(gui.contains(required), "GUI must wire {required}");
+    }
+    assert!(
+        i18n.matches("\"alert_kind_follow\"").count() >= 2,
+        "alert kind keys must be localized in both locales"
+    );
+    assert!(
+        changelog.contains("feat(alerts)"),
+        "CHANGELOG must document the alerts feature"
+    );
+}
+
+#[test]
 fn m6_audio_routing_is_specified_in_readme_gate_and_spec() {
     // M6 audio routing: the README milestone block, the M6 quality gate and
     // the feature spec must stay in sync — a silent edit to any of the three

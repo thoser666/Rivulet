@@ -28,6 +28,11 @@ pub mod telemetry;
 pub use telemetry::{
     platform_code, TelemetryBatch, TelemetryEvent, TelemetryReporter, TelemetrySink,
 };
+pub mod alerts_ingest;
+pub use alerts_ingest::{
+    parse_streamlabs_webhook, parse_twitch_eventsub_notification, verify_twitch_eventsub_signature,
+    AlertEvent, AlertIngest, AlertIngestError, AlertKind,
+};
 pub mod rate_limit;
 pub use rate_limit::{RateLimitConfig, RateLimiter};
 pub mod global_hotkey;

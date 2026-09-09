@@ -208,4 +208,7 @@ rivulet-gui::app
 Chat and alerts are tracked in `docs/obs-vision-roadmap.md` (M5
 "Community-Dock": chat for Twitch/Kick/YouTube + alert import via the
 existing browser source). Alert overlays (Streamlabs/StreamElements or own
-EventSub → overlay) are a follow-up item.
+EventSub → overlay) are a follow-up item. Native alert ingestion
+(follows/subs/donations/raids parsed from provider webhooks and surfaced in
+the chat dock) ships in `rivulet-core::alerts_ingest` — see
+[`docs/alerts-ingest.md`](alerts-ingest.md).
