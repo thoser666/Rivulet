@@ -1,10 +1,10 @@
 name: Flatpak Build
 
 # Validates the Linux Flatpak manifest (packaging/flatpak) exactly the way a
-# Flathub transparent build would: offline cargo from the committed crate pin,
-# freedesktop 24.08 runtime/SDK with the rust-stable extension, a real
-# flatpak-builder run (which also runs appstream-compose), repo export and
-# bundle.
+# Flathub transparent build would: offline cargo over the pinned crate archives
+# (cargo-sources.json, URL + SHA-256), freedesktop 24.08 runtime/SDK with the
+# rust-stable extension, a real flatpak-builder run (which also runs
+# appstream-compose), repo export and bundle.
 
 on:
   push:
@@ -93,6 +93,6 @@ jobs:
             echo
             echo "- Manifest: packaging/flatpak/org.rivulet.Rivulet.yml"
             echo "- Runtime: org.freedesktop.Platform 24.08 (rust-stable extension)"
-            echo "- Cargo: offline, vendored from cargo-sources.json ($(jq 'length' packaging/flatpak/cargo/cargo-sources.json) crates)"
+            echo "- Cargo: offline cargo, pinned archives from cargo-sources.json ($(jq 'length' packaging/flatpak/cargo/cargo-sources.json) crates)"
             echo "- Bundle: $RUNNER_TEMP/rivulet.flatpak"
           } >> "$GITHUB_STEP_SUMMARY"

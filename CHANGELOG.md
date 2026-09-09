@@ -2,19 +2,20 @@
 
 ## [Unreleased]
 
-- feat(distribution): Flathub Stage 2 preparation — offline, reproducible
+- feat(distribution): Flathub Stage 2 preparation — offline-cargo, reproducible
   Flatpak manifest `packaging/flatpak/org.rivulet.Rivulet.yml`
-  (org.freedesktop.Platform/Sdk 24.08 + rust-stable SDK extension, fully
-  offline cargo via the vendored `packaging/flatpak/cargo/cargo-sources.json`,
-  1239 crates generated from `Cargo.lock` by the official
-  `flatpak-cargo-generator` at a pinned commit, `cargo/config.toml`
-  vendored-sources mapping; honest finish-args for screen/audio capture,
-  Vulkan/DRM, PipeWire/PulseAudio, stream-ingest + opt-in telemetry network and
-  `$HOME` recordings), desktop file + AppStream metainfo + icon; new
-  `.github/workflows/flatpak-build.yml` job that re-verifies the crate pin
-  (drift guard), builds and runs the official Flathub lint
-  (manifest/appstream/desktop) on the result, plus a dry-run
-  **Distribution Readiness → flathub** job; honest scope: the Flathub
+  (org.freedesktop.Platform/Sdk 24.08 + rust-stable SDK extension, cargo builds
+  fully offline over the pinned crate archives in
+  `packaging/flatpak/cargo/cargo-sources.json` — 1239 crates generated from
+  `Cargo.lock` by the official `flatpak-cargo-generator` at a pinned commit and
+  consumed as merged flatpak sources (URL + SHA-256, extracted to
+  `cargo/vendor/...`), `cargo/config.toml` vendored-sources mapping; honest
+  finish-args for screen/audio capture, Vulkan/DRM, PipeWire/PulseAudio,
+  stream-ingest + opt-in telemetry network and `$HOME` recordings), desktop
+  file + AppStream metainfo + icon; new `.github/workflows/flatpak-build.yml`
+  job that re-verifies the crate pin (drift guard), builds and runs the
+  official Flathub lint (manifest/appstream/desktop) on the result, plus a
+  dry-run **Distribution Readiness → flathub** job; honest scope: the Flathub
   submission PR and its permissions/appstream review stay the external gate
   (see `docs/release-platforms.md`)
 - feat(alerts): native alert ingestion for the chat dock (M5) — new

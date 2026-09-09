@@ -163,7 +163,7 @@ jobs:
             org.freedesktop.Sdk//24.08 \
             org.freedesktop.Sdk.Extension.rust-stable//24.08
 
-      - name: Build the Flatpak (offline, validated by flatpak-builder)
+      - name: Build the Flatpak (cargo-offline, validated by flatpak-builder)
         shell: bash
         run: |
           set -euo pipefail
@@ -191,7 +191,7 @@ jobs:
             echo "## Flathub readiness"
             echo
             echo "- Release: $RELEASE_TAG"
-            echo "- Mode: dry run (offline build against org.freedesktop.Platform 24.08)"
+            echo "- Mode: dry run (cargo-offline build against org.freedesktop.Platform 24.08)"
             echo "- Flatpak id: org.rivulet.Rivulet"
             echo "- Crate pin: valid (generate-cargo-sources.sh --verify)"
             echo
