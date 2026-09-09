@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- feat(telemetry): M5 opt-in, privacy-first usage telemetry — Settings → Telemetry
+  toggle (off by default, persisted; opting out clears pending events);
+  identifier-free event model in `rivulet-core::telemetry` (enums/codes/booleans
+  only, never titles, paths, URLs, stream keys or usernames; a deterministic test
+  pins the serialized payload against free-form text); bounded reporter
+  (`TelemetryReporter` auto-flushes at 128 events) with a `TelemetrySink`
+  interface and **no transport wired in the shipped build** (nothing leaves the
+  device; HTTPS ingestion backend stays a documented follow-up); `Startup` once
+  per session and `RecordingStop { duration_secs, healthy }` from every platform
+  stop path (Windows/Linux/macOS/aux); i18n DE/EN; docs in
+  `docs/telemetry.md` + security policy section; ci_pinning guard
+  `m5_telemetry_opt_in_is_privacy_safe_and_pinned`
 - docs(signing): SignPath Foundation application draft
   (`docs/signpath-application-draft.md`) — ready-to-submit application text
   (project description, repo links, build-system openness, security

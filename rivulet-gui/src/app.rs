@@ -742,6 +742,19 @@ pub struct RivuletApp {
     #[serde(skip)]
     discord_payload_warning: Option<rivulet_core::discord::PayloadIssue>,
 
+    /// Telemetry: opt-in toggle. Persisted. Off by default — usage events are
+    /// never captured (and never sent by the shipped build, which wires no
+    /// transport sink) unless the user opts in.
+    telemetry_enabled: bool,
+    /// Telemetry: runtime collector (bounded queue + optional sink). Not
+    /// persisted; recreated empty and disabled on restore.
+    #[serde(skip)]
+    telemetry: rivulet_core::TelemetryReporter,
+    /// Whether the once-per-session Startup event was already reported. Not
+    /// persisted; re-reported after every restart while opted in.
+    #[serde(skip)]
+    telemetry_startup_reported: bool,
+
     /// Chat dock: selected platform (Twitch, Kick or YouTube). Persisted;
     /// defaults to Twitch for existing configs.
     #[serde(default)]
@@ -1336,6 +1349,9 @@ impl Default for RivuletApp {
             discord_presence_last: None,
             discord_client_id_warning: None,
             discord_payload_warning: None,
+            telemetry_enabled: false,
+            telemetry: rivulet_core::TelemetryReporter::default(),
+            telemetry_startup_reported: false,
             chat_channel: String::new(),
             chat_oauth_token: String::new(),
             chat_input: String::new(),
@@ -2053,6 +2069,7 @@ impl RivuletApp {
         // that arrives a frame late is still shown in the UI; the next
         // recording start replaces it.
         self.stop_signal = None;
+        self.complete_recording_session_telemetry();
     }
 }
 
@@ -2549,6 +2566,7 @@ impl RivuletApp {
         self.stop_signal = None;
         self.stop_audio_capture();
         self.is_recording = false;
+        self.complete_recording_session_telemetry();
     }
 
     fn drain_linux_frames(&mut self) {
@@ -2890,6 +2908,7 @@ impl RivuletApp {
         self.raw_rx = None;
         self.stop_signal = None;
         self.is_recording = false;
+        self.complete_recording_session_telemetry();
     }
 
     /// Push captured macOS frames into the engine and refresh the live preview
@@ -3068,6 +3087,7 @@ impl RivuletApp {
         {
             self.capture_backend = None;
         }
+        self.complete_recording_session_telemetry();
     }
 
     /// Arms the non-blocking recording stop: shows the translated
@@ -5990,6 +6010,31 @@ impl RivuletApp {
         self.is_muted = false;
     }
 
+    /// Mirror the persisted telemetry opt-in into the runtime collector and
+    /// report the once-per-session Startup event when opted in. Called after
+    /// restore in `new()` and whenever the Settings toggle changes.
+    fn apply_telemetry_policy(&mut self) {
+        self.telemetry.set_enabled(self.telemetry_enabled);
+        if self.telemetry_enabled && !self.telemetry_startup_reported {
+            self.telemetry_startup_reported = true;
+            self.telemetry.record(rivulet_core::TelemetryEvent::Startup);
+        }
+    }
+
+    /// Classify one finished recording session for telemetry. `healthy` is
+    /// best-effort at the moment the session ends (`last_error` empty); events
+    /// are only collected while the user opted in and never leave the device
+    /// in the shipped build (no transport sink is wired).
+    fn complete_recording_session_telemetry(&mut self) {
+        let duration_secs = self.record_started.elapsed().as_secs().min(u32::MAX as u64) as u32;
+        let healthy = self.last_error.is_none();
+        self.telemetry
+            .record(rivulet_core::TelemetryEvent::RecordingStop {
+                duration_secs,
+                healthy,
+            });
+    }
+
     fn draw_presence_status(&mut self, ui: &mut egui::Ui) {
         self.sync_discord_presence();
         let status = self.current_presence_status();
@@ -6929,6 +6974,10 @@ impl RivuletApp {
         {
             app.refresh_linux_sources();
         }
+        // Mirror the persisted telemetry opt-in into the runtime collector
+        // (disabled by default) and report the once-per-session Startup event
+        // when the user opted in.
+        app.apply_telemetry_policy();
         app
     }
 }
@@ -8578,6 +8627,21 @@ impl eframe::App for RivuletApp {
                         }
                         ui.small(discord_client_id_note);
 
+                        // Settings: opt-in usage telemetry (off by default,
+                        // privacy-first; see docs/telemetry.md).
+                        let telemetry_section = self.tr("telemetry_section");
+                        let telemetry_enable = self.tr("telemetry_enable");
+                        let telemetry_note = self.tr("telemetry_note");
+                        ui.separator();
+                        ui.label(egui::RichText::new(telemetry_section).strong());
+                        if ui
+                            .checkbox(&mut self.telemetry_enabled, telemetry_enable)
+                            .changed()
+                        {
+                            self.apply_telemetry_policy();
+                        }
+                        ui.small(telemetry_note);
+
                         // Settings: NDI output — LAN monitor feed published
                         // next to a recording/streaming session (M5 #77).
                         let ndi_section = self.tr("ndi_section");
@@ -9697,6 +9761,142 @@ mod tests {
         app.discord_presence_enabled = false;
         app.sync_discord_presence();
         assert!(app.discord_presence.is_none());
+    }
+
+    // ── Usage telemetry (M5, opt-in) ──────────────────────────────
+
+    #[test]
+    fn telemetry_defaults_to_opt_out() {
+        // The M5 privacy posture: telemetry is off unless the user explicitly
+        // opts in, and the runtime reporter mirrors the persisted toggle.
+        let app = RivuletApp::default();
+        assert!(!app.telemetry_enabled, "telemetry must be opt-in");
+        assert!(!app.telemetry.enabled(), "reporter must reflect the opt-in");
+        assert!(!app.telemetry_startup_reported);
+    }
+
+    #[test]
+    fn apply_telemetry_policy_mirrors_the_persisted_toggle() {
+        let mut app = RivuletApp {
+            telemetry_enabled: true,
+            ..Default::default()
+        };
+        app.apply_telemetry_policy();
+        assert!(app.telemetry.enabled(), "opted in => reporter enabled");
+        assert!(app.telemetry_startup_reported);
+        assert_eq!(
+            app.telemetry.pending_len(),
+            1,
+            "Startup must be reported once per session"
+        );
+        // Re-applying (e.g. after restore) must not duplicate the Startup event.
+        app.apply_telemetry_policy();
+        assert_eq!(
+            app.telemetry.pending_len(),
+            1,
+            "Startup must not be reported twice"
+        );
+
+        // Opting back out disables the reporter and clears everything captured.
+        app.telemetry_enabled = false;
+        app.apply_telemetry_policy();
+        assert!(!app.telemetry.enabled());
+        assert_eq!(app.telemetry.pending_len(), 0);
+    }
+
+    #[test]
+    fn recording_stop_telemetry_reports_duration_and_health() {
+        let mut app = RivuletApp {
+            telemetry_enabled: true,
+            ..Default::default()
+        };
+        app.apply_telemetry_policy();
+        let captured = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        {
+            let batch = captured.clone();
+            app.telemetry
+                .set_sink(Box::new(move |b: &rivulet_core::TelemetryBatch| {
+                    batch.borrow_mut().push(b.clone())
+                }));
+        }
+        app.last_error = None;
+        app.record_started = std::time::Instant::now() - std::time::Duration::from_secs(90);
+        app.complete_recording_session_telemetry();
+        app.telemetry.flush();
+        let batches = captured.borrow();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(
+            batches[0].events[1],
+            rivulet_core::TelemetryEvent::RecordingStop {
+                duration_secs: 90,
+                healthy: true,
+            }
+        );
+    }
+
+    #[test]
+    fn recording_stop_telemetry_marks_unhealthy_sessions() {
+        let mut app = RivuletApp {
+            telemetry_enabled: true,
+            ..Default::default()
+        };
+        app.apply_telemetry_policy();
+        let captured = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        {
+            let batch = captured.clone();
+            app.telemetry
+                .set_sink(Box::new(move |b: &rivulet_core::TelemetryBatch| {
+                    batch.borrow_mut().push(b.clone())
+                }));
+        }
+        app.last_error = Some("capture failed".to_string());
+        app.record_started = std::time::Instant::now() - std::time::Duration::from_secs(5);
+        app.complete_recording_session_telemetry();
+        app.telemetry.flush();
+        let batches = captured.borrow();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(
+            batches[0].events[1],
+            rivulet_core::TelemetryEvent::RecordingStop {
+                duration_secs: 5,
+                healthy: false,
+            }
+        );
+    }
+
+    #[test]
+    fn telemetry_session_events_are_wired_into_the_stop_paths() {
+        // Text-pins the M5 telemetry wiring: every platform recording stop
+        // (Windows/Linux/macOS/aux) must classify the finished session, and the
+        // opt-in policy must be applied on startup and from the Settings toggle.
+        let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/app.rs"));
+        let stops = [
+            "fn stop_windows_recording",
+            "fn stop_linux_recording",
+            "fn stop_macos_recording",
+            "fn stop_aux_recording",
+        ];
+        for stop in stops {
+            assert!(
+                source.contains(&format!("{stop}(&mut self)")),
+                "stop path must exist for pinning: {stop}"
+            );
+        }
+        assert!(
+            source
+                .matches("self.complete_recording_session_telemetry();")
+                .count()
+                >= 4,
+            "every platform stop must classify its recording session"
+        );
+        assert!(
+            source.contains("app.apply_telemetry_policy();"),
+            "the opt-in policy must be applied after restore in new()"
+        );
+        assert!(
+            source.contains(".checkbox(&mut self.telemetry_enabled, telemetry_enable)"),
+            "Settings must wire the opt-in toggle"
+        );
     }
 
     #[allow(clippy::field_reassign_with_default)]
