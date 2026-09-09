@@ -24,6 +24,7 @@ const WORKFLOWS: &[&str] = &[
     "security.yml",
     "scorecard.yml",
     "distribution-readiness.yml",
+    "flatpak-build.yml",
 ];
 
 /// The reviewed pins. `(action@sha, human-readable version)` — the version
@@ -4246,5 +4247,76 @@ fn windows_ci_installs_one_consistent_gstreamer_version() {
     assert!(
         mirror.contains("FORMAT=\"exe\""),
         "the mirror script must branch on the detected installer format"
+    );
+}
+
+#[test]
+fn m5_flathub_stage2_is_prepared_and_pinned() {
+    // M5 distribution rollout Stage 2 (Flathub): an offline, reproducible
+    // Flatpak build is wired and stays honest. The manifest never fetches
+    // crates from the network (crates are vendored from Cargo.lock via the
+    // official flatpak-cargo-generator), a CI job builds and lints the bundle
+    // against org.freedesktop.Platform 24.08 with the official Flathub lint,
+    // and the external Flathub submission + review remain the documented gate.
+    let manifest = read("packaging/flatpak/org.rivulet.Rivulet.yml");
+    let generator = read("packaging/flatpak/generate-cargo-sources.sh");
+    let config = read("packaging/flatpak/cargo/config.toml");
+    let sources = read("packaging/flatpak/cargo/cargo-sources.json");
+    let flatpak_ci = read(".github/workflows/flatpak-build.yml");
+    let readiness = read(".github/workflows/distribution-readiness.yml");
+    let readme = read("README.md");
+    let platforms = read("docs/release-platforms.md");
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        manifest.contains("org.rivulet.Rivulet")
+            && manifest.contains("org.freedesktop.Platform")
+            && manifest.contains("24.08")
+            && manifest.contains("org.freedesktop.Sdk.Extension.rust-stable"),
+        "the Flatpak manifest must pin the freedesktop 24.08 stack with the rust-stable extension"
+    );
+    assert!(
+        manifest.contains("CARGO_NET_OFFLINE") && manifest.contains("cargo --offline"),
+        "the Flatpak build must be fully offline"
+    );
+    assert!(
+        manifest.contains("cargo/config.toml")
+            && config.contains("vendored-sources")
+            && config.contains("cargo/vendor"),
+        "the cargo offline config must map crates-io to the vendored directory"
+    );
+    assert!(
+        sources.contains("static.crates.io") && sources.contains("cargo/vendor"),
+        "cargo-sources.json must carry the vendored crate archives"
+    );
+    assert!(
+        generator.contains("flatpak-cargo-generator")
+            && generator.contains("f03a673abe6ce189cea1c2857e2b44af2dd79d1f")
+            && generator.contains("--verify"),
+        "the source generator must pin the official tool and support a verify mode"
+    );
+    assert!(
+        flatpak_ci.contains("generate-cargo-sources.sh --verify")
+            && flatpak_ci.contains("flatpak-builder")
+            && flatpak_ci.contains("packaging/flatpak/org.rivulet.Rivulet.yml")
+            && flatpak_ci.contains("org.flathub.flatpak-builder-lint"),
+        "the flatpak CI job must re-verify the crate pin, build the manifest, and run the official lint"
+    );
+    assert!(
+        readiness.contains("prepare-flathub")
+            && readiness.contains("flatpak-builder")
+            && readiness.contains("packaging/flatpak/org.rivulet.Rivulet.yml"),
+        "distribution readiness must contain the prepare-flathub job"
+    );
+    assert!(
+        readme.contains("Flathub preparation") && readme.contains("packaging/flatpak/"),
+        "README must document the Flathub preparation state"
+    );
+    assert!(
+        platforms.contains("org.rivulet.Rivulet") && platforms.contains("cargo-sources.json"),
+        "release-platforms must document the flatpak id and the offline crate pin"
+    );
+    assert!(
+        changelog.contains("feat(distribution)") && changelog.contains("flathub"),
+        "CHANGELOG must record the Flathub Stage 2 preparation"
     );
 }

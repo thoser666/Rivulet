@@ -1,0 +1,98 @@
+name: Flatpak Build
+
+# Validates the Linux Flatpak manifest (packaging/flatpak) exactly the way a
+# Flathub transparent build would: offline cargo from the committed crate pin,
+# freedesktop 24.08 runtime/SDK with the rust-stable extension, a real
+# flatpak-builder run (which also runs appstream-compose), repo export and
+# bundle.
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - packaging/flatpak/**
+      - Cargo.lock
+      - Cargo.toml
+      - "**/Cargo.toml"
+      - .github/workflows/flatpak-build.yml
+  pull_request:
+    paths:
+      - packaging/flatpak/**
+      - Cargo.lock
+      - Cargo.toml
+      - "**/Cargo.toml"
+      - .github/workflows/flatpak-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flatpak-build:
+    name: Build the Flatpak
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate the offline crate pin against Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --quiet aiohttp tomlkit
+          bash packaging/flatpak/generate-cargo-sources.sh --verify
+
+      - name: Install flatpak and flatpak-builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Add the SDK runtime and rust-stable extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          flatpak install -y flathub \
+            org.freedesktop.Platform//24.08 \
+            org.freedesktop.Sdk//24.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//24.08
+
+      - name: Build the Flatpak
+        shell: bash
+        run: |
+          set -euo pipefail
+          flatpak-builder --default-branch=stable --force-clean --ccache \
+            --disable-rofiles-fuse \
+            --repo="$RUNNER_TEMP/rivulet-repo" \
+            "$RUNNER_TEMP/rivulet-build" \
+            packaging/flatpak/org.rivulet.Rivulet.yml
+
+      - name: Lint the exported metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          flatpak build-export --no-update-summary "$RUNNER_TEMP/rivulet-repo" "$RUNNER_TEMP/rivulet-build"
+          flatpak build-bundle --runtime "$RUNNER_TEMP/rivulet-repo" "$RUNNER_TEMP/rivulet.flatpak" org.rivulet.Rivulet stable
+
+      - name: Run the official Flathub lint (appstream, desktop, manifest)
+        shell: bash
+        run: |
+          set -euo pipefail
+          flatpak install -y flathub org.flathub.flatpak-builder-lint
+          flatpak run org.flathub.flatpak-builder-lint manifest packaging/flatpak/org.rivulet.Rivulet.yml
+          flatpak run org.flathub.flatpak-builder-lint appstream "$RUNNER_TEMP/rivulet-build"
+          flatpak run org.flathub.flatpak-builder-lint cdi "$RUNNER_TEMP/rivulet-build"
+
+      - name: Report
+        shell: bash
+        run: |
+          {
+            echo "## Flatpak build"
+            echo
+            echo "- Manifest: packaging/flatpak/org.rivulet.Rivulet.yml"
+            echo "- Runtime: org.freedesktop.Platform 24.08 (rust-stable extension)"
+            echo "- Cargo: offline, vendored from cargo-sources.json ($(jq 'length' packaging/flatpak/cargo/cargo-sources.json) crates)"
+            echo "- Bundle: $RUNNER_TEMP/rivulet.flatpak"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.rivulet.Rivulet</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Rivulet</name>
+  <summary>Modern screen recording and streaming software</summary>
+  <description>
+    <p>Rivulet is a modern screen recording and streaming application that runs entirely on the desktop and does not require an account. Record gameplay, your screen, or stream to services such as Twitch and YouTube.</p>
+    <p>Recordings are stored locally in open formats (WebM/MKV) using hardware-accelerated encoding on NVIDIA, AMD, and Intel GPUs.</p>
+  </description>
+  <launchable type="desktop-id">org.rivulet.Rivulet.desktop</launchable>
+  <url type="homepage">https://github.com/thoser666/Rivulet</url>
+  <developer_name>Rivulet Project</developer_name>
+  <releases>
+    <release version="0.65.0-alpha.55"/>
+  </releases>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Recorder</category>
+  </categories>
+</component>
