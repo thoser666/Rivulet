@@ -356,6 +356,22 @@ instead of restarting from zero. A ci_pinning guard keeps the targets, the
 workspace exclusion, and the CI wiring (including the deep campaign) in
 place.
 
+### Telemetry policy
+
+The M5 opt-in telemetry (`rivulet-core/src/telemetry.rs`, see
+[`docs/telemetry.md`](telemetry.md)) is designed so that a future collector
+cannot accidentally leak user data:
+
+- Collecting is **off by default**; the persisted Settings toggle is the only
+  way to start capturing, and opting back out clears everything pending.
+- The event model carries **no free-form text**: only enums, numeric codes and
+  booleans. Window titles, paths, URLs, stream keys and usernames are not part
+  of the model, and a ci_pinning guard pins the serialized payload against
+  free-form content.
+- The shipped build wires **no transport sink** — nothing leaves the device.
+  Any future transport must be reviewed separately before it is allowed to
+  call into `TelemetrySink`.
+
 ## Incident Response
 
 1. Stop the affected workflow or release if a credential may be exposed.

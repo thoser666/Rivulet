@@ -248,6 +248,73 @@ fn m5_source_delete_hotkey_is_wired_and_pinned() {
 }
 
 #[test]
+fn m5_telemetry_opt_in_is_privacy_safe_and_pinned() {
+    // M5 roadmap "Telemetry (opt-in, privacy-friendly)": the toggle must stay
+    // off by default, the event model must stay free of free-form text, the
+    // shipped build must wire no transport, and all of it must be pinned
+    // across the README, the telemetry doc, the security policy and the GUI
+    // wiring so a silent privacy regression fails CI instead of drifting.
+    let readme = read("README.md");
+    let telemetry_docs = read("docs/telemetry.md");
+    let security = read("docs/security.md");
+    let gui = read("rivulet-gui/src/app.rs");
+    let core = read("rivulet-core/src/telemetry.rs");
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        readme.contains("- [x] **Telemetry (opt-in, privacy-friendly)**"),
+        "M5 README bullet must be checked"
+    );
+    assert!(
+        readme.contains("docs/telemetry.md"),
+        "README must link the telemetry doc"
+    );
+    for required in [
+        "Off by default",
+        "No free-form text",
+        "Nothing leaves the device",
+        "TelemetryReporter",
+        "platform_code",
+        "ci_pinning guard",
+    ] {
+        assert!(
+            telemetry_docs.contains(required),
+            "docs/telemetry.md must contain {required}"
+        );
+    }
+    assert!(
+        security.contains("### Telemetry policy"),
+        "security policy must carry a telemetry section"
+    );
+    assert!(
+        security.contains("ships wires **no transport sink**")
+            || security.contains("no transport sink"),
+        "security policy must document that the shipped build transmits nothing"
+    );
+    for required in [
+        "telemetry_enabled",
+        "apply_telemetry_policy",
+        "complete_recording_session_telemetry",
+    ] {
+        assert!(gui.contains(required), "GUI must wire {required}");
+    }
+    for required in [
+        "TelemetryReporter",
+        "set_enabled",
+        "TelemetrySink",
+        "platform_code",
+    ] {
+        assert!(
+            core.contains(required),
+            "telemetry module must define {required}"
+        );
+    }
+    assert!(
+        changelog.contains("feat(telemetry)"),
+        "CHANGELOG must document the telemetry feature"
+    );
+}
+
+#[test]
 fn m6_audio_routing_is_specified_in_readme_gate_and_spec() {
     // M6 audio routing: the README milestone block, the M6 quality gate and
     // the feature spec must stay in sync — a silent edit to any of the three

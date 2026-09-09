@@ -24,6 +24,10 @@ pub mod youtube_chat;
 pub use youtube_chat::{YouTubeChat, YouTubeChatConfig};
 pub mod chat;
 pub use chat::{Chat, ChatConfig, ChatPlatform};
+pub mod telemetry;
+pub use telemetry::{
+    platform_code, TelemetryBatch, TelemetryEvent, TelemetryReporter, TelemetrySink,
+};
 pub mod rate_limit;
 pub use rate_limit::{RateLimitConfig, RateLimiter};
 pub mod global_hotkey;
