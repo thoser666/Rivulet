@@ -48,13 +48,13 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
-          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
       - name: Add the SDK runtime and rust-stable extension
         shell: bash
         run: |
           set -euo pipefail
-          flatpak install -y flathub \
+          sudo flatpak install -y flathub \
             org.freedesktop.Platform//24.08 \
             org.freedesktop.Sdk//24.08 \
             org.freedesktop.Sdk.Extension.rust-stable//24.08
@@ -80,7 +80,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          flatpak install -y flathub org.flathub.flatpak-builder-lint
+          sudo flatpak install -y flathub org.flathub.flatpak-builder-lint
           flatpak run org.flathub.flatpak-builder-lint manifest packaging/flatpak/org.rivulet.Rivulet.yml
           flatpak run org.flathub.flatpak-builder-lint appstream "$RUNNER_TEMP/rivulet-build"
           flatpak run org.flathub.flatpak-builder-lint cdi "$RUNNER_TEMP/rivulet-build"

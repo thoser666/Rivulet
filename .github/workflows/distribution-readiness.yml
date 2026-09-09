@@ -152,13 +152,13 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
-          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
       - name: Add the SDK runtime and rust-stable extension
         shell: bash
         run: |
           set -euo pipefail
-          flatpak install -y flathub \
+          sudo flatpak install -y flathub \
             org.freedesktop.Platform//24.08 \
             org.freedesktop.Sdk//24.08 \
             org.freedesktop.Sdk.Extension.rust-stable//24.08
