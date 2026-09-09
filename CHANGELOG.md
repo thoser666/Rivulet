@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- feat(distribution): WinGet Stage 2 preparation — deterministic winget
+  manifest generator/validator `packaging/windows/generate-winget-manifest.ps1`
+  (singleton manifest v1.6, canonical GitHub asset URL + SHA-256 + MSI
+  `ProductCode`/`UpgradeCode`, `-ValidateOnly` re-verification), Pester-pinned
+  (14 tests), plus a dry-run **Distribution Readiness → winget** job that runs
+  the tests and renders/verifies the manifest against the real release MSI;
+  honest scope: the `microsoft/winget-pkgs` submission PR stays the external
+  gate (stable identity `Rivulet.Rivulet`, see `docs/release-platforms.md`)
 - feat(alerts): native alert ingestion for the chat dock (M5) — new
   `rivulet-core::alerts_ingest` contract: `AlertEvent`/`AlertKind` (Follow,
   Subscribe, GiftSub, Donation, Raid), Streamlabs donation + Twitch EventSub
