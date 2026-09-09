@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+- feat(signing): paste-in SignPath artifact configuration
+  (`packaging/signpath/artifact-configuration.xml`) matching the release
+  workflow's two upload shapes — a `<zip-file>` root Authenticode-signing
+  `rivulet-gui.exe`, `rivulet.exe` and `rivulet-updater.exe`, and an
+  `<msi-file>` root signing the MSI whole (no deep signing; the installed
+  EXEs are signed in the first request) — plus the required `version`
+  parameter the submit steps pass; portal setup after SignPath Foundation
+  approval is now a paste-in, pinned by `code_signing_automation_is_wired_up`
+  (workflow-vs-XML EXE/MSI coverage, parameter declaration, no pinned
+  artifact-configuration slug) and documented in `docs/code-signing.md`
+- feat(distribution): Flathub Stage 2 preparation — offline-cargo, reproducible
+  Flatpak manifest `packaging/flatpak/org.rivulet.Rivulet.yml`
+  (org.freedesktop.Platform/Sdk 24.08 + rust-stable SDK extension, cargo builds
+  fully offline over the pinned crate archives in
+  `packaging/flatpak/cargo/cargo-sources.json` — 1239 crates generated from
+  `Cargo.lock` by the official `flatpak-cargo-generator` at a pinned commit and
+  consumed as merged flatpak sources (URL + SHA-256, extracted to
+  `cargo/vendor/...`), `cargo/config.toml` vendored-sources mapping; honest
+  finish-args for screen/audio capture, Vulkan/DRM, PipeWire/PulseAudio,
+  stream-ingest + opt-in telemetry network and `$HOME` recordings), desktop
+  file + AppStream metainfo + icon; new `.github/workflows/flatpak-build.yml`
+  job that re-verifies the crate pin (drift guard), builds and runs the
+  official Flathub lint (manifest/appstream/desktop) on the result, plus a
+  dry-run **Distribution Readiness → flathub** job; honest scope: the Flathub
+  submission PR and its permissions/appstream review stay the external gate
+  (see `docs/release-platforms.md`)
 - feat(alerts): native alert ingestion for the chat dock (M5) — new
   `rivulet-core::alerts_ingest` contract: `AlertEvent`/`AlertKind` (Follow,
   Subscribe, GiftSub, Donation, Raid), Streamlabs donation + Twitch EventSub

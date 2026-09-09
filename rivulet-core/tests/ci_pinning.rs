@@ -1517,6 +1517,39 @@ fn code_signing_automation_is_wired_up() {
         "test-signpath-config.py must pin the action SHA and offer --self-test"
     );
 
+    // The paste-in artifact configuration (SignPath portal setup) must stay
+    // in sync with what the workflow actually uploads: a ZIP with exactly
+    // the three EXEs, plus the MSI as a whole-file request. If either side
+    // changes, this pin forces the other to change with it.
+    let signpath_config = read("packaging/signpath/artifact-configuration.xml");
+    assert!(
+        signpath_config.contains("http://signpath.io/artifact-configuration/v1"),
+        "artifact-configuration.xml must use the SignPath v1 schema namespace"
+    );
+    assert!(
+        signpath_config.contains("<zip-file>") && signpath_config.contains("<msi-file>"),
+        "artifact-configuration.xml must define both request shapes (EXE ZIP + MSI)"
+    );
+    for exe in ["rivulet-gui.exe", "rivulet.exe", "rivulet-updater.exe"] {
+        assert!(
+            build.contains(&format!("staging/{exe}"))
+                && signpath_config.contains(&format!("path=\"{exe}\"")),
+            "SignPath artifact configuration and workflow upload must both cover the EXEs"
+        );
+    }
+    assert!(
+        build.contains("staging/rivulet-windows-x86_64.msi"),
+        "build-package.yml must upload the MSI for SignPath signing"
+    );
+    assert!(
+        signpath_config.contains("name=\"version\"") && signpath_config.contains("required=\"true\""),
+        "artifact-configuration.xml must declare the version parameter the workflow passes on every submit"
+    );
+    assert!(
+        !build.contains("artifact-configuration-slug"),
+        "submit steps rely on automatic artifact-configuration selection; if slugs are pinned, update the portal setup docs"
+    );
+
     let beta_gate = read("scripts/check-beta-gate.py");
     assert!(
         beta_gate.contains("SIGNPATH_API_TOKEN")
@@ -1568,6 +1601,10 @@ fn code_signing_automation_is_wired_up() {
             && doc.contains("packaging/windows/sign.ps1")
             && doc.contains("signpath/github-action-submit-signing-request"),
         "docs/code-signing.md must reference all signing scripts and the SignPath action"
+    );
+    assert!(
+        doc.contains("packaging/signpath/artifact-configuration.xml"),
+        "docs/code-signing.md must point to the paste-in artifact configuration"
     );
     assert!(
         doc.contains("Hash-based vs. file-based"),
