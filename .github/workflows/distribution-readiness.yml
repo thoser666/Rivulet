@@ -93,7 +93,7 @@ jobs:
               ;;
             flathub)
               require_asset rivulet-linux-x86_64.AppImage
-              echo "Flathub readiness: the Linux binary exists; a Flatpak manifest and Flathub review are still required."
+              echo "Flathub readiness: the Linux binary exists; the Flatpak manifest is prepared (prepare-flathub job) and the Flathub review is still external."
               ;;
             homebrew)
               require_asset rivulet-macos-aarch64.dmg
@@ -133,6 +133,76 @@ jobs:
             echo "No external store submission was performed. See the release-platforms guide in the repository for activation prerequisites."
           } >> "$GITHUB_STEP_SUMMARY"
 
+  prepare-flathub:
+    name: Prepare Flathub manifest (dry run)
+    if: inputs.platform == 'flathub'
+    needs: validate-release
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate the offline crate pin against Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --quiet aiohttp tomlkit
+          bash packaging/flatpak/generate-cargo-sources.sh --verify
+
+      - name: Install flatpak and flatpak-builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Add the SDK runtime and rust-stable extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo flatpak install -y flathub \
+            org.freedesktop.Platform//25.08 \
+            org.freedesktop.Sdk//25.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//25.08
+
+      - name: Build the Flatpak (cargo-offline, validated by flatpak-builder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          flatpak-builder --default-branch=stable --force-clean --ccache \
+            --disable-rofiles-fuse \
+            --repo="$RUNNER_TEMP/rivulet-repo" \
+            "$RUNNER_TEMP/rivulet-build" \
+            packaging/flatpak/org.rivulet.Rivulet.yml
+
+      - name: Export the repository metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          flatpak build-export --no-update-summary "$RUNNER_TEMP/rivulet-repo" "$RUNNER_TEMP/rivulet-build"
+          flatpak build-bundle --runtime "$RUNNER_TEMP/rivulet-repo" "$RUNNER_TEMP/rivulet.flatpak" org.rivulet.Rivulet stable
+
+      - name: Publish Flathub plan
+        shell: bash
+        run: |
+          if [[ "$DRY_RUN" == "false" ]]; then
+            echo "::error::Publishing is intentionally not enabled: the Flathub submission PR and its permissions/appstream review are external."
+            exit 1
+          fi
+          {
+            echo "## Flathub readiness"
+            echo
+            echo "- Release: $RELEASE_TAG"
+            echo "- Mode: dry run (cargo-offline build against org.freedesktop.Platform 25.08)"
+            echo "- Flatpak id: org.rivulet.Rivulet"
+            echo "- Crate pin: valid (generate-cargo-sources.sh --verify)"
+            echo
+            echo "Submission is external: a Flathub PR carries the packaging/flatpak manifest (adjusted to the upstream git tag) and is subject to the Flathub permissions and appstream review. No external store was modified."
+          } >> "$GITHUB_STEP_SUMMARY"
   prepare-winget:
     name: Prepare WinGet manifest (dry run)
     if: inputs.platform == 'winget'

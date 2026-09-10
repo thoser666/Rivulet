@@ -31,7 +31,9 @@
   artifact-configuration slug) and documented in `docs/code-signing.md`
 - feat(distribution): Flathub Stage 2 preparation — offline-cargo, reproducible
   Flatpak manifest `packaging/flatpak/org.rivulet.Rivulet.yml`
-  (org.freedesktop.Platform/Sdk 24.08 + rust-stable SDK extension, cargo builds
+  (org.freedesktop.Platform/Sdk 25.08 + rust-stable SDK extension, with the
+  llvm20 extension providing libclang to bindgen build scripts (libspa-sys),
+  cargo builds
   fully offline over the pinned crate archives in
   `packaging/flatpak/cargo/cargo-sources.json` — 1239 crates generated from
   `Cargo.lock` by the official `flatpak-cargo-generator` at a pinned commit and
