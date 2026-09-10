@@ -16,6 +16,12 @@
     <name>Rivulet Project</name>
   </developer>
   <content_rating type="oars-1.1"/>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/thoser666/Rivulet/c7d03f278eae36e9e067bcd8434df865a0092d7f/docs/thumbnail.png</image>
+      <caption>Rivulet main window</caption>
+    </screenshot>
+  </screenshots>
   <releases>
     <release version="0.65.0-alpha.55" date="2026-09-10"/>
   </releases>

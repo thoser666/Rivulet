@@ -4419,6 +4419,14 @@ fn m5_flathub_stage2_is_prepared_and_pinned() {
         "the metainfo must use the modern developer tag, an OARS content rating and dated releases (warnings are fatal in the official lint)"
     );
     assert!(
+        metainfo.contains("<screenshots>")
+            && metainfo.contains("<screenshot type=\"default\">")
+            && metainfo.contains("raw.githubusercontent.com/thoser666/Rivulet/")
+            && !metainfo.contains("raw.githubusercontent.com/thoser666/Rivulet/main/")
+            && !metainfo.contains("raw.githubusercontent.com/thoser666/Rivulet/develop/"),
+        "the metainfo must ship at least one screenshot referenced by commit, never by branch (metainfo-missing-screenshots is never grantable)"
+    );
+    assert!(
         manifest.contains("LIBCLANG_PATH") && manifest.contains("/usr/lib/sdk/llvm20/lib"),
         "the manifest must point bindgen at libclang via LIBCLANG_PATH (llvm20 extension)"
     );
