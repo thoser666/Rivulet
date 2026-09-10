@@ -2739,6 +2739,7 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
             && workflow.contains("- winget")
             && workflow.contains("- scoop")
             && workflow.contains("- chocolatey")
+            && workflow.contains("- aur")
             && workflow.contains("- flathub")
             && workflow.contains("- homebrew")
             && workflow.contains("- steam")
@@ -2806,6 +2807,27 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
     assert!(
         release_doc.contains("choco push") && release_doc.contains("community repository"),
         "release-platforms docs must document the chocolatey submission path"
+    );
+
+    // AUR channel (community package, no signing required): the PKGBUILD
+    // downloads the pre-built AppImage from GitHub Releases and extracts it;
+    // the CI job validates the PKGBUILD version matches the release tag and
+    // that required assets exist. Submission to AUR is external.
+    let pkgbuild = read("packaging/aur/PKGBUILD");
+    assert!(
+        pkgbuild.contains("pkgname=rivulet")
+            && pkgbuild.contains("pkgver=")
+            && pkgbuild.contains("rivulet-linux-x86_64.AppImage")
+            && pkgbuild.contains("extract"),
+        "AUR PKGBUILD must declare pkgname, pkgver, download the AppImage, and extract it"
+    );
+    assert!(
+        workflow.contains("prepare-aur") && workflow.contains("PKGBUILD"),
+        "distribution workflow must run AUR PKGBUILD validation"
+    );
+    assert!(
+        release_doc.contains("AUR") && release_doc.contains("PKGBUILD"),
+        "release-platforms docs must document the AUR submission path"
     );
 }
 

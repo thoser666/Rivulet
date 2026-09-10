@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Rivulet
+GenericName=Screen Recorder
+Comment=Modern Screen Recording & Streaming Software
+Exec=rivulet-gui %U
+Icon=rivulet
+Terminal=false
+Categories=AudioVideo;Recorder;
+MimeType=application/x-rivulet;
+Keywords=streaming;recording;screen;capture;obs;stream;game;
+StartupWMClass=rivulet-gui
