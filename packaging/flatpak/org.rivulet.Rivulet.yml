@@ -15,6 +15,10 @@ runtime-version: '25.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
+  # libclang for bindgen build scripts (libspa-sys) during the build. The
+  # freedesktop 25.08 SDK no longer ships libclang in the base; the matching
+  # LLVM SDK extension provides it under /usr/lib/sdk/llvm20/lib.
+  - org.freedesktop.Sdk.Extension.llvm20
 command: rivulet-gui
 
 finish-args:
@@ -41,11 +45,13 @@ modules:
   - name: rivulet
     buildsystem: simple
     build-options:
-      append-path: /usr/lib/sdk/rust-stable/bin
+      append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm20/bin
+      prepend-ld-library-path: /usr/lib/sdk/llvm20/lib
       env:
         CARGO_HOME: /run/build/rivulet/cargo-home
         CARGO_NET_OFFLINE: 'true'
         CARGO_TERM_COLOR: never
+        LIBCLANG_PATH: /usr/lib/sdk/llvm20/lib
         RUSTFLAGS: -C link-arg=-fuse-ld=mold
     build-commands:
       - mkdir -p .cargo

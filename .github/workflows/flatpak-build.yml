@@ -50,14 +50,15 @@ jobs:
           sudo apt-get install -y flatpak flatpak-builder
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
-      - name: Add the SDK runtime and rust-stable extension
+      - name: Add the SDK runtime, rust-stable and llvm extensions
         shell: bash
         run: |
           set -euo pipefail
           sudo flatpak install -y flathub \
             org.freedesktop.Platform//25.08 \
             org.freedesktop.Sdk//25.08 \
-            org.freedesktop.Sdk.Extension.rust-stable//25.08
+            org.freedesktop.Sdk.Extension.rust-stable//25.08 \
+            org.freedesktop.Sdk.Extension.llvm20//25.08
 
       - name: Build the Flatpak
         shell: bash
@@ -92,7 +93,7 @@ jobs:
             echo "## Flatpak build"
             echo
             echo "- Manifest: packaging/flatpak/org.rivulet.Rivulet.yml"
-            echo "- Runtime: org.freedesktop.Platform 25.08 (rust-stable extension)"
+            echo "- Runtime: org.freedesktop.Platform 25.08 (rust-stable + llvm20 extensions)"
             echo "- Cargo: offline cargo, pinned archives from cargo-sources.json ($(jq 'length' packaging/flatpak/cargo/cargo-sources.json) crates)"
             echo "- Bundle: $RUNNER_TEMP/rivulet.flatpak"
           } >> "$GITHUB_STEP_SUMMARY"
