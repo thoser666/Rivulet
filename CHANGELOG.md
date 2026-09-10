@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+- feat(distribution): Scoop bucket — the first native Windows package channel,
+  available already because Scoop (unlike winget) requires no code signing:
+  deterministic manifest generator `packaging/windows/generate-scoop-manifest.ps1`
+  renders `bucket/rivulet.json` from a release tag with the portable-ZIP
+  SHA-256 taken from the release's own `SHA256SUMS` (a manifest can never
+  reference an unverified binary; `[ordered]` throughout so re-renders are
+  byte-stable and `-ValidateOnly` re-verification catches drift), Pester tests
+  (5), a **Distribution Readiness → scoop** dry-run job, the live bucket
+  repository [thoser666/scoop-bucket](https://github.com/thoser666/scoop-bucket)
+  seeded with the v0.65.0-alpha.163 manifest (install:
+  `scoop bucket add rivulet https://github.com/thoser666/scoop-bucket` &&
+  `scoop install rivulet/rivulet`), ci_pinning guard, and
+  `docs/release-platforms.md` Scoop section- feat(signing): CI notice for automatic SignPath activation — once all
+  four `SIGNPATH_*` secrets exist, `check-beta-gate.py` appends "the next
+  release signs automatically via SignPath Foundation" to the Beta-Gate
+  step summary on every push (pure information, verdict-neutral); notice
+  logic extracted into `signpath_note()` with a `--self-test` run by the
+  beta-gate CI job and pinned by `beta_gate_checker_is_wired_up`- feat(signing): paste-in SignPath artifact configuration
+  (`packaging/signpath/artifact-configuration.xml`) matching the release
+  workflow's two upload shapes — a `<zip-file>` root Authenticode-signing
+  `rivulet-gui.exe`, `rivulet.exe` and `rivulet-updater.exe`, and an
+  `<msi-file>` root signing the MSI whole (no deep signing; the installed
+  EXEs are signed in the first request) — plus the required `version`
+  parameter the submit steps pass; portal setup after SignPath Foundation
+  approval is now a paste-in, pinned by `code_signing_automation_is_wired_up`
+  (workflow-vs-XML EXE/MSI coverage, parameter declaration, no pinned
+  artifact-configuration slug) and documented in `docs/code-signing.md`
 - feat(distribution): Flathub Stage 2 preparation — offline-cargo, reproducible
   Flatpak manifest `packaging/flatpak/org.rivulet.Rivulet.yml`
   (org.freedesktop.Platform/Sdk 25.08 + rust-stable SDK extension, cargo builds
@@ -18,6 +45,14 @@
   dry-run **Distribution Readiness → flathub** job; honest scope: the Flathub
   submission PR and its permissions/appstream review stay the external gate
   (see `docs/release-platforms.md`)
+- feat(distribution): WinGet Stage 2 preparation — deterministic winget
+  manifest generator/validator `packaging/windows/generate-winget-manifest.ps1`
+  (singleton manifest v1.6, canonical GitHub asset URL + SHA-256 + MSI
+  `ProductCode`/`UpgradeCode`, `-ValidateOnly` re-verification), Pester-pinned
+  (14 tests), plus a dry-run **Distribution Readiness → winget** job that runs
+  the tests and renders/verifies the manifest against the real release MSI;
+  honest scope: the `microsoft/winget-pkgs` submission PR stays the external
+  gate (stable identity `Rivulet.Rivulet`, see `docs/release-platforms.md`)
 - feat(alerts): native alert ingestion for the chat dock (M5) — new
   `rivulet-core::alerts_ingest` contract: `AlertEvent`/`AlertKind` (Follow,
   Subscribe, GiftSub, Donation, Raid), Streamlabs donation + Twitch EventSub

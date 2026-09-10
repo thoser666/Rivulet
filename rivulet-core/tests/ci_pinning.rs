@@ -1408,6 +1408,17 @@ fn beta_gate_checker_is_wired_up() {
         checker.contains("--fail"),
         "check-beta-gate.py must offer --fail to turn unmet criteria into exit 1"
     );
+    // SignPath auto-signing notice: once all four SIGNPATH_* secrets exist,
+    // the beta-gate dashboard must announce that the next release signs
+    // automatically — so the maintainer learns the good news from CI, not
+    // from reading workflow YAML. The notice must be logic-tested (self-test)
+    // and CI must run that self-test.
+    assert!(
+        checker.contains("def signpath_note")
+            && checker.contains("signs automatically")
+            && checker.contains("--self-test"),
+        "check-beta-gate.py must expose the SignPath notice with a self-test"
+    );
 
     // The gate itself lives in the roadmap; the README must define it.
     let readme = read("README.md");
@@ -1420,6 +1431,10 @@ fn beta_gate_checker_is_wired_up() {
     assert!(
         ci.contains("check-beta-gate.py"),
         "the CI workflow must run the beta-gate checker"
+    );
+    assert!(
+        ci.contains("check-beta-gate.py --self-test"),
+        "CI must run the beta-gate checker self-test"
     );
     assert!(
         ci.contains("GITHUB_STEP_SUMMARY"),
@@ -1518,6 +1533,39 @@ fn code_signing_automation_is_wired_up() {
         "test-signpath-config.py must pin the action SHA and offer --self-test"
     );
 
+    // The paste-in artifact configuration (SignPath portal setup) must stay
+    // in sync with what the workflow actually uploads: a ZIP with exactly
+    // the three EXEs, plus the MSI as a whole-file request. If either side
+    // changes, this pin forces the other to change with it.
+    let signpath_config = read("packaging/signpath/artifact-configuration.xml");
+    assert!(
+        signpath_config.contains("http://signpath.io/artifact-configuration/v1"),
+        "artifact-configuration.xml must use the SignPath v1 schema namespace"
+    );
+    assert!(
+        signpath_config.contains("<zip-file>") && signpath_config.contains("<msi-file>"),
+        "artifact-configuration.xml must define both request shapes (EXE ZIP + MSI)"
+    );
+    for exe in ["rivulet-gui.exe", "rivulet.exe", "rivulet-updater.exe"] {
+        assert!(
+            build.contains(&format!("staging/{exe}"))
+                && signpath_config.contains(&format!("path=\"{exe}\"")),
+            "SignPath artifact configuration and workflow upload must both cover the EXEs"
+        );
+    }
+    assert!(
+        build.contains("staging/rivulet-windows-x86_64.msi"),
+        "build-package.yml must upload the MSI for SignPath signing"
+    );
+    assert!(
+        signpath_config.contains("name=\"version\"") && signpath_config.contains("required=\"true\""),
+        "artifact-configuration.xml must declare the version parameter the workflow passes on every submit"
+    );
+    assert!(
+        !build.contains("artifact-configuration-slug"),
+        "submit steps rely on automatic artifact-configuration selection; if slugs are pinned, update the portal setup docs"
+    );
+
     let beta_gate = read("scripts/check-beta-gate.py");
     assert!(
         beta_gate.contains("SIGNPATH_API_TOKEN")
@@ -1569,6 +1617,10 @@ fn code_signing_automation_is_wired_up() {
             && doc.contains("packaging/windows/sign.ps1")
             && doc.contains("signpath/github-action-submit-signing-request"),
         "docs/code-signing.md must reference all signing scripts and the SignPath action"
+    );
+    assert!(
+        doc.contains("packaging/signpath/artifact-configuration.xml"),
+        "docs/code-signing.md must point to the paste-in artifact configuration"
     );
     assert!(
         doc.contains("Hash-based vs. file-based"),
@@ -2568,6 +2620,7 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
     assert!(
         workflow.contains("platform:")
             && workflow.contains("- winget")
+            && workflow.contains("- scoop")
             && workflow.contains("- flathub")
             && workflow.contains("- homebrew")
             && workflow.contains("- steam")
@@ -2579,6 +2632,39 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
             && workflow.contains("contents: read")
             && !workflow.contains("contents: write"),
         "distribution preparation must not publish or request write access"
+    );
+
+    // Scoop channel (no signing required): the generator takes the portable
+    // ZIP SHA-256 from the release's own SHA256SUMS asset, and the CI job
+    // re-verifies the rendered manifest byte-exact. The bucket repo carries
+    // the generated manifest; the docs must stay in sync with the wiring.
+    let scoop_gen = read("packaging/windows/generate-scoop-manifest.ps1");
+    assert!(
+        scoop_gen.contains("SHA256SUMS")
+            && scoop_gen.contains("rivulet-windows-x86_64-portable.zip")
+            && scoop_gen.contains("-ValidateOnly"),
+        "scoop manifest generator must hash-pin the portable ZIP from SHA256SUMS and support re-verification"
+    );
+    assert!(
+        read("packaging/windows/generate-scoop-manifest.tests.ps1").contains("Invoke-Pester")
+            || scoop_gen.contains("Pester"),
+        "scoop manifest generator must be covered by Pester tests"
+    );
+    assert!(
+        workflow.contains("prepare-scoop")
+            && workflow.contains("generate-scoop-manifest.ps1")
+            && workflow.contains("generate-scoop-manifest.tests.ps1"),
+        "distribution workflow must run the scoop Pester tests and generator"
+    );
+    assert!(
+        workflow.contains("thoser666/scoop-bucket"),
+        "the scoop plan must point at the live bucket repository"
+    );
+    let release_doc = read("docs/release-platforms.md");
+    assert!(
+        release_doc.contains("thoser666/scoop-bucket")
+            && release_doc.contains("scoop bucket add rivulet"),
+        "release-platforms docs must document the live scoop bucket"
     );
 }
 
@@ -4322,5 +4408,65 @@ fn m5_flathub_stage2_is_prepared_and_pinned() {
     assert!(
         changelog.contains("feat(distribution)") && changelog.contains("flathub"),
         "CHANGELOG must record the Flathub Stage 2 preparation"
+    );
+}
+
+#[test]
+fn m5_winget_stage2_is_prepared_and_pinned() {
+    // M5 distribution rollout Stage 2 (WinGet): a deterministic manifest
+    // generator must stay wired so the winget-pkgs payload stays canonical
+    // (GitHub asset URL + SHA-256 + MSI ProductCode/UpgradeCode), covered by
+    // Pester tests, exercised by a dry-run readiness job, and honestly
+    // documented (external review remains the gate, never a bot).
+    let generator = read("packaging/windows/generate-winget-manifest.ps1");
+    let pester = read("packaging/windows/generate-winget-manifest.tests.ps1");
+    let workflow = read(".github/workflows/distribution-readiness.yml");
+    let readme = read("README.md");
+    let platforms = read("docs/release-platforms.md");
+    let changelog = read("CHANGELOG.md");
+    for required in [
+        "PackageIdentifier: ",
+        "ManifestType: singleton",
+        "ManifestVersion: 1.6.0",
+        "InstallerType: wix",
+        "Scope: machine",
+        "InstallerUrl",
+        "InstallerSha256",
+        "A5C1E5E8-7A3B-4C9D-B6E2-9F1D4C7A8B90",
+        "ValidateOnly",
+        "Read-MsiProductCode",
+    ] {
+        assert!(
+            generator.contains(required),
+            "winget manifest generator must contain {required:?}"
+        );
+    }
+    assert!(
+        pester.contains("Invoke-Generator") && pester.contains("ValidateOnly"),
+        "Pester tests must cover generation and validation mode"
+    );
+    assert!(
+        workflow.contains("prepare-winget") && workflow.contains("generate-winget-manifest.ps1"),
+        "distribution-readiness must contain the prepare-winget job"
+    );
+    assert!(
+        workflow.contains("Invoke-Pester") && workflow.contains("validate-release"),
+        "the prepare-winget job must run the Pester tests after asset validation"
+    );
+    assert!(
+        readme.contains("WinGet preparation") && readme.contains("generate-winget-manifest.ps1"),
+        "README must document the WinGet preparation state"
+    );
+    assert!(
+        readme.contains("Flathub preparation") && readme.contains("packaging/flatpak/"),
+        "README must document the Flathub preparation state"
+    );
+    assert!(
+        platforms.contains("generate-winget-manifest.ps1") && platforms.contains("Rivulet.Rivulet"),
+        "release-platforms must document the generator and the stable package identity"
+    );
+    assert!(
+        changelog.contains("feat(distribution)") || changelog.contains("winget"),
+        "CHANGELOG must record the WinGet Stage 2 preparation"
     );
 }

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for Rivulet (paste into the SignPath portal).
+
+  Where: SignPath portal -> Project "rivulet" -> Artifact Configurations ->
+         Add -> Custom -> paste this file.
+  Why:   the release workflow
+         (.github/workflows/build-package.yml) submits two kinds of
+         signing requests and the portal must match their exact structure:
+
+    1. rivulet-windows-unsigned-exe-<run_id>  — a ZIP containing exactly
+       three PE executables: rivulet-gui.exe, rivulet.exe,
+       rivulet-updater.exe (see "Upload Windows EXEs for SignPath
+       signing"). Each gets an Authenticode signature.
+    2. rivulet-windows-unsigned-msi-<run_id>  — the MSI installer
+       rivulet-windows-x86_64.msi (see "Upload MSI for SignPath
+       signing"), signed as a whole. No deep signing: every PE that the
+       MSI installs is already signed in request 1, so the inner files
+       are not enumerated here.
+
+  How it is selected: the workflow's submit steps do not pass
+  artifact-configuration-slug; SignPath picks this configuration
+  automatically because it is the only one in the project whose root
+  element matches the uploaded artifact (a ZIP -> zip-file, an MSI ->
+  msi-file).
+
+  The `version` parameter is required because the workflow passes
+  `parameters: version: "<release version>"` to every submit step
+  (github-action-submit-signing-request v2.3). User-defined parameters
+  are supported on Open Source Code Signing; they must be declared here,
+  otherwise the request is rejected as an unknown parameter.
+
+  Schema: http://signpath.io/artifact-configuration/v1 (downloadable from
+  the portal's Edit XML view for schema-aware editors).
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+
+  <parameters>
+    <!-- Passed by build-package.yml on every submit step:
+         parameters: |
+           version: "${{ inputs.version }}" -->
+    <parameter name="version" required="true" />
+  </parameters>
+
+  <!-- Request shape 1: the unsigned-EXE ZIP (three PE files, flat). -->
+  <zip-file>
+    <pe-file path="rivulet-gui.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="rivulet.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="rivulet-updater.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+
+  <!-- Request shape 2: the MSI installer (whole-file Authenticode).
+       Deliberately no deep signing: the EXEs it installs were signed
+       individually in the first signing request. If a future MSI embeds
+       unsigned PEs, enumerate them here as
+       <pe-file path="..."><authenticode-sign/></pe-file> children before
+       the outer <authenticode-sign /> to re-enable deep signing. -->
+  <msi-file>
+    <authenticode-sign />
+  </msi-file>
+
+</artifact-configuration>
