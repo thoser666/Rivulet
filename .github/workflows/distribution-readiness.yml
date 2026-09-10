@@ -20,6 +20,7 @@ on:
           - github
           - winget
           - scoop
+          - chocolatey
           - flathub
           - homebrew
           - steam
@@ -90,6 +91,11 @@ jobs:
               require_asset rivulet-windows-x86_64-portable.zip
               require_asset SHA256SUMS
               echo "scoop readiness: portable ZIP + SHA256SUMS exist; manifest generation and validation are wired in the prepare-scoop job."
+              ;;
+            chocolatey)
+              require_asset rivulet-windows-x86_64-portable.zip
+              require_asset SHA256SUMS
+              echo "chocolatey readiness: portable ZIP + SHA256SUMS exist; package generation and validation are wired in the prepare-chocolatey job."
               ;;
             flathub)
               require_asset rivulet-linux-x86_64.AppImage
@@ -345,4 +351,75 @@ jobs:
           Publishing is external: copy the generated rivulet.json into the bucket repo's
           bucket/ directory (commit + push). Scoop requires no code signing, so this
           channel is available already. No external store was modified.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  prepare-chocolatey:
+    name: Prepare Chocolatey package (dry run)
+    if: inputs.platform == 'chocolatey'
+    needs: validate-release
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Derive version from the release tag
+        shell: bash
+        run: echo "CHOCO_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Run the chocolatey package Pester tests
+        shell: pwsh
+        run: |
+          $env:NO_COLOR = "1"
+          Invoke-Pester -CI -Path packaging/windows/generate-chocolatey-package.tests.ps1 -Output Detailed
+
+      - name: Generate the chocolatey package (real release, SHA-256 from SHA256SUMS)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-chocolatey-package.ps1" `
+            -Version "$env:CHOCO_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG" `
+            -OutDir "$env:RUNNER_TEMP/chocolatey-packages"
+
+      - name: Verify the generated package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Re-render (deterministic) and compare byte-for-byte, so a drifted
+          # or hand-edited package can never pass validation.
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-chocolatey-package.ps1" `
+            -ValidateOnly `
+            -ManifestPath "$env:RUNNER_TEMP/chocolatey-packages/rivulet" `
+            -Version "$env:CHOCO_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG"
+
+      - name: Publish Chocolatey plan
+        shell: pwsh
+        run: |
+          if ("$env:DRY_RUN" -eq "false") {
+            Write-Error "Publishing is intentionally not enabled: the community-repository PR is external and moderated."
+            exit 1
+          }
+          $install = "$env:RUNNER_TEMP/chocolatey-packages/rivulet/tools/chocolateyInstall.ps1"
+          $sha = (Select-String -LiteralPath $install -Pattern "checksum64\s*=\s*'([0-9a-f]{64})'").Matches.Groups[1].Value
+          @"
+          ## Chocolatey readiness
+          - Release: $env:RELEASE_TAG (version $env:CHOCO_VERSION)
+          - Mode: dry run
+          - Generated package: $env:RUNNER_TEMP/chocolatey-packages/rivulet (rivulet.nuspec + tools/chocolateyInstall.ps1)
+          - Portable ZIP SHA-256: $sha (verified against the release SHA256SUMS)
+          - Submission target: Chocolatey community repository (moderated PR)
+
+          Timing note: the community repository requires manual moderation per
+          version, so Rivulet submits only milestone releases (first beta),
+          not weekly alphas — see docs/release-platforms.md.
+
+          Publishing is external: upload the generated package directory with
+          `choco push` (API key required) or open the package PR against the
+          community repository. Unsigned installers are accepted with a
+          warning. No external store was modified.
           "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

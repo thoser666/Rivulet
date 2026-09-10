@@ -1,0 +1,258 @@
+# Weekly release promotion — the slow lane for Stage-2/4 distribution
+# channels (Scoop, WinGet, Chocolatey, ...).
+#
+# Rivulet publishes an alpha release on every green push (the fast lane).
+# Package-manager channels must not consume that firehose: moderators reject
+# per-release churn and store listings read better with one bigger, coarser
+# changelog per week. This scheduled workflow therefore:
+#
+#   1. picks the newest published release (releases only exist after the
+#      gated pipeline succeeded, so "published" == "green"; the check-runs
+#      assertion below is belt-and-suspenders),
+#   2. moves the `weekly-latest` tag onto that release's commit — the tag is
+#      the slow lane pointer. It deliberately does NOT create a release:
+#      the in-app updater reads the /releases endpoint and must keep
+#      following the fast lane,
+#   3. generates one digest changelog covering everything since the previous
+#      promotion (`--from-tag` + `--digest` modes of
+#      scripts/generate-release-notes.sh),
+#   4. updates the Scoop bucket automatically when the SCOOP_BUCKET_TOKEN
+#      secret exists (a fine-grained PAT with contents:write on
+#      thoser666/scoop-bucket — the default GITHUB_TOKEN cannot push
+#      cross-repo); otherwise it publishes the manifest as an artifact with
+#      copy-paste instructions instead of failing.
+#
+# Usage:
+#   scheduled: Mondays 07:09 UTC
+#   manual:    gh workflow run weekly-promotion.yml [-f release_tag vX.Y.Z-alpha.N]
+name: Weekly release promotion
+
+on:
+  schedule:
+    - cron: "9 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to promote (default: newest published release)"
+        required: false
+        type: string
+
+# Tag push on this repository. No other scope is needed; notably there is
+# deliberately no `actions: read` — GitHub rejects workflow_call files that
+# carry that top-level permission at startup (see docs/ci-action-pins.md).
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-promotion
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  promote:
+    name: Promote newest green release to weekly-latest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository (full history for the changelog range)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Refresh all tags (weekly-latest + release tags)
+        run: git fetch --tags --force origin
+
+      - name: Resolve the release to promote
+        id: resolve
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.release_tag }}" ]; then
+            CHOSEN="${{ inputs.release_tag }}"
+          else
+            # Newest published release first. isDraft=false only lists
+            # actually published releases; every release in this repo is a
+            # prerelease, so filtering that out would empty the list.
+            CHOSEN="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
+              --json tagName,isDraft --jq '[.[] | select(.isDraft == false)][0].tagName')"
+          fi
+          if [ -z "$CHOSEN" ] || [ "$CHOSEN" = "null" ]; then
+            echo "::error::No published release found to promote"
+            exit 1
+          fi
+          SHA="$(git rev-parse "$CHOSEN^{commit}")"
+          echo "chosen=$CHOSEN" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Promoting: $CHOSEN ($SHA)"
+
+      - name: Verify the release commit is green
+        # The release pipeline already gates publishing on CI success; this
+        # assertion catches out-of-band publishes and keeps the promotion
+        # honest even when someone creates a release by hand.
+        run: |
+          set -euo pipefail
+          SHA="${{ steps.resolve.outputs.sha }}"
+          CHOSEN="${{ steps.resolve.outputs.chosen }}"
+          FAILED="$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs" \
+            --jq '[.check_runs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled")] | length')"
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::$CHOSEN commit has $FAILED failed check run(s) — not promoting a red release"
+            exit 1
+          fi
+          echo "Green check: 0 failed check runs on the release commit."
+
+      - name: Determine the previous promotion target
+        id: previous
+        run: |
+          set -euo pipefail
+          CHOSEN="${{ steps.resolve.outputs.chosen }}"
+          # Where does weekly-latest point right now (empty on first run)?
+          if git cat-file -e refs/tags/weekly-latest 2>/dev/null; then
+            TARGET_SHA="$(git rev-parse 'weekly-latest^{commit}')"
+          else
+            TARGET_SHA=""
+          fi
+          if [ -n "$TARGET_SHA" ] && [ "$TARGET_SHA" = "${{ steps.resolve.outputs.sha }}" ]; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+            echo "weekly-latest already points at $CHOSEN — nothing to do."
+            exit 0
+          fi
+          echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+          # Changelog base: the release tag sitting on the current weekly-latest
+          # target, falling back to the release right before the chosen one,
+          # falling back to the chosen tag itself (first promotion with a
+          # dangling pointer → empty delta, rendered as a note below).
+          FROM_REF=""
+          if [ -n "$TARGET_SHA" ]; then
+            FROM_REF="$(git tag --points-at "$TARGET_SHA" | grep -E '^v[0-9]' | head -1 || true)"
+          fi
+          if [ -z "$FROM_REF" ]; then
+            # Fallback: the release tag right before the chosen one. Local
+            # tags are complete (the refresh step fetched all tags), so sort
+            # them newest-first by version and take the entry after the
+            # chosen one. Chosen not found or already the oldest → empty,
+            # which the caller maps to the chosen tag itself.
+            # shellcheck disable=SC2016
+            FROM_REF="$(git tag --list 'v*' --sort=-version:refname \
+              | awk -v chosen="$CHOSEN" '{ if (seen) { print; exit } if ($0 == chosen) seen = 1 }')"
+          fi
+          [ -n "$FROM_REF" ] || FROM_REF="$CHOSEN"
+          echo "from_ref=$FROM_REF" >> "$GITHUB_OUTPUT"
+          echo "Changelog range base: $FROM_REF"
+
+      - name: Short-circuit when already up to date
+        if: steps.previous.outputs.up_to_date == 'true'
+        run: |
+          {
+            echo "## Weekly promotion"
+            echo
+            echo "- Status: up to date — \`weekly-latest\` already points at \`${CHOSEN:-<unresolved>}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Move the weekly-latest tag
+        if: steps.previous.outputs.up_to_date == 'false'
+        run: |
+          set -euo pipefail
+          # -f is required by design: the pointer moves forward to the newest
+          # green release every week. Only ever moved to a NEWER commit — the
+          # resolve step picks the newest published release.
+          git tag -f weekly-latest "${{ steps.resolve.outputs.sha }}" \
+            -m "Slow-lane pointer: promoted ${{ steps.resolve.outputs.chosen }}"
+          git push -f origin refs/tags/weekly-latest
+
+      - name: Generate the weekly digest changelog
+        if: steps.previous.outputs.up_to_date == 'false'
+        id: notes
+        env:
+          CHOSEN: ${{ steps.resolve.outputs.chosen }}
+          FROM_REF: ${{ steps.previous.outputs.from_ref }}
+        run: |
+          set -euo pipefail
+          # Detach at the promoted release tip so the range ends exactly at
+          # the release (never at newer, unpublished develop commits).
+          git checkout --quiet "${{ steps.resolve.outputs.sha }}"
+          bash scripts/generate-release-notes.sh \
+            --from-tag "$FROM_REF" --digest \
+            > "$RUNNER_TEMP/weekly-notes.md" || true
+          # Two releases can differ only by version-bump commits; the notes
+          # exclude those, so an empty file is legitimate.
+          if [ ! -s "$RUNNER_TEMP/weekly-notes.md" ]; then
+            echo "- maintenance release: no user-facing changes since $FROM_REF" \
+              > "$RUNNER_TEMP/weekly-notes.md"
+          fi
+          echo "--- weekly notes ---"; cat "$RUNNER_TEMP/weekly-notes.md"
+          {
+            echo "## Weekly promotion — $CHOSEN"
+            echo
+            echo "Changelog since $FROM_REF (digest):"
+            echo
+            cat "$RUNNER_TEMP/weekly-notes.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare the Scoop manifest for the promoted release
+        if: steps.previous.outputs.up_to_date == 'false'
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.resolve.outputs.chosen }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-scoop-manifest.ps1" `
+            -Version $version `
+            -ReleaseTag $env:RELEASE_TAG `
+            -OutDir "$env:RUNNER_TEMP/scoop-manifests"
+          # Deterministic re-render + byte compare: a drifted manifest can
+          # never reach the bucket (same guard as the distribution-readiness
+          # dry-run job, without the Pester suite which already runs there).
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-scoop-manifest.ps1" `
+            -ValidateOnly `
+            -ManifestPath "$env:RUNNER_TEMP/scoop-manifests/rivulet.json" `
+            -Version $version `
+            -ReleaseTag $env:RELEASE_TAG
+          # upload-artifact cannot expand RUNNER_TEMP in its path — copy the
+          # manifest into the workspace for the publish step.
+          Copy-Item "$env:RUNNER_TEMP/scoop-manifests/rivulet.json" "$env:GITHUB_WORKSPACE/scoop-manifest.json"
+
+      - name: Update the Scoop bucket (when SCOOP_BUCKET_TOKEN is set)
+        if: steps.previous.outputs.up_to_date == 'false'
+        env:
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          CHOSEN: ${{ steps.resolve.outputs.chosen }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SCOOP_BUCKET_TOKEN" ]; then
+            echo "::warning::SCOOP_BUCKET_TOKEN is not set — publishing the manifest as an artifact instead. Add a fine-grained PAT (contents:write on thoser666/scoop-bucket) as a repository secret to automate the bucket update."
+            exit 0
+          fi
+          git clone --quiet --depth 1 \
+            "https://x-access-token:$SCOOP_BUCKET_TOKEN@github.com/thoser666/scoop-bucket.git" \
+            "$RUNNER_TEMP/scoop-bucket"
+          cp "scoop-manifest.json" "$RUNNER_TEMP/scoop-bucket/bucket/rivulet.json"
+          git -C "$RUNNER_TEMP/scoop-bucket" config user.name "rivulet-promotion-bot"
+          git -C "$RUNNER_TEMP/scoop-bucket" config user.email "actions@users.noreply.github.com"
+          if git -C "$RUNNER_TEMP/scoop-bucket" diff --quiet; then
+            echo "Bucket manifest already at the promoted release."
+            exit 0
+          fi
+          git -C "$RUNNER_TEMP/scoop-bucket" add bucket/rivulet.json
+          {
+            echo "rivulet $CHOSEN"
+            echo
+            cat "$RUNNER_TEMP/weekly-notes.md"
+          } > "$RUNNER_TEMP/bucket-commit-msg.txt"
+          git -C "$RUNNER_TEMP/scoop-bucket" commit --quiet -F "$RUNNER_TEMP/bucket-commit-msg.txt"
+          git -C "$RUNNER_TEMP/scoop-bucket" push --quiet origin main
+          echo "Bucket updated for $CHOSEN."
+          {
+            echo
+            echo "- Scoop bucket: updated \`bucket/rivulet.json\` to $CHOSEN."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the manifest as an artifact (fallback / verification)
+        if: steps.previous.outputs.up_to_date == 'false'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "scoop-manifest-${{ steps.resolve.outputs.chosen }}"
+          path: scoop-manifest.json
+          if-no-files-found: error
+          retention-days: 30

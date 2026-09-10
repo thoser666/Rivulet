@@ -85,6 +85,76 @@ unverified binary.
    rivulet/rivulet`; updates come from `checkver.github`.
 4. When winget goes live later, keep both: Scoop serves portable users and
    no-admin installs, winget serves MSI users.
+5. **Automatic weekly updates**: the **Weekly release promotion** workflow
+   (Mondays 07:09 UTC) regenerates `rivulet.json` for the promoted release
+   and pushes it to the bucket via `SCOOP_BUCKET_TOKEN` (fine-grained PAT,
+   contents:write on the bucket repo). Without the secret it publishes the
+   manifest as a workflow artifact with a warning instead of failing — set
+   the secret once and the bucket updates itself.
+
+### Chocolatey
+
+The Chocolatey **community repository** accepts unsigned installers (with a
+moderator warning), so it is usable before SignPath approval — but unlike
+Scoop every submission is a **moderated PR per version**. That makes it a
+milestone channel, not a fast-follow: submit the first beta, not weekly
+alphas, or the moderation queue rejects the churn.
+
+The package is generated from the portable ZIP asset exactly like the Scoop
+manifest: `generate-chocolatey-package.ps1` takes the SHA-256 from the
+release's own `SHA256SUMS` asset, normalizes the version for Chocolatey
+(dots are forbidden in prerelease suffixes: `0.65.0-alpha.163` →
+`0.65.0-alpha163`), and emits `rivulet.nuspec` +
+`tools/chocolateyInstall.ps1` wrapping `Install-ChocolateyZipPackage`.
+
+1. Trigger the **Distribution Readiness → chocolatey** workflow on a release
+   tag: it runs the Pester tests (`generate-chocolatey-package.tests.ps1`),
+   renders the package from the real release, and byte-verifies the render.
+2. Submit the generated package directory with `choco push` (API key from
+   the community repository account) or open the package PR against the
+   community repository — both are external and moderated.
+3. When winget goes live later, Chocolatey stays as the second Windows
+   option (winget serves MSI users, Chocolatey serves portable users who
+   prefer choco); promote both from the same `weekly-latest` target.
+
+### Promotion cadence: fast lane vs. weekly-latest
+
+Rivulet publishes a release on every green push — that firehose is the
+**fast lane** (GitHub Releases + the in-app updater). Package-manager
+channels must not consume it: moderators reject per-release churn and store
+listings read better with one coarser changelog per week. The **Weekly
+release promotion** workflow (`.github/workflows/weekly-promotion.yml`,
+Mondays 07:09 UTC, manual dispatch supported) is the **slow lane**:
+
+1. It picks the **newest published release** (published == green: the
+   release pipeline gates publishing on CI success) and additionally
+   verifies the release commit has no failed check runs — never promotes a
+   red release.
+2. It moves the **`weekly-latest` tag** onto that release's commit. The tag
+   is the slow-lane pointer. It deliberately does **not** create a release:
+   the in-app updater reads the `/releases` endpoint and must keep following
+   the fast lane.
+3. It generates one **digest changelog** covering everything since the
+   previous promotion (`generate-release-notes.sh --from-tag <prev>
+   --digest`): features stay listed individually, everything else rolls up
+   into per-section counts — a natural week of changes, not 30 alpha bullets.
+4. It renders and byte-verifies the Scoop manifest for the promoted release
+   and updates the bucket automatically (with `SCOOP_BUCKET_TOKEN`) or
+   publishes the manifest as an artifact (without). WinGet/Chocolatey/Cask
+   can later consume the same promotion target: the promoted tag + digest
+   notes are exactly what their manifest PRs need.
+
+To promote manually (e.g. right after a big feature lands):
+
+```bash
+gh workflow run weekly-promotion.yml -f release_tag v0.65.0-alpha.164
+```
+
+To see where the slow lane points:
+
+```bash
+git fetch --tags --force origin && git rev-parse weekly-latest^{commit}
+```
 
 ### Flathub
 
