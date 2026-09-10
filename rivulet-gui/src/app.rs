@@ -801,6 +801,27 @@ pub struct RivuletApp {
     /// Not persisted.
     #[serde(skip)]
     alert_preview_dirty: bool,
+    /// Alerts: local webhook receiver enabled (`127.0.0.1` only). Persisted,
+    /// off by default — the loopback receiver is the optional delivery half of
+    /// the honest ingestion story and stays off unless the streamer enables it.
+    alerts_receiver_enabled: bool,
+    /// Alerts: loopback port for the webhook receiver. Persisted; the Settings
+    /// UI constrains it to 1..=65535, tests may use ephemeral port 0.
+    alerts_receiver_port: u16,
+    /// Alerts: Twitch EventSub secret used to verify webhook signatures.
+    /// Persisted (masked in the UI like the chat token), never logged and
+    /// never embedded in any event. Empty disables the EventSub route.
+    alerts_twitch_secret: String,
+    /// Alerts: running loopback receiver handle. Not persisted.
+    #[serde(skip)]
+    alerts_receiver: Option<rivulet_core::AlertsReceiver>,
+    /// Alerts: settings the running receiver was started with (so a changed
+    /// port or secret restarts it once per frame, no more). Not persisted.
+    #[serde(skip)]
+    alerts_receiver_applied: rivulet_core::AlertsReceiverConfig,
+    /// Alerts: receiver bind/IO error shown in Settings. Not persisted.
+    #[serde(skip)]
+    alerts_receiver_error: Option<String>,
 
     /// Set when any hotkey binding changes through the Settings UI (or scene
     /// hotkey assignment), so the OS-level global hotkeys are re-registered
@@ -1377,6 +1398,12 @@ impl Default for RivuletApp {
             chat_state: rivulet_core::ChatConnState::Off,
             alert_ingest: rivulet_core::AlertIngest::default(),
             alert_preview_dirty: false,
+            alerts_receiver_enabled: false,
+            alerts_receiver_port: rivulet_core::DEFAULT_ALERTS_RECEIVER_PORT,
+            alerts_twitch_secret: String::new(),
+            alerts_receiver: None,
+            alerts_receiver_applied: rivulet_core::AlertsReceiverConfig::default(),
+            alerts_receiver_error: None,
             global_hotkeys_dirty: false,
             global_hotkeys: None,
             obs_ws_enabled: false,
@@ -5309,12 +5336,19 @@ impl RivuletApp {
             }
         }
 
+        // Keep the loopback webhook receiver in sync with the persisted
+        // settings (start/restart/stop), then drain its parsed alert events
+        // into the local queue (respecting the queue's enabled state).
+        self.apply_alerts_receiver();
+        if let Some(receiver) = &self.alerts_receiver {
+            while let Ok(event) = receiver.events().try_recv() {
+                self.alert_ingest.push(event);
+            }
+        }
+
         // Surface pending local alert events in the chat dock, newest first.
-        // There is no network receiver in the shipped build (like telemetry,
-        // ingestion is offline by default); the preview button queues samples.
-        // Surface pending local alert events in the chat dock, newest first.
-        // There is no network receiver in the shipped build (like telemetry,
-        // ingestion is offline by default); the preview button queues samples.
+        // Ingestion is local by default; the preview button and the loopback
+        // webhook receiver feed the same queue.
         if self.alert_preview_dirty {
             self.queue_alert_preview();
             self.alert_preview_dirty = false;
@@ -6153,6 +6187,47 @@ impl RivuletApp {
         self.alert_ingest.set_enabled(self.alert_ingest_enabled);
     }
 
+    /// Mirror the persisted webhook-receiver settings into the running
+    /// loopback listener: start when enabled and not running, restart when the
+    /// port or the Twitch secret changed, stop when disabled. Loopback-only by
+    /// design (providers need an HTTPS terminator or tunnel in front, see
+    /// docs/alerts-ingest.md); a bind failure is surfaced as a settings warning,
+    /// never a crash. Called once per frame, cheap when nothing changed.
+    fn apply_alerts_receiver(&mut self) {
+        if self.alerts_receiver_enabled {
+            let desired = rivulet_core::AlertsReceiverConfig {
+                port: self.alerts_receiver_port,
+                twitch_secret: self.alerts_twitch_secret.trim().to_owned(),
+            };
+            let restart = self.alerts_receiver.is_none()
+                || self.alerts_receiver_applied.port != desired.port
+                || self.alerts_receiver_applied.twitch_secret != desired.twitch_secret;
+            if restart {
+                if let Some(mut old) = self.alerts_receiver.take() {
+                    old.shutdown();
+                }
+                self.alerts_receiver_error = None;
+                match rivulet_core::AlertsReceiver::start(desired.clone()) {
+                    Ok(receiver) => {
+                        self.alerts_receiver_applied = desired;
+                        self.alerts_receiver = Some(receiver);
+                    }
+                    Err(err) => {
+                        self.alerts_receiver_error = Some(err.to_string());
+                        self.alerts_receiver_applied =
+                            rivulet_core::AlertsReceiverConfig::default();
+                    }
+                }
+            }
+        } else {
+            if let Some(mut old) = self.alerts_receiver.take() {
+                old.shutdown();
+            }
+            self.alerts_receiver_applied = rivulet_core::AlertsReceiverConfig::default();
+            self.alerts_receiver_error = None;
+        }
+    }
+
     /// Classify one finished recording session for telemetry. `healthy` is
     /// best-effort at the moment the session ends (`last_error` empty); events
     /// are only collected while the user opted in and never leave the device
@@ -6349,10 +6424,11 @@ impl RivuletApp {
         ui.small(note);
         ui.add_space(4.0);
 
-        // Alerts: the local ingestion queue is surfaced as chat entries.
-        // There is no network receiver in the shipped build, so a preview
-        // button queues one deterministic sample per alert kind — letting the
-        // streamer check the dock layout and the GUI tests verify the wiring.
+        // Alerts: the local ingestion queue is surfaced as chat entries. The
+        // optional loopback webhook receiver (Settings) feeds the same queue;
+        // the preview button adds one deterministic sample per alert kind so
+        // the streamer can check the dock layout offline and GUI tests verify
+        // the wiring.
         ui.horizontal_wrapped(|ui| {
             if ui.button(self.tr("alert_preview_button")).clicked() {
                 self.alert_preview_dirty = true;
@@ -7123,6 +7199,9 @@ impl RivuletApp {
         app.apply_telemetry_policy();
         // Mirror the persisted alert-ingestion toggle into the local queue.
         app.apply_alerts_policy();
+        // Mirror the persisted webhook-receiver settings into the loopback
+        // listener (disabled by default).
+        app.apply_alerts_receiver();
         app
     }
 }
@@ -8789,8 +8868,9 @@ impl eframe::App for RivuletApp {
 
                         // Settings: native alert ingestion (follows/subs/
                         // donations/raids) surfaced in the chat dock. Purely
-                        // local and never transmitted; see docs/alerts-ingest.md
-                        // for the honest scope (no network receiver yet).
+                        // local, never transmitted; the optional loopback
+                        // webhook receiver feeds the same queue (see
+                        // docs/alerts-ingest.md for the honest scope).
                         let alert_section = self.tr("alert_section");
                         let alert_enable = self.tr("alert_enable");
                         let alert_note = self.tr("alert_note");
@@ -8803,6 +8883,57 @@ impl eframe::App for RivuletApp {
                             self.apply_alerts_policy();
                         }
                         ui.small(alert_note);
+
+                        // Settings: loopback webhook receiver feeding the
+                        // ingestion queue (Streamlabs donation + Twitch
+                        // EventSub with HMAC verification; 127.0.0.1 only).
+                        let receiver_section = self.tr("alert_receiver_section");
+                        let receiver_enable = self.tr("alert_receiver_enable");
+                        let receiver_port = self.tr("alert_receiver_port");
+                        let receiver_secret = self.tr("alert_receiver_secret");
+                        let receiver_secret_note = self.tr("alert_receiver_secret_note");
+                        let receiver_note = self.tr("alert_receiver_note");
+                        ui.separator();
+                        ui.label(egui::RichText::new(receiver_section).strong());
+                        if ui
+                            .checkbox(&mut self.alerts_receiver_enabled, receiver_enable)
+                            .changed()
+                        {
+                            self.alerts_receiver_error = None;
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label(receiver_port);
+                            ui.add(
+                                egui::DragValue::new(&mut self.alerts_receiver_port)
+                                    .range(1..=65535),
+                            );
+                        });
+                        egui::Grid::new("alerts_receiver_secret_grid")
+                            .num_columns(2)
+                            .show(ui, |ui| {
+                                ui.label(receiver_secret);
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.alerts_twitch_secret)
+                                        .password(true)
+                                        .desired_width(220.0),
+                                );
+                                ui.end_row();
+                            });
+                        ui.small(receiver_secret_note);
+                        ui.small(receiver_note);
+                        if let Some(err) = &self.alerts_receiver_error {
+                            let colors = theme::StatusColors::for_ui(ui);
+                            let msg = err.clone();
+                            ui.colored_label(
+                                colors.warning,
+                                self.tr_fmt("alert_receiver_error", std::slice::from_ref(&msg)),
+                            );
+                        } else if let Some(rx) = &self.alerts_receiver {
+                            let addr = rx.addr().to_string();
+                            ui.small(
+                                self.tr_fmt("alert_receiver_running", std::slice::from_ref(&addr)),
+                            );
+                        }
 
                         // Settings: NDI output — LAN monitor feed published
                         // next to a recording/streaming session (M5 #77).
@@ -10150,9 +10281,14 @@ mod tests {
             "fn queue_alert_preview",
             "fn alert_event_to_chat_message",
             "fn apply_alerts_policy",
+            "fn apply_alerts_receiver",
+            "alerts_receiver_enabled",
+            "alerts_twitch_secret",
             ".checkbox(&mut self.alert_ingest_enabled, alert_enable)",
+            ".checkbox(&mut self.alerts_receiver_enabled, receiver_enable)",
             "self.alert_ingest.drain()",
             "app.apply_alerts_policy();",
+            "receiver.events().try_recv()",
         ] {
             assert!(
                 source.contains(required),
@@ -10162,6 +10298,152 @@ mod tests {
         assert!(
             source.contains("alert_preview_button"),
             "settings/chat-dock must expose the preview action"
+        );
+    }
+
+    /// Send a raw HTTP POST to a loopback listener and return the response head.
+    fn post_loopback(
+        addr: std::net::SocketAddr,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: &str,
+    ) -> String {
+        use std::io::{Read, Write};
+        let mut request = format!("POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n").into_bytes();
+        for (name, value) in headers {
+            request.extend_from_slice(format!("{name}: {value}\r\n").as_bytes());
+        }
+        request.extend_from_slice(format!("Content-Length: {}\r\n\r\n", body.len()).as_bytes());
+        request.extend_from_slice(body.as_bytes());
+
+        let mut stream = std::net::TcpStream::connect(addr).expect("connect to loopback");
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .expect("timeout");
+        stream.write_all(&request).expect("write request");
+        let mut response = String::new();
+        stream.read_to_string(&mut response).expect("read response");
+        response
+    }
+
+    #[test]
+    fn alerts_receiver_defaults_to_off_and_loopback_only() {
+        let app = RivuletApp::default();
+        assert!(
+            !app.alerts_receiver_enabled,
+            "the webhook receiver is opt-in and off by default"
+        );
+        assert!(app.alerts_receiver.is_none());
+        assert_eq!(
+            app.alerts_receiver_port,
+            rivulet_core::DEFAULT_ALERTS_RECEIVER_PORT
+        );
+        assert!(app.alerts_twitch_secret.is_empty());
+    }
+
+    #[test]
+    fn alerts_receiver_starts_and_surfaces_streamlabs_donation_in_the_chat_dock() {
+        let mut app = RivuletApp {
+            alerts_receiver_enabled: true,
+            alerts_receiver_port: 0, // ephemeral loopback port for tests
+            ..Default::default()
+        };
+        app.reconcile_chat();
+        let addr = app
+            .alerts_receiver
+            .as_ref()
+            .expect("receiver started on the ephemeral port")
+            .addr();
+        assert!(
+            addr.ip().is_loopback(),
+            "receiver must bind loopback only: {addr}"
+        );
+
+        let body = r#"{"type":"donation","message":[{"name":"Donor","amount":12.34,"currency":"EUR","message":"thank you"}]}"#;
+        let response = post_loopback(
+            addr,
+            "/webhook/streamlabs",
+            &[("Content-Type", "application/json")],
+            body,
+        );
+        assert!(response.starts_with("HTTP/1.1 200"), "response: {response}");
+
+        // One reconcile drains socket -> queue -> chat dock.
+        app.reconcile_chat();
+        let texts: Vec<&str> = app.chat_messages.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec!["Donor donated 12.34 EUR"],
+            "a Streamlabs donation must surface as a localized chat entry"
+        );
+        assert!(app.chat_messages[0].action && app.chat_messages[0].id.is_none());
+        let stats = app.alerts_receiver.as_ref().expect("receiver").stats();
+        assert_eq!(stats, (1, 1, 0), "one request received and accepted");
+    }
+
+    #[test]
+    fn alerts_receiver_rejects_forged_twitch_signature_with_403() {
+        let mut app = RivuletApp {
+            alerts_receiver_enabled: true,
+            alerts_receiver_port: 0,
+            alerts_twitch_secret: "secret".to_owned(),
+            ..Default::default()
+        };
+        app.reconcile_chat();
+        let addr = app
+            .alerts_receiver
+            .as_ref()
+            .expect("receiver started")
+            .addr();
+
+        let body = r#"{"subscription":{"type":"channel.follow"},"event":{"user_name":"Ada"}}"#;
+        let response = post_loopback(
+            addr,
+            "/eventsub/twitch",
+            &[
+                ("Twitch-Webhook-Message-Id", "a1b2c3d4"),
+                ("Twitch-Webhook-Message-Timestamp", "2026-09-09T12:00:00Z"),
+                (
+                    "Twitch-Webhook-Message-Signature",
+                    "sha256=0000000000000000000000000000000000000000000000000000000000000000",
+                ),
+            ],
+            body,
+        );
+        assert!(response.starts_with("HTTP/1.1 403"), "response: {response}");
+
+        app.reconcile_chat();
+        assert!(
+            app.chat_messages.is_empty(),
+            "a forged signature must never surface anything"
+        );
+        assert_eq!(
+            app.alerts_receiver.as_ref().expect("receiver").stats(),
+            (1, 0, 1)
+        );
+    }
+
+    #[test]
+    fn alerts_receiver_stops_and_clears_when_disabled() {
+        let mut app = RivuletApp {
+            alerts_receiver_enabled: true,
+            alerts_receiver_port: 0,
+            ..Default::default()
+        };
+        app.reconcile_chat();
+        assert!(app.alerts_receiver.is_some());
+
+        app.alerts_receiver_enabled = false;
+        app.reconcile_chat();
+        assert!(
+            app.alerts_receiver.is_none(),
+            "disabling must stop the loopback listener"
+        );
+        assert!(app.alerts_receiver_error.is_none());
+        assert_eq!(
+            app.alerts_receiver_applied,
+            rivulet_core::AlertsReceiverConfig::default(),
+            "the applied-config marker must reset after a stop"
         );
     }
 

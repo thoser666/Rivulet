@@ -23,33 +23,55 @@ entries, with redaction of tokens and privacy tests.
   - `AlertIngest`: **bounded** local queue (default capacity 64, oldest
     dropped), enabled by default, `Debug` renders settings/counters **only** —
     never entry contents.
-- **GUI** — Settings → **Alerts** panel (persisted toggle, local-only note)
-  and chat-dock surfacing: ingested entries become chat entries with a
-  distinct accent color; a **Preview** button queues one deterministic sample
-  per kind for layout checks and GUI tests.
+- **`rivulet-core::alerts_webhook`** — the optional **loopback receiver**:
+  - A tiny, dependency-free HTTP/1.1 listener bound to **`127.0.0.1`** (never
+    a non-loopback address). Routes: `POST /webhook/streamlabs` (Streamlabs
+    donation, no signature) and `POST /eventsub/twitch` (Twitch EventSub,
+    HMAC verification against the configured secret; empty secret disables the
+    route with `403`). Bodies bounded to 64 KiB; malformed/oversized/forged
+    requests are rejected with honest status codes (Twitch retries non-`2xx`).
+    Parsed events flow over a bounded channel into the same `AlertIngest`.
+  - `AlertsReceiver::start(config)` bind error is surfaced as a Settings
+    warning, never a crash. The pure `handle_webhook` handler is testable
+    without sockets; two socket-level tests post real HTTP requests to the
+    loopback listener (valid EventSub delivery + forged signature).
+- **GUI** — Settings → **Alerts** panel: persisted **ingestion** toggle
+  (on by default, purely local) and an opt-in **webhook receiver** section
+  (enabled toggle, port, masked Twitch EventSub secret), plus chat-dock
+  surfacing: ingested entries become chat entries with a distinct accent
+  color; a **Preview** button queues one deterministic sample per kind for
+  layout checks and GUI tests.
 - **i18n** — `alert_kind_follow/subscribe/giftsub/donation/raid` plus panel
-  keys, EN + DE (parity-enforced; 471 keys total).
+  and receiver keys, EN + DE (parity-enforced; 479 keys total).
 - **Privacy tests** — no `Serialize` on events, `Debug` never leaks entry
   contents, `AlertEvent::sanitize_message` strips control characters, tokens
-  and secrets are never stored or logged.
+  and secrets are never embedded in events or logged.
 
 ## Honest scope
 
-This ships **no network receiver**. The HTTPS endpoint those webhook payloads
-would arrive on, or an EventSub WebSocket connection, is a **documented
-follow-up** — exactly like the telemetry transport. Nothing in the shipped
-build listens on any socket for alerts; the parsers, signature verification and
-queue are testable deterministically precisely because they are network-free.
-Wiring a transport later is a drop-in: parse → verify → `AlertIngest::push`.
+The **receiver listens on `127.0.0.1` only** and is off by default. Real
+Twitch/Streamlabs deliveries arrive over **public HTTPS**, so a live setup
+needs a local HTTPS terminator, a tunnel, or a reverse proxy in front that
+forwards provider POSTs to the loopback port — that forwarder is a documented
+follow-up, exactly like the telemetry transport. (An **EventSub WebSocket**
+connection is another documented follow-up.) Because the receiver is loopback
+bounded and the parsers/signature/queue are network-free, everything is still
+testable deterministically; wiring a public transport later is a drop-in:
+parse → verify → `AlertIngest::push`.
 
 ## Files
 
 - `rivulet-core/src/alerts_ingest.rs` — event model, parsers, signature
   verification, bounded queue (+17 deterministic unit tests)
-- `rivulet-gui/src/app.rs` — `alert_ingest`/`alert_ingest_enabled` fields,
-  `apply_alerts_policy`, per-frame drain into the bounded chat list,
-  `queue_alert_preview` / `alert_event_to_chat_message`, Settings panel,
-  chat-dock preview button (+4 GUI tests)
+- `rivulet-core/src/alerts_webhook.rs` — loopback webhook receiver, pure
+  `handle_webhook` handler, `AlertsReceiver` (+11 tests incl. two socket-level
+  loopback deliveries)
+- `rivulet-gui/src/app.rs` — `alert_ingest`/`alert_ingest_enabled` +
+  `alerts_receiver_enabled`/`alerts_receiver_port`/`alerts_twitch_secret`
+  fields, `apply_alerts_policy` / `apply_alerts_receiver`, per-frame drain
+  into the bounded chat list, `queue_alert_preview` /
+  `alert_event_to_chat_message`, Settings panels, chat-dock preview button
+  (+8 GUI tests incl. loopback Receiver/Streamlabs-end-to-end)
 - `rivulet-core/tests/ci_pinning.rs` — guard
   `m5_alerts_ingest_is_native_localized_and_pinned` (the ci_pinning guard
   pins the README/roadmap markers, the doc contents and the GUI wiring)
