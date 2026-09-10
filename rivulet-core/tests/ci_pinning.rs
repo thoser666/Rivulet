@@ -4393,11 +4393,13 @@ fn m5_flathub_stage2_is_prepared_and_pinned() {
     assert!(
         flatpak_ci.contains("generate-cargo-sources.sh --verify")
             && flatpak_ci.contains("flatpak-builder")
+            && flatpak_ci.contains("--mirror-screenshots-url=https://dl.flathub.org/media")
+            && flatpak_ci.contains("--compose-url-policy=full")
             && flatpak_ci.contains("packaging/flatpak/org.rivulet.Rivulet.yml")
             && flatpak_ci.contains("org.flatpak.Builder")
             && flatpak_ci.contains("builddir")
             && flatpak_ci.contains("org.freedesktop.Sdk.Extension.llvm20//25.08"),
-        "the flatpak CI job must re-verify the crate pin, build the manifest, run the official lint (appstream/manifest/builddir), and install the llvm20 extension"
+        "the flatpak CI job must re-verify the crate pin, build the manifest with screenshot mirroring, run the official lint (appstream/manifest/builddir), and install the llvm20 extension"
     );
     assert!(
         manifest.contains("--filesystem=home")

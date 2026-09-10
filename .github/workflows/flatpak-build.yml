@@ -64,8 +64,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # --compose-url-policy=full --mirror-screenshots-url mirrors the
+          # metainfo screenshot to dl.flathub.org/media paths exactly like the
+          # Flathub infrastructure does, so the builddir lint sees mirrored
+          # media instead of appstream-external-screenshot-url.
           flatpak-builder --default-branch=stable --force-clean --ccache \
             --disable-rofiles-fuse \
+            --compose-url-policy=full \
+            --mirror-screenshots-url=https://dl.flathub.org/media \
             --repo="$RUNNER_TEMP/rivulet-repo" \
             "$RUNNER_TEMP/rivulet-build" \
             packaging/flatpak/org.rivulet.Rivulet.yml
