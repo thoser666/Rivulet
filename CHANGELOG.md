@@ -66,11 +66,22 @@
   chars so events stay privacy-safe; GUI surfaces ingested events as
   color-accented chat-dock entries (Settings → Alerts toggle, honest
   local-only note, Preview button queueing one sample per kind, drain into the
-  bounded chat list); honest scope: **no network receiver in the shipped
-  build** (parsers/verifier/queue ship; the webhook/EventSub transport stays a
-  documented follow-up like telemetry); i18n DE/EN (471 keys), GUI + core
+  bounded chat list); i18n DE/EN (471 keys), GUI + core
   tests, docs `docs/alerts-ingest.md`, roadmap M5 Alerts row marked **Done**,
   ci_pinning guard `m5_alerts_ingest_is_native_localized_and_pinned`
+- feat(alerts): opt-in loopback webhook receiver — new
+  `rivulet-core::alerts_webhook`: dependency-free HTTP/1.1 listener bound to
+  **127.0.0.1 only** (off by default) accepting `POST /webhook/streamlabs`
+  (Streamlabs donations) and `POST /eventsub/twitch` (Twitch EventSub with
+  HMAC-SHA-256 verification against the masked Settings secret; empty secret
+  disables the route with 403), bounded bodies (64 KiB) and honest status
+  codes (Twitch retries non-2xx); parsed events stream into the same
+  `AlertIngest` push path and surface as chat-dock entries; honest scope:
+  public HTTPS delivery from providers still needs a forwarder/HTTPS
+  terminator or tunnel in front (documented follow-up, like the EventSub
+  WebSocket transport); bind errors surfacing as Settings warnings, never
+  crashes; i18n DE/EN (479 keys), core + socket-level e2e receiver tests
+  (valid delivery + forged signature), docs `docs/alerts-ingest.md`
 - feat(telemetry): M5 opt-in, privacy-first usage telemetry — Settings → Telemetry
   toggle (off by default, persisted; opting out clears pending events);
   identifier-free event model in `rivulet-core::telemetry` (enums/codes/booleans
