@@ -4368,8 +4368,9 @@ fn m5_flathub_stage2_is_prepared_and_pinned() {
     assert!(
         manifest.contains("CARGO_NET_OFFLINE")
             && manifest.contains("cargo --offline")
-            && manifest.contains("cargo-sources.json"),
-        "cargo must be fully offline in the flatpak build and consume the pinned archives from cargo-sources.json"
+            && manifest.contains("cargo-sources.json")
+            && manifest.contains("${FLATPAK_ARCH}-unknown-linux-gnu"),
+        "cargo must be fully offline in the flatpak build, consume the pinned archives from cargo-sources.json, and build for the flatpak arch explicitly"
     );
     assert!(
         manifest.contains("cargo/config.toml")

@@ -57,7 +57,7 @@ modules:
       - mkdir -p .cargo
       - cp -v packaging/flatpak/cargo/config.toml .cargo/config.toml
       - cargo --offline fetch --locked
-      - cargo build --offline --release --locked
+      - cargo build --offline --release --locked --target ${FLATPAK_ARCH}-unknown-linux-gnu
       - install -Dm0755 target/${FLATPAK_ARCH}-unknown-linux-gnu/release/rivulet-gui ${FLATPAK_DEST}/bin/rivulet-gui
       - install -Dm0644 packaging/flatpak/org.rivulet.Rivulet.desktop ${FLATPAK_DEST}/share/applications/org.rivulet.Rivulet.desktop
       - install -Dm0644 packaging/flatpak/org.rivulet.Rivulet.metainfo.xml ${FLATPAK_DEST}/share/metainfo/org.rivulet.Rivulet.metainfo.xml
