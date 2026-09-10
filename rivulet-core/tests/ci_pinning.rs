@@ -4395,6 +4395,8 @@ fn m5_flathub_stage2_is_prepared_and_pinned() {
             && flatpak_ci.contains("flatpak-builder")
             && flatpak_ci.contains("--mirror-screenshots-url=https://dl.flathub.org/media")
             && flatpak_ci.contains("--compose-url-policy=full")
+            && flatpak_ci.contains("flatpak-builder-1.4.10")
+            && flatpak_ci.contains("b1721078c0697c8ca1d7db965232b509d1aa87f68b4dae378eb500bddddb9cc1")
             && flatpak_ci.contains("packaging/flatpak/org.rivulet.Rivulet.yml")
             && flatpak_ci.contains("org.flatpak.Builder")
             && flatpak_ci.contains("builddir")

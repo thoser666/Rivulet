@@ -60,6 +60,26 @@ jobs:
             org.freedesktop.Sdk.Extension.rust-stable//25.08 \
             org.freedesktop.Sdk.Extension.llvm20//25.08
 
+      - name: Build the pinned recent flatpak-builder (screenshot mirroring)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Ubuntu 24.04 ships flatpak-builder 1.2.0, which predates the
+          # --compose-url-policy/--mirror-screenshots-url options (added in
+          # 1.4.5). Build the pinned upstream release so the screenshot is
+          # mirrored to dl.flathub.org/media paths exactly like Flathub does.
+          sudo apt-get install -y meson ninja-build \
+            libflatpak-dev libappstream-dev libostree-dev libsoup-3.0-dev \
+            libjson-glib-dev libxml2-dev libzstd-dev libcurl4-openssl-dev
+          FB="flatpak-builder-1.4.10"
+          curl -fsSL -o "$FB.tar.xz" \
+            "https://github.com/flatpak/flatpak-builder/releases/download/1.4.10/$FB.tar.xz"
+          echo "b1721078c0697c8ca1d7db965232b509d1aa87f68b4dae378eb500bddddb9cc1  $FB.tar.xz" | sha256sum -c -
+          tar xf "$FB.tar.xz"
+          meson setup --prefix=/usr/local "$RUNNER_TEMP/fb-build" "$FB"
+          ninja -C "$RUNNER_TEMP/fb-build"
+          sudo ninja -C "$RUNNER_TEMP/fb-build" install
+
       - name: Build the Flatpak
         shell: bash
         run: |
