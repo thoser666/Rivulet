@@ -139,11 +139,13 @@ jobs:
 
       - name: Short-circuit when already up to date
         if: steps.previous.outputs.up_to_date == 'true'
+        env:
+          CHOSEN: ${{ steps.resolve.outputs.chosen }}
         run: |
           {
             echo "## Weekly promotion"
             echo
-            echo "- Status: up to date — \`weekly-latest\` already points at \`${{ steps.resolve.outputs.chosen }}\`."
+            echo "- Status: up to date — \`weekly-latest\` already points at \`$CHOSEN\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Move the weekly-latest tag
