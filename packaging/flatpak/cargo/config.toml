@@ -1,0 +1,7 @@
+# Cargo configuration for the offline Flatpak build.
+# Matches the layout emitted by flatpak-cargo-generator (dest: cargo/vendor/...).
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "cargo/vendor"

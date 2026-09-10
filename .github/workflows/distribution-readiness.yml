@@ -19,6 +19,7 @@ on:
         options:
           - github
           - winget
+          - scoop
           - flathub
           - homebrew
           - steam
@@ -83,11 +84,16 @@ jobs:
             winget)
               require_asset rivulet-windows-x86_64.msi
               require_asset rivulet-windows-x86_64-portable.zip
-              echo "winget readiness: package artifacts exist; the manifest still needs a winget-pkgs submission."
+              echo "winget readiness: package artifacts exist; manifest generation and validation are wired in the prepare-winget job."
+              ;;
+            scoop)
+              require_asset rivulet-windows-x86_64-portable.zip
+              require_asset SHA256SUMS
+              echo "scoop readiness: portable ZIP + SHA256SUMS exist; manifest generation and validation are wired in the prepare-scoop job."
               ;;
             flathub)
               require_asset rivulet-linux-x86_64.AppImage
-              echo "Flathub readiness: the Linux binary exists; a Flatpak manifest and Flathub review are still required."
+              echo "Flathub readiness: the Linux binary exists; the Flatpak manifest is prepared (prepare-flathub job) and the Flathub review is still external."
               ;;
             homebrew)
               require_asset rivulet-macos-aarch64.dmg
@@ -126,3 +132,217 @@ jobs:
             echo
             echo "No external store submission was performed. See the release-platforms guide in the repository for activation prerequisites."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  prepare-flathub:
+    name: Prepare Flathub manifest (dry run)
+    if: inputs.platform == 'flathub'
+    needs: validate-release
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate the offline crate pin against Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --quiet aiohttp tomlkit
+          bash packaging/flatpak/generate-cargo-sources.sh --verify
+
+      - name: Install flatpak and flatpak-builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Add the SDK runtime and rust-stable extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo flatpak install -y flathub \
+            org.freedesktop.Platform//25.08 \
+            org.freedesktop.Sdk//25.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//25.08
+
+      - name: Build the Flatpak (cargo-offline, validated by flatpak-builder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          flatpak-builder --default-branch=stable --force-clean --ccache \
+            --disable-rofiles-fuse \
+            --repo="$RUNNER_TEMP/rivulet-repo" \
+            "$RUNNER_TEMP/rivulet-build" \
+            packaging/flatpak/org.rivulet.Rivulet.yml
+
+      - name: Export the repository metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          flatpak build-export --no-update-summary "$RUNNER_TEMP/rivulet-repo" "$RUNNER_TEMP/rivulet-build"
+          flatpak build-bundle --runtime "$RUNNER_TEMP/rivulet-repo" "$RUNNER_TEMP/rivulet.flatpak" org.rivulet.Rivulet stable
+
+      - name: Publish Flathub plan
+        shell: bash
+        run: |
+          if [[ "$DRY_RUN" == "false" ]]; then
+            echo "::error::Publishing is intentionally not enabled: the Flathub submission PR and its permissions/appstream review are external."
+            exit 1
+          fi
+          {
+            echo "## Flathub readiness"
+            echo
+            echo "- Release: $RELEASE_TAG"
+            echo "- Mode: dry run (cargo-offline build against org.freedesktop.Platform 25.08)"
+            echo "- Flatpak id: org.rivulet.Rivulet"
+            echo "- Crate pin: valid (generate-cargo-sources.sh --verify)"
+            echo
+            echo "Submission is external: a Flathub PR carries the packaging/flatpak manifest (adjusted to the upstream git tag) and is subject to the Flathub permissions and appstream review. No external store was modified."
+          } >> "$GITHUB_STEP_SUMMARY"
+  prepare-winget:
+    name: Prepare WinGet manifest (dry run)
+    if: inputs.platform == 'winget'
+    needs: validate-release
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Derive MSI version from the release tag
+        shell: bash
+        run: echo "MSI_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Download the MSI release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p msi
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern rivulet-windows-x86_64.msi \
+            --dir msi
+
+      - name: Run the winget manifest Pester tests
+        shell: pwsh
+        run: |
+          $env:NO_COLOR = "1"
+          Invoke-Pester -CI -Path packaging/windows/generate-winget-manifest.tests.ps1 -Output Detailed
+
+      - name: Generate the winget manifest (dry run, real MSI metadata)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-winget-manifest.ps1" `
+            -Version "$env:MSI_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG" `
+            -MsiPath "$env:GITHUB_WORKSPACE/msi/rivulet-windows-x86_64.msi" `
+            -OutDir "$env:RUNNER_TEMP/winget-manifests"
+
+      - name: Verify the generated manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-winget-manifest.ps1" `
+            -ValidateOnly `
+            -ManifestPath "$env:RUNNER_TEMP/winget-manifests/Rivulet.Rivulet/$env:MSI_VERSION/Rivulet.Rivulet.yaml" `
+            -Version "$env:MSI_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG"
+
+      - name: Publish WinGet plan
+        shell: pwsh
+        run: |
+          if ("$env:DRY_RUN" -eq "false") {
+            Write-Error "Publishing is intentionally not enabled: a winget-pkgs submission PR and its reviewer approval are external."
+            exit 1
+          }
+          $manifest = "$env:RUNNER_TEMP/winget-manifests/Rivulet.Rivulet/$env:MSI_VERSION/Rivulet.Rivulet.yaml"
+          $sha = (Select-String -LiteralPath $manifest -Pattern "InstallerSha256:\s*([0-9A-F]{64})").Matches.Groups[1].Value
+          @"
+          ## WinGet readiness
+          - Release: $env:RELEASE_TAG (MSI version $env:MSI_VERSION)
+          - Mode: dry run
+          - Generated manifest: $manifest
+          - Installer SHA-256: $sha
+          - Winget package identity: Rivulet.Rivulet (publisher Rivulet)
+
+          Submission is external: open a PR against microsoft/winget-pkgs carrying the generated
+          Rivulet.Rivulet/$env:MSI_VERSION/Rivulet.Rivulet.yaml folder. No external store was modified.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  prepare-scoop:
+    name: Prepare Scoop manifest (dry run)
+    if: inputs.platform == 'scoop'
+    needs: validate-release
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Derive version from the release tag
+        shell: bash
+        run: echo "SCOOP_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Run the scoop manifest Pester tests
+        shell: pwsh
+        run: |
+          $env:NO_COLOR = "1"
+          Invoke-Pester -CI -Path packaging/windows/generate-scoop-manifest.tests.ps1 -Output Detailed
+
+      - name: Generate the scoop manifest (real release, SHA-256 from SHA256SUMS)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-scoop-manifest.ps1" `
+            -Version "$env:SCOOP_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG" `
+            -OutDir "$env:RUNNER_TEMP/scoop-manifests"
+
+      - name: Verify the generated manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Re-render (deterministic) and compare byte-for-byte, so a drifted
+          # or hand-edited manifest can never pass validation.
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-scoop-manifest.ps1" `
+            -ValidateOnly `
+            -ManifestPath "$env:RUNNER_TEMP/scoop-manifests/rivulet.json" `
+            -Version "$env:SCOOP_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG"
+
+      - name: Publish Scoop plan
+        shell: pwsh
+        run: |
+          if ("$env:DRY_RUN" -eq "false") {
+            Write-Error "Publishing is intentionally not enabled: the bucket repository push and its manifest PR are external."
+            exit 1
+          }
+          $manifest = "$env:RUNNER_TEMP/scoop-manifests/rivulet.json"
+          $sha = (Select-String -LiteralPath $manifest -Pattern '"hash":\s*"([0-9a-f]{64})"').Matches.Groups[1].Value
+          @"
+          ## Scoop readiness
+          - Release: $env:RELEASE_TAG (version $env:SCOOP_VERSION)
+          - Mode: dry run
+          - Generated manifest: $manifest
+          - Portable ZIP SHA-256: $sha (verified against the release SHA256SUMS)
+          - Bucket: thoser666/scoop-bucket (bucket/rivulet.json)
+
+          Installation for users once the bucket is live:
+            scoop bucket add rivulet https://github.com/thoser666/scoop-bucket
+            scoop install rivulet/rivulet
+
+          Publishing is external: copy the generated rivulet.json into the bucket repo's
+          bucket/ directory (commit + push). Scoop requires no code signing, so this
+          channel is available already. No external store was modified.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

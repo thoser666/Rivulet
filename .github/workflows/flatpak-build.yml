@@ -1,0 +1,130 @@
+name: Flatpak Build
+
+# Validates the Linux Flatpak manifest (packaging/flatpak) exactly the way a
+# Flathub transparent build would: offline cargo over the pinned crate archives
+# (cargo-sources.json, URL + SHA-256), freedesktop 25.08 runtime/SDK with the
+# rust-stable extension, a real flatpak-builder run (which also runs
+# appstream-compose), repo export and bundle.
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - packaging/flatpak/**
+      - Cargo.lock
+      - Cargo.toml
+      - "**/Cargo.toml"
+      - .github/workflows/flatpak-build.yml
+  pull_request:
+    paths:
+      - packaging/flatpak/**
+      - Cargo.lock
+      - Cargo.toml
+      - "**/Cargo.toml"
+      - .github/workflows/flatpak-build.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flatpak-build:
+    name: Build the Flatpak
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate the offline crate pin against Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --quiet aiohttp tomlkit
+          bash packaging/flatpak/generate-cargo-sources.sh --verify
+
+      - name: Install flatpak and flatpak-builder
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: Add the SDK runtime, rust-stable and llvm extensions
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo flatpak install -y flathub \
+            org.freedesktop.Platform//25.08 \
+            org.freedesktop.Sdk//25.08 \
+            org.freedesktop.Sdk.Extension.rust-stable//25.08 \
+            org.freedesktop.Sdk.Extension.llvm20//25.08
+
+      - name: Build the pinned recent flatpak-builder (screenshot mirroring)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Ubuntu 24.04 ships flatpak-builder 1.2.0, which predates the
+          # --compose-url-policy/--mirror-screenshots-url options (added in
+          # 1.4.5). Build the pinned upstream release so the screenshot is
+          # mirrored to dl.flathub.org/media paths exactly like Flathub does.
+          sudo apt-get install -y meson ninja-build \
+            libflatpak-dev libappstream-dev libostree-dev libsoup-3.0-dev \
+            libjson-glib-dev libxml2-dev libzstd-dev libcurl4-openssl-dev \
+            libelf-dev
+          FB="flatpak-builder-1.4.10"
+          curl -fsSL -o "$FB.tar.xz" \
+            "https://github.com/flatpak/flatpak-builder/releases/download/1.4.10/$FB.tar.xz"
+          echo "b1721078c0697c8ca1d7db965232b509d1aa87f68b4dae378eb500bddddb9cc1  $FB.tar.xz" | sha256sum -c -
+          tar xf "$FB.tar.xz"
+          meson setup --prefix=/usr/local "$RUNNER_TEMP/fb-build" "$FB"
+          ninja -C "$RUNNER_TEMP/fb-build"
+          sudo ninja -C "$RUNNER_TEMP/fb-build" install
+
+      - name: Build the Flatpak
+        shell: bash
+        run: |
+          set -euo pipefail
+          # --compose-url-policy=full --mirror-screenshots-url mirrors the
+          # metainfo screenshot to dl.flathub.org/media paths exactly like the
+          # Flathub infrastructure does, so the builddir lint sees mirrored
+          # media instead of appstream-external-screenshot-url.
+          flatpak-builder --default-branch=stable --force-clean --ccache \
+            --disable-rofiles-fuse \
+            --compose-url-policy=full \
+            --mirror-screenshots-url=https://dl.flathub.org/media \
+            --repo="$RUNNER_TEMP/rivulet-repo" \
+            "$RUNNER_TEMP/rivulet-build" \
+            packaging/flatpak/org.rivulet.Rivulet.yml
+
+      - name: Lint the exported metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          flatpak build-export --no-update-summary "$RUNNER_TEMP/rivulet-repo" "$RUNNER_TEMP/rivulet-build"
+          flatpak build-bundle "$RUNNER_TEMP/rivulet-repo" "$RUNNER_TEMP/rivulet.flatpak" org.rivulet.Rivulet stable
+
+      - name: Run the official Flathub lint (manifest, appstream, builddir)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo flatpak install -y flathub org.flatpak.Builder
+          # Local lint exceptions for the CI dry run: the only entry is the
+          # documented --filesystem=home review point (finish-args-home-
+          # filesystem-access). Remote/external exceptions from Flathub are not
+          # consulted; the Flathub submission review approves it separately.
+          flatpak run --command=flatpak-builder-lint org.flatpak.Builder --exceptions --user-exceptions packaging/flatpak/lint-exceptions.json manifest packaging/flatpak/org.rivulet.Rivulet.yml
+          flatpak run --command=flatpak-builder-lint org.flatpak.Builder appstream packaging/flatpak/org.rivulet.Rivulet.metainfo.xml
+          flatpak run --command=flatpak-builder-lint org.flatpak.Builder --exceptions --user-exceptions packaging/flatpak/lint-exceptions.json builddir "$RUNNER_TEMP/rivulet-build"
+
+      - name: Report
+        shell: bash
+        run: |
+          {
+            echo "## Flatpak build"
+            echo
+            echo "- Manifest: packaging/flatpak/org.rivulet.Rivulet.yml"
+            echo "- Runtime: org.freedesktop.Platform 25.08 (rust-stable + llvm20 extensions)"
+            echo "- Cargo: offline cargo, pinned archives from cargo-sources.json ($(jq 'length' packaging/flatpak/cargo/cargo-sources.json) crates)"
+            echo "- Bundle: $RUNNER_TEMP/rivulet.flatpak"
+          } >> "$GITHUB_STEP_SUMMARY"

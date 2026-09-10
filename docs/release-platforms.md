@@ -9,8 +9,9 @@ support costs. The canonical source remains [GitHub Releases](https://github.com
 | Stage | Milestone | Channel | Platforms | Recommendation | Current state |
 | --- | --- | --- | --- | --- | --- |
 | 1 | M5, supported by M7 | GitHub Releases | Windows, macOS, Linux | Keep as the source of truth for release notes, checksums, and updater downloads. | Active: MSI/portable ZIP, DMG, and AppImage are built by CI. |
-| 2 | M5, supported by M7 | WinGet | Windows | Add after the MSI product identity and signing are stable. It provides native discovery and upgrades without another binary hosting system. | Readiness workflow validates the MSI and portable ZIP; manifest submission is still open. |
-| 2 | M5, supported by M7 | Flathub | Linux | Prefer this over maintaining distribution-specific packages. It gives Linux users a familiar, sandboxed, updateable installation. | Open: a Flatpak manifest, permissions review, and Flathub submission are needed. |
+| 2 | M5, supported by M7 | WinGet | Windows | Add after the MSI product identity and signing are stable. It provides native discovery and upgrades without another binary hosting system. | Manifest generation/validation are wired (packaging/windows/generate-winget-manifest.ps1 + dry-run job); submission to `microsoft/winget-pkgs` is still open (external review). |
+| 2 | M5, supported by M7 | Scoop | Windows | Add now: Scoop requires no code signing, so this is the only native Windows package manager available before signing lands. The bucket repo hosts a generated, hash-pinned manifest. | Active: bucket `thoser666/scoop-bucket` (`scoop bucket add rivulet https://github.com/thoser666/scoop-bucket`); manifest generated + byte-verified by the **Distribution Readiness → scoop** dry-run job. |
+| 2 | M5, supported by M7 | Flathub | Linux | Prefer this over maintaining distribution-specific packages. It gives Linux users a familiar, sandboxed, updateable installation. | Manifest wired (packaging/flatpak/org.rivulet.Rivulet.yml, pinned offline-cargo build + CI build/lint job); submission PR and permissions/appstream review are still open (external). |
 | 3 | M5 | Homebrew Cask | macOS | Useful for developer-oriented installs; publish only signed/notarized DMGs. | Readiness workflow validates the DMG; cask/tap submission is still open. |
 | 3 | M5 | Steam | Windows, macOS | Worth preparing for the gaming-streamer audience, but treat it as a secondary channel rather than the update authority. | Open: Steam App ID, depots, SteamPipe credentials, store metadata, and a Steam-specific package layout. |
 | 4 | M5 | Microsoft Store | Windows | Consider later for enterprise trust and discoverability. It requires MSIX packaging and Partner Center identity management. | Not ready: the current pipeline produces MSI/ZIP, not MSIX. |
@@ -44,23 +45,83 @@ separate, explicitly permissioned job with:
 
 ### WinGet
 
-1. Reserve the stable package identifier and publisher identity.
+The chosen stable identity is `Rivulet.Rivulet` (publisher `Rivulet`). The
+manifest is a `ManifestType: "singleton"` file (v1.6) consuming the GitHub
+release asset `rivulet-windows-x86_64.msi` with its SHA-256, the MSI
+`ProductCode` and the stable `UpgradeCode`.
+
+1. Reserve the stable package identifier and publisher identity (`Rivulet.Rivulet` is reserved).
 2. Ensure the signed MSI has a stable `UpgradeCode`, product identity, and
    silent-install/uninstall behavior.
-3. Generate a WinGet manifest with the release URL and SHA-256 hash.
-4. Submit it to `microsoft/winget-pkgs` and let the community validation run.
-5. Add an opt-in PR/dispatch workflow that submits only reviewed manifest
+3. Generate/validate the winget manifest with
+   `packaging/windows/generate-winget-manifest.ps1` (canonical asset URL,
+   SHA-256, MSI `ProductCode`/`UpgradeCode`), pinned by Pester tests
+   (`generate-winget-manifest.tests.ps1`).
+4. Trigger the **Distribution Readiness → winget** workflow: it runs the
+   Pester tests, generates and verifies the manifest against the real release
+   MSI, and dry-run reports the payload SHA-256 and package identity.
+5. Submit the generated `<identifier>/<version>/<identifier>.yaml` folder as
+   a PR to `microsoft/winget-pkgs` and let the community validation run.
+6. Add an opt-in PR/dispatch workflow that submits only reviewed manifest
    changes; never upload unsigned binaries.
+
+### Scoop
+
+The only native Windows package manager that does **not** require code
+signing — the channel is usable before SignPath approval lands. The manifest
+(`bucket/rivulet.json` in [thoser666/scoop-bucket](https://github.com/thoser666/scoop-bucket))
+consumes the portable ZIP asset with its SHA-256; the SHA-256 is taken from
+the release's own `SHA256SUMS` asset, so a manifest can never reference an
+unverified binary.
+
+1. Trigger the **Distribution Readiness → scoop** workflow on a release tag:
+   it runs the Pester tests (`generate-scoop-manifest.tests.ps1`), renders
+   `rivulet.json` from the real release (SHA-256 via `SHA256SUMS`), and
+   byte-verifies the render.
+2. Copy the generated `rivulet.json` into the bucket repo's `bucket/`
+   directory and push — publishing is a git commit, no external review.
+3. Users install with `scoop bucket add rivulet
+   https://github.com/thoser666/scoop-bucket` and `scoop install
+   rivulet/rivulet`; updates come from `checkver.github`.
+4. When winget goes live later, keep both: Scoop serves portable users and
+   no-admin installs, winget serves MSI users.
 
 ### Flathub
 
-1. Create a Flatpak manifest with explicit permissions and runtime choice.
-2. Package the application using the upstream source or a reproducible build,
-   not an opaque locally generated binary.
-3. Add desktop file, AppStream metadata, icon, and sandbox capability review.
-4. Open the Flathub submission PR and verify the app on a clean supported
-   desktop session.
-5. Add a post-release check that the Flathub version matches the GitHub tag.
+The chosen stable Flatpak id is `org.rivulet.Rivulet`, built from the
+`org.freedesktop.Platform`/`org.freedesktop.Sdk` 25.08 runtime with the
+`org.freedesktop.Sdk.Extension.rust-stable` SDK extension.
+
+1. The manifest `packaging/flatpak/org.rivulet.Rivulet.yml` lists the
+   application module, the desktop file, the AppStream metainfo, and the icon;
+   their `finish-args` are intentional (screen/audio capture, Vulkan/DRM,
+   PipeWire/PulseAudio, network for stream ingest + telemetry opt-in, `$HOME`
+   for recordings/config) and must be signed off by a permissions review.
+2. Cargo is fully offline in the build: the crate archives are pinned in
+   `packaging/flatpak/cargo/cargo-sources.json` (1239 crates from `Cargo.lock`,
+   generated by the official `flatpak-cargo-generator` at the commit pinned in
+   `packaging/flatpak/generate-cargo-sources.sh`) and merged into the manifest
+   as flatpak sources (URL + SHA-256, extracted to `cargo/vendor/...`), while
+   `packaging/flatpak/cargo/config.toml` maps crates-io to the vendored
+   directory so cargo never touches the network. Re-run the script whenever
+   `Cargo.lock` changes; CI fails if the committed file drifts.
+3. `packaging/flatpak/org.rivulet.Rivulet.desktop` and
+   `packaging/flatpak/org.rivulet.Rivulet.metainfo.xml` (`launchable`
+   desktop-id matches the desktop file; `project_license`, `developer_name`,
+   release entry). `flatpak-builder` runs `appstream-compose` on every build,
+   so AppStream validation is part of the CI job.
+4. CI job `flatpak-build.yml` validates the manifest end to end on every push:
+   installs `flatpak` + `flatpak-builder` from apt, installs the 25.08 runtime/
+   SDK and the `rust-stable` extension, runs the cargo-offline build, the
+   export and bundle, then the official Flathub lint
+   (`org.flathub.flatpak-builder-lint`)
+   for manifest, appstream, and desktop. The
+   **Distribution Readiness → flathub** dry-run adds the real-release asset
+   prerequisite to the checklist.
+5. Open the Flathub submission PR (the manifest as submitted must point at the
+   upstream git tag, which the PR fork adjusts) and verify the app on a clean
+   supported desktop session.
+6. Add a post-release check that the Flathub version matches the GitHub tag.
 
 ### Homebrew Cask
 

@@ -138,23 +138,38 @@ test certificate first and a production certificate after a build
    **submitted in September 2026**; the doc tracks the current application
    status.
 2. **Create the SignPath project and signing policy** in the SignPath
-   portal. The project needs an **artifact configuration** whose root
-   matches what the workflow uploads: the EXEs are uploaded as a GitHub
-   artifact (a ZIP containing `rivulet-gui.exe`, `rivulet.exe`,
-   `rivulet-updater.exe`) and the MSI as a separate artifact. Configure
-   the artifact configuration accordingly (e.g. a `<zip-file>` root for
-   the EXE bundle, `<msi-file>` for the installer) and note the **project
-   slug** and **signing policy slug**.
+   portal. The project needs an **artifact configuration** matching what
+   the workflow uploads: the EXEs are uploaded as a GitHub artifact (a
+   ZIP containing `rivulet-gui.exe`, `rivulet.exe`, `rivulet-updater.exe`)
+   and the MSI as a separate artifact. The paste-in XML for this lives in
+   [packaging/signpath/artifact-configuration.xml](../packaging/signpath/artifact-configuration.xml)
+   and is kept in sync with the workflow by a CI pinning test. Portal
+   steps: select the project → **Artifact Configurations** → **Add** →
+   **Custom** → paste the XML → save. It defines both request shapes (a
+   `<zip-file>` root signing the three EXEs, an `<msi-file>` root signing
+   the installer as a whole) and the required `version` parameter the
+   workflow passes on every submit. Because the workflow's submit steps
+   do not pin an `artifact-configuration-slug`, SignPath selects this
+   configuration automatically by matching the root element to the
+   uploaded artifact. Then note the **project slug** and **signing policy
+   slug**.
 3. **Create an API token** for a CI user with *Submitter* permission on the
    signing policy; note it as the API token.
 4. **Create the four secrets**: `SIGNPATH_API_TOKEN`, `SIGNPATH_ORGANIZATION_ID`,
    `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG`. The workflow
-   only activates the SignPath path when **all four** are present.
+   only activates the SignPath path when **all four** are present. As soon
+   as they are, the Beta-Gate dashboard in every CI run announces it:
+   *“All four SIGNPATH_* secrets are set — the next release signs
+   automatically via SignPath Foundation (EXEs + MSI).”* (See the
+   Beta-Gate step summary on any push; the notice comes from
+   `scripts/check-beta-gate.py`.)
 5. Optional: install the **SignPath GitHub App** and allow access to the
    repository so SignPath can verify the workflow provenance and the
-   artifact's origin (recommended for the production certificate; the
-   action also needs `actions: read` permission, which is already set in
-   `build-package.yml`).
+   artifact's origin (recommended for the production certificate). No
+   extra token permission is needed: `build-package.yml` deliberately
+   does not set `permissions.actions: read` (GitHub rejects it in
+   reusable workflows at startup, and on public repositories the default
+   token can download artifacts without it).
 
 When both the SignPath and PFX secret groups are configured, SignPath wins
 (see the precedence note above).
@@ -236,6 +251,10 @@ the AppImage. The workflow produces `rivulet-linux-x86_64.AppImage.asc`.
   disables that platform’s signing for that release.
 - **SignPath signing request fails** — check the four secrets are all set,
   the API token has *Submitter* permission on the signing policy, and the
-  artifact configuration matches the uploaded ZIP layout (see step 2
-  above). The action logs the signing-request URL; open it in the SignPath
-  portal for the exact rejection reason.
+  uploaded artifact matches the
+  [artifact configuration](../packaging/signpath/artifact-configuration.xml)
+  (EXE ZIP with exactly the three executables, or the MSI). Rejections
+  like *unknown parameter* mean the `version` parameter is not declared
+  in the portal copy of the XML — re-paste the file. The action logs the
+  signing-request URL; open it in the SignPath portal for the exact
+  rejection reason.

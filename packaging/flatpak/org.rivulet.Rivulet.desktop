@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Rivulet
+Comment=Modern Screen Recording & Streaming Software
+Exec=rivulet-gui
+Icon=org.rivulet.Rivulet
+Terminal=false
+Categories=AudioVideo;Recorder;

@@ -24,6 +24,7 @@ const WORKFLOWS: &[&str] = &[
     "security.yml",
     "scorecard.yml",
     "distribution-readiness.yml",
+    "flatpak-build.yml",
 ];
 
 /// The reviewed pins. `(action@sha, human-readable version)` — the version
@@ -1429,6 +1430,17 @@ fn beta_gate_checker_is_wired_up() {
         checker.contains("--fail"),
         "check-beta-gate.py must offer --fail to turn unmet criteria into exit 1"
     );
+    // SignPath auto-signing notice: once all four SIGNPATH_* secrets exist,
+    // the beta-gate dashboard must announce that the next release signs
+    // automatically — so the maintainer learns the good news from CI, not
+    // from reading workflow YAML. The notice must be logic-tested (self-test)
+    // and CI must run that self-test.
+    assert!(
+        checker.contains("def signpath_note")
+            && checker.contains("signs automatically")
+            && checker.contains("--self-test"),
+        "check-beta-gate.py must expose the SignPath notice with a self-test"
+    );
 
     // The gate itself lives in the roadmap; the README must define it.
     let readme = read("README.md");
@@ -1441,6 +1453,10 @@ fn beta_gate_checker_is_wired_up() {
     assert!(
         ci.contains("check-beta-gate.py"),
         "the CI workflow must run the beta-gate checker"
+    );
+    assert!(
+        ci.contains("check-beta-gate.py --self-test"),
+        "CI must run the beta-gate checker self-test"
     );
     assert!(
         ci.contains("GITHUB_STEP_SUMMARY"),
@@ -1539,6 +1555,39 @@ fn code_signing_automation_is_wired_up() {
         "test-signpath-config.py must pin the action SHA and offer --self-test"
     );
 
+    // The paste-in artifact configuration (SignPath portal setup) must stay
+    // in sync with what the workflow actually uploads: a ZIP with exactly
+    // the three EXEs, plus the MSI as a whole-file request. If either side
+    // changes, this pin forces the other to change with it.
+    let signpath_config = read("packaging/signpath/artifact-configuration.xml");
+    assert!(
+        signpath_config.contains("http://signpath.io/artifact-configuration/v1"),
+        "artifact-configuration.xml must use the SignPath v1 schema namespace"
+    );
+    assert!(
+        signpath_config.contains("<zip-file>") && signpath_config.contains("<msi-file>"),
+        "artifact-configuration.xml must define both request shapes (EXE ZIP + MSI)"
+    );
+    for exe in ["rivulet-gui.exe", "rivulet.exe", "rivulet-updater.exe"] {
+        assert!(
+            build.contains(&format!("staging/{exe}"))
+                && signpath_config.contains(&format!("path=\"{exe}\"")),
+            "SignPath artifact configuration and workflow upload must both cover the EXEs"
+        );
+    }
+    assert!(
+        build.contains("staging/rivulet-windows-x86_64.msi"),
+        "build-package.yml must upload the MSI for SignPath signing"
+    );
+    assert!(
+        signpath_config.contains("name=\"version\"") && signpath_config.contains("required=\"true\""),
+        "artifact-configuration.xml must declare the version parameter the workflow passes on every submit"
+    );
+    assert!(
+        !build.contains("artifact-configuration-slug"),
+        "submit steps rely on automatic artifact-configuration selection; if slugs are pinned, update the portal setup docs"
+    );
+
     let beta_gate = read("scripts/check-beta-gate.py");
     assert!(
         beta_gate.contains("SIGNPATH_API_TOKEN")
@@ -1590,6 +1639,10 @@ fn code_signing_automation_is_wired_up() {
             && doc.contains("packaging/windows/sign.ps1")
             && doc.contains("signpath/github-action-submit-signing-request"),
         "docs/code-signing.md must reference all signing scripts and the SignPath action"
+    );
+    assert!(
+        doc.contains("packaging/signpath/artifact-configuration.xml"),
+        "docs/code-signing.md must point to the paste-in artifact configuration"
     );
     assert!(
         doc.contains("Hash-based vs. file-based"),
@@ -2589,6 +2642,7 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
     assert!(
         workflow.contains("platform:")
             && workflow.contains("- winget")
+            && workflow.contains("- scoop")
             && workflow.contains("- flathub")
             && workflow.contains("- homebrew")
             && workflow.contains("- steam")
@@ -2600,6 +2654,39 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
             && workflow.contains("contents: read")
             && !workflow.contains("contents: write"),
         "distribution preparation must not publish or request write access"
+    );
+
+    // Scoop channel (no signing required): the generator takes the portable
+    // ZIP SHA-256 from the release's own SHA256SUMS asset, and the CI job
+    // re-verifies the rendered manifest byte-exact. The bucket repo carries
+    // the generated manifest; the docs must stay in sync with the wiring.
+    let scoop_gen = read("packaging/windows/generate-scoop-manifest.ps1");
+    assert!(
+        scoop_gen.contains("SHA256SUMS")
+            && scoop_gen.contains("rivulet-windows-x86_64-portable.zip")
+            && scoop_gen.contains("-ValidateOnly"),
+        "scoop manifest generator must hash-pin the portable ZIP from SHA256SUMS and support re-verification"
+    );
+    assert!(
+        read("packaging/windows/generate-scoop-manifest.tests.ps1").contains("Invoke-Pester")
+            || scoop_gen.contains("Pester"),
+        "scoop manifest generator must be covered by Pester tests"
+    );
+    assert!(
+        workflow.contains("prepare-scoop")
+            && workflow.contains("generate-scoop-manifest.ps1")
+            && workflow.contains("generate-scoop-manifest.tests.ps1"),
+        "distribution workflow must run the scoop Pester tests and generator"
+    );
+    assert!(
+        workflow.contains("thoser666/scoop-bucket"),
+        "the scoop plan must point at the live bucket repository"
+    );
+    let release_doc = read("docs/release-platforms.md");
+    assert!(
+        release_doc.contains("thoser666/scoop-bucket")
+            && release_doc.contains("scoop bucket add rivulet"),
+        "release-platforms docs must document the live scoop bucket"
     );
 }
 
@@ -4268,5 +4355,183 @@ fn windows_ci_installs_one_consistent_gstreamer_version() {
     assert!(
         mirror.contains("FORMAT=\"exe\""),
         "the mirror script must branch on the detected installer format"
+    );
+}
+
+#[test]
+fn m5_flathub_stage2_is_prepared_and_pinned() {
+    // M5 distribution rollout Stage 2 (Flathub): a reproducible Flatpak build
+    // is wired and stays honest. Cargo is fully offline (CARGO_NET_OFFLINE)
+    // and works only against the pinned crate archives in cargo-sources.json
+    // (URL + SHA-256, generated by the official flatpak-cargo-generator and
+    // merged into the manifest as flatpak sources, exactly like a Flathub
+    // transparent build), a CI job builds and lints the bundle against
+    // org.freedesktop.Platform 25.08 with the official Flathub lint, bindgen
+    // build scripts (libspa-sys) get libclang from the llvm20 SDK extension via
+    // LIBCLANG_PATH (25.08 removed libclang from the base SDK),
+    // and the external Flathub submission + review remain the documented gate.
+    let manifest = read("packaging/flatpak/org.rivulet.Rivulet.yml");
+    let generator = read("packaging/flatpak/generate-cargo-sources.sh");
+    let config = read("packaging/flatpak/cargo/config.toml");
+    let sources = read("packaging/flatpak/cargo/cargo-sources.json");
+    let flatpak_ci = read(".github/workflows/flatpak-build.yml");
+    let exceptions = read("packaging/flatpak/lint-exceptions.json");
+    let metainfo = read("packaging/flatpak/org.rivulet.Rivulet.metainfo.xml");
+    let readiness = read(".github/workflows/distribution-readiness.yml");
+    let readme = read("README.md");
+    let platforms = read("docs/release-platforms.md");
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        manifest.contains("org.rivulet.Rivulet")
+            && manifest.contains("org.freedesktop.Platform")
+            && manifest.contains("25.08")
+            && manifest.contains("org.freedesktop.Sdk.Extension.rust-stable")
+            && manifest.contains("org.freedesktop.Sdk.Extension.llvm20"),
+        "the Flatpak manifest must pin the freedesktop 25.08 stack with the rust-stable + llvm20 (libclang) extensions"
+    );
+    assert!(
+        manifest.contains("CARGO_NET_OFFLINE")
+            && manifest.contains("cargo --offline")
+            && manifest.contains("cargo-sources.json")
+            && manifest.contains("${FLATPAK_ARCH}-unknown-linux-gnu"),
+        "cargo must be fully offline in the flatpak build, consume the pinned archives from cargo-sources.json, and build for the flatpak arch explicitly"
+    );
+    assert!(
+        manifest.contains("cargo/config.toml")
+            && config.contains("vendored-sources")
+            && config.contains("cargo/vendor"),
+        "the cargo offline config must map crates-io to the vendored directory"
+    );
+    assert!(
+        sources.contains("static.crates.io") && sources.contains("cargo/vendor"),
+        "cargo-sources.json must carry the vendored crate archives"
+    );
+    assert!(
+        generator.contains("flatpak-cargo-generator")
+            && generator.contains("f03a673abe6ce189cea1c2857e2b44af2dd79d1f")
+            && generator.contains("--verify"),
+        "the source generator must pin the official tool and support a verify mode"
+    );
+    assert!(
+        flatpak_ci.contains("generate-cargo-sources.sh --verify")
+            && flatpak_ci.contains("flatpak-builder")
+            && flatpak_ci.contains("--mirror-screenshots-url=https://dl.flathub.org/media")
+            && flatpak_ci.contains("--compose-url-policy=full")
+            && flatpak_ci.contains("flatpak-builder-1.4.10")
+            && flatpak_ci.contains("b1721078c0697c8ca1d7db965232b509d1aa87f68b4dae378eb500bddddb9cc1")
+            && flatpak_ci.contains("packaging/flatpak/org.rivulet.Rivulet.yml")
+            && flatpak_ci.contains("org.flatpak.Builder")
+            && flatpak_ci.contains("builddir")
+            && flatpak_ci.contains("org.freedesktop.Sdk.Extension.llvm20//25.08"),
+        "the flatpak CI job must re-verify the crate pin, build the manifest with screenshot mirroring, run the official lint (appstream/manifest/builddir), and install the llvm20 extension"
+    );
+    assert!(
+        manifest.contains("--filesystem=home")
+            && manifest.contains("no --talk-name=org.freedesktop.portal.*")
+            && !manifest.contains("  - --talk-name="),
+        "the manifest must keep the honest home-filesystem review point and must NEVER carry the never-granted portal/Flatpak talk names"
+    );
+    assert!(
+        flatpak_ci.contains("--user-exceptions packaging/flatpak/lint-exceptions.json")
+            && exceptions.contains("finish-args-home-filesystem-access")
+            && exceptions.contains("org.rivulet.Rivulet"),
+        "the lint dry run must consume the local exceptions file whose only entry is the documented home-filesystem review point"
+    );
+    assert!(
+        metainfo.contains("<developer id=\"org.rivulet\">")
+            && metainfo.contains("<name>Rivulet Project</name>")
+            && metainfo.contains("<content_rating type=\"oars-1.1\"/>")
+            && metainfo.contains("date=\""),
+        "the metainfo must use the modern developer tag, an OARS content rating and dated releases (warnings are fatal in the official lint)"
+    );
+    assert!(
+        metainfo.contains("<screenshots>")
+            && metainfo.contains("<screenshot type=\"default\">")
+            && metainfo.contains("raw.githubusercontent.com/thoser666/Rivulet/")
+            && !metainfo.contains("raw.githubusercontent.com/thoser666/Rivulet/main/")
+            && !metainfo.contains("raw.githubusercontent.com/thoser666/Rivulet/develop/"),
+        "the metainfo must ship at least one screenshot referenced by commit, never by branch (metainfo-missing-screenshots is never grantable)"
+    );
+    assert!(
+        manifest.contains("LIBCLANG_PATH") && manifest.contains("/usr/lib/sdk/llvm20/lib"),
+        "the manifest must point bindgen at libclang via LIBCLANG_PATH (llvm20 extension)"
+    );
+    assert!(
+        readiness.contains("prepare-flathub")
+            && readiness.contains("flatpak-builder")
+            && readiness.contains("packaging/flatpak/org.rivulet.Rivulet.yml"),
+        "distribution readiness must contain the prepare-flathub job"
+    );
+    assert!(
+        readme.contains("Flathub preparation") && readme.contains("packaging/flatpak/"),
+        "README must document the Flathub preparation state"
+    );
+    assert!(
+        platforms.contains("org.rivulet.Rivulet") && platforms.contains("cargo-sources.json"),
+        "release-platforms must document the flatpak id and the offline crate pin"
+    );
+    assert!(
+        changelog.contains("feat(distribution)") && changelog.contains("flathub"),
+        "CHANGELOG must record the Flathub Stage 2 preparation"
+    );
+}
+
+#[test]
+fn m5_winget_stage2_is_prepared_and_pinned() {
+    // M5 distribution rollout Stage 2 (WinGet): a deterministic manifest
+    // generator must stay wired so the winget-pkgs payload stays canonical
+    // (GitHub asset URL + SHA-256 + MSI ProductCode/UpgradeCode), covered by
+    // Pester tests, exercised by a dry-run readiness job, and honestly
+    // documented (external review remains the gate, never a bot).
+    let generator = read("packaging/windows/generate-winget-manifest.ps1");
+    let pester = read("packaging/windows/generate-winget-manifest.tests.ps1");
+    let workflow = read(".github/workflows/distribution-readiness.yml");
+    let readme = read("README.md");
+    let platforms = read("docs/release-platforms.md");
+    let changelog = read("CHANGELOG.md");
+    for required in [
+        "PackageIdentifier: ",
+        "ManifestType: singleton",
+        "ManifestVersion: 1.6.0",
+        "InstallerType: wix",
+        "Scope: machine",
+        "InstallerUrl",
+        "InstallerSha256",
+        "A5C1E5E8-7A3B-4C9D-B6E2-9F1D4C7A8B90",
+        "ValidateOnly",
+        "Read-MsiProductCode",
+    ] {
+        assert!(
+            generator.contains(required),
+            "winget manifest generator must contain {required:?}"
+        );
+    }
+    assert!(
+        pester.contains("Invoke-Generator") && pester.contains("ValidateOnly"),
+        "Pester tests must cover generation and validation mode"
+    );
+    assert!(
+        workflow.contains("prepare-winget") && workflow.contains("generate-winget-manifest.ps1"),
+        "distribution-readiness must contain the prepare-winget job"
+    );
+    assert!(
+        workflow.contains("Invoke-Pester") && workflow.contains("validate-release"),
+        "the prepare-winget job must run the Pester tests after asset validation"
+    );
+    assert!(
+        readme.contains("WinGet preparation") && readme.contains("generate-winget-manifest.ps1"),
+        "README must document the WinGet preparation state"
+    );
+    assert!(
+        readme.contains("Flathub preparation") && readme.contains("packaging/flatpak/"),
+        "README must document the Flathub preparation state"
+    );
+    assert!(
+        platforms.contains("generate-winget-manifest.ps1") && platforms.contains("Rivulet.Rivulet"),
+        "release-platforms must document the generator and the stable package identity"
+    );
+    assert!(
+        changelog.contains("feat(distribution)") || changelog.contains("winget"),
+        "CHANGELOG must record the WinGet Stage 2 preparation"
     );
 }

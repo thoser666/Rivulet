@@ -378,6 +378,8 @@ must not be implied by beta parity.
 - [ ] **Multi-channel distribution rollout** — tracked in [`docs/release-platforms.md`](docs/release-platforms.md):
   - [x] **Stage 1 – GitHub Releases:** canonical artifacts, checksums, changelog, and updater source (already active; signing is enabled when release secrets are configured).
   - [ ] **Stage 2 – WinGet + Flathub:** first external channels after stable package identity, signing, Flatpak metadata, and review are complete.
+- [x] **WinGet preparation** — signed MSI with a stable `UpgradeCode` plus a deterministic winget manifest generator/validator (`packaging/windows/generate-winget-manifest.ps1`, Pester-pinned) and a dry-run **Distribution Readiness → winget** job that renders and verifies the manifest against the real release MSI; the initial `microsoft/winget-pkgs` submission PR stays external.
+    - [x] **Flathub preparation** — Flatpak manifest with a pinned, cargo-offline build (`packaging/flatpak/`, `cargo-sources.json` generated from `Cargo.lock` by the official `flatpak-cargo-generator` — crate archives pinned by URL + SHA-256, cargo builds offline via vendored sources), honest sandbox permissions, and a CI job that builds/installs/flatpak-lints the bundle against `org.freedesktop.Platform` 25.08; the initial Flathub submission PR and its permissions/appstream review stay external.
   - [ ] **Stage 3 – Homebrew Cask + Steam:** macOS cask after notarization; Steam for Windows/macOS after beta stability, App/Depot setup, and SteamPipe verification.
   - [ ] **Stage 4 – Microsoft Store:** optional MSIX/Partner Center channel after the MSIX packaging decision.
 
