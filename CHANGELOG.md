@@ -112,6 +112,23 @@
   WebSocket transport); bind errors surfacing as Settings warnings, never
   crashes; i18n DE/EN (479 keys), core + socket-level e2e receiver tests
   (valid delivery + forged signature), docs `docs/alerts-ingest.md`
+- feat(alerts): native outbound Twitch EventSub WebSocket transport — new
+  `rivulet-core::alerts_eventsub`: dials `wss://eventsub.wss.twitch.tv/ws`
+  (tungstenite + `rustls-tls-webpki-roots`, the same TLS stack `ureq` already
+  uses) and keeps a `channel.follow` (v2) / `channel.subscribe` /
+  `channel.subscription.gift` / `channel.raid` (v1) session alive with
+  automatic reconnect; parses the session lifecycle (welcome/keepalive/reconnect/
+  revocation) and pushes notification frames through
+  `parse_twitch_eventsub_notification` into the same `AlertIngest`; creates
+  the four subscriptions against the Helix API over TLS (masked client ID +
+  user token, scopes `moderator:read:followers`, `channel:read:subscriptions`;
+  token acquisition/refresh stays a documented follow-up); live Twitch
+  delivery needs **no forwarder, no shared secret and no port**; tokens are
+  never logged, never `Debug`-printed and never embedded in events; GUI
+  Settings → Alerts gains an opt-in EventSub section (masked credentials,
+  broadcaster ID, live connection indicator; missing credentials never dial
+  out); i18n DE/EN (512 keys), protocol/unit + WebSocket-puppet e2e tests,
+  docs `docs/alerts-ingest.md`, ci_pinning guard m5 extended
 - feat(telemetry): M5 opt-in, privacy-first usage telemetry — Settings → Telemetry
   toggle (off by default, persisted; opting out clears pending events);
   identifier-free event model in `rivulet-core::telemetry` (enums/codes/booleans

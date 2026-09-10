@@ -320,15 +320,17 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
     // M5 roadmap "Alerts (follows/subs/donations)": event ingestion is a
     // local, provider-neutral contract mapped to localized chat-dock entries.
     // The shipped build wires a bounded LOOPBACK webhook receiver (Streamlabs
-    // + Twitch EventSub with HMAC verification); public HTTPS delivery always
-    // needs a forwarder/terminator, and the honest scope, queue, parsers and
-    // signature checks must stay pinned across README, roadmap, docs and
-    // wiring.
+    // + Twitch EventSub with HMAC verification) and a native OUTBOUND EventSub
+    // WebSocket transport (wss://, forwarder-free for Twitch); public HTTPS
+    // webhook delivery still needs a forwarder/terminator, and the honest
+    // scope, queue, parsers, signature checks and both transports must stay
+    // pinned across README, roadmap, docs and wiring.
     let readme = read("README.md");
     let roadmap = read("docs/obs-vision-roadmap.md");
     let alerts_docs = read("docs/alerts-ingest.md");
     let core = read("rivulet-core/src/alerts_ingest.rs");
     let webhook = read("rivulet-core/src/alerts_webhook.rs");
+    let eventsub = read("rivulet-core/src/alerts_eventsub.rs");
     let gui = read("rivulet-gui/src/app.rs");
     let i18n = read("rivulet-core/src/i18n.rs");
     let changelog = read("CHANGELOG.md");
@@ -353,6 +355,10 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
         "bounded",
         "Streamlabs",
         "ci_pinning guard",
+        "WebSocket",
+        "wss://eventsub.wss.twitch.tv/ws",
+        "forwarder-free",
+        "rustls",
     ] {
         assert!(
             alerts_docs.contains(required),
@@ -382,14 +388,35 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
         );
     }
     for required in [
+        "EventsubReceiver",
+        "EventsubWsConfig",
+        "EventsubWsError",
+        "EventsubWsMessage",
+        "parse_eventsub_ws_message",
+        "build_subscription_body",
+        "DEFAULT_EVENTSUB_WS_ENDPOINT",
+        "session_welcome",
+        "session_reconnect",
+        "rustls-tls-webpki-roots",
+    ] {
+        assert!(
+            eventsub.contains(required),
+            "alerts_eventsub module must define {required}"
+        );
+    }
+    for required in [
         "alert_ingest: rivulet_core::AlertIngest",
         "alert_ingest_enabled",
         "alerts_receiver_enabled",
         "alerts_twitch_secret",
         "rivulet_core::AlertsReceiver",
+        "alerts_eventsub_enabled",
+        "alerts_eventsub_token",
+        "rivulet_core::EventsubReceiver",
         "fn queue_alert_preview",
         "fn alert_event_to_chat_message",
         "fn apply_alerts_receiver",
+        "fn apply_alerts_eventsub",
     ] {
         assert!(gui.contains(required), "GUI must wire {required}");
     }
@@ -400,6 +427,10 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
     assert!(
         i18n.matches("\"alert_receiver_enable\"").count() >= 2,
         "receiver settings keys must be localized in both locales"
+    );
+    assert!(
+        i18n.matches("\"alert_eventsub_enable\"").count() >= 2,
+        "EventSub settings keys must be localized in both locales"
     );
     assert!(
         changelog.contains("feat(alerts)"),

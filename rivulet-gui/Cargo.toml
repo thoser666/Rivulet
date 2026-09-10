@@ -87,3 +87,7 @@ winres = "0.1"
 
 [dev-dependencies]
 egui_kittest = { version = "0.36", features = ["eframe"] }
+# WebSocket server-side accept used by the EventSub GUI test's local puppet
+# (the client transport itself runs in rivulet-core; this reuses the already
+# locked tungstenite 0.26 from the workspace without new versions or licenses).
+tungstenite = "0.26"

@@ -551,8 +551,8 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Mobile remote & MIDI | Open (M6: mobile/HTTP remote companion; obs-websocket server + MIDI shipped in M5) |
 | Cloud & telemetry | Partial (M4 S3 SigV4 PUT upload after stop; multipart + GUI settings open) |
 | Discord Rich Presence | Implemented (optional, privacy-safe activity status; M5, see docs/activity-status.md) |
-| Chat dock & alerts | Partial (M5: Twitch IRC + Kick WebSocket + YouTube polling chat in the Stream workspace, see docs/twitch-chat.md; follow/sub/donation/raid ingestion surfaced locally in the chat dock, incl. an opt-in loopback webhook receiver for Streamlabs + Twitch EventSub with HMAC verification — see docs/alerts-ingest.md) *[#129](https://github.com/thoser666/Rivulet/issues/129)* |
-| Multi-language support | Implemented (EN/DE, 479 keys, parity-tested; see docs/i18n.md) |
+| Chat dock & alerts | Partial (M5: Twitch IRC + Kick WebSocket + YouTube polling chat in the Stream workspace, see docs/twitch-chat.md; follow/sub/donation/raid ingestion surfaced locally in the chat dock — an opt-in loopback webhook receiver for Streamlabs + Twitch EventSub with HMAC verification, and a native outbound Twitch EventSub WebSocket transport (wss://, forwarder-free, no port) — see docs/alerts-ingest.md) *[#129](https://github.com/thoser666/Rivulet/issues/129)* |
+| Multi-language support | Implemented (EN/DE, 512 keys, parity-tested; see docs/i18n.md) |
 | Platform parity (Windows/macOS) | Open |
 | AI chat assistant | Open (M10) |
 

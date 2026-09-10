@@ -822,6 +822,38 @@ pub struct RivuletApp {
     /// Alerts: receiver bind/IO error shown in Settings. Not persisted.
     #[serde(skip)]
     alerts_receiver_error: Option<String>,
+    /// Alerts: Twitch EventSub WebSocket transport enabled (outbound
+    /// `wss://` — no forwarder or shared secret needed). Persisted, off by
+    /// default: the streamer opts into contacting Twitch.
+    alerts_eventsub_enabled: bool,
+    /// Alerts: Twitch application client ID for EventSub subscription
+    /// creation. Persisted, masked like the chat token, never logged.
+    alerts_eventsub_client_id: String,
+    /// Alerts: Twitch user access token (scopes `moderator:read:followers`,
+    /// `channel:read:subscriptions`). Persisted, masked, never logged and
+    /// never embedded in any event. Empty disables the transport.
+    alerts_eventsub_token: String,
+    /// Alerts: target broadcaster numeric user ID. Persisted.
+    alerts_eventsub_broadcaster_id: String,
+    /// Alerts: running EventSub worker handle. Not persisted.
+    #[serde(skip)]
+    alerts_eventsub: Option<rivulet_core::EventsubReceiver>,
+    /// Alerts: settings the running EventSub worker was started with (so a
+    /// changed client ID, token or broadcaster restarts it once per frame).
+    /// Not persisted; the token stays inside and is never Debug-printed.
+    #[serde(skip)]
+    alerts_eventsub_applied: rivulet_core::EventsubWsConfig,
+    /// Alerts: EventSub worker/IO error shown in Settings. Not persisted.
+    #[serde(skip)]
+    alerts_eventsub_error: Option<String>,
+    /// Alerts: EventSub WebSocket endpoint override (Twitch default when
+    /// empty; only tests point it at a local puppet). Not persisted.
+    #[serde(skip)]
+    alerts_eventsub_ws_endpoint: String,
+    /// Alerts: Twitch Helix API base override (default when empty; only tests
+    /// point it at a local stub). Not persisted.
+    #[serde(skip)]
+    alerts_eventsub_api_base: String,
 
     /// Set when any hotkey binding changes through the Settings UI (or scene
     /// hotkey assignment), so the OS-level global hotkeys are re-registered
@@ -1404,6 +1436,15 @@ impl Default for RivuletApp {
             alerts_receiver: None,
             alerts_receiver_applied: rivulet_core::AlertsReceiverConfig::default(),
             alerts_receiver_error: None,
+            alerts_eventsub_enabled: false,
+            alerts_eventsub_client_id: String::new(),
+            alerts_eventsub_token: String::new(),
+            alerts_eventsub_broadcaster_id: String::new(),
+            alerts_eventsub: None,
+            alerts_eventsub_applied: rivulet_core::EventsubWsConfig::default(),
+            alerts_eventsub_error: None,
+            alerts_eventsub_ws_endpoint: String::new(),
+            alerts_eventsub_api_base: String::new(),
             global_hotkeys_dirty: false,
             global_hotkeys: None,
             obs_ws_enabled: false,
@@ -5346,6 +5387,16 @@ impl RivuletApp {
             }
         }
 
+        // Keep the outbound EventSub worker in sync with the persisted
+        // settings (start/restart/stop), then drain its pushed alert events
+        // into the same local queue (respecting the queue's enabled state).
+        self.apply_alerts_eventsub();
+        if let Some(eventsub) = &self.alerts_eventsub {
+            while let Ok(event) = eventsub.events().try_recv() {
+                self.alert_ingest.push(event);
+            }
+        }
+
         // Surface pending local alert events in the chat dock, newest first.
         // Ingestion is local by default; the preview button and the loopback
         // webhook receiver feed the same queue.
@@ -6225,6 +6276,53 @@ impl RivuletApp {
             }
             self.alerts_receiver_applied = rivulet_core::AlertsReceiverConfig::default();
             self.alerts_receiver_error = None;
+        }
+    }
+
+    /// Mirror the persisted EventSub settings into the running worker: start
+    /// when enabled and all credentials are filled, restart when the client
+    /// ID, token or broadcaster changed, stop otherwise. Missing credentials
+    /// never dial out (the worker stays off), matching the webhook receiver's
+    /// "empty disables" semantics. Called once per frame, cheap when nothing
+    /// changed. Connection failures are asynchronous (counters + `connected()`),
+    /// so no error is raised here.
+    fn apply_alerts_eventsub(&mut self) {
+        let ws_endpoint = if self.alerts_eventsub_ws_endpoint.trim().is_empty() {
+            rivulet_core::DEFAULT_EVENTSUB_WS_ENDPOINT.to_owned()
+        } else {
+            self.alerts_eventsub_ws_endpoint.trim().to_owned()
+        };
+        let api_base = if self.alerts_eventsub_api_base.trim().is_empty() {
+            rivulet_core::DEFAULT_TWITCH_API_BASE.to_owned()
+        } else {
+            self.alerts_eventsub_api_base.trim().to_owned()
+        };
+        let desired = rivulet_core::EventsubWsConfig {
+            client_id: self.alerts_eventsub_client_id.trim().to_owned(),
+            token: self.alerts_eventsub_token.trim().to_owned(),
+            broadcaster_id: self.alerts_eventsub_broadcaster_id.trim().to_owned(),
+            ws_endpoint,
+            api_base,
+        };
+        let complete = !desired.client_id.is_empty()
+            && !desired.token.is_empty()
+            && !desired.broadcaster_id.is_empty();
+        if self.alerts_eventsub_enabled && complete {
+            let restart = self.alerts_eventsub.is_none() || self.alerts_eventsub_applied != desired;
+            if restart {
+                if let Some(mut old) = self.alerts_eventsub.take() {
+                    old.shutdown();
+                }
+                self.alerts_eventsub_error = None;
+                self.alerts_eventsub_applied = desired.clone();
+                self.alerts_eventsub = Some(rivulet_core::EventsubReceiver::start(desired));
+            }
+        } else {
+            if let Some(mut old) = self.alerts_eventsub.take() {
+                old.shutdown();
+            }
+            self.alerts_eventsub_applied = rivulet_core::EventsubWsConfig::default();
+            self.alerts_eventsub_error = None;
         }
     }
 
@@ -8935,6 +9033,75 @@ impl eframe::App for RivuletApp {
                             );
                         }
 
+                        // Settings: outbound Twitch EventSub WebSocket — a
+                        // native, forwarder-free delivery path that pushes
+                        // follows/subs/gifts/raids straight into the same
+                        // ingestion queue (see docs/alerts-ingest.md).
+                        let eventsub_section = self.tr("alert_eventsub_section");
+                        let eventsub_enable = self.tr("alert_eventsub_enable");
+                        let eventsub_client_id = self.tr("alert_eventsub_client_id");
+                        let eventsub_token = self.tr("alert_eventsub_token");
+                        let eventsub_broadcaster = self.tr("alert_eventsub_broadcaster");
+                        let eventsub_note = self.tr("alert_eventsub_note");
+                        ui.separator();
+                        ui.label(egui::RichText::new(eventsub_section).strong());
+                        if ui
+                            .checkbox(&mut self.alerts_eventsub_enabled, eventsub_enable)
+                            .changed()
+                        {
+                            self.alerts_eventsub_error = None;
+                        }
+                        ui.horizontal(|ui| {
+                            let colors = theme::StatusColors::for_ui(ui);
+                            if let Some(eventsub) = &self.alerts_eventsub {
+                                if eventsub.connected() {
+                                    let subs = eventsub.stats().2.to_string();
+                                    ui.colored_label(
+                                        colors.success,
+                                        self.tr_fmt(
+                                            "alert_eventsub_connected",
+                                            std::slice::from_ref(&subs),
+                                        ),
+                                    );
+                                }
+                            }
+                        });
+                        egui::Grid::new("alerts_eventsub_credentials_grid")
+                            .num_columns(2)
+                            .show(ui, |ui| {
+                                ui.label(eventsub_client_id);
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.alerts_eventsub_client_id)
+                                        .password(true)
+                                        .desired_width(220.0),
+                                );
+                                ui.end_row();
+                                ui.label(eventsub_token);
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.alerts_eventsub_token)
+                                        .password(true)
+                                        .desired_width(220.0),
+                                );
+                                ui.end_row();
+                                ui.label(eventsub_broadcaster);
+                                ui.add(
+                                    egui::TextEdit::singleline(
+                                        &mut self.alerts_eventsub_broadcaster_id,
+                                    )
+                                    .desired_width(220.0),
+                                );
+                                ui.end_row();
+                            });
+                        if let Some(err) = &self.alerts_eventsub_error {
+                            let colors = theme::StatusColors::for_ui(ui);
+                            let msg = err.clone();
+                            ui.colored_label(
+                                colors.warning,
+                                self.tr_fmt("alert_eventsub_error", std::slice::from_ref(&msg)),
+                            );
+                        }
+                        ui.small(eventsub_note);
+
                         // Settings: NDI output — LAN monitor feed published
                         // next to a recording/streaming session (M5 #77).
                         let ndi_section = self.tr("ndi_section");
@@ -10443,6 +10610,149 @@ mod tests {
         assert_eq!(
             app.alerts_receiver_applied,
             rivulet_core::AlertsReceiverConfig::default(),
+            "the applied-config marker must reset after a stop"
+        );
+    }
+
+    /// Puppet EventSub WebSocket server for GUI tests: accept one client,
+    /// push a welcome then a follow notification, then close cleanly after the
+    /// client disconnects (mirrors the rivulet-core fixture; a clean FIN avoids
+    /// `WSAECONNRESET` on Windows).
+    fn spawn_eventsub_ws_puppet(
+        welcome: &'static str,
+        notification: &'static str,
+    ) -> std::net::SocketAddr {
+        let (port_tx, port_rx) = std::sync::mpsc::sync_channel::<u16>(1);
+        std::thread::Builder::new()
+            .name("test-eventsub-gui-puppet".into())
+            .spawn(move || {
+                let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind puppet");
+                let port = listener.local_addr().expect("addr").port();
+                let _ = port_tx.try_send(port);
+                let (stream, _) = listener.accept().expect("accept");
+                let mut ws = tungstenite::accept(stream).expect("ws accept");
+                ws.send(tungstenite::Message::Text(welcome.into()))
+                    .expect("welcome");
+                ws.send(tungstenite::Message::Text(notification.into()))
+                    .expect("notification");
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                while ws.read().is_ok() {}
+            })
+            .expect("spawn puppet");
+        std::net::SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            port_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("puppet port"),
+        )
+    }
+
+    #[test]
+    fn alerts_eventsub_defaults_to_off_and_empty() {
+        let app = RivuletApp::default();
+        assert!(
+            !app.alerts_eventsub_enabled,
+            "the EventSub transport is opt-in and off by default"
+        );
+        assert!(app.alerts_eventsub.is_none());
+        assert!(app.alerts_eventsub_client_id.is_empty());
+        assert!(app.alerts_eventsub_token.is_empty());
+        assert!(app.alerts_eventsub_broadcaster_id.is_empty());
+    }
+
+    #[test]
+    fn alerts_eventsub_missing_credentials_never_start_a_worker() {
+        let mut app = RivuletApp {
+            alerts_eventsub_enabled: true,
+            alerts_eventsub_client_id: String::new(),
+            ..Default::default()
+        };
+        app.reconcile_chat();
+        assert!(
+            app.alerts_eventsub.is_none(),
+            "empty credentials must keep the transport off, no dial-out"
+        );
+        assert_eq!(
+            app.alerts_eventsub_applied,
+            rivulet_core::EventsubWsConfig::default()
+        );
+    }
+
+    #[test]
+    fn alerts_eventsub_starts_and_surfaces_a_follow_notification_in_the_chat_dock() {
+        // Static payloads bound to the local puppet (a real Helix stub is not
+        // needed for the GUI test: subscription POSTs hit api_base, which
+        // points at a dead port, and the worker just counts those failures).
+        const WELCOME: &str = r#"{
+            "metadata": {"message_type": "session_welcome"},
+            "payload": {"session": {"id": "SES_gui", "keepalive_timeout_seconds": 10}}
+        }"#;
+        const NOTIFICATION: &str = r#"{
+            "metadata": {"message_type": "notification"},
+            "payload": {"subscription": {"type": "channel.follow", "version": "2"},
+                        "event": {"user_id": "42", "user_login": "ada",
+                                  "user_name": "Ada", "followed_at": "2026-09-10T00:00:00Z"}}
+        }"#;
+        let ws_addr = spawn_eventsub_ws_puppet(WELCOME, NOTIFICATION);
+        let mut app = RivuletApp {
+            alerts_eventsub_enabled: true,
+            alerts_eventsub_client_id: "test-client".to_owned(),
+            alerts_eventsub_token: "test-token".to_owned(),
+            alerts_eventsub_broadcaster_id: "123".to_owned(),
+            alerts_eventsub_ws_endpoint: format!("ws://{ws_addr}"),
+            alerts_eventsub_api_base: "http://127.0.0.1:9".to_owned(),
+            ..Default::default()
+        };
+        app.reconcile_chat();
+        assert!(app.alerts_eventsub.is_some(), "worker started");
+
+        // The worker pushes asynchronously through the queue; poll reconcile
+        // until the follow surfaces in the chat dock (or fail after 10 s).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let surfaced = loop {
+            app.reconcile_chat();
+            let texts: Vec<&str> = app.chat_messages.iter().map(|m| m.text.as_str()).collect();
+            if texts.contains(&"Ada followed the channel") {
+                break true;
+            }
+            if std::time::Instant::now() >= deadline {
+                break false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        };
+        assert!(
+            surfaced,
+            "an EventSub follow must surface as a localized chat entry: {:?}",
+            app.chat_messages
+                .iter()
+                .map(|m| m.text.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn alerts_eventsub_stops_and_clears_when_disabled() {
+        let mut app = RivuletApp {
+            alerts_eventsub_enabled: true,
+            alerts_eventsub_client_id: "client".to_owned(),
+            alerts_eventsub_token: "token".to_owned(),
+            alerts_eventsub_broadcaster_id: "123".to_owned(),
+            alerts_eventsub_ws_endpoint: "ws://127.0.0.1:9".to_owned(),
+            ..Default::default()
+        };
+        app.reconcile_chat();
+        assert!(app.alerts_eventsub.is_some());
+
+        app.alerts_eventsub_enabled = false;
+        app.reconcile_chat();
+        assert!(
+            app.alerts_eventsub.is_none(),
+            "disabling must stop the EventSub worker"
+        );
+        assert!(app.alerts_eventsub_error.is_none());
+        assert_eq!(
+            app.alerts_eventsub_applied,
+            rivulet_core::EventsubWsConfig::default(),
             "the applied-config marker must reset after a stop"
         );
     }

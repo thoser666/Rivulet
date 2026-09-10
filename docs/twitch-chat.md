@@ -210,5 +210,7 @@ Chat and alerts are tracked in `docs/obs-vision-roadmap.md` (M5
 existing browser source). Alert overlays (Streamlabs/StreamElements or own
 EventSub → overlay) are a follow-up item. Native alert ingestion
 (follows/subs/donations/raids parsed from provider webhooks and surfaced in
-the chat dock) ships in `rivulet-core::alerts_ingest` — see
-[`docs/alerts-ingest.md`](alerts-ingest.md).
+the chat dock) ships in `rivulet-core::alerts_ingest`, with an opt-in
+loopback webhook receiver (`alerts_webhook`) and a native outbound
+**EventSub WebSocket** transport (`alerts_eventsub`, `wss://`, no forwarder)
+— see [`docs/alerts-ingest.md`](alerts-ingest.md).
