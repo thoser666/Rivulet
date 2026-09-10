@@ -831,7 +831,6 @@ mod tests {
         // without loosening the assertion (we still require exactly one
         // delivered follow with no rejections/errors).
         let mut event = None;
-        let mut received_follow = false;
         let deadline = std::time::Instant::now() + StdDuration::from_secs(10);
         while std::time::Instant::now() < deadline {
             match receiver
@@ -840,7 +839,6 @@ mod tests {
             {
                 Ok(e) if e.kind == AlertKind::Follow => {
                     event = Some(e);
-                    received_follow = true;
                     break;
                 }
                 Ok(_) => {
