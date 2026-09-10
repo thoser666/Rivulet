@@ -70,7 +70,8 @@ jobs:
           # mirrored to dl.flathub.org/media paths exactly like Flathub does.
           sudo apt-get install -y meson ninja-build \
             libflatpak-dev libappstream-dev libostree-dev libsoup-3.0-dev \
-            libjson-glib-dev libxml2-dev libzstd-dev libcurl4-openssl-dev
+            libjson-glib-dev libxml2-dev libzstd-dev libcurl4-openssl-dev \
+            libelf-dev
           FB="flatpak-builder-1.4.10"
           curl -fsSL -o "$FB.tar.xz" \
             "https://github.com/flatpak/flatpak-builder/releases/download/1.4.10/$FB.tar.xz"
