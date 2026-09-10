@@ -105,7 +105,6 @@ jobs:
         id: previous
         run: |
           set -euo pipefail
-          # shellcheck disable=SC2016
           CHOSEN="${{ steps.resolve.outputs.chosen }}"
           # Where does weekly-latest point right now (empty on first run)?
           if git cat-file -e refs/tags/weekly-latest 2>/dev/null; then
@@ -128,11 +127,10 @@ jobs:
             FROM_REF="$(git tag --points-at "$TARGET_SHA" | grep -E '^v[0-9]' | head -1 || true)"
           fi
           if [ -z "$FROM_REF" ]; then
+            # shellcheck disable=SC2016
+            JQ_PROG='[.[] | select(.isDraft == false)] as $r | ($r | to_entries | map(select(.value.tagName == $chosen)) | .[0].key // -1) as $i | (if $i >= 0 and ($i + 1) < ($r | length) then $r[$i + 1].tagName else "" end)'
             FROM_REF="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
-              --json tagName,isDraft --jq --arg chosen "$CHOSEN" \
-              '[.[] | select(.isDraft == false)] as $r |
-               ($r | to_entries | map(select(.value.tagName == $chosen)) | .[0].key // -1) as $i |
-               (if $i >= 0 and ($i + 1) < ($r | length) then $r[$i + 1].tagName else "" end)')"
+              --json tagName,isDraft --jq --arg chosen "$CHOSEN" "$JQ_PROG")"
           fi
           [ -n "$FROM_REF" ] || FROM_REF="$CHOSEN"
           echo "from_ref=$FROM_REF" >> "$GITHUB_OUTPUT"
