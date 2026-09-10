@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- feat(distribution): Chocolatey as a distribution target — the second
+  Windows package channel, usable before SignPath approval because the
+  community repository accepts unsigned installers (with a moderator
+  warning): deterministic package generator
+  `packaging/windows/generate-chocolatey-package.ps1` renders
+  `rivulet.nuspec` + `tools/chocolateyInstall.ps1` from a release tag with
+  the portable-ZIP SHA-256 taken from the release's own `SHA256SUMS`
+  (re-render byte-compare via `-ValidateOnly` catches drift) and normalizes
+  the version for Chocolatey's no-dots prerelease rule
+  (`0.65.0-alpha.163` → `0.65.0-alpha163`); Pester tests (8), a
+  **Distribution Readiness → chocolatey** dry-run job, ci_pinning guard,
+  and a new "Chocolatey" section in `docs/release-platforms.md` that pins
+  the milestone-only submission policy (first beta, not weekly alphas —
+  every version is a moderated PR).
+
 - feat(distribution): weekly release promotion — the slow lane for
   package-manager channels: the scheduled **Weekly release promotion**
   workflow (`.github/workflows/weekly-promotion.yml`, Mondays 07:09 UTC,

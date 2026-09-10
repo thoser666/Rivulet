@@ -92,6 +92,31 @@ unverified binary.
    manifest as a workflow artifact with a warning instead of failing — set
    the secret once and the bucket updates itself.
 
+### Chocolatey
+
+The Chocolatey **community repository** accepts unsigned installers (with a
+moderator warning), so it is usable before SignPath approval — but unlike
+Scoop every submission is a **moderated PR per version**. That makes it a
+milestone channel, not a fast-follow: submit the first beta, not weekly
+alphas, or the moderation queue rejects the churn.
+
+The package is generated from the portable ZIP asset exactly like the Scoop
+manifest: `generate-chocolatey-package.ps1` takes the SHA-256 from the
+release's own `SHA256SUMS` asset, normalizes the version for Chocolatey
+(dots are forbidden in prerelease suffixes: `0.65.0-alpha.163` →
+`0.65.0-alpha163`), and emits `rivulet.nuspec` +
+`tools/chocolateyInstall.ps1` wrapping `Install-ChocolateyZipPackage`.
+
+1. Trigger the **Distribution Readiness → chocolatey** workflow on a release
+   tag: it runs the Pester tests (`generate-chocolatey-package.tests.ps1`),
+   renders the package from the real release, and byte-verifies the render.
+2. Submit the generated package directory with `choco push` (API key from
+   the community repository account) or open the package PR against the
+   community repository — both are external and moderated.
+3. When winget goes live later, Chocolatey stays as the second Windows
+   option (winget serves MSI users, Chocolatey serves portable users who
+   prefer choco); promote both from the same `weekly-latest` target.
+
 ### Promotion cadence: fast lane vs. weekly-latest
 
 Rivulet publishes a release on every green push — that firehose is the

@@ -2620,6 +2620,7 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
         workflow.contains("platform:")
             && workflow.contains("- winget")
             && workflow.contains("- scoop")
+            && workflow.contains("- chocolatey")
             && workflow.contains("- flathub")
             && workflow.contains("- homebrew")
             && workflow.contains("- steam")
@@ -2659,11 +2660,34 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
         workflow.contains("thoser666/scoop-bucket"),
         "the scoop plan must point at the live bucket repository"
     );
+    // Chocolatey channel (community repository, unsigned allowed): the
+    // generator takes the portable ZIP SHA-256 from the release's own
+    // SHA256SUMS asset, normalizes the prerelease version (Chocolatey
+    // forbids dots in the suffix), and the CI job re-verifies the package
+    // byte-exact. Submission stays external and milestone-gated.
+    let choco_gen = read("packaging/windows/generate-chocolatey-package.ps1");
+    assert!(
+        choco_gen.contains("SHA256SUMS")
+            && choco_gen.contains("rivulet-windows-x86_64-portable.zip")
+            && choco_gen.contains("-ValidateOnly")
+            && choco_gen.contains("Install-ChocolateyZipPackage"),
+        "chocolatey generator must hash-pin the portable ZIP from SHA256SUMS, emit an Install-ChocolateyZipPackage script, and support re-verification"
+    );
+    assert!(
+        read("packaging/windows/generate-chocolatey-package.tests.ps1").contains("Invoke-Pester")
+            || choco_gen.contains("Pester"),
+        "chocolatey generator must be covered by Pester tests"
+    );
+    assert!(
+        workflow.contains("prepare-chocolatey")
+            && workflow.contains("generate-chocolatey-package.ps1")
+            && workflow.contains("generate-chocolatey-package.tests.ps1"),
+        "distribution workflow must run the chocolatey Pester tests and generator"
+    );
     let release_doc = read("docs/release-platforms.md");
     assert!(
-        release_doc.contains("thoser666/scoop-bucket")
-            && release_doc.contains("scoop bucket add rivulet"),
-        "release-platforms docs must document the live scoop bucket"
+        release_doc.contains("choco push") && release_doc.contains("community repository"),
+        "release-platforms docs must document the chocolatey submission path"
     );
 }
 
