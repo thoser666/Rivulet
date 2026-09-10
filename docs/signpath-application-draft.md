@@ -113,11 +113,11 @@ token with *Submitter* permission, then set the four secrets
 | Step | State | Notes |
 | --- | --- | --- |
 | Application submitted | **done** (Sep 2026) | via signpath.org/apply, including the reputation text below |
-| Initial review / test certificate | open | SignPath verifies "project reputation and control" (see their terms); expected turnaround: days to a few weeks |
-| Build-system review → production certificate | open | they inspect the public pipeline; our summary lives in the "Build system and its openness" section above |
-| Portal setup (project, policy, artifact configuration, API token) | open | step-by-step in `docs/code-signing.md` § SignPath |
-| Secrets set (`SIGNPATH_*`) | open | four secrets; the workflow activates automatically once all four exist |
-| First signed release | open | `scripts/check-beta-gate.py` criterion 4 flips to met |
+| Initial review / test certificate | **rejected** (Oct 2026) | SignPath Foundation declined: insufficient GitHub stars / download volume for their reputation threshold. Re-application possible once the project reaches higher visibility. |
+| Build-system review → production certificate | — | blocked by rejection |
+| Portal setup (project, policy, artifact configuration, API token) | — | blocked by rejection |
+| Secrets set (`SIGNPATH_*`) | — | blocked by rejection |
+| First signed release | — | blocked by rejection |
 
 ### Reputation text (as submitted)
 

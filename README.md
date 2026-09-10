@@ -551,8 +551,8 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Mobile remote & MIDI | Open (M6: mobile/HTTP remote companion; obs-websocket server + MIDI shipped in M5) |
 | Cloud & telemetry | Partial (M4 S3 SigV4 PUT upload after stop; multipart + GUI settings open) |
 | Discord Rich Presence | Implemented (optional, privacy-safe activity status; M5, see docs/activity-status.md) |
-| Chat dock & alerts | Partial (M5: Twitch IRC + Kick WebSocket + YouTube polling chat in the Stream workspace, see docs/twitch-chat.md; follow/sub/donation/raid ingestion surfaced locally in the chat dock, incl. an opt-in loopback webhook receiver for Streamlabs + Twitch EventSub with HMAC verification — see docs/alerts-ingest.md) *[#129](https://github.com/thoser666/Rivulet/issues/129)* |
-| Multi-language support | Implemented (EN/DE, 479 keys, parity-tested; see docs/i18n.md) |
+| Chat dock & alerts | Partial (M5: Twitch IRC + Kick WebSocket + YouTube polling chat in the Stream workspace, see docs/twitch-chat.md; follow/sub/donation/raid ingestion surfaced locally in the chat dock — an opt-in loopback webhook receiver for Streamlabs + Twitch EventSub with HMAC verification, and a native outbound Twitch EventSub WebSocket transport (wss://, forwarder-free, no port) — see docs/alerts-ingest.md) *[#129](https://github.com/thoser666/Rivulet/issues/129)* |
+| Multi-language support | Implemented (EN/DE, 512 keys, parity-tested; see docs/i18n.md) |
 | Platform parity (Windows/macOS) | Open |
 | AI chat assistant | Open (M10) |
 
@@ -862,6 +862,17 @@ and the GitHub release attaches them as standalone downloads.
 
 ## 📦 Installation
 
+### Download
+
+Get the latest release from [GitHub Releases](https://github.com/thoser666/rivulet/releases):
+
+- **Windows:** `rivulet-windows-x86_64.msi` (installer) or the portable `.zip`
+- **macOS:** `rivulet-macos-aarch64.dmg` (Apple Silicon) — Universal2/intel builds are planned
+- **Linux:** `rivulet-linux-x86_64.AppImage` (portable, no install needed)
+
+Pick the package for your platform, download it, and run the installer / open the AppImage. See the
+[Rivulet-Bedienungsanleitung](docs/user-guide.md#1-installation-und-erster-start) for platform-specific first-launch notes (Windows screen-capture permission, Linux PipeWire/Wayland access).
+
 ### Prerequisites
 
 **GStreamer** (Core + `gst-plugins-good`/`gst-plugins-bad`/`gst-plugins-ugly` + `gst-libav`) is required by the engine for encoding, audio mixing, and streaming (H.264 + AAC).
@@ -950,15 +961,17 @@ maintainer setup steps (certificate export, Apple notarization, GPG key
 creation, verification, troubleshooting) are in
 [`docs/code-signing.md`](docs/code-signing.md).
 
-**Free for open source:** instead of buying a Windows certificate, apply at
-[SignPath Foundation](https://signpath.org) — qualifying open-source
-projects get a free OV-level Authenticode certificate. Configure the four
-`SIGNPATH_API_TOKEN`, `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`,
-`SIGNPATH_SIGNING_POLICY_SLUG` secrets and the workflow signs the Windows
-executables and MSI via a signing request (the certificate stays in
-SignPath's HSM); the SignPath path takes precedence over the PFX path when
-both are configured. The Beta-Gate (criterion 4) accepts either the PFX
-pair or the SignPath set for Windows.
+**Free for open source:** We applied at [SignPath Foundation](https://signpath.org)
+for a free OV-level Authenticode certificate, but the application was **rejected
+(Oct 2026)** due to insufficient GitHub stars / download volume for their
+reputation threshold. Re-application is possible once the project reaches
+higher visibility. Until then, Windows artifacts remain unsigned (the PFX
+path is the alternative for paid certificates). The four `SIGNPATH_API_TOKEN`,
+`SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`, and
+`SIGNPATH_SIGNING_POLICY_SLUG` secrets are still referenced in the workflow
+and will activate signing if the application is approved in the future.
+The Beta-Gate (criterion 4) accepts either the PFX pair or the SignPath
+set for Windows.
 
 ### Setting up the signing secrets
 

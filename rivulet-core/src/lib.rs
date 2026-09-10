@@ -38,6 +38,11 @@ pub use alerts_webhook::{
     handle_webhook, AlertsReceiver, AlertsReceiverConfig, WebhookReject, WebhookRequest,
     DEFAULT_ALERTS_RECEIVER_PORT,
 };
+pub mod alerts_eventsub;
+pub use alerts_eventsub::{
+    build_subscription_body, parse_eventsub_ws_message, EventsubReceiver, EventsubWsConfig,
+    EventsubWsError, EventsubWsMessage, DEFAULT_EVENTSUB_WS_ENDPOINT, DEFAULT_TWITCH_API_BASE,
+};
 pub mod rate_limit;
 pub use rate_limit::{RateLimitConfig, RateLimiter};
 pub mod global_hotkey;
