@@ -1,7 +1,5 @@
 {
-  "org.rivulet.Rivulet": {
-    "stable": {
-      "finish-args-home-filesystem-access": "Recordings, config and resources live under the user's $HOME (documented for the external Flathub submission review; dry-run lint only)"
-    }
-  }
+  "org.rivulet.Rivulet": [
+    "finish-args-home-filesystem-access"
+  ]
 }
