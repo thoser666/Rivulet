@@ -862,6 +862,17 @@ and the GitHub release attaches them as standalone downloads.
 
 ## 📦 Installation
 
+### Download
+
+Get the latest release from [GitHub Releases](https://github.com/thoser666/rivulet/releases):
+
+- **Windows:** `rivulet-windows-x86_64.msi` (installer) or the portable `.zip`
+- **macOS:** `rivulet-macos-aarch64.dmg` (Apple Silicon) — Universal2/intel builds are planned
+- **Linux:** `rivulet-linux-x86_64.AppImage` (portable, no install needed)
+
+Pick the package for your platform, download it, and run the installer / open the AppImage. See the
+[Rivulet-Bedienungsanleitung](docs/user-guide.md#1-installation-und-erster-start) for platform-specific first-launch notes (Windows screen-capture permission, Linux PipeWire/Wayland access).
+
 ### Prerequisites
 
 **GStreamer** (Core + `gst-plugins-good`/`gst-plugins-bad`/`gst-plugins-ugly` + `gst-libav`) is required by the engine for encoding, audio mixing, and streaming (H.264 + AAC).

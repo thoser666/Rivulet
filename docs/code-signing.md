@@ -137,6 +137,13 @@ test certificate first and a production certificate after a build
    [signpath-application-draft.md](signpath-application-draft.md) — it was
    **submitted in September 2026**; the doc tracks the current application
    status.
+
+> **Code signing policy.** SignPath expects the project to publish a code
+> signing policy (the phrase “Code signing policy” on the project's homepage or
+> download/release page, plus a link to the policy). That policy lives at
+> [`docs/code-signing.md`](docs/code-signing.md) and is referenced from the
+> project homepage and the release documentation so the phrase and link are
+> easy to find. The policy section of this document is the canonical copy.
 2. **Create the SignPath project and signing policy** in the SignPath
    portal. The project needs an **artifact configuration** matching what
    the workflow uploads: the EXEs are uploaded as a GitHub artifact (a

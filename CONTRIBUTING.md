@@ -268,6 +268,14 @@ cargo test
 
 ---
 
+## Code signing policy
+
+See [`docs/code-signing.md`](docs/code-signing.md) — Rivulet's code signing policy
+describes the signing automation, the secrets each platform needs, and the free
+Windows signing path via [SignPath Foundation](https://signpath.org).
+
+---
+
 ## Questions?
 
 Open an issue at https://github.com/thoser666/rivulet/issues

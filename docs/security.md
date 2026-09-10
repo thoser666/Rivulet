@@ -372,6 +372,13 @@ cannot accidentally leak user data:
   Any future transport must be reviewed separately before it is allowed to
   call into `TelemetrySink`.
 
+## Code signing policy
+
+The project's code signing policy is documented in
+[`docs/code-signing.md`](docs/code-signing.md). It is published on the project's
+homepage and download page so users and administrators can verify where signed
+artifacts come from and how they are built.
+
 ## Incident Response
 
 1. Stop the affected workflow or release if a credential may be exposed.
