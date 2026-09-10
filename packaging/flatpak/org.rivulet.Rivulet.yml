@@ -32,9 +32,10 @@ finish-args:
   # Outgoing network connections: Twitch/YouTube ingest, obs-websocket,
   # update checks and the opt-in telemetry/announce endpoint.
   - --share=network
-  # Audio playback for the stream preview deck.
+  # Audio playback for the stream preview deck and native PipeWire screen/audio
+  # capture (the PipeWire client socket lives in the runtime dir).
   - --socket=pulseaudio
-  - --socket=pipewire
+  - --filesystem=xdg-run/pipewire-0
   # Recording files, config and resources live under $HOME.
   - --filesystem=home
   # Desktop portals.
