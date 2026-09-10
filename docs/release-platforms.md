@@ -55,7 +55,7 @@ separate, explicitly permissioned job with:
 ### Flathub
 
 The chosen stable Flatpak id is `org.rivulet.Rivulet`, built from the
-`org.freedesktop.Platform`/`org.freedesktop.Sdk` 24.08 runtime with the
+`org.freedesktop.Platform`/`org.freedesktop.Sdk` 25.08 runtime with the
 `org.freedesktop.Sdk.Extension.rust-stable` SDK extension.
 
 1. The manifest `packaging/flatpak/org.rivulet.Rivulet.yml` lists the
@@ -77,7 +77,7 @@ The chosen stable Flatpak id is `org.rivulet.Rivulet`, built from the
    release entry). `flatpak-builder` runs `appstream-compose` on every build,
    so AppStream validation is part of the CI job.
 4. CI job `flatpak-build.yml` validates the manifest end to end on every push:
-   installs `flatpak` + `flatpak-builder` from apt, installs the 24.08 runtime/
+   installs `flatpak` + `flatpak-builder` from apt, installs the 25.08 runtime/
    SDK and the `rust-stable` extension, runs the cargo-offline build, the
    export and bundle, then the official Flathub lint
    (`org.flathub.flatpak-builder-lint`)
