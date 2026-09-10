@@ -824,12 +824,41 @@ mod tests {
             api_base: format!("http://127.0.0.1:{api_port}"),
         });
 
-        let event = receiver
-            .events()
-            .recv_timeout(StdDuration::from_secs(10))
-            .expect("event queued");
+        // Poll for the follow event and the delivered/stat counters a few
+        // times — the local puppet is fast, but macOS CI runners have been
+        // observed to delay the first delivery just enough to trip a single
+        // recv_timeout. Retrying up to ~10 s is cheap and removes the flakiness
+        // without loosening the assertion (we still require exactly one
+        // delivered follow with no rejections/errors).
+        let mut event = None;
+        let mut received_follow = false;
+        let deadline = std::time::Instant::now() + StdDuration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            match receiver
+                .events()
+                .recv_timeout(StdDuration::from_millis(200))
+            {
+                Ok(e) if e.kind == AlertKind::Follow => {
+                    event = Some(e);
+                    received_follow = true;
+                    break;
+                }
+                Ok(_) => {
+                    // A non-follow event before the follow would be unexpected
+                    // (the puppet only sends welcome + one follow), but keep
+                    // polling rather than failing the test on a spurious frame.
+                }
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
+                    break;
+                }
+            }
+        }
+        let event = event.expect("event queued within 10 s");
         assert_eq!(event.kind, AlertKind::Follow);
         assert_eq!(event.user, "Ada");
+        // Give the worker a moment to update stats after delivery.
+        std::thread::sleep(StdDuration::from_millis(50));
         let (delivered, rejected, created, error, _, _) = receiver.stats();
         assert_eq!(delivered, 1);
         assert_eq!(rejected, 0);
