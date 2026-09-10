@@ -4353,6 +4353,8 @@ fn m5_flathub_stage2_is_prepared_and_pinned() {
     let config = read("packaging/flatpak/cargo/config.toml");
     let sources = read("packaging/flatpak/cargo/cargo-sources.json");
     let flatpak_ci = read(".github/workflows/flatpak-build.yml");
+    let exceptions = read("packaging/flatpak/lint-exceptions.json");
+    let metainfo = read("packaging/flatpak/org.rivulet.Rivulet.metainfo.xml");
     let readiness = read(".github/workflows/distribution-readiness.yml");
     let readme = read("README.md");
     let platforms = read("docs/release-platforms.md");
@@ -4392,9 +4394,29 @@ fn m5_flathub_stage2_is_prepared_and_pinned() {
         flatpak_ci.contains("generate-cargo-sources.sh --verify")
             && flatpak_ci.contains("flatpak-builder")
             && flatpak_ci.contains("packaging/flatpak/org.rivulet.Rivulet.yml")
-            && flatpak_ci.contains("org.flathub.flatpak-builder-lint")
+            && flatpak_ci.contains("org.flatpak.Builder")
+            && flatpak_ci.contains("builddir")
             && flatpak_ci.contains("org.freedesktop.Sdk.Extension.llvm20//25.08"),
-        "the flatpak CI job must re-verify the crate pin, build the manifest, run the official lint, and install the llvm20 extension"
+        "the flatpak CI job must re-verify the crate pin, build the manifest, run the official lint (appstream/manifest/builddir), and install the llvm20 extension"
+    );
+    assert!(
+        manifest.contains("--filesystem=home")
+            && manifest.contains("no --talk-name=org.freedesktop.portal.*")
+            && !manifest.contains("  - --talk-name="),
+        "the manifest must keep the honest home-filesystem review point and must NEVER carry the never-granted portal/Flatpak talk names"
+    );
+    assert!(
+        flatpak_ci.contains("--user-exceptions packaging/flatpak/lint-exceptions.json")
+            && exceptions.contains("finish-args-home-filesystem-access")
+            && exceptions.contains("org.rivulet.Rivulet"),
+        "the lint dry run must consume the local exceptions file whose only entry is the documented home-filesystem review point"
+    );
+    assert!(
+        metainfo.contains("<developer id=\"org.rivulet\">")
+            && metainfo.contains("<name>Rivulet Project</name>")
+            && metainfo.contains("<content_rating type=\"oars-1.1\"/>")
+            && metainfo.contains("date=\""),
+        "the metainfo must use the modern developer tag, an OARS content rating and dated releases (warnings are fatal in the official lint)"
     );
     assert!(
         manifest.contains("LIBCLANG_PATH") && manifest.contains("/usr/lib/sdk/llvm20/lib"),

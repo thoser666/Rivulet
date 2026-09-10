@@ -11,9 +11,13 @@
   </description>
   <launchable type="desktop-id">org.rivulet.Rivulet.desktop</launchable>
   <url type="homepage">https://github.com/thoser666/Rivulet</url>
-  <developer_name>Rivulet Project</developer_name>
+  <url type="vcs-browser">https://github.com/thoser666/Rivulet</url>
+  <developer id="org.rivulet">
+    <name>Rivulet Project</name>
+  </developer>
+  <content_rating type="oars-1.1"/>
   <releases>
-    <release version="0.65.0-alpha.55"/>
+    <release version="0.65.0-alpha.55" date="2026-09-10"/>
   </releases>
   <categories>
     <category>AudioVideo</category>

@@ -36,11 +36,14 @@ finish-args:
   # capture (the PipeWire client socket lives in the runtime dir).
   - --socket=pulseaudio
   - --filesystem=xdg-run/pipewire-0
-  # Recording files, config and resources live under $HOME.
+  # Recording files, config and resources live under the user's $HOME. This
+  # single point is the known Flathub review exception (finish-args-home-
+  # filesystem-access); everything else passes the official lint without
+  # exceptions. See lint-exceptions.json (used only for the CI dry run).
   - --filesystem=home
-  # Desktop portals.
-  - --talk-name=org.freedesktop.portal.*
-  - --talk-name=org.freedesktop.Flatpak
+  # NOTE: no --talk-name=org.freedesktop.portal.* / org.freedesktop.Flatpak:
+  # Flatpak grants desktop portals by default and the lint never allows these
+  # talk names (finish-args-portal-talk-name, finish-args-flatpak-talk-name).
 
 modules:
   - name: rivulet

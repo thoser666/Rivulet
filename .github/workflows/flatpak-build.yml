@@ -75,16 +75,20 @@ jobs:
         run: |
           set -euo pipefail
           flatpak build-export --no-update-summary "$RUNNER_TEMP/rivulet-repo" "$RUNNER_TEMP/rivulet-build"
-          flatpak build-bundle --runtime "$RUNNER_TEMP/rivulet-repo" "$RUNNER_TEMP/rivulet.flatpak" org.rivulet.Rivulet stable
+          flatpak build-bundle "$RUNNER_TEMP/rivulet-repo" "$RUNNER_TEMP/rivulet.flatpak" org.rivulet.Rivulet stable
 
-      - name: Run the official Flathub lint (appstream, desktop, manifest)
+      - name: Run the official Flathub lint (manifest, appstream, builddir)
         shell: bash
         run: |
           set -euo pipefail
-          sudo flatpak install -y flathub org.flathub.flatpak-builder-lint
-          flatpak run org.flathub.flatpak-builder-lint manifest packaging/flatpak/org.rivulet.Rivulet.yml
-          flatpak run org.flathub.flatpak-builder-lint appstream "$RUNNER_TEMP/rivulet-build"
-          flatpak run org.flathub.flatpak-builder-lint cdi "$RUNNER_TEMP/rivulet-build"
+          sudo flatpak install -y flathub org.flatpak.Builder
+          # Local lint exceptions for the CI dry run: the only entry is the
+          # documented --filesystem=home review point (finish-args-home-
+          # filesystem-access). Remote/external exceptions from Flathub are not
+          # consulted; the Flathub submission review approves it separately.
+          flatpak run --command=flatpak-builder-lint org.flatpak.Builder --exceptions --user-exceptions packaging/flatpak/lint-exceptions.json manifest packaging/flatpak/org.rivulet.Rivulet.yml
+          flatpak run --command=flatpak-builder-lint org.flatpak.Builder appstream packaging/flatpak/org.rivulet.Rivulet.metainfo.xml
+          flatpak run --command=flatpak-builder-lint org.flatpak.Builder --exceptions --user-exceptions packaging/flatpak/lint-exceptions.json builddir "$RUNNER_TEMP/rivulet-build"
 
       - name: Report
         shell: bash
