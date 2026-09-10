@@ -25,7 +25,7 @@ honest comparison (prices verified September 2026):
 
 | Option | Platform | Cost | Certificate level | Caveats |
 |---|---|---|---|---|
-| **SignPath Foundation** | Windows | **Free** for qualifying OSS | OV Authenticode | Application + build review required; signing is file-based via their API (the free tier does not expose hash-based Crypto Providers — that is the paid Code Signing Gateway); SmartScreen reputation still needs download volume; certificate stays in SignPath's HSM |
+| **SignPath Foundation** | Windows | **Free** for qualifying OSS | OV Authenticode | Application + build review required; signing is file-based via their API (the free tier does not expose hash-based Crypto Providers — that is the paid Code Signing Gateway); SmartScreen reputation still needs download volume; certificate stays in SignPath's HSM. **Status:** Application rejected (Oct 2026) — insufficient GitHub stars / download volume for their reputation threshold. Re-application possible once the project reaches higher visibility. |
 | **Azure Artifact Signing** (formerly Trusted Signing) | Windows | **$9.99/month** Basic (no free tier; ~$200 one-time Azure trial credit is a trial, not permanent) | OV (non-EV) | EV restricted to businesses registered 3+ years in US/CA/EU; identity service managed by Microsoft |
 | **Purchased OV certificate** (Sectigo, Certum, …) | Windows | ≈ **$100–200/year** | OV | SmartScreen reputation builds over downloads; may require re-validation per year |
 | **Purchased EV certificate** (DigiCert, GlobalSign, …) | Windows | ≈ **$300/year** | EV | Immediate SmartScreen reputation; requires hardware token or cloud HSM, which complicates CI |
@@ -33,10 +33,13 @@ honest comparison (prices verified September 2026):
 | **Apple Developer Program** | macOS | **$99/year** — no free route | Developer ID | Gatekeeper blocks unsigned apps entirely; notarization is tied to the paid membership. There is no self-signed workaround that users can open |
 | **GPG key pair** | Linux | **Free** | OpenPGP | Already implemented (`sign-gpg.sh`); generate a key, set one secret, done |
 
-**Recommendation for Rivulet:** apply at **SignPath Foundation** (free,
-OV-level, Microsoft-documented for open source) for Windows, keep macOS on
-the paid Apple Developer Program when beta approaches (unavoidable platform
-tax), and stay on the existing free GPG signing for Linux.
+**Recommendation for Rivulet:** Since SignPath Foundation was rejected (insufficient stars), the immediate options are:
+1. **Re-apply at SignPath Foundation** once the project reaches higher visibility (more stars, downloads, community traction)
+2. **Purchase an OV certificate** (~$100-200/year) for Windows signing
+3. **Use Azure Artifact Signing** ($9.99/month) for Windows signing
+4. **Stay unsigned for now** (current state) — Windows artifacts work but show "unknown publisher" warnings
+
+Keep macOS on the paid Apple Developer Program when beta approaches (unavoidable platform tax), and stay on the existing free GPG signing for Linux.
 
 **SignPath artifacts:** `rivulet-windows-unsigned-exe-<run_id>` (ZIP with
 the three executables) and `rivulet-windows-unsigned-msi-<run_id>` — the
@@ -112,6 +115,11 @@ reports exactly which secrets are still missing (criterion 4 of the Beta-Gate).
    `WINDOWS_TIMESTAMP_URL` overrides it (`off` disables it).
 
 ### Windows — SignPath Foundation (free for open source, `SIGNPATH_*`)
+
+> **Status:** Application rejected (Oct 2026) — insufficient GitHub stars /
+> download volume for their reputation threshold. Re-application possible
+> once the project reaches higher visibility. The following setup steps are
+> documented for when the application is approved.
 
 SignPath Foundation (signpath.org) gives qualifying open-source projects a
 **free OV-level Authenticode certificate**. The certificate lives in
