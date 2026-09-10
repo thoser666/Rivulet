@@ -139,13 +139,11 @@ jobs:
 
       - name: Short-circuit when already up to date
         if: steps.previous.outputs.up_to_date == 'true'
-        env:
-          CHOSEN: ${{ steps.resolve.outputs.chosen }}
         run: |
           {
             echo "## Weekly promotion"
             echo
-            echo "- Status: up to date — \`weekly-latest\` already points at \`$CHOSEN\`."
+            echo "- Status: up to date — \`weekly-latest\` already points at \`${CHOSEN:-<unresolved>}\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Move the weekly-latest tag
@@ -162,25 +160,28 @@ jobs:
       - name: Generate the weekly digest changelog
         if: steps.previous.outputs.up_to_date == 'false'
         id: notes
+        env:
+          CHOSEN: ${{ steps.resolve.outputs.chosen }}
+          FROM_REF: ${{ steps.previous.outputs.from_ref }}
         run: |
           set -euo pipefail
           # Detach at the promoted release tip so the range ends exactly at
           # the release (never at newer, unpublished develop commits).
           git checkout --quiet "${{ steps.resolve.outputs.sha }}"
           bash scripts/generate-release-notes.sh \
-            --from-tag "${{ steps.previous.outputs.from_ref }}" --digest \
+            --from-tag "$FROM_REF" --digest \
             > "$RUNNER_TEMP/weekly-notes.md" || true
           # Two releases can differ only by version-bump commits; the notes
           # exclude those, so an empty file is legitimate.
           if [ ! -s "$RUNNER_TEMP/weekly-notes.md" ]; then
-            echo "- maintenance release: no user-facing changes since ${{ steps.previous.outputs.from_ref }}" \
+            echo "- maintenance release: no user-facing changes since $FROM_REF" \
               > "$RUNNER_TEMP/weekly-notes.md"
           fi
           echo "--- weekly notes ---"; cat "$RUNNER_TEMP/weekly-notes.md"
           {
-            echo "## Weekly promotion — ${{ steps.resolve.outputs.chosen }}"
+            echo "## Weekly promotion — $CHOSEN"
             echo
-            echo "Changelog since ${{ steps.previous.outputs.from_ref }} (digest):"
+            echo "Changelog since $FROM_REF (digest):"
             echo
             cat "$RUNNER_TEMP/weekly-notes.md"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -213,6 +214,7 @@ jobs:
         if: steps.previous.outputs.up_to_date == 'false'
         env:
           SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          CHOSEN: ${{ steps.resolve.outputs.chosen }}
         run: |
           set -euo pipefail
           if [ -z "$SCOOP_BUCKET_TOKEN" ]; then
@@ -231,23 +233,23 @@ jobs:
           fi
           git -C "$RUNNER_TEMP/scoop-bucket" add bucket/rivulet.json
           {
-            echo "rivulet ${{ steps.resolve.outputs.chosen }}"
+            echo "rivulet $CHOSEN"
             echo
             cat "$RUNNER_TEMP/weekly-notes.md"
           } > "$RUNNER_TEMP/bucket-commit-msg.txt"
           git -C "$RUNNER_TEMP/scoop-bucket" commit --quiet -F "$RUNNER_TEMP/bucket-commit-msg.txt"
           git -C "$RUNNER_TEMP/scoop-bucket" push --quiet origin main
-          echo "Bucket updated for ${{ steps.resolve.outputs.chosen }}."
+          echo "Bucket updated for $CHOSEN."
           {
             echo
-            echo "- Scoop bucket: updated \`bucket/rivulet.json\` to ${{ steps.resolve.outputs.chosen }}."
+            echo "- Scoop bucket: updated \`bucket/rivulet.json\` to $CHOSEN."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish the manifest as an artifact (fallback / verification)
         if: steps.previous.outputs.up_to_date == 'false'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: scoop-manifest-${{ steps.resolve.outputs.chosen }}
+          name: "scoop-manifest-${{ steps.resolve.outputs.chosen }}"
           path: scoop-manifest.json
           if-no-files-found: error
           retention-days: 30
