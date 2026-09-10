@@ -108,7 +108,7 @@ jobs:
           CHOSEN="${{ steps.resolve.outputs.chosen }}"
           # Where does weekly-latest point right now (empty on first run)?
           if git cat-file -e refs/tags/weekly-latest 2>/dev/null; then
-            TARGET_SHA="$(git rev-parse weekly-latest^{commit})"
+            TARGET_SHA="$(git rev-parse 'weekly-latest^{commit}')"
           else
             TARGET_SHA=""
           fi
