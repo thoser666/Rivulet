@@ -127,10 +127,14 @@ jobs:
             FROM_REF="$(git tag --points-at "$TARGET_SHA" | grep -E '^v[0-9]' | head -1 || true)"
           fi
           if [ -z "$FROM_REF" ]; then
+            # Fallback: the release tag right before the chosen one. Local
+            # tags are complete (the refresh step fetched all tags), so sort
+            # them newest-first by version and take the entry after the
+            # chosen one. Chosen not found or already the oldest → empty,
+            # which the caller maps to the chosen tag itself.
             # shellcheck disable=SC2016
-            JQ_PROG='[.[] | select(.isDraft == false)] as $r | ($r | to_entries | map(select(.value.tagName == $chosen)) | .[0].key // -1) as $i | (if $i >= 0 and ($i + 1) < ($r | length) then $r[$i + 1].tagName else "" end)'
-            FROM_REF="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
-              --json tagName,isDraft --jq --arg chosen "$CHOSEN" "$JQ_PROG")"
+            FROM_REF="$(git tag --list 'v*' --sort=-version:refname \
+              | awk -v chosen="$CHOSEN" '{ if (seen) { print; exit } if ($0 == chosen) seen = 1 }')"
           fi
           [ -n "$FROM_REF" ] || FROM_REF="$CHOSEN"
           echo "from_ref=$FROM_REF" >> "$GITHUB_OUTPUT"
