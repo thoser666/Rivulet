@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- feat(plugins): Plugin System RFC (`docs/plugin-system-rfc.md`) — complete
+  design for manifest format (`rivulet-plugin.toml`), WASM sandbox (WASI-based
+  isolation), host API (core + capability-gated imports), capability model
+  (default denial, user approval, sensitive-capability guardrails), and plugin
+  lifecycle (Discovered → Loaded → Active → Inactive → Unloaded) with crash
+  isolation, timeout enforcement, and resource limits. Builds on the VST3 host
+  boundary shipped in M5 (Z96). Four plugin categories: UI Panel, Audio Effect,
+  Video Filter, Integration. Native DLY bridge for OBS-compat and VST3.
+
 - feat(distribution): Chocolatey as a distribution target — the second
   Windows package channel, usable before SignPath approval because the
   community repository accepts unsigned installers (with a moderator

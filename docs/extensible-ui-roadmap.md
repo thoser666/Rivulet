@@ -3,6 +3,12 @@
 Rivulet reserves a separate milestone for customizable layouts and UI plugins.
 This work must not weaken streaming reliability or expose credentials.
 
+## Design Documents
+
+- **Plugin System RFC** ([`docs/plugin-system-rfc.md`](plugin-system-rfc.md)): complete
+  design for manifest format, WASM sandbox, host API, capability model, and
+  plugin lifecycle. Builds on the VST3 host boundary shipped in M5.
+
 ## Work packages
 
 - **P1 – Persistable UI layout:** versioned workspace state, migrations, safe defaults,

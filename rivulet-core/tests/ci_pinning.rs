@@ -4653,3 +4653,43 @@ fn m5_winget_stage2_is_prepared_and_pinned() {
         "CHANGELOG must record the WinGet Stage 2 preparation"
     );
 }
+
+#[test]
+fn plugin_system_rfc_is_wired() {
+    // The plugin system RFC must exist and be cross-referenced from the
+    // extensible UI roadmap and VST3 docs.
+    let rfc = read("docs/plugin-system-rfc.md");
+    for marker in [
+        "rivulet-plugin.toml",
+        "WASM",
+        "WASI",
+        "Capability",
+        "Lifecycle",
+        "plugin_init",
+        "plugin_process",
+        "Skipped",
+    ] {
+        assert!(
+            rfc.contains(marker),
+            "docs/plugin-system-rfc.md must contain the marker {marker}"
+        );
+    }
+    // The roadmap must reference the RFC.
+    let roadmap = read("docs/extensible-ui-roadmap.md");
+    assert!(
+        roadmap.contains("plugin-system-rfc.md"),
+        "docs/extensible-ui-roadmap.md must reference the plugin-system-rfc"
+    );
+    // The VST3 doc must cross-reference the RFC.
+    let vst3_doc = read("docs/vst3.md");
+    assert!(
+        vst3_doc.contains("plugin-system-rfc.md"),
+        "docs/vst3.md must cross-reference the plugin-system-rfc"
+    );
+    // The CHANGELOG must record the RFC.
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        changelog.contains("plugin-system-rfc.md") || changelog.contains("Plugin System RFC"),
+        "CHANGELOG must record the Plugin System RFC"
+    );
+}

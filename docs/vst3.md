@@ -99,7 +99,8 @@ Gating-Regeln, die so in CI abgesichert sind:
 
 Referenzen: [issue #96](https://github.com/thoser666/Rivulet/issues/96) (M5),
 Subtask-Doku [`docs/issues/96-vst3-hosting-subtasks.md`](issues/96-vst3-hosting-subtasks.md),
-Host-Vertrag [`docs/vst3-host-boundary.md`](vst3-host-boundary.md).
+Host-Vertrag [`docs/vst3-host-boundary.md`](vst3-host-boundary.md),
+Plugin-System-RFC [`docs/plugin-system-rfc.md`](plugin-system-rfc.md).
 
 ## Offen (Follow-up)
 
