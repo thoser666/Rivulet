@@ -372,7 +372,7 @@ must not be implied by beta parity.
 - [x] Code signing (signing automation present, secrets needed)
 - [x] **Telemetry (opt-in, privacy-friendly)** — privacy-first opt-in telemetry pipeline (Settings → Telemetry, off by default): identifier-free event model (enums/codes/booleans only — never titles, paths, URLs, stream keys or usernames), opting out clears pending events, bounded deterministic collector (`rivulet-core::TelemetryReporter`), and a `TelemetrySink` interface with **no transport wired in the shipped build** — nothing leaves the device; the client-side contract and policy are shipped and test-locked, an HTTPS ingestion backend remains a documented follow-up (see [`docs/telemetry.md`](docs/telemetry.md)) *[#127](https://github.com/thoser666/Rivulet/issues/127)*
 - [x] **Discord Rich Presence adapter** — non-blocking activity updates using the Rivulet status model; explicit opt-out (persisted Settings toggle), no stream keys/URLs/paths/window titles, and graceful operation when Discord is unavailable (see [`docs/activity-status.md`](docs/activity-status.md)).
-- [x] **Multi-language support** — all UI strings driven by locale tables (EN/DE, 479 keys each), Settings → Language picker with OS auto-detection on first launch, parity test prevents key drift (see [`docs/i18n.md`](docs/i18n.md))
+- [x] **Multi-language support** — all UI strings driven by locale tables (EN/DE, 528 keys each), Settings → Language picker with OS auto-detection on first launch, parity test prevents key drift (see [`docs/i18n.md`](docs/i18n.md))
 - [x] **MIDI device support** — map controllers like the Korg NanoKontrol to scene switches, master-volume faders (CC 0-127), mute, and chroma-key toggles, with **learn mode** (capture the next moved control) and **per-device presets** (see [`docs/midi.md`](docs/midi.md)); the mapping/parse core is hardware-free and unit-tested, the GUI owns the `midir` device bridge
 - [x] **Global hotkeys & remapping UI** — OBS-style hotkey settings: per-action rebinding (Settings → Hotkeys), OS-level registration that keeps working while the app is unfocused on Windows, with an honest platform matrix (see [`docs/hotkeys.md`](docs/hotkeys.md)) *[#80](https://github.com/thoser666/Rivulet/issues/80)*
 - [ ] **Multi-channel distribution rollout** — tracked in [`docs/release-platforms.md`](docs/release-platforms.md):
@@ -396,7 +396,7 @@ must not be implied by beta parity.
 - [x] **Chat-driven auto-clips** — save replay-buffer highlight clips automatically when chat activity spikes (sliding-window message-rate detector, configurable threshold + window + cooldown) or on a `!clip` command (customizable command name); builds on the shipped chat dock (Twitch/Kick/YouTube) and M4 replay buffer; auto-clip toggle and settings in the Stream view, i18n (EN/DE)
 - [x] **Multi-platform restream** — one pipeline to Twitch, YouTube, and Kick simultaneously via the Stream view restream section: add/remove targets with per-platform name, platform selector, ingest URL, and stream key (persisted), independent health per target (Connecting/Live/Degraded/Failed), wired into `MultistreamSettings` before every stream start; max 4 targets, duplicate-name protection, i18n (EN/DE)
 - [ ] **Multi-track audio routing** — capture individual app audio streams (game, Spotify, Discord) as separate named sources with independent filters and volume; route each source independently to Record and/or Stream outputs via a checkbox matrix; persists across restarts with i18n (EN+DE); per-platform capture: WASAPI per-app (Windows), PipeWire/PulseAudio per-app (Linux), system loopback fallback (macOS); see [`docs/m6-audio-routing.md`](docs/m6-audio-routing.md)
-- [ ] **Mobile & HTTP remote companion** — drive scenes, record, and stream from the phone or a browser on the LAN, building on the shipped obs-websocket v5 server (M5) with optional auth
+- [x] **Mobile & HTTP remote companion** — drive scenes, record, and stream from the phone or a browser on the LAN, building on the shipped obs-websocket v5 server (M5) with optional auth; self-contained mobile page (no CDN) served over HTTP with explicit LAN bind, LAN-requires-password policy, and a permission gate for remote stream start/stop (see [`docs/remote-companion.md`](docs/remote-companion.md))
 
 **Goal:** The creator workflows that make a streamer choose Rivulet — clips appear when chat pops off, the stream reaches every platform at once, and the setup is controllable from the couch.
 
@@ -548,11 +548,11 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Multi-track audio | Partial (2 local tracks; VOD-track model in M3) |
 | Plugin ecosystem & OBS compatibility | Open |
 | obs-websocket / Streamdeck | Implemented (M5) |
-| Mobile remote & MIDI | Open (M6: mobile/HTTP remote companion; obs-websocket server + MIDI shipped in M5) |
+| Mobile remote & MIDI | Implemented (M6: mobile/HTTP remote companion page with LAN bind, password policy, and permission-gated stream control, see docs/remote-companion.md; MIDI mapping shipped in M5) |
 | Cloud & telemetry | Partial (M4 S3 SigV4 PUT upload after stop; multipart + GUI settings open) |
 | Discord Rich Presence | Implemented (optional, privacy-safe activity status; M5, see docs/activity-status.md) |
 | Chat dock & alerts | Partial (M5: Twitch IRC + Kick WebSocket + YouTube polling chat in the Stream workspace, see docs/twitch-chat.md; follow/sub/donation/raid ingestion surfaced locally in the chat dock — an opt-in loopback webhook receiver for Streamlabs + Twitch EventSub with HMAC verification, and a native outbound Twitch EventSub WebSocket transport (wss://, forwarder-free, no port) — see docs/alerts-ingest.md) *[#129](https://github.com/thoser666/Rivulet/issues/129)* |
-| Multi-language support | Implemented (EN/DE, 512 keys, parity-tested; see docs/i18n.md) |
+| Multi-language support | Implemented (EN/DE, 528 keys, parity-tested; see docs/i18n.md) |
 | Platform parity (Windows/macOS) | Open |
 | AI chat assistant | Open (M10) |
 

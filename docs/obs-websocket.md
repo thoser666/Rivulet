@@ -39,9 +39,15 @@ failures always include a `comment`.
 4. Optionally set a **password** — empty disables authentication.
 5. The status line reports the listen address (`ws://127.0.0.1:4455`).
 
-The server binds to **127.0.0.1 only** — it is not reachable from other
-machines. If you need remote access, run it through a local tunnel/SSH
-forward and enable the password.
+The server binds to **127.0.0.1 only** by default — it is not reachable from
+other machines. If you need remote access, use the **Remote companion**
+(`docs/remote-companion.md`, M6): ticking *Allow access from the network (LAN)*
+there binds the obs-websocket server **and** the companion page to `0.0.0.0`
+and *requires* a password (a passwordless LAN bind is refused). Alternatively
+run it through a local tunnel/SSH forward and enable the password. Remote
+stream **start/stop** additionally requires the explicit permission flag in the
+Remote companion settings — scene and recording control work on the LAN
+without it.
 
 ## Connecting a client
 

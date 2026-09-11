@@ -22,10 +22,16 @@
 //! `tests/client_smoke.rs` with a real (non-mock) WebSocket client.
 
 pub mod backend;
+pub mod companion;
 pub mod protocol;
 pub mod server;
 
 pub use backend::{
     ChannelBackend, ObsBackend, ObsCommand, ObsCommandResult, ObsEvent, ObsSnapshot,
 };
-pub use server::{start, ObsServerHandle, DEFAULT_PORT};
+pub use companion::{
+    CompanionConfig, CompanionServerHandle, DEFAULT_PORT as COMPANION_DEFAULT_PORT,
+};
+pub use server::{
+    start, start_with_options, BindAddress, ObsServerHandle, ServerOptions, DEFAULT_PORT,
+};

@@ -1812,6 +1812,70 @@ fn obs_websocket_smoke_is_wired_up() {
 }
 
 #[test]
+fn m6_remote_companion_is_wired_up_and_pinned() {
+    // The M6 mobile & HTTP remote companion (issue #99) is a real network
+    // surface: CI must smoke it, the docs must ship it, and the security
+    // contract (LAN bind requires a password, remote stream control requires
+    // explicit permission) is the point of the feature.
+    let workflow = read(".github/workflows/ci.yml");
+    assert!(workflow.contains("name: Remote Companion Smoke"));
+    let smoke_job = workflow
+        .find("name: Remote Companion Smoke")
+        .expect("Remote Companion smoke job");
+    let aggregate = workflow.find("    name: CI").expect("CI aggregate job");
+    assert!(
+        smoke_job < aggregate,
+        "the Remote Companion smoke job must run before the CI aggregate"
+    );
+    assert!(
+        workflow
+            .contains("cargo test -p rivulet-obs-websocket --test companion_smoke -- --nocapture"),
+        "CI must run the companion smoke test against the real server"
+    );
+    assert!(
+        workflow.contains("needs.remote_companion_smoke.result"),
+        "the CI aggregate must require the Remote Companion smoke result"
+    );
+    // The crate must expose the companion surface the GUI wires up: a config,
+    // a running handle, and the widened bind + permission options on the obs
+    // server.
+    let lib = read("rivulet-obs-websocket/src/lib.rs");
+    assert!(lib.contains("COMPANION_DEFAULT_PORT"));
+    assert!(lib.contains("pub mod companion"));
+    let server = read("rivulet-obs-websocket/src/server.rs");
+    assert!(server.contains("pub fn start_with_options"));
+    assert!(server.contains("BindAddress::All"));
+    assert!(server.contains("allow_remote_stream_control"));
+    // The permission gate refuses stream start/stop on a LAN bind unless
+    // explicitly allowed (the page may switch scenes and record without it).
+    assert!(server.contains("STREAM_CONTROL_DENIED_COMMENT"));
+    assert!(server.contains("RequestType::StartStreaming"));
+    assert!(server.contains("RequestType::StopStreaming"));
+    // The smoke itself must cover denial AND the existence of the LAN
+    // surfaces: binding to 0.0.0.0 without a password is an error.
+    let smoke = read("rivulet-obs-websocket/tests/companion_smoke.rs");
+    assert!(smoke.contains("lan_bind_without_permission_denies_stream_control"));
+    assert!(smoke.contains("lan_bind_with_permission_allows_stream_control"));
+    assert!(smoke.contains("lan_bind_refuses_to_start_without_a_password"));
+    assert!(smoke.contains("missing_authentication_is_rejected_when_auth_required"));
+    assert!(smoke.contains("BindAddress::All"));
+    // The GUI must offer the companion settings and reconcile the page
+    // server, and the Settings section labels must exist in both locales.
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(app.contains("reconcile_remote_companion"));
+    assert!(app.contains("fn start_remote_companion"));
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(i18n.contains("\"remote_companion_section\""));
+    assert!(i18n.contains("\"remote_companion_lan_requires_password\""));
+    // The docs and the roadmap must reflect the feature (README M6 bullet).
+    let readme = read("README.md");
+    assert!(readme.contains("Mobile & HTTP remote companion"));
+    assert!(readme.contains("docs/remote-companion.md"));
+    let doc = read("docs/remote-companion.md");
+    assert!(doc.contains("remote companion"));
+}
+
+#[test]
 fn responsive_layout_contract_is_pinned_in_the_gui() {
     // Shrinking the window must never clip controls without a way to reach
     // them: the central view content and the sidebar live in scroll areas and
@@ -2591,7 +2655,7 @@ fn develop_required_checks_have_stable_job_names() {
             && ci.contains("cargo test -p rivulet-core --test ci_pinning")
             && ci.contains("name: CI")
             && ci.contains(
-                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, fuzz_smoke, coverage, roadmap_sync]"
+                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, remote_companion_smoke, fuzz_smoke, coverage, roadmap_sync]"
             ),
         "CI must expose dedicated Pinning-Tests and aggregate CI checks"
     );
