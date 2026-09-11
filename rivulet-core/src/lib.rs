@@ -116,6 +116,11 @@ pub use plugin_manifest::{
     PluginResources,
 };
 
+pub mod plugin_runtime;
+pub use plugin_runtime::{
+    PluginHandle, PluginLoadResult, PluginState, RuntimeError, SkipReason, WasmPluginRuntime,
+};
+
 pub mod sdp;
 pub use sdp::SdpOffer;
 
