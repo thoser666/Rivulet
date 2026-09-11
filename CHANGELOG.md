@@ -11,6 +11,12 @@
   boundary shipped in M5 (Z96). Four plugin categories: UI Panel, Audio Effect,
   Video Filter, Integration. Native DLY bridge for OBS-compat and VST3.
 
+- feat(plugins): Phase 1 — Plugin manifest parser and validator
+  (`rivulet-core/src/plugin_manifest.rs`). Implements `rivulet-plugin.toml`
+  deserialization with strict validation (reverse-DNS ID, semver, resource hard
+  caps, platform whitelist, capability audit). 35 unit tests covering parse,
+  validate, error variants, edge cases, and default denial.
+
 - feat(distribution): Chocolatey as a distribution target — the second
   Windows package channel, usable before SignPath approval because the
   community repository accepts unsigned installers (with a moderator

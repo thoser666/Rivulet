@@ -110,6 +110,12 @@ pub use cloud::{mask_secret, CloudRecording};
 pub mod vst3;
 pub use vst3::{discover_in, discover_vst3_plugins, vst3_search_dirs, VstChain, VstPlugin};
 
+pub mod plugin_manifest;
+pub use plugin_manifest::{
+    parse_manifest, ApiVersion, ManifestError, PluginCapabilities, PluginKind, PluginManifest,
+    PluginResources,
+};
+
 pub mod sdp;
 pub use sdp::SdpOffer;
 

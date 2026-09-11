@@ -4693,3 +4693,43 @@ fn plugin_system_rfc_is_wired() {
         "CHANGELOG must record the Plugin System RFC"
     );
 }
+
+#[test]
+fn plugin_manifest_phase1_is_implemented() {
+    // Phase 1 of the plugin system RFC: manifest parser + validator.
+    let manifest_rs = read("rivulet-core/src/plugin_manifest.rs");
+
+    // Core types must exist
+    for marker in [
+        "pub enum ManifestError",
+        "pub enum PluginKind",
+        "pub struct PluginCapabilities",
+        "pub struct PluginResources",
+        "pub struct PluginManifest",
+        "pub fn parse_manifest",
+        "fn validate",
+    ] {
+        assert!(
+            manifest_rs.contains(marker),
+            "rivulet-core/src/plugin_manifest.rs must contain {marker}"
+        );
+    }
+
+    // The module must be wired into lib.rs
+    let lib = read("rivulet-core/src/lib.rs");
+    assert!(
+        lib.contains("pub mod plugin_manifest"),
+        "rivulet-core/src/lib.rs must declare pub mod plugin_manifest"
+    );
+    assert!(
+        lib.contains("pub use plugin_manifest::"),
+        "rivulet-core/src/lib.rs must re-export from plugin_manifest"
+    );
+
+    // CHANGELOG must record Phase 1
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        changelog.contains("plugin_manifest") || changelog.contains("Plugin Manifest"),
+        "CHANGELOG must record the plugin manifest implementation"
+    );
+}

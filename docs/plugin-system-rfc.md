@@ -1,6 +1,6 @@
 # RFC: Rivulet Plugin System
 
-**Status:** Draft  
+**Status:** Draft (Phase 1 shipped)  
 **Author:** Buffy (AI)  
 **Target Milestone:** M11 – Extensible UI & Plugin Platform  
 **Depends on:** M5 VST3 Host Boundary (Z96), P1–P2 (Layout Persistence, View Registry)
@@ -523,14 +523,14 @@ Before any plugin ships to users, it must pass:
 
 ## 14. Implementation Phases
 
-| Phase | Scope | Milestone |
-|-------|-------|-----------|
-| **Phase 1** | Manifest format + validation + VST3 wrapper | M11-P3 |
-| **Phase 2** | WASM runtime + sandbox + core imports | M11-P5 |
-| **Phase 3** | Capability system + user approval UI | M11-P4 |
-| **Phase 4** | UI panel integration + View Registry | M11-P2 |
-| **Phase 5** | Audio/Video filter integration | M11-P6 |
-| **Phase 6** | Integration plugins (chat/alerts) | Post-M11 |
+| Phase | Scope | Milestone | Status |
+|-------|-------|-----------|--------|
+| **Phase 1** | Manifest format + validation | M11-P3 | ✅ Shipped (`plugin_manifest.rs`, 35 tests) |
+| **Phase 2** | WASM runtime + sandbox + core imports | M11-P5 | |
+| **Phase 3** | Capability system + user approval UI | M11-P4 | |
+| **Phase 4** | UI panel integration + View Registry | M11-P2 | |
+| **Phase 5** | Audio/Video filter integration | M11-P6 | |
+| **Phase 6** | Integration plugins (chat/alerts) | Post-M11 | |
 
 ---
 
