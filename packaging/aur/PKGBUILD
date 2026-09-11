@@ -1,0 +1,93 @@
+# Maintainer: thoser666 <thoser666@users.noreply.github.com>
+# Contributor: Rivulet maintainers
+
+pkgname=rivulet
+pkgver=0.65.0
+pkgrel=1
+pkgdesc='Modern screen recording & streaming software — a privacy-friendly alternative to OBS Studio'
+arch=('x86_64')
+url='https://github.com/thoser666/Rivulet'
+license=('MIT')
+depends=(
+    'gstreamer'
+    'gst-plugins-base'
+    'gst-plugins-good'
+    'gst-plugins-bad'
+    'gst-plugins-ugly'
+    'gst-libav'
+    'libxcb'
+    'libxcursor'
+    'libxrandr'
+    'libxi'
+    'libxinerama'
+    'libglvnd'
+    'fontconfig'
+    'freetype2'
+    'alsa-lib'
+    'cpal'
+)
+makedepends=(
+    'wget'
+    'fuse2'
+)
+optdepends=(
+    'gstreamer-vaapi: hardware-accelerated encoding on AMD/Intel (Wayland)'
+    'pipewire: portal-based screen capture on Wayland'
+    'xdotool: window listing for game capture'
+    'libndi: NDI output support'
+    'blackhole: macOS system audio capture (not applicable on Linux, listed for completeness)'
+)
+install=rivulet.install
+
+# GitHub release asset URL — bump pkgver and sha256sums on each release.
+# The sha256sum is for the AppImage; verify against the release SHA256SUMS.
+source=(
+    "https://github.com/thoser666/Rivulet/releases/download/v${pkgver}/rivulet-linux-x86_64.AppImage"
+    "https://github.com/thoser666/Rivulet/releases/download/v${pkgver}/rivulet-app-icon-512.png"
+    "rivulet.desktop"
+)
+sha256sums=(
+    'SKIP'
+    'SKIP'
+    'SKIP'
+)
+
+# The AppImage is not relocatable; extract it and install the squashfs contents.
+prepare() {
+    cd "$srcdir"
+    chmod +x "rivulet-linux-x86_64.AppImage"
+    # Extract the AppImage — produces a squashfs-root/ directory.
+    # --appimage-extract works without FUSE (no root needed for build).
+    ./rivulet-linux-x86_64.AppImage --appimage-extract >/dev/null 2>&1 || true
+}
+
+package() {
+    cd "$srcdir"
+
+    # Install the extracted application to /opt/rivulet
+    install -d "$pkgdir/opt/rivulet"
+    cp -a squashfs-root/* "$pkgdir/opt/rivulet/"
+
+    # Ensure executables are executable
+    chmod +x "$pkgdir/opt/rivulet/rivulet-gui" 2>/dev/null || true
+    chmod +x "$pkgdir/opt/rivulet/rivulet" 2>/dev/null || true
+
+    # Binary symlinks in /usr/bin
+    install -d "$pkgdir/usr/bin"
+    ln -s /opt/rivulet/rivulet-gui "$pkgdir/usr/bin/rivulet-gui"
+    ln -s /opt/rivulet/rivulet "$pkgdir/usr/bin/rivulet"
+
+    # Desktop file
+    install -Dm644 "$srcdir/rivulet.desktop" \
+        "$pkgdir/usr/share/applications/rivulet.desktop"
+
+    # Icon (512x512)
+    install -Dm644 "$srcdir/rivulet-app-icon-512.png" \
+        "$pkgdir/usr/share/icons/hicolor/512x512/apps/rivulet.png"
+
+    # License
+    install -Dm644 "$pkgdir/opt/rivulet/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE" 2>/dev/null || \
+    install -Dm644 "$srcdir/squashfs-root/LICENSE" \
+        "$pkgdir/usr/share/licenses/$pkgname/LICENSE" 2>/dev/null || true
+}

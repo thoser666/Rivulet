@@ -21,6 +21,7 @@ on:
           - winget
           - scoop
           - chocolatey
+          - aur
           - flathub
           - homebrew
           - steam
@@ -96,6 +97,11 @@ jobs:
               require_asset rivulet-windows-x86_64-portable.zip
               require_asset SHA256SUMS
               echo "chocolatey readiness: portable ZIP + SHA256SUMS exist; package generation and validation are wired in the prepare-chocolatey job."
+              ;;
+            aur)
+              require_asset rivulet-linux-x86_64.AppImage
+              require_asset rivulet-app-icon-512.png
+              echo "AUR readiness: AppImage + icon exist; PKGBUILD validation is wired in the prepare-aur job."
               ;;
             flathub)
               require_asset rivulet-linux-x86_64.AppImage
@@ -423,3 +429,90 @@ jobs:
           community repository. Unsigned installers are accepted with a
           warning. No external store was modified.
           "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  prepare-aur:
+    name: Prepare AUR PKGBUILD (dry run)
+    if: inputs.platform == 'aur'
+    needs: validate-release
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Derive version from the release tag
+        shell: bash
+        run: echo "AUR_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Validate PKGBUILD against the release
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKGBUILD="packaging/aur/PKGBUILD"
+          if [[ ! -f "$PKGBUILD" ]]; then
+            echo "::error::PKGBUILD not found at $PKGBUILD"
+            exit 1
+          fi
+
+          # Verify the PKGBUILD version matches the release tag.
+          PKGVER=$(grep '^pkgver=' "$PKGBUILD" | cut -d= -f2)
+          if [[ "$PKGVER" != "$AUR_VERSION" ]]; then
+            echo "::error::PKGBUILD pkgver ($PKGVER) does not match release ($AUR_VERSION)"
+            exit 1
+          fi
+
+          # Verify the PKGBUILD source URL references the correct AppImage.
+          EXPECTED_ASSET="rivulet-linux-x86_64.AppImage"
+          if ! grep -q "$EXPECTED_ASSET" "$PKGBUILD"; then
+            echo "::error::PKGBUILD does not reference $EXPECTED_ASSET in source"
+            exit 1
+          fi
+
+          # Verify the .install file exists.
+          if ! grep -q '^install=' "$PKGBUILD" || [[ ! -f "packaging/aur/rivulet.install" ]]; then
+            echo "::error::rivulet.install file missing or not referenced"
+            exit 1
+          fi
+
+          # Verify the desktop file exists.
+          if [[ ! -f "packaging/aur/rivulet.desktop" ]]; then
+            echo "::error::rivulet.desktop file missing"
+            exit 1
+          fi
+
+          # Verify the icon asset exists in the release.
+          gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name' \
+            | grep -q rivulet-app-icon-512.png || {
+            echo "::error::Release $RELEASE_TAG is missing rivulet-app-icon-512.png"
+            exit 1
+          }
+
+          echo "PKGBUILD validation passed for $RELEASE_TAG"
+
+      - name: Publish AUR plan
+        shell: bash
+        run: |
+          if [[ "$DRY_RUN" == "false" ]]; then
+            echo "::error::Publishing is intentionally not enabled: the AUR submission is external."
+            exit 1
+          fi
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          ## AUR readiness
+          - Release: ${{ env.RELEASE_TAG }} (version ${{ env.AUR_VERSION }})
+          - Mode: dry run
+          - PKGBUILD: packaging/aur/PKGBUILD (AppImage-based)
+          - Desktop integration: packaging/aur/rivulet.desktop + rivulet.install
+          - AUR submission target: https://aur.archlinux.org/packages/rivulet
+
+          Installation for users once the AUR package is published:
+            yay -S rivulet
+            # or: paru -S rivulet
+
+          Publishing is external: push the PKGBUILD to the AUR git repo
+          (https://aur.archlinux.org/rivulet.git). No external store was modified.
+          SUMMARY

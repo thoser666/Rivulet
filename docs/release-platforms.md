@@ -11,6 +11,7 @@ support costs. The canonical source remains [GitHub Releases](https://github.com
 | 1 | M5, supported by M7 | GitHub Releases | Windows, macOS, Linux | Keep as the source of truth for release notes, checksums, and updater downloads. | Active: MSI/portable ZIP, DMG, and AppImage are built by CI. |
 | 2 | M5, supported by M7 | WinGet | Windows | Add after the MSI product identity and signing are stable. It provides native discovery and upgrades without another binary hosting system. | Manifest generation/validation are wired (packaging/windows/generate-winget-manifest.ps1 + dry-run job); submission to `microsoft/winget-pkgs` is still open (external review). |
 | 2 | M5, supported by M7 | Scoop | Windows | Add now: Scoop requires no code signing, so this is the only native Windows package manager available before signing lands. The bucket repo hosts a generated, hash-pinned manifest. | Active: bucket `thoser666/scoop-bucket` (`scoop bucket add rivulet https://github.com/thoser666/scoop-bucket`); manifest generated + byte-verified by the **Distribution Readiness → scoop** dry-run job. |
+| 2 | M5 | AUR | Linux (Arch) | No signing required; the PKGBUILD downloads the AppImage from GitHub Releases and extracts it. AUR submissions are external and not moderated per-version. | PKGBUILD wired (`packaging/aur/PKGBUILD`); CI validates the PKGBUILD against the real release via the **Distribution Readiness → aur** dry-run job. AUR push is external. |
 | 2 | M5, supported by M7 | Flathub | Linux | Prefer this over maintaining distribution-specific packages. It gives Linux users a familiar, sandboxed, updateable installation. | Manifest wired (packaging/flatpak/org.rivulet.Rivulet.yml, pinned offline-cargo build + CI build/lint job); submission PR and permissions/appstream review are still open (external). |
 | 3 | M5 | Homebrew Cask | macOS | Useful for developer-oriented installs; publish only signed/notarized DMGs. | Readiness workflow validates the DMG; cask/tap submission is still open. |
 | 3 | M5 | Steam | Windows, macOS | Worth preparing for the gaming-streamer audience, but treat it as a secondary channel rather than the update authority. | Open: Steam App ID, depots, SteamPipe credentials, store metadata, and a Steam-specific package layout. |
@@ -116,6 +117,26 @@ release's own `SHA256SUMS` asset, normalizes the version for Chocolatey
 3. When winget goes live later, Chocolatey stays as the second Windows
    option (winget serves MSI users, Chocolatey serves portable users who
    prefer choco); promote both from the same `weekly-latest` target.
+
+### AUR (Arch User Repository)
+
+The AUR is the community package repository for Arch Linux and derivatives
+(Manjaro, EndeavourOS, …). It accepts PKGBUILDs that download pre-built
+binaries from upstream — no signing required, no moderation queue per
+version. This makes it a **fast-follow** channel: available immediately
+when the PKGBUILD is published.
+
+The PKGBUILD (`packaging/aur/PKGBUILD`) downloads the AppImage asset from
+GitHub Releases, extracts it with `--appimage-extract` (works without FUSE
+during build), and installs the contents to `/opt/rivulet/` with binary
+symlinks in `/usr/bin/`, a desktop file, and the 512×512 icon.
+
+1. Trigger the **Distribution Readiness → aur** workflow on a release tag:
+   it validates the PKGBUILD version matches the release, the required
+   assets (AppImage + icon) exist, and the `.install` file is referenced.
+2. Push the PKGBUILD to the AUR git repo
+   (`https://aur.archlinux.org/rivulet.git`) — external, not automated.
+3. Users install with `yay -S rivulet` or `paru -S rivulet`.
 
 ### Promotion cadence: fast lane vs. weekly-latest
 
