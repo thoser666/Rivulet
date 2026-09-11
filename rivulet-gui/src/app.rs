@@ -904,6 +904,32 @@ pub struct RivuletApp {
     #[serde(skip)]
     obs_ws_last_public_state: Option<ObsWsPublicState>,
 
+    // --- Mobile & HTTP remote companion (M6) ---
+    /// Master switch for the companion HTTP page server (phone/browser
+    /// remote control). Persisted across sessions.
+    remote_companion_enabled: bool,
+    /// HTTP port for the companion page. Persisted across sessions.
+    remote_companion_port: u16,
+    /// Bind the companion page AND the obs-websocket server to `0.0.0.0` so a
+    /// phone on the same network can reach them. Requires an obs-websocket
+    /// password. Persisted across sessions.
+    remote_companion_bind_lan: bool,
+    /// Explicit permission gate: stream start/stop/toggle from beyond
+    /// loopback requires this to be enabled (enforced by the obs server).
+    /// Persisted across sessions.
+    remote_allow_stream_control: bool,
+    /// Running companion server. Rebuilt whenever it is enabled. Not
+    /// persisted.
+    #[serde(skip)]
+    remote_companion_server: Option<rivulet_obs_websocket::CompanionServerHandle>,
+    /// Status/error line shown in Settings (e.g. bind failure, page URL).
+    #[serde(skip)]
+    remote_companion_status: Option<String>,
+    /// URL used by the "Open page" button (kept so the handler and the status
+    /// line agree on what is served). Not persisted, rebuilt on start.
+    #[serde(skip)]
+    remote_companion_url: Option<String>,
+
     // --- MIDI controller mapping (M5) ---
     /// Master switch for the MIDI listener. Persisted across sessions.
     midi_enabled: bool,
@@ -1474,6 +1500,13 @@ impl Default for RivuletApp {
             obs_ws_status: None,
             obs_ws_restart: false,
             obs_ws_last_public_state: None,
+            remote_companion_enabled: false,
+            remote_companion_port: rivulet_obs_websocket::COMPANION_DEFAULT_PORT,
+            remote_companion_bind_lan: false,
+            remote_allow_stream_control: false,
+            remote_companion_server: None,
+            remote_companion_status: None,
+            remote_companion_url: None,
 
             #[cfg(target_os = "linux")]
             is_previewing: false,
@@ -5820,12 +5853,14 @@ impl RivuletApp {
         use rivulet_obs_websocket::backend::ObsBackend as _;
 
         // Start the server when the feature is enabled and it is not running;
-        // stop it when the toggle is off.
+        // stop it when the toggle is off. Port/password/bind edits are
+        // coalesced into a single restart via `obs_ws_restart`.
         if self.obs_ws_enabled {
             if self.obs_ws_server.is_none() {
                 self.start_obs_websocket();
             } else if self.obs_gw_restart_requested() {
                 self.obs_ws_server = None;
+                self.obs_ws_commands_rx = None;
                 self.start_obs_websocket();
             }
         } else if self.obs_ws_server.is_some() {
@@ -5835,6 +5870,9 @@ impl RivuletApp {
             self.obs_ws_snapshot = None;
             self.obs_ws_status = Some(self.tr("obs_ws_stopped").to_owned());
         }
+        // The restart request is consumed exactly once a frame; a fresh edit
+        // flips it again.
+        self.obs_ws_restart = false;
 
         self.refresh_obs_ws_snapshot();
 
@@ -5909,13 +5947,46 @@ impl RivuletApp {
         } else {
             Some(self.obs_ws_password.clone())
         };
-        match rivulet_obs_websocket::server::start(backend, password, self.obs_ws_port) {
+        // The companion's "reachable from the LAN" setting widens the obs
+        // server bind too: a phone drives scenes/record/stream through this
+        // same v5 surface, so both listeners must be reachable together.
+        let bind = if self.remote_companion_enabled && self.remote_companion_bind_lan {
+            rivulet_obs_websocket::BindAddress::All
+        } else {
+            rivulet_obs_websocket::BindAddress::Loopback
+        };
+        let options = rivulet_obs_websocket::ServerOptions {
+            port: self.obs_ws_port,
+            bind,
+            password,
+            allow_remote_stream_control: self.remote_allow_stream_control,
+        };
+        // Friendly pre-check for the LAN-needs-password rule before the crate
+        // refuses the bind (the crate enforces it too; this message is more
+        // actionable in the Settings view).
+        if bind == rivulet_obs_websocket::BindAddress::All && self.obs_ws_password.is_empty() {
+            self.obs_ws_server = None;
+            self.obs_ws_commands_rx = None;
+            self.obs_ws_status = Some(self.tr("remote_companion_lan_requires_password").to_owned());
+            self.remote_companion_status =
+                Some(self.tr("remote_companion_lan_requires_password").to_owned());
+            return;
+        }
+        match rivulet_obs_websocket::server::start_with_options(backend, options) {
             Ok(server) => {
                 self.obs_ws_server = Some(server);
                 self.obs_ws_commands_rx = Some(cmd_rx);
-                self.obs_ws_status =
-                    Some(self.tr_fmt("obs_ws_running", &[self.obs_ws_port.to_string()]));
-                tracing::info!(port = self.obs_ws_port, "OBS WebSocket server started");
+                if bind == rivulet_obs_websocket::BindAddress::All {
+                    self.obs_ws_status = Some(self.tr("obs_ws_running_lan").to_owned());
+                } else {
+                    self.obs_ws_status =
+                        Some(self.tr_fmt("obs_ws_running", &[self.obs_ws_port.to_string()]));
+                }
+                tracing::info!(
+                    port = self.obs_ws_port,
+                    lan = bind.is_lan(),
+                    "OBS WebSocket server started"
+                );
             }
             Err(err) => {
                 self.obs_ws_server = None;
@@ -5931,6 +6002,103 @@ impl RivuletApp {
         // Tracked via the field below: the Settings UI flips it when the user
         // edits port/password.
         self.obs_ws_restart
+    }
+
+    /// Whether the companion page is configured to be reachable from the LAN.
+    /// The obs-websocket server shares this decision (the page drives scenes
+    /// through it), so the bind must widen for both together.
+    fn companion_reaches_lan(&self) -> bool {
+        self.remote_companion_enabled && self.remote_companion_bind_lan
+    }
+
+    /// Start, keep, or stop the companion HTTP page server in sync with the
+    /// settings. The page is useless without the OBS WebSocket server (it
+    /// connects there over WebSocket), so it only runs while that server is
+    /// enabled — the status line says so instead of silently dying.
+    fn reconcile_remote_companion(&mut self) {
+        if self.remote_companion_enabled && self.obs_ws_enabled {
+            if self.remote_companion_server.is_none() {
+                self.start_remote_companion();
+            }
+        } else if self.remote_companion_server.is_some() {
+            tracing::info!("Stopping remote companion page server");
+            self.remote_companion_server = None;
+            self.remote_companion_url = None;
+            self.remote_companion_status = Some(self.tr("remote_companion_stopped").to_owned());
+        } else if self.remote_companion_enabled && !self.obs_ws_enabled {
+            // Honest dependency hint: the page requires the obs server above.
+            self.remote_companion_status =
+                Some(self.tr("remote_companion_requires_obs_ws").to_owned());
+        }
+    }
+
+    /// Attempt to start the companion HTTP page server with the current
+    /// settings. On failure a status message is stored for the Settings view.
+    /// Secrets are never logged: no bodies, no passwords, no identifiers.
+    fn start_remote_companion(&mut self) {
+        // LAN binding requires a password on the obs-websocket server; both
+        // the obs server (crate) and the page (config endpoint) are gated by
+        // it. Refuse with an actionable message instead of exposing an
+        // unauthenticated network surface.
+        if self.companion_reaches_lan() && self.obs_ws_password.is_empty() {
+            self.remote_companion_status =
+                Some(self.tr("remote_companion_lan_requires_password").to_owned());
+            return;
+        }
+        let bind_address = if self.companion_reaches_lan() {
+            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
+        } else {
+            std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)
+        };
+        let config = rivulet_obs_websocket::CompanionConfig {
+            bind_address,
+            port: self.remote_companion_port,
+            ws_port: self.obs_ws_port,
+            ws_auth_required: !self.obs_ws_password.is_empty(),
+        };
+        match rivulet_obs_websocket::companion::start(config) {
+            Ok(server) => {
+                // "Open page" always targets loopback (works on this machine);
+                // the displayed status mentions the LAN URL when reachable.
+                let url = self.remote_companion_page_url();
+                self.remote_companion_server = Some(server);
+                self.remote_companion_url = Some(url.clone());
+                self.remote_companion_status = if self.companion_reaches_lan() {
+                    Some(self.tr_fmt(
+                        "remote_companion_running_lan",
+                        &[self.remote_companion_port.to_string()],
+                    ))
+                } else {
+                    Some(self.tr_fmt("remote_companion_running", &[url]))
+                };
+                tracing::info!(
+                    port = self.remote_companion_port,
+                    lan = self.companion_reaches_lan(),
+                    "remote companion page server started"
+                );
+            }
+            Err(err) => {
+                self.remote_companion_server = None;
+                self.remote_companion_url = None;
+                self.remote_companion_status =
+                    Some(self.tr_fmt("remote_companion_error", &[err.to_string()]));
+                tracing::error!(error = %err, "remote companion page failed to start");
+            }
+        }
+    }
+
+    /// The URL handed to "Open page" — always loopback so it opens on this
+    /// machine regardless of the bind.
+    fn remote_companion_page_url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.remote_companion_port)
+    }
+
+    /// Open the companion page in the default browser (loopback always works
+    /// on the machine itself).
+    fn open_remote_companion_page(&self) {
+        if let Some(url) = &self.remote_companion_url {
+            let _ = open::that(url);
+        }
     }
 
     /// Refresh the shared snapshot the server reads for Get*/Status requests.
@@ -7334,6 +7502,10 @@ impl eframe::App for RivuletApp {
         // sync the read snapshot, execute remote commands, and broadcast
         // GUI-initiated changes to connected Stream Deck/TouchPortal clients.
         self.reconcile_obs_websocket();
+
+        // Reconcile the mobile & HTTP remote companion: keep the embedded
+        // page server (M6) running while the obs-websocket surface is up.
+        self.reconcile_remote_companion();
 
         // Reconcile the MIDI listener: start/stop it with the setting and
         // selected device, then apply mapped actions from incoming messages.
@@ -9230,6 +9402,87 @@ impl eframe::App for RivuletApp {
                             self.obs_ws_status = Some(self.tr("obs_ws_stopped").to_owned());
                         }
                         ui.small(obs_ws_hint);
+
+                        // Settings: Mobile & HTTP remote companion (M6). Serves a
+                        // phone/browser page on the LAN that switches scenes and
+                        // controls recording/streaming through the authenticated
+                        // obs-websocket server above (see docs/remote-companion.md).
+                        let companion_section = self.tr("remote_companion_section");
+                        let companion_enable = self.tr("remote_companion_enable");
+                        let companion_port = self.tr("remote_companion_port");
+                        let companion_bind_lan = self.tr("remote_companion_bind_lan");
+                        let companion_bind_lan_hint = self.tr("remote_companion_bind_lan_hint");
+                        let companion_allow_stream_control =
+                            self.tr("remote_companion_allow_stream_control");
+                        let companion_allow_stream_control_hint =
+                            self.tr("remote_companion_allow_stream_control_hint");
+                        let companion_open_page = self.tr("remote_companion_open_page");
+                        ui.separator();
+                        ui.label(egui::RichText::new(companion_section).strong());
+                        let was_companion_enabled = self.remote_companion_enabled;
+                        let was_bind_lan = self.remote_companion_bind_lan;
+                        ui.checkbox(&mut self.remote_companion_enabled, companion_enable);
+                        let mut companion_port_dirty = false;
+                        let old_companion_port = self.remote_companion_port;
+                        ui.horizontal(|ui| {
+                            ui.label(companion_port);
+                            companion_port_dirty = ui
+                                .add(
+                                    egui::DragValue::new(&mut self.remote_companion_port)
+                                        .range(1..=65535)
+                                        .speed(1),
+                                )
+                                .changed();
+                        });
+                        ui.checkbox(&mut self.remote_companion_bind_lan, companion_bind_lan);
+                        ui.small(companion_bind_lan_hint);
+                        // Widening the obs bind or serving the page from a new
+                        // port requires the obs server (and page) to restart.
+                        if companion_port_dirty && old_companion_port != self.remote_companion_port
+                        {
+                            self.obs_ws_restart = true;
+                        }
+                        if was_companion_enabled != self.remote_companion_enabled
+                            || was_bind_lan != self.remote_companion_bind_lan
+                        {
+                            self.obs_ws_restart = true;
+                        }
+                        if self.remote_companion_bind_lan {
+                            ui.horizontal(|ui| {
+                                ui.checkbox(
+                                    &mut self.remote_allow_stream_control,
+                                    companion_allow_stream_control,
+                                );
+                                ui.small(companion_allow_stream_control_hint);
+                            });
+                        }
+                        if let Some(status) = &self.remote_companion_status {
+                            ui.colored_label(
+                                if self.remote_companion_enabled && self.obs_ws_enabled {
+                                    colors.success
+                                } else {
+                                    colors.warning
+                                },
+                                status,
+                            );
+                        }
+                        if (self.remote_companion_enabled && !was_companion_enabled)
+                            || (!self.remote_companion_enabled && was_companion_enabled)
+                        {
+                            // Flip the status line immediately on the toggle so
+                            // the section does not show a stale message.
+                            self.remote_companion_status = if self.remote_companion_enabled {
+                                Some(self.tr("remote_companion_starting").to_owned())
+                            } else {
+                                Some(self.tr("remote_companion_stopped").to_owned())
+                            };
+                        }
+                        if self.remote_companion_url.is_some()
+                            && ui.button(companion_open_page).clicked()
+                        {
+                            self.open_remote_companion_page();
+                        }
+                        ui.small(self.tr("remote_companion_hint"));
 
                         // Settings: MIDI controller mapping (Korg NanoKontrol etc.).
                         // Maps MIDI messages (note/CC on a channel) to actions such as
@@ -12904,6 +13157,85 @@ mod tests {
         let app = RivuletApp::default();
         assert_eq!(app.obs_ws_port, 4455);
         assert!(!app.obs_ws_enabled, "remote control must be opt-in");
+    }
+
+    // ── Mobile & HTTP remote companion ─────────────────────────────
+
+    #[test]
+    fn remote_companion_defaults_are_opt_in_loopback_and_secure() {
+        let app = RivuletApp::default();
+        assert!(
+            !app.remote_companion_enabled,
+            "companion page must be opt-in"
+        );
+        assert!(!app.remote_companion_bind_lan, "LAN bind must be opt-in");
+        assert!(
+            !app.remote_allow_stream_control,
+            "remote stream control must be explicit permission"
+        );
+        assert_eq!(
+            app.remote_companion_port,
+            rivulet_obs_websocket::COMPANION_DEFAULT_PORT
+        );
+        assert!(app.remote_companion_server.is_none());
+        assert!(!app.companion_reaches_lan());
+    }
+
+    #[test]
+    fn companion_reaches_lan_reflects_enable_and_bind_toggles() {
+        let app = RivuletApp::default();
+        assert!(!app.companion_reaches_lan());
+        let app = RivuletApp {
+            remote_companion_enabled: true,
+            ..Default::default()
+        };
+        assert!(
+            !app.companion_reaches_lan(),
+            "enabled alone is still loopback"
+        );
+        let app = RivuletApp {
+            remote_companion_enabled: true,
+            remote_companion_bind_lan: true,
+            ..Default::default()
+        };
+        assert!(
+            app.companion_reaches_lan(),
+            "enabled + LAN bind reaches the LAN"
+        );
+    }
+
+    #[test]
+    fn remote_companion_settings_persist_across_restarts() {
+        // The RivuletApp serde round-trip must carry the companion settings
+        // (toggle + port + bind + permission) across an app restart, while the
+        // running server handle and status lines stay runtime-only.
+        let app = RivuletApp {
+            remote_companion_enabled: true,
+            remote_companion_port: 4466,
+            remote_companion_bind_lan: true,
+            remote_allow_stream_control: true,
+            remote_companion_server: Some(rivulet_obs_websocket::CompanionServerHandle::unused()),
+            remote_companion_status: Some("running".to_owned()),
+            remote_companion_url: Some("http://127.0.0.1:4466".to_owned()),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&app).expect("serialize app");
+        assert_eq!(json["remote_companion_enabled"], true);
+        assert_eq!(json["remote_companion_port"], 4466);
+        assert_eq!(json["remote_companion_bind_lan"], true);
+        assert_eq!(json["remote_allow_stream_control"], true);
+        // Runtime-only state must not be persisted.
+        assert!(json.get("remote_companion_server").is_none());
+        assert!(json.get("remote_companion_status").is_none());
+        assert!(json.get("remote_companion_url").is_none());
+
+        let restored: RivuletApp = serde_json::from_value(json).expect("deserialize app");
+        assert!(restored.remote_companion_enabled);
+        assert_eq!(restored.remote_companion_port, 4466);
+        assert!(restored.remote_companion_bind_lan);
+        assert!(restored.remote_allow_stream_control);
+        assert!(restored.remote_companion_server.is_none());
+        assert!(restored.remote_companion_status.is_none());
     }
 
     // ── MIDI controller mapping ────────────────────────────────────

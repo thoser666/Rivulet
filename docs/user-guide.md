@@ -183,6 +183,15 @@ Unter **Settings → MIDI** kannst du MIDI-Geräte verbinden und Aktionen auf Co
 
 Rivulet bietet einen OBS-WebSocket-v5-kompatiblen Server (siehe [`obs-websocket.md`](obs-websocket.md)). Damit lassen sich Rivulet-Steuerungen wie Streamdeck oder Touch Portal anschließen, und das Protokoll ist mit bestehenden OBS-Tools kompatibel. Der Server lauscht standardmäßig auf `127.0.0.1` und kann mit einem Passwort geschützt werden.
 
+### Remote-Begleiter (Handy / Browser)
+
+Unter **Settings → Remote-Begleiter (Handy / Browser)** kannst du Rivulet vom Smartphone oder einem Browser im selben Netzwerk steuern: Szenen wechseln, Aufnahme starten/stoppen und – mit ausdrücklicher Freigabe – den Stream starten/stoppen (siehe [`remote-companion.md`](remote-companion.md)).
+
+- Die Seite läuft nur, wenn der **OBS-WebSocket-Server** oben aktiviert ist, und liegt standardmäßig unter `http://127.0.0.1:<Port>`.
+- **Zugriff aus dem Netzwerk erlauben (LAN)** bindet Seite und WebSocket-Server an `0.0.0.0` und erfordert ein **Passwort** – ein LAN-Bind ohne Passwort wird verweigert.
+- **Remote Stream Start/Stopp erlauben**: Erst mit dieser Checkbox kann das Handy den Stream steuern; Szenen- und Aufnahmesteuerung funktionieren auch ohne. Die Freigabe wird vom Server durchgesetzt, nicht nur von der Seite.
+- **Seite öffnen** startet den Browser auf dem Rechner; auf dem Handy `http://<PC-LAN-IP>:<Port>` eingeben.
+
 ### Stream-Diagnose
 
 Pro Ziel werden Status, FPS/Rate, Queue-Füllstand, Underflows, Overflows und – sofern verfügbar – Sink-Latenz angezeigt. Ein einzelnes fehlerhaftes Ziel sollte gesunde Ziele nicht stoppen. Bei Reconnects zeigt der Status den Zielzustand; Retry-Intervalle sind begrenzt.

@@ -1,11 +1,19 @@
 //! OBS WebSocket v5-compatible server (JSON subprotocol).
 //!
-//! Runs a small TCP listener on `127.0.0.1`, accepts WebSocket connections,
-//! performs the v5 Hello/Identify handshake (optionally with SHA-256
-//! challenge/response authentication), and dispatches requests against a
+//! Runs a small TCP listener, accepts WebSocket connections, performs the v5
+//! Hello/Identify handshake (optionally with SHA-256 challenge/response
+//! authentication), and dispatches requests against a
 //! [`crate::backend::ObsBackend`]. Events produced by the backend are
 //! broadcast to all identified clients that subscribed to the relevant
 //! intent.
+//!
+//! Binding is loopback by default ([`start`]); callers that need the
+//! companion surface reachable from a phone/browser on the LAN use
+//! [`start_with_options`] with [`BindAddress::All`]. Binding beyond loopback
+//! requires a password (refused otherwise) and, as an explicit-permission
+//! gate, rejects stream start/stop/toggle unless
+//! [`ServerOptions::allow_remote_stream_control`] is enabled — see
+//! `docs/remote-companion.md`.
 
 use std::collections::HashMap;
 use std::io;
@@ -30,6 +38,68 @@ type SessionResult<T> = Result<T, Box<WsError>>;
 
 /// Default TCP port (matches the OBS WebSocket default).
 pub const DEFAULT_PORT: u16 = 4455;
+
+/// Where the listener binds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BindAddress {
+    /// Bind to `127.0.0.1` only — reachable from this machine, not the LAN.
+    Loopback,
+    /// Bind to `0.0.0.0` — reachable from other machines on the network. The
+    /// M6 remote-companion gate requires this to be paired with a password
+    /// and (for stream control) an explicit permission.
+    All,
+}
+
+impl BindAddress {
+    fn address(self) -> std::net::IpAddr {
+        match self {
+            BindAddress::Loopback => std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            BindAddress::All => std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+        }
+    }
+
+    /// Whether the bind is reachable beyond loopback (drives the explicit-
+    /// permission gate for remote stream control).
+    pub fn is_lan(self) -> bool {
+        matches!(self, BindAddress::All)
+    }
+}
+
+/// Server configuration for [`start_with_options`].
+#[derive(Debug, Clone)]
+pub struct ServerOptions {
+    /// Listen port. `0` picks an ephemeral port (useful in tests).
+    pub port: u16,
+    /// Loopback-only (default, M5 behaviour) or reachable from the LAN.
+    pub bind: BindAddress,
+    /// Password to challenge against (None = authentication disabled).
+    ///
+    /// A LAN bind requires a non-empty password; `start_with_options`
+    /// refuses to bind otherwise.
+    pub password: Option<String>,
+    /// Explicit permission to start/stop/toggle the stream output from a
+    /// remote surface. When `false` **and** the server binds beyond loopback,
+    /// `StartStreaming`/`StopStreaming`/`ToggleStreaming` are rejected with an
+    /// honest error instead of reaching the backend. Loopback binds are
+    /// unaffected (M5 parity).
+    pub allow_remote_stream_control: bool,
+}
+
+impl Default for ServerOptions {
+    fn default() -> Self {
+        Self {
+            port: DEFAULT_PORT,
+            bind: BindAddress::Loopback,
+            password: None,
+            allow_remote_stream_control: true,
+        }
+    }
+}
+
+/// Error comment used when a LAN-bound server without explicit permission
+/// rejects remote stream control.
+pub const STREAM_CONTROL_DENIED_COMMENT: &str =
+    "Remote stream start/stop requires explicit permission (Settings → Remote companion)";
 
 /// How long a fresh connection may wait for its `Identify` message.
 const IDENTIFY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -87,6 +157,11 @@ struct ServerState {
     backend: SharedBackend,
     /// Password to challenge against (None = auth disabled).
     password: Option<Arc<str>>,
+    /// Whether the listener is reachable beyond loopback (the LAN permission
+    /// gate applies only to this case).
+    bound_to_lan: bool,
+    /// Explicit permission for remote stream start/stop/toggle.
+    allow_remote_stream_control: bool,
     shutdown: Arc<AtomicBool>,
     /// Registered identified sessions for event broadcast.
     sessions: Mutex<HashMap<u64, Session>>,
@@ -111,7 +186,8 @@ struct SessionThread {
     subscription_mask: u32,
 }
 
-/// Start the OBS WebSocket server on `127.0.0.1:port`.
+/// Start the OBS WebSocket server on `127.0.0.1:port` (loopback-only; M5
+/// behaviour).
 ///
 /// `password` enables authentication: every connection receives a challenge
 /// and is closed with `AUTHENTICATION_FAILED` (4009) if the `Identify`
@@ -121,19 +197,58 @@ pub fn start(
     password: Option<String>,
     port: u16,
 ) -> io::Result<ObsServerHandle> {
-    let listener = TcpListener::bind(("127.0.0.1", port))?;
+    start_with_options(
+        backend,
+        ServerOptions {
+            password,
+            port,
+            ..Default::default()
+        },
+    )
+}
+
+/// Start the server with explicit binding and permission options.
+///
+/// Refuses a LAN bind ([`BindAddress::All`]) without a non-empty password:
+/// the mobile/HTTP companion must never expose an unauthenticated
+/// control surface to the network.
+pub fn start_with_options(
+    backend: SharedBackend,
+    options: ServerOptions,
+) -> io::Result<ObsServerHandle> {
+    if options.bind.is_lan()
+        && options
+            .password
+            .as_deref()
+            .map(str::is_empty)
+            .unwrap_or(true)
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "OBS WebSocket LAN binding requires a non-empty password",
+        ));
+    }
+    let listener = TcpListener::bind((options.bind.address(), options.port))?;
     listener.set_nonblocking(true)?;
     let addr = listener.local_addr()?;
     let shutdown = Arc::new(AtomicBool::new(false));
     let state = Arc::new(ServerState {
         backend,
-        password: password.map(Arc::from),
+        password: options.password.map(Arc::from),
+        bound_to_lan: options.bind.is_lan(),
+        allow_remote_stream_control: options.allow_remote_stream_control,
         shutdown: shutdown.clone(),
         sessions: Mutex::new(HashMap::new()),
         next_session_id: AtomicU64::new(1),
     });
 
-    tracing::info!(%addr, auth = state.password.is_some(), "obs-webSocket server listening");
+    tracing::info!(
+        %addr,
+        auth = state.password.is_some(),
+        lan = state.bound_to_lan,
+        stream_control = state.allow_remote_stream_control,
+        "obs-webSocket server listening"
+    );
 
     let thread_state = state.clone();
     let thread = thread::Builder::new()
@@ -520,18 +635,33 @@ impl SessionThread {
                 self.run_command(ObsCommand::ToggleRecording),
                 serde_json::Value::Null,
             ),
-            RequestType::StartStreaming => (
-                self.run_command(ObsCommand::StartStreaming),
-                serde_json::Value::Null,
-            ),
-            RequestType::StopStreaming => (
-                self.run_command(ObsCommand::StopStreaming),
-                serde_json::Value::Null,
-            ),
-            RequestType::ToggleStreaming => (
-                self.run_command(ObsCommand::ToggleStreaming),
-                serde_json::Value::Null,
-            ),
+            RequestType::StartStreaming => {
+                if self.stream_control_denied() {
+                    return self.deny_stream_control();
+                }
+                (
+                    self.run_command(ObsCommand::StartStreaming),
+                    serde_json::Value::Null,
+                )
+            }
+            RequestType::StopStreaming => {
+                if self.stream_control_denied() {
+                    return self.deny_stream_control();
+                }
+                (
+                    self.run_command(ObsCommand::StopStreaming),
+                    serde_json::Value::Null,
+                )
+            }
+            RequestType::ToggleStreaming => {
+                if self.stream_control_denied() {
+                    return self.deny_stream_control();
+                }
+                (
+                    self.run_command(ObsCommand::ToggleStreaming),
+                    serde_json::Value::Null,
+                )
+            }
             _ => (
                 ObsCommandResult::Failure {
                     status_code: protocol::status::UNKNOWN_REQUEST_TYPE,
@@ -550,6 +680,23 @@ impl SessionThread {
             }
         }
         result
+    }
+
+    /// Whether remote stream control is blocked by the explicit-permission
+    /// gate. Applies **only** when the listener is reachable beyond loopback
+    /// and the permission was not enabled; loopback keeps M5 behaviour.
+    fn stream_control_denied(&self) -> bool {
+        self.state.bound_to_lan && !self.state.allow_remote_stream_control
+    }
+
+    fn deny_stream_control(&self) -> (ObsCommandResult, serde_json::Value) {
+        (
+            ObsCommandResult::Failure {
+                status_code: protocol::status::GENERIC_ERROR,
+                comment: STREAM_CONTROL_DENIED_COMMENT.into(),
+            },
+            serde_json::Value::Null,
+        )
     }
 
     /// Broadcast events to every identified session (including this one; its

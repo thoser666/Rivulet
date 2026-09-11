@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Rivulet Remote</title>
+<style>
+  :root { --bg:#14161a; --panel:#1d2026; --fg:#e6e8ec; --dim:#9aa3b0; --accent:#4f8cff; --good:#3fb96d; --bad:#e4574f; --border:#2a2e36; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; padding:0; background:var(--bg); color:var(--fg);
+    font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  body { max-width:520px; margin:0 auto; padding:16px; padding-bottom:calc(24px + env(safe-area-inset-bottom)); }
+  header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  h1 { font-size:20px; margin:0; }
+  .lang { background:none; border:1px solid var(--border); color:var(--dim); border-radius:999px;
+    padding:4px 12px; font-size:13px; cursor:pointer; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:16px; margin-top:16px; }
+  .hint { color:var(--dim); font-size:13px; margin:4px 0 0; }
+  .row { display:flex; gap:10px; align-items:center; margin-top:10px; }
+  label { display:block; font-size:13px; color:var(--dim); margin-bottom:6px; }
+  input[type=password], input[type=text] { width:100%; background:#14161a; color:var(--fg);
+    border:1px solid var(--border); border-radius:8px; padding:12px; font-size:16px; }
+  button { border:0; border-radius:10px; background:var(--accent); color:#fff; font-size:16px;
+    font-weight:600; padding:14px 16px; cursor:pointer; width:100%; }
+  button:disabled { opacity:.45; cursor:default; }
+  button.ghost { background:transparent; border:1px solid var(--border); color:var(--fg); font-weight:500; }
+  button.bad { background:var(--bad); }
+  button.good { background:var(--good); }
+  select { width:100%; background:#14161a; color:var(--fg); border:1px solid var(--border);
+    border-radius:8px; padding:12px; font-size:16px; }
+  #status { min-height:20px; margin-top:14px; font-size:14px; word-break:break-word; }
+  #status.connected { color:var(--good); }
+  #status.error { color:var(--bad); }
+  #info { margin-top:6px; font-size:12px; color:var(--dim); word-break:break-word; }
+  .pill { display:inline-block; border:1px solid var(--border); border-radius:999px;
+    padding:2px 10px; font-size:12px; color:var(--dim); margin-top:8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 data-i18n="title">Rivulet Remote</h1>
+  <button class="lang" id="langBtn" aria-label="Language">DE</button>
+</header>
+
+<div class="card" id="loginCard" hidden>
+  <label data-i18n="pwdLabel" for="pwd">Password</label>
+  <input type="password" id="pwd" inputmode="text" autocomplete="current-password">
+  <div class="row">
+    <button id="connectBtn" data-i18n="connect">Connect</button>
+  </div>
+  <p class="hint" data-i18n="pwdHint">The password you configured for the OBS WebSocket server. Stored only in this tab.</p>
+</div>
+
+<div class="card" id="remoteCard" hidden>
+  <div class="row" style="gap:10px;">
+    <button id="disconnectBtn" class="ghost" style="flex:0 0 auto; width:auto;" data-i18n="disconnect">Disconnect</button>
+    <button id="refreshBtn" class="ghost" style="flex:0 0 auto; width:auto;" data-i18n="refresh">Refresh</button>
+  </div>
+
+  <label data-i18n="sceneLabel" for="sceneSel" style="margin-top:14px;">Scene</label>
+  <select id="sceneSel">
+    <option value="" data-i18n="sceneNone">(no scenes)</option>
+  </select>
+
+  <div class="row">
+    <button id="recordBtn" class="ghost">Record</button>
+  </div>
+  <div class="row">
+    <button id="streamBtn" class="ghost">Stream</button>
+  </div>
+  <div id="status" role="status"></div>
+  <div id="info"><span class="pill" id="wsBadge">●</span></div>
+</div>
+
+<noscript><p style="color:#e4574f">This page requires JavaScript.</p></noscript>
+
+<script>
+"use strict";
+/* Rivulet remote companion — dependency-free OBS WebSocket v5 client.
+   Security/behaviour notes:
+   - On LAN (http://) the Web Crypto API is unavailable (not a secure
+     context), so SHA-256 falls back to a compact pure-JS implementation that
+     is self-tested against the FIPS 180-4 "abc" vector before any use.
+   - The password lives in sessionStorage and only ever leaves this tab as
+     the obs-websocket v5 authentication response over the WebSocket. */
+
+/* ---------- i18n (EN/DE), persisted per browser ---------- */
+var L = {
+  en: {
+    title: "Rivulet Remote", langBtn: "DE",
+    pwdLabel: "Password", connect: "Connect",
+    pwdHint: "The password you configured for the OBS WebSocket server. Stored only in this tab.",
+    disconnect: "Disconnect", refresh: "Refresh",
+    sceneLabel: "Scene", sceneNone: "(no scenes)",
+    connecting: "Connecting…", connected: "Connected",
+    connectingAuth: "Authenticating…",
+    connectFailed: "Connection failed — is Rivulet running and the OBS WebSocket server enabled?",
+    authFailed: "Authentication rejected — wrong password?",
+    closed: "Disconnected. Reconnect to continue.",
+    recIdle: "Record", recOn: "Stop recording",
+    streamIdle: "Go live", streamOn: "Stop stream",
+    denied: "Denied by Rivulet:",
+    noScene: "(no scenes) — add scenes in Rivulet first.",
+    wsVersion: "Rivulet OBS WebSocket v5"
+  },
+  de: {
+    title: "Rivulet Remote", langBtn: "EN",
+    pwdLabel: "Passwort", connect: "Verbinden",
+    pwdHint: "Das Passwort, das du für den OBS-WebSocket-Server eingerichtet hast. Wird nur in diesem Tab gespeichert.",
+    disconnect: "Trennen", refresh: "Aktualisieren",
+    sceneLabel: "Szene", sceneNone: "(keine Szenen)",
+    connecting: "Verbinde…", connected: "Verbunden",
+    connectingAuth: "Authentifiziere…",
+    connectFailed: "Verbindung fehlgeschlagen — läuft Rivulet mit aktivem OBS-WebSocket-Server?",
+    authFailed: "Authentifizierung abgelehnt — falsches Passwort?",
+    closed: "Verbindung getrennt. Neu verbinden zum Fortsetzen.",
+    recIdle: "Aufnahme", recOn: "Aufnahme stoppen",
+    streamIdle: "Stream starten", streamOn: "Stream stoppen",
+    denied: "Von Rivulet verweigert:",
+    noScene: "(keine Szenen) — lege zuerst welche in Rivulet an.",
+    wsVersion: "Rivulet OBS-WebSocket v5"
+  }
+};
+var lang = localStorage.getItem("rv.remote.lang") ||
+  (navigator.language && navigator.language.toLowerCase().indexOf("de") === 0 ? "de" : "en");
+var T = L[lang] || L.en;
+
+function localize() {
+  document.querySelectorAll("[data-i18n]").forEach(function (el) {
+    var key = el.getAttribute("data-i18n");
+    if (T[key]) el.textContent = T[key];
+  });
+  document.getElementById("langBtn").textContent = T.langBtn;
+  setUi()
+}
+function toggleLang() {
+  lang = lang === "en" ? "de" : "en";
+  localStorage.setItem("rv.remote.lang", lang);
+  T = L[lang] || L.en;
+  localize();
+}
+document.getElementById("langBtn").addEventListener("click", toggleLang);
+
+/* ---------- SHA-256: WebCrypto preferred, pure-JS fallback ---------- */
+var SHA256_K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+  0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+  0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+  0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+function rr(n, x) { return (x >>> n) | (x << (32 - n)); }
+function ro(n, x) { return x >>> n; }
+function sha256bytes(bytes) {
+  var H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  var l = bytes.length;
+  var bitLenHi = Math.floor(l / 536870912) >>> 0;   /* high 32 bits of l*8 */
+  var bitLenLo = (l << 3) >>> 0;                    /* low 32 bits of l*8   */
+  var padded = new Uint8Array((((l + 8) >> 6) + 1) << 6);
+  padded.set(bytes);
+  padded[l] = 0x80;
+  padded[padded.length - 8] = (bitLenHi >>> 24) & 0xff; padded[padded.length - 7] = (bitLenHi >>> 16) & 0xff;
+  padded[padded.length - 6] = (bitLenHi >>> 8) & 0xff;  padded[padded.length - 5] = bitLenHi & 0xff;
+  padded[padded.length - 4] = (bitLenLo >>> 24) & 0xff; padded[padded.length - 3] = (bitLenLo >>> 16) & 0xff;
+  padded[padded.length - 2] = (bitLenLo >>> 8) & 0xff;  padded[padded.length - 1] = bitLenLo & 0xff;
+  var w = new Int32Array(64);
+  for (var i = 0; i < padded.length; i += 64) {
+    for (var t = 0; t < 16; t++) {
+      w[t] = (padded[i + t * 4] << 24) | (padded[i + t * 4 + 1] << 16) |
+             (padded[i + t * 4 + 2] << 8) | padded[i + t * 4 + 3];
+    }
+    for (t = 16; t < 64; t++) {
+      var s0 = rr(7, w[t - 15]) ^ rr(18, w[t - 15]) ^ ro(3, w[t - 15]);
+      var s1 = rr(17, w[t - 2]) ^ rr(19, w[t - 2]) ^ ro(10, w[t - 2]);
+      w[t] = (w[t - 16] + s0 + w[t - 7] + s1) | 0;
+    }
+    var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+    for (t = 0; t < 64; t++) {
+      var S1 = rr(6, e) ^ rr(11, e) ^ rr(25, e);
+      var ch = (e & f) ^ (~e & g);
+      var t1 = (h + S1 + ch + SHA256_K[t] + w[t]) | 0;
+      var S0 = rr(2, a) ^ rr(13, a) ^ rr(22, a);
+      var maj = (a & b) ^ (a & c) ^ (b & c);
+      var t2 = (S0 + maj) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+    H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+  }
+  var out = new Uint8Array(32);
+  for (var j = 0; j < 8; j++) {
+    out[j * 4] = (H[j] >>> 24) & 0xff; out[j * 4 + 1] = (H[j] >>> 16) & 0xff;
+    out[j * 4 + 2] = (H[j] >>> 8) & 0xff;  out[j * 4 + 3] = H[j] & 0xff;
+  }
+  return out;
+}
+var supportsWebCrypto = !!(window.crypto && crypto.subtle && crypto.subtle.digest);
+function sha256Promise(bytes) {
+  if (supportsWebCrypto) {
+    return crypto.subtle.digest("SHA-256", bytes).then(function (buf) { return new Uint8Array(buf); });
+  }
+  return Promise.resolve(sha256bytes(bytes));
+}
+function bytesToB64(bytes) {
+  var bin = "";
+  for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+function sha256Str(s) {
+  return sha256Promise(new TextEncoder().encode(s)).then(bytesToB64);
+}
+
+/* Self-test the active digest path against the FIPS 180-4 vector before use. */
+function selftest() {
+  return sha256Promise(new TextEncoder().encode("abc")).then(function (b) {
+    var hex = "";
+    for (var i = 0; i < b.length; i++) hex += ("0" + b[i].toString(16)).slice(-2);
+    if (hex !== "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") {
+      throw new Error("SHA-256 self-test failed: " + hex);
+    }
+  });
+}
+function authResponse(password, salt, challenge) {
+  return sha256Str(password + base64ToString(salt)).then(function (secret) {
+    return sha256Str(secret + base64ToString(challenge));
+  });
+}
+/* base64ToString: the salt/challenge arrive as base64 text; convert to the
+   plain ASCII/UTF-8 string form the Rust server concatenates. */
+function base64ToString(b64) {
+  var bin = atob(b64);
+  var bytes = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+/* ---------- app state ---------- */
+var ws = null;
+var sceneNames = [];
+var currentScene = null;
+var recording = false;
+var streaming = false;
+var cfg = null;                 /* { wsPort, authRequired } from /config */
+var connected = false;
+
+var $ = function (id) { return document.getElementById(id); };
+
+function setStatus(text, klass) {
+  var el = $("status");
+  el.textContent = text;
+  el.className = klass || "";
+}
+function setUi() {
+  $("recordBtn").textContent = recording ? T.recOn : T.recIdle;
+  $("recordBtn").className = recording ? "good" : "ghost";
+  $("streamBtn").textContent = streaming ? T.streamOn : T.streamIdle;
+  $("streamBtn").className = streaming ? "bad" : "ghost";
+  var busy = !connected;
+  $("recordBtn").disabled = busy;
+  $("streamBtn").disabled = busy;
+  $("sceneSel").disabled = busy;
+  $("refreshBtn").disabled = busy;
+  $("disconnectBtn").disabled = busy;
+  $("wsBadge").textContent = connected ? "● connected" : "● offline";
+  $("wsBadge").style.color = connected ? "var(--good)" : "var(--dim)";
+}
+
+/* ---------- WebSocket v5 client ---------- */
+function connectWs() {
+  if (!cfg) return;
+  var pwd = sessionStorage.getItem("rv.remote.pwd") || "";
+  connected = false;
+  setUi();
+  setStatus(T.connecting);
+
+  var url = "ws://" + window.location.hostname + ":" + cfg.wsPort;
+  var sock;
+  try { sock = new WebSocket(url, "obswebsocket.json"); }
+  catch (e) { failConnect(); return; }
+  ws = sock;
+
+  sock.onopen = function () {
+    if (cfg.authRequired && !sessionStorage.getItem("rv.remote.pwd")) {
+      $("loginCard").hidden = false;
+      $("remoteCard").hidden = true;
+      return;
+    }
+    /* the server sends Hello first; nothing to do on open. */
+  };
+
+  sock.onmessage = function (ev) {
+    var m;
+    try { m = JSON.parse(ev.data); } catch (e) { return; }
+    handleMessage(m);
+  };
+
+  sock.onerror = function () { /* handled via onclose */ };
+  sock.onclose = function () {
+    if (connected) connected = false;
+    if (ws === sock) {
+      ws = null;
+      setUi();
+      setStatus(T.closed);
+    }
+  };
+}
+
+function handleMessage(m) {
+  switch (m.op) {
+    case 0: /* Hello */
+      if (cfg.authRequired) {
+        var auth = m.d && m.d.authentication;
+        if (!auth) { failAuth(); return; }
+        setStatus(T.connectingAuth);
+        return authResponse(sessionStorage.getItem("rv.remote.pwd") || "", auth.salt, auth.challenge)
+          .then(function (response) {
+            identify(response);
+          })
+          .catch(function () { failConnect(); });
+      }
+      identify(undefined);
+      break;
+    case 2: /* Identified */
+      connected = true;
+      setStatus(T.connected, "connected");
+      $("loginCard").hidden = true;
+      $("remoteCard").hidden = false;
+      setUi();
+      refreshAll();
+      break;
+    case 5: /* Event */
+      handleEvent(m.d);
+      break;
+    case 7: /* RequestResponse */
+      handleResponse(m.d);
+      break;
+  }
+}
+
+function identify(authResponse) {
+  var d = { rpcVersion: 1, eventSubscriptions: 0x45 }; /* General|Scenes|Outputs */
+  if (authResponse !== undefined) d.authentication = authResponse;
+  send({ op: 1, d: d });
+}
+
+function send(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+function handleEvent(d) {
+  switch (d.eventType) {
+    case "CurrentProgramSceneChanged":
+      if (d.eventData && d.eventData.sceneName) {
+        currentScene = d.eventData.sceneName;
+        $("sceneSel").value = sceneNames.indexOf(currentScene) >= 0 ? currentScene : "";
+      }
+      break;
+    case "RecordStateChanged":
+      recording = !!(d.eventData && d.eventData.outputActive);
+      setUi();
+      break;
+    case "StreamStateChanged":
+      streaming = !!(d.eventData && d.eventData.outputActive);
+      setUi();
+      break;
+  }
+}
+
+function handleResponse(d) {
+  if (!d.requestStatus) return;
+  var ok = d.requestStatus.result === true;
+  var id = d.requestId || "";
+  if (id.indexOf("scenes-") === 0) {
+    var data = d.responseData || {};
+    var list = data.scenes || [];
+    sceneNames = list.map(function (s) { return s.sceneName; });
+    currentScene = data.currentProgramSceneName || null;
+    renderScenes();
+  } else if (id.indexOf("rec") === 0 || id.indexOf("stream") === 0) {
+    if (!ok) {
+      var comment = (d.requestStatus.comment || "failed").replace(/^Remote stream start\/stop requires /, "");
+      setStatus(T.denied + " " + comment, "error");
+    }
+    refreshStatus();
+  } else if (id === "rec-status") {
+    recording = !!(d.responseData && d.responseData.outputActive);
+    setUi();
+  } else if (id === "stream-status") {
+    streaming = !!(d.responseData && d.responseData.outputActive);
+    setUi();
+  }
+}
+
+function renderScenes() {
+  var sel = $("sceneSel");
+  sel.innerHTML = "";
+  if (!sceneNames.length) {
+    var none = document.createElement("option");
+    none.value = "";
+    none.textContent = T.noScene;
+    sel.appendChild(none);
+    return;
+  }
+  sceneNames.forEach(function (name) {
+    var opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  sel.value = currentScene && sceneNames.indexOf(currentScene) >= 0 ? currentScene : sceneNames[0];
+}
+
+function refreshAll() {
+  request("GetSceneList", {}, "scenes-");
+  request("GetRecordStatus", {}, "rec-status");
+  request("GetStreamStatus", {}, "stream-status");
+}
+function refreshStatus() {
+  request("GetRecordStatus", {}, "rec-status");
+  request("GetStreamStatus", {}, "stream-status");
+}
+function request(rt, data, idPrefix) {
+  send({ op: 6, d: { requestType: rt, requestId: idPrefix ? idPrefix + Date.now() : undefined, requestData: data } });
+}
+
+function failConnect() {
+  setStatus(T.connectFailed, "error");
+  $("remoteCard").hidden = true;
+  $("loginCard").hidden = true;
+  connected = false;
+  setUi();
+}
+function failAuth() {
+  sessionStorage.removeItem("rv.remote.pwd");
+  setStatus(T.authFailed, "error");
+  connected = false;
+  $("remoteCard").hidden = true;
+  $("loginCard").hidden = false;
+  setUi();
+}
+
+/* ---------- events ---------- */
+function initHandlers() {
+  $("connectBtn").addEventListener("click", function () {
+    var pwd = $("pwd").value;
+    if (cfg.authRequired && !pwd) return;
+    sessionStorage.setItem("rv.remote.pwd", pwd);
+    $("pwd").value = "";
+    $("loginCard").hidden = true;
+    connectWs();
+  });
+  $("disconnectBtn").addEventListener("click", function () {
+    sessionStorage.removeItem("rv.remote.pwd");
+    if (ws) { try { ws.close(); } catch (e) {} }
+    ws = null;
+    connected = false;
+    setUi();
+    setStatus(T.closed);
+    $("remoteCard").hidden = true;
+    $("loginCard").hidden = false;
+  });
+  $("refreshBtn").addEventListener("click", refreshAll);
+  $("sceneSel").addEventListener("change", function () {
+    var name = $("sceneSel").value;
+    if (name) request("SetCurrentProgramScene", { sceneName: name }, "scenes-");
+  });
+  $("recordBtn").addEventListener("click", function () {
+    request("ToggleRecording", {}, "rec-");
+  });
+  $("streamBtn").addEventListener("click", function () {
+    request("ToggleStreaming", {}, "stream-");
+  });
+}
+
+/* ---------- boot ---------- */
+function boot() {
+  initHandlers();
+  setUi();
+  fetch("/config")
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (c) {
+      cfg = { wsPort: c.wsPort, authRequired: !!c.authRequired };
+      $("info").insertAdjacentHTML("beforeend",
+        '<div>' + T.wsVersion + ' · ws://' + window.location.hostname + ':' + c.wsPort + '</div>');
+      if (cfg.authRequired && !sessionStorage.getItem("rv.remote.pwd")) {
+        $("loginCard").hidden = false;
+      } else {
+        connectWs();
+      }
+    })
+    .catch(function () {
+      setStatus(T.connectFailed, "error");
+      $("remoteCard").hidden = false;
+    });
+}
+
+localize();
+selftest()
+  .then(boot)
+  .catch(function (err) {
+    $("remoteCard").hidden = false;
+    setStatus("fatal: " + err.message, "error");
+  });
+</script>
+</body>
+</html>
