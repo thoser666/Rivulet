@@ -3296,7 +3296,9 @@ fn weekly_release_promotion_is_scheduled_and_safe() {
     // push: excerpts flow to winget-pkgs PRs, `choco push`, and the AUR git
     // repo by a human from the published artifacts.
     assert!(
-        promo.contains("outputs:") && promo.contains("up_to_date:") && promo.contains("needs.promote.outputs.up_to_date"),
+        promo.contains("outputs:")
+            && promo.contains("up_to_date:")
+            && promo.contains("needs.promote.outputs.up_to_date"),
         "the promote job must expose an up_to_date output and each channel job must gate on it"
     );
     assert!(
@@ -3310,7 +3312,8 @@ fn weekly_release_promotion_is_scheduled_and_safe() {
         "the weekly run must prepare a byte-verified Chocolatey package (with a real portable ZIP checksum) as an artifact — external `choco push` stays human"
     );
     assert!(
-        promo.contains("prepare-aur:") && promo.contains("pkgver")
+        promo.contains("prepare-aur:")
+            && promo.contains("pkgver")
             && promo.contains("https://aur.archlinux.org/rivulet.git"),
         "the weekly run must validate the AUR PKGBUILD bump status and hand off the exact push"
     );
