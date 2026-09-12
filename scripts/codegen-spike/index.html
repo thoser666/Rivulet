@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>M10 Codegen Spike — Artifact Index</title>
+<style>
+  body { font-family: 'Segoe UI', sans-serif; background: #12141a; color: #e6e6e6; margin: 0; padding: 24px; }
+  h1 { font-size: 20px; } h2 { font-size: 15px; margin: 28px 0 8px; color: #9ad; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 16px; }
+  .card { background: #1b1e27; border: 1px solid #2a2e3d; border-radius: 8px; padding: 10px; }
+  .card img { width: 100%; border-radius: 4px; display: block; background: #0a0b0f; }
+  .card p { margin: 6px 0 0; font-size: 12px; color: #9aa; }
+  .verdict { border-left: 3px solid #7fd; padding: 8px 12px; background: #16211f; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>M10 Codegen Spike — Artifact Index</h1>
+<p class="verdict">
+  <b>Verdict (2026-09-12, RTX 4060 Ti 8 GB):</b> <code>qwen2.5-coder:7b</code> is the default —
+  4/5 valid artifacts at 8–15 s per prompt (after 61 s model load), only miss: goal-bar
+  (no transition, bar not initialized). <code>devstral</code> (14 GB, CPU-offload): 2/5 valid at
+  183–291 s, 3/5 request timeouts — but its outputs were the most complete (goal-bar correctly
+  initialized + animated). With 16+ GB VRAM devstral becomes the quality pick; on 8 GB it is
+  unusable for interactive generation.
+</p>
+<p>Screenshots rendered with headless Edge (WebView2 engine) — regenerate with
+<code>render-screenshots.sh</code>. Validator: <code>../../validate-overlay.py</code>.</p>
+<div class="grid">
+  <div class="card"><h2>qwen2.5-coder:7b — chat-box</h2><img src="results/qwen2.5-coder_7b/chat-box.png" alt="chat-box"><p>validator: PASS · 61 s (first load)</p></div>
+  <div class="card"><h2>qwen2.5-coder:7b — emote-rain</h2><img src="results/qwen2.5-coder_7b/emote-rain.png" alt="emote-rain"><p>validator: PASS · 10 s</p></div>
+  <div class="card"><h2>qwen2.5-coder:7b — follower-alert</h2><img src="results/qwen2.5-coder_7b/follower-alert.png" alt="follower-alert"><p>validator: PASS · 8 s</p></div>
+  <div class="card"><h2>qwen2.5-coder:7b — goal-bar</h2><img src="results/qwen2.5-coder_7b/goal-bar.png" alt="goal-bar"><p>validator: FAIL (no transition, bar not initialized) · 9 s</p></div>
+  <div class="card"><h2>qwen2.5-coder:7b — poll-widget</h2><img src="results/qwen2.5-coder_7b/poll-widget.png" alt="poll-widget"><p>validator: PASS · 15 s</p></div>
+  <div class="card"><h2>devstral — follower-alert</h2><img src="results/devstral_latest/follower-alert.png" alt="devstral follower-alert"><p>validator: PASS · 183 s</p></div>
+  <div class="card"><h2>devstral — goal-bar</h2><img src="results/devstral_latest/goal-bar.png" alt="devstral goal-bar"><p>validator: PASS (initialized + transition) · 291 s</p></div>
+  <div class="card"><h2>devstral — chat-box / emote-rain / poll-widget</h2><p>TIMEOUT at 300 s (CPU-offload on 8 GB GPU) — no artifacts</p></div>
+</div>
+</body>
+</html>

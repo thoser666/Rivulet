@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Emote Rain</title>
+<style>
+  body, html {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: transparent;
+  }
+  .emote {
+    position: absolute;
+    font-size: 24px;
+    animation: sway 2s infinite ease-in-out;
+  }
+  @keyframes sway {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(10px); }
+  }
+</style>
+</head>
+<body>
+<script>
+  const emojis = ['🎉', '❤️', '⭐', '🔥', '😂'];
+  const maxEmotes = 80;
+  let emoteCount = 0;
+
+  function createEmote() {
+    if (emoteCount >= maxEmotes) return;
+    const emoji = emojis[Math.floor(Math.random() * emojis.length)];
+    const size = Math.floor(Math.random() * 41) + 24;
+    const x = Math.floor(Math.random() * window.innerWidth);
+    const emote = document.createElement('div');
+    emote.className = 'emote';
+    emote.style.fontSize = `${size}px`;
+    emote.style.left = `${x}px`;
+    emote.style.top = '0px';
+    emote.style.transform = `rotate(${Math.random() * 360}deg)`;
+    emote.textContent = emoji;
+    document.body.appendChild(emote);
+    emoteCount++;
+    emote.addEventListener('animationend', () => {
+      document.body.removeChild(emote);
+      emoteCount--;
+    });
+  }
+
+  function spawnEmote(emoji) {
+    if (emoji) emojis.push(emoji);
+    for (let i = 0; i < 12; i++) createEmote();
+  }
+
+  window.rivuletEmote = spawnEmote;
+
+  setInterval(createEmote, 100);
+</script>
+</body>
+</html>

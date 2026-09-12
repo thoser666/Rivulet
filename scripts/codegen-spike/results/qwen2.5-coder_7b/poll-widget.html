@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Poll Widget</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    .poll { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 480px; background: rgba(255, 255, 255, 0.8); padding: 20px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); border-radius: 8px; text-align: center; }
+    .question { font-size: 24px; margin-bottom: 20px; }
+    .option { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .label { font-size: 16px; }
+    .bar { height: 20px; background: #ccc; border-radius: 8px; overflow: hidden; }
+    .bar-fill { height: 100%; background: teal; transition: width 400ms; }
+    .count { font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="poll" id="poll">
+    <div class="question" id="question"></div>
+    <div class="option" id="option1"></div>
+    <div class="option" id="option2"></div>
+    <div class="option" id="option3"></div>
+    <div class="option" id="option4"></div>
+  </div>
+  <script>
+    let pollData = {
+      question: "Next game?",
+      options: ["Minecraft", "Fortnite", "Rocket League", "Other"]
+    };
+
+    function updatePoll(data) {
+      document.getElementById('question').innerText = data.question;
+      data.options.forEach((option, index) => {
+        const optionElement = document.getElementById(`option${index + 1}`);
+        optionElement.innerHTML = `<div class="label">${option}</div><div class="bar"><div class="bar-fill" style="width: 0%"></div></div><div class="count">0</div>`;
+      });
+    }
+
+    function updateVote(index) {
+      const optionElement = document.getElementById(`option${index + 1}`);
+      const countElement = optionElement.querySelector('.count');
+      const barFillElement = optionElement.querySelector('.bar-fill');
+      let count = parseInt(countElement.innerText) + 1;
+      countElement.innerText = count;
+      barFillElement.style.width = `${(count / pollData.options.length) * 100}%`;
+      barFillElement.style.backgroundColor = index === 0 ? 'teal' : index === 1 ? 'orange' : index === 2 ? 'violet' : 'rose';
+    }
+
+    window.rivuletPoll = function(question, options) {
+      pollData = { question, options };
+      updatePoll(pollData);
+    };
+
+    window.rivuletVote = function(index) {
+      updateVote(index);
+    };
+
+    window.rivuletPoll(pollData.question, pollData.options);
+  </script>
+</body>
+</html>

@@ -577,7 +577,7 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Multi-language support | Implemented (EN/DE, 528 keys, parity-tested; see docs/i18n.md) |
 | Platform parity (Windows/macOS) | Open |
 | AI chat assistant | Open (M10) |
-| AI creative studio (Spark-like overlays) | Open (M10, planned: chat-driven local code-gen of browser-source overlays + emote/asset T2I, see docs/m10-ai-creative-studio.md) |
+| AI creative studio (Spark-like overlays) | Open (M10, planned: chat-driven local code-gen of browser-source overlays + emote/asset T2I; code-gen spike done — `qwen2.5-coder:7b` default on 8 GB GPUs, see docs/m10-ai-creative-studio.md + scripts/codegen-spike/) |
 | AI off-switches | Open (M10, planned: master switch + per-feature toggles + pause-while-live, default off, see docs/m10-ai-creative-studio.md) |
 
 > The checklist is verified against the machine-readable OBS catalog

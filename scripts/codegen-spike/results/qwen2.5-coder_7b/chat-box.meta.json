@@ -1,0 +1,9 @@
+{
+  "model": "qwen2.5-coder:7b",
+  "prompt": "chat-box",
+  "total_duration_ns": 60652431700,
+  "load_duration_ns": 26707659000,
+  "prompt_eval_count": 219,
+  "eval_count": 670,
+  "eval_duration_ns": 14724165000
+}

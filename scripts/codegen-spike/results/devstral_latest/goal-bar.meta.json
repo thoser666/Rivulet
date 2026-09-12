@@ -1,0 +1,9 @@
+{
+  "model": "devstral:latest",
+  "prompt": "goal-bar",
+  "total_duration_ns": 290799342300,
+  "load_duration_ns": 4208600,
+  "prompt_eval_count": 1433,
+  "eval_count": 686,
+  "eval_duration_ns": 289721335000
+}

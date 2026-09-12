@@ -1,0 +1,9 @@
+{
+  "model": "qwen2.5-coder:7b",
+  "prompt": "poll-widget",
+  "total_duration_ns": 15097260600,
+  "load_duration_ns": 3769800,
+  "prompt_eval_count": 247,
+  "eval_count": 818,
+  "eval_duration_ns": 14989151000
+}
