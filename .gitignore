@@ -91,3 +91,6 @@ fuzz/coverage/
 
 # OBS upstream check: last-checked release tag (runtime artifact, persisted via actions cache)
 /scripts/.obs-upstream-state.json
+
+# M10 code-gen spike: rendered screenshots are regenerable binaries
+/scripts/codegen-spike/results/**/*.png

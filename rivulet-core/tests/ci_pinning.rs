@@ -4329,12 +4329,17 @@ fn m10_creative_studio_is_specified_in_readme_gate_and_spec() {
     for marker in [
         "chat-driven local code-gen of browser-source overlays",
         "docs/m10-ai-creative-studio.md",
+        "scripts/codegen-spike/",
     ] {
         assert!(
             readme.contains(marker),
             "README M10 creative-studio bullet must mention {marker}"
         );
     }
+    assert!(
+        readme.contains("code-gen spike done — `qwen2.5-coder:7b` default on 8 GB GPUs"),
+        "README M10 row must carry the spike verdict (qwen2.5-coder:7b default on 8 GB GPUs)"
+    );
     assert!(
         readme.contains("AI off-switches"),
         "README M10 must carry the AI off-switches bullet"
@@ -4391,6 +4396,63 @@ fn m10_creative_studio_is_specified_in_readme_gate_and_spec() {
             || spec.contains("no public upload API")
             || spec.contains("no public emote-upload API"),
         "the M10 spec must document platform emote-upload constraints"
+    );
+}
+
+#[test]
+fn m10_codegen_spike_harness_is_wired() {
+    // The M10 spike row promises a code-gen quality comparison with real
+    // overlay prompts. The harness (prompts, runner, validator, renderer)
+    // is repo tooling: pin its pieces so the methodology survives refactors
+    // and the results stay regenerable.
+    let spike = repo_file("scripts/codegen-spike");
+    for file in [
+        "run-spike.sh",
+        "build-payload.py",
+        "extract-response.py",
+        "render-screenshots.sh",
+        "README.md",
+    ] {
+        assert!(
+            spike.join(file).exists(),
+            "the codegen spike harness must ship scripts/codegen-spike/{file}"
+        );
+    }
+    for prompt in [
+        "follower-alert",
+        "goal-bar",
+        "chat-box",
+        "poll-widget",
+        "emote-rain",
+    ] {
+        assert!(
+            spike
+                .join("prompts")
+                .join(format!("{prompt}.prompt.md"))
+                .exists(),
+            "the codegen spike must pin the real overlay prompt {prompt}"
+        );
+    }
+    let runner = read("scripts/codegen-spike/run-spike.sh");
+    assert!(
+        runner.contains("validate-overlay.py") && runner.contains("extract-response.py"),
+        "the spike runner must validate artifacts and use the response extractor"
+    );
+    let validator = read("scripts/validate-overlay.py");
+    for marker in ["no-remote", "no-crash", "animation", "--self-test"] {
+        assert!(
+            validator.contains(marker),
+            "the overlay validator must implement the {marker} check"
+        );
+    }
+    let spec = read("docs/m10-ai-creative-studio.md");
+    assert!(
+        spec.contains("qwen2.5-coder:7b"),
+        "the M10 spec must name the real 8 GB-tier codegen candidate (qwen2.5-coder:7b)"
+    );
+    assert!(
+        !spec.contains("8 GB GPU | `qwen3-coder:8b`") && !spec.contains("Recommended default: **`qwen3-coder:8b`**"),
+        "the phantom qwen3-coder:8b tag must not return as the recommended model (it does not exist in the Ollama library)"
     );
 }
 

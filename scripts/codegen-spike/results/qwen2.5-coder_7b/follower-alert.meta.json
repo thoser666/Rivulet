@@ -1,0 +1,9 @@
+{
+  "model": "qwen2.5-coder:7b",
+  "prompt": "follower-alert",
+  "total_duration_ns": 7802064200,
+  "load_duration_ns": 4278900,
+  "prompt_eval_count": 205,
+  "eval_count": 419,
+  "eval_duration_ns": 7695956000
+}

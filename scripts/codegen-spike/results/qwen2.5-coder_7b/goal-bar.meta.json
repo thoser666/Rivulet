@@ -1,0 +1,9 @@
+{
+  "model": "qwen2.5-coder:7b",
+  "prompt": "goal-bar",
+  "total_duration_ns": 8999981900,
+  "load_duration_ns": 3807100,
+  "prompt_eval_count": 231,
+  "eval_count": 482,
+  "eval_duration_ns": 8895858000
+}

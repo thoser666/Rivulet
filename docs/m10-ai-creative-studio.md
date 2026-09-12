@@ -55,11 +55,16 @@ Frontend/codegen is a chatbot strength — no need for a huge model for single-f
 
 | Size tier | Model (`ollama run …`) | Footprint | Use |
 | --- | --- | --- | --- |
-| 8 GB GPU | `qwen3-coder:8b` | ~5.6 GB | Fast inner loop; single-file overlays |
-| 16–24 GB GPU | `devstral` (small), `qwen3-coder:80b-a3b` w/ expert-offload | ~14–48 GB | Agentic multi-file/scene packages |
-| Big rigs | `qwen3-coder` 30B/480B-A35B | 19–290 GB | Best quality; usually overkill for overlays |
+| 8 GB GPU | `qwen2.5-coder:7b` | ~4.7 GB | Fast inner loop; single-file overlays |
+| 16–24 GB GPU | `devstral` (small), `qwen3-coder:30b-a3b` (MoE) | ~14–19 GB | Agentic multi-file/scene packages |
+| Big rigs | `qwen3-coder` 480B-A35B | ~290 GB | Best quality; usually overkill for overlays |
 
-Recommended default: **`qwen3-coder:8b`** (or `devstral` small on 16 GB) — single-file overlays are short, well-scoped code-gen tasks.
+Recommended default: **`qwen2.5-coder:7b`** (or `devstral` small on 16 GB) — single-file overlays are short, well-scoped code-gen tasks.
+
+> Correction (spike finding): the originally listed `qwen3-coder:8b` does not
+> exist in the Ollama library — the qwen3-coder family ships 30b/480b MoE
+> variants only. The 8 GB-tier candidate is `qwen2.5-coder:7b`; verified
+> against the registry tag list during the spike.
 
 ### 4. Emote/asset generation — free local T2I (additional feature)
 
@@ -180,7 +185,17 @@ The M10 gate (`milestone-quality-gates.md` §M10) already requires local-model C
 
 ## Open questions
 
-1. **LLM choice**: `qwen3-coder:8b` (single GPU default) vs `devstral` small (16 GB) vs `qwen3-coder:80b-a3b` (expert-offload) for quality on scene packages. Decided by a code-gen spike with real overlay prompts.
+1. **LLM choice** — ✅ decided by the code-gen spike (2026-09-12, RTX 4060 Ti 8 GB,
+   harness in [`scripts/codegen-spike/`](../scripts/codegen-spike/README.md)):
+   **`qwen2.5-coder:7b` is the default.** 4/5 real overlay prompts produced valid
+   single-file overlays (structure, no-CDN, JS-syntax, host-API all pass) at
+   8–15 s per prompt after first load. Only miss: donation goal bar (missing CSS
+   transition, progress not initialized). `devstral` (14 GB) CPU-offloads on this
+   card: 2/5 prompts finished inside 300 s (183–291 s) and 3 timed out — unusable
+   for interactive generation on 8 GB, but its two outputs were the most complete
+   (goal bar correctly initialized and animated), so **devstral stays the quality
+   pick for 16+ GB cards** and for non-interactive batch generation. `qwen3-coder`
+   30b/480b remain out of reach for this tier.
 2. **Scene integration depth**: phase 1 = overlay into current scene only; phase 2 = full scene packages + layer reference by name (mirror-Spark). Keep phase 2 out of the M10 gate.
 3. **Vision**: reference-image color pickup needs an Ollama vision model (`llava` / `qwen3-vl`). Optional in phase 1 (hex palettes accepted as text); do not gate on it.
 4. **WASM-plugin tie-in (M11)**: could ship the generator as a host-built plugin later; not required for phase 1.
@@ -191,7 +206,7 @@ The M10 gate (`milestone-quality-gates.md` §M10) already requires local-model C
 | --- | --- | --- |
 | **Scratch** | Feasibility + Spark parity research | ✅ This document |
 | **Acceptance** | Accepted into M10 scope; README bullet + quality-gate bullet + ci_pinning guard | ✅ README M10 bullets (creative studio + off-switches), M10 gate bullets, `m10_creative_studio_is_specified_in_readme_gate_and_spec` guard, CHANGELOG |
-| **Spike** | Code-gen quality spike (qwen3-coder:8b vs devstral) + overlay-in-scene prototype | |
+| **Spike** | Code-gen quality spike (qwen2.5-coder:7b vs devstral) + overlay-in-scene prototype | ✅ Spike done (2026-09-12): `qwen2.5-coder:7b` wins on 8 GB (4/5 valid @ 8–15 s; devstral 2/5 + 3 timeouts). Artifacts + review index in `scripts/codegen-spike/`. Overlay-in-scene prototype still open. |
 | **Feature** | Overlay pipeline + reactive wiring + GUI panel | |
 | **Emote sub-feature** | T2I backend + platform export kit (7TV push optional) | |
 | **Kill-switch** | `AiSwitches` persistence + Settings UI + default-off tests + pause-while-live hook | |

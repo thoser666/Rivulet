@@ -1,0 +1,9 @@
+{
+  "model": "devstral:latest",
+  "prompt": "follower-alert",
+  "total_duration_ns": 183020897600,
+  "load_duration_ns": 4906200,
+  "prompt_eval_count": 1405,
+  "eval_count": 450,
+  "eval_duration_ns": 181948202000
+}

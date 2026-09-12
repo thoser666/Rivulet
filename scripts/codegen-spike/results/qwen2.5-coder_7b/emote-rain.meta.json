@@ -1,0 +1,9 @@
+{
+  "model": "qwen2.5-coder:7b",
+  "prompt": "emote-rain",
+  "total_duration_ns": 9818415800,
+  "load_duration_ns": 3052900,
+  "prompt_eval_count": 226,
+  "eval_count": 534,
+  "eval_duration_ns": 9712966000
+}

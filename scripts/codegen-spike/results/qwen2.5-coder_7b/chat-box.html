@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Overlay</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: rgba(0, 0, 0, 0.1); }
+        .chat-container { position: fixed; bottom: 0; left: 0; width: 100%; max-height: 50vh; overflow-y: auto; }
+        .chat-message { display: flex; align-items: center; margin: 5px 0; padding: 10px; background: rgba(0, 0, 0, 0.5); border-radius: 15px; animation: slideInLeft 0.5s forwards; }
+        .chat-message.fadeOut { animation: slideOutLeft 0.5s forwards; }
+        @keyframes slideInLeft { from { transform: translateX(-100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes slideOutLeft { from { transform: translateX(0); opacity: 1; } to { transform: translateX(-100%); opacity: 0; } }
+        .username { font-weight: bold; color: cyan; }
+        .message { color: white; }
+    </style>
+</head>
+<body>
+    <div class="chat-container" id="chatContainer"></div>
+    <script>
+        const chatContainer = document.getElementById('chatContainer');
+        const messages = [];
+
+        function rivuletChat(user, message) {
+            messages.push({ user, message });
+            if (messages.length > 5) {
+                messages.shift();
+            }
+            renderMessages();
+        }
+
+        function renderMessages() {
+            chatContainer.innerHTML = '';
+            messages.forEach((msg, index) => {
+                const messageElement = document.createElement('div');
+                messageElement.classList.add('chat-message');
+                messageElement.classList.add('fadeOut');
+                setTimeout(() => {
+                    messageElement.classList.remove('fadeOut');
+                }, index * 500);
+                messageElement.innerHTML = `<span class="username">${msg.user}:</span> <span class="message">${msg.message}</span>`;
+                chatContainer.appendChild(messageElement);
+                setTimeout(() => {
+                    messageElement.classList.add('fadeOut');
+                }, 30000);
+            });
+        }
+
+        // Seed demo messages
+        rivuletChat('StreamFan', 'Lets gooo!');
+        rivuletChat('PixelPete', 'hi from Germany');
+        rivuletChat('ModMarc', 'rules in pinned msg');
+    </script>
+</body>
+</html>

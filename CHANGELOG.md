@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+- spike(m10): code-gen quality spike harness (`scripts/codegen-spike/`) for the Creative Studio's
+  model decision — five real overlay prompts (follower alert, goal bar, chat box, poll widget,
+  emote rain), `run-spike.sh` driving Ollama with a strict JSON output contract + per-prompt
+  metrics, `scripts/validate-overlay.py` objective validator (structure, no-remote/no-CDN,
+  no-crash, size, `node --check` JS syntax, animation) with self-test, and a headless-Edge
+  (WebView2-engine) screenshot harness for the visual pass. Doc correction: the previously
+  listed `qwen3-coder:8b` does not exist in the Ollama library (30b/480b MoE only); the 8 GB-tier
+  candidate is `qwen2.5-coder:7b` — model table + open questions + status tracker updated.
+  **Spike executed** (RTX 4060 Ti 8 GB): `qwen2.5-coder:7b` wins as default — 4/5 prompts valid
+  at 8–15 s (only miss: goal-bar transition/init); `devstral` (14 GB, CPU-offload) 2/5 valid at
+  183–291 s + 3 timeouts, but the most complete outputs — quality pick for 16+ GB cards. Artifacts,
+  metrics, and review index committed under `scripts/codegen-spike/results/`.
+
 - docs(m10): AI Creative Studio (Spark-like) accepted into the M10 roadmap as a local-first
   chat-driven code-gen studio (browser-source overlays/widgets/scene packages + optional local
   emote/T2I), with first-class **off-switches**: all AI features off by default, a global master
