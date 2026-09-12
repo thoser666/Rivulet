@@ -489,6 +489,28 @@ must not be implied by beta parity.
       double replies — shared reply cooldown, command-claiming, optional
       silent/observer mode
 - [ ] GUI panel (chat + bot settings) wired through the i18n layer
+- [ ] **AI Creative Studio (Spark-like)** — a local-first chat-driven creative
+      assistant in the M10 panel, mirroring Meld Spark but fully local and
+      free: the Ollama code model turns natural-language requests into
+      HTML/CSS/JS overlays (alerts, lower thirds, countdown timers, goal
+      trackers, leaderboards, chat overlays, starting-soon/BRB/ending screens,
+      full scene packages) rendered through the shipped browser source, with
+      live-event reactivity (follows/subs/raids/chat/`!commands`), scene/layer
+      awareness, conversational refinement, per-message restore points,
+      test-event firing, and a gallery; **emote/asset generation** is an
+      additional local T2I pipeline (transparent platform kit + optional 7TV
+      push); scope and research in
+      [`docs/m10-ai-creative-studio.md`](docs/m10-ai-creative-studio.md)
+- [ ] **AI off-switches (Settings)** — all AI features are **off by default**
+      and independently disableable: a global **"Enable AI features"** master
+      switch (kills the chatbot, the creative studio, and the emote/T2I
+      generator — no model load, no workers spawned) plus per-feature toggles
+      for "AI Chat Assistant", "AI Creative Studio (overlays)", and
+      "Emote/T2I generator", with an optional "pause while live" runtime
+      override (Go Live ⇒ models suspend, streaming stays unblocked); the
+      switches persist (Settings serialization), are localized (EN/DE), and
+      their default-off state is verified by tests — mirrors the M6
+      remote-companion permission-gating pattern
 
 **Goal:** A private, subscription-free, API-free AI chat assistant that runs fully locally — the counter-position to cloud chat bots like StreamChatAI.
 
@@ -555,6 +577,8 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Multi-language support | Implemented (EN/DE, 528 keys, parity-tested; see docs/i18n.md) |
 | Platform parity (Windows/macOS) | Open |
 | AI chat assistant | Open (M10) |
+| AI creative studio (Spark-like overlays) | Open (M10, planned: chat-driven local code-gen of browser-source overlays + emote/asset T2I, see docs/m10-ai-creative-studio.md) |
+| AI off-switches | Open (M10, planned: master switch + per-feature toggles + pause-while-live, default off, see docs/m10-ai-creative-studio.md) |
 
 > The checklist is verified against the machine-readable OBS catalog
 > [`scripts/obs-features.json`](scripts/obs-features.json) by

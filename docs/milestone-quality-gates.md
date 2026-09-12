@@ -302,6 +302,23 @@ Review privacy, control, and failure boundaries:
   `chat:read`+`chat:edit`, Kick session token, YouTube API key + OAuth
   (`youtube.force-ssl`), none of them ever logged, exported, or screenshotted;
   the UI surfaces missing scopes and the Twitch phone-verification requirement.
+- The **AI Creative Studio (Spark-like sub-feature)** keeps every stage local
+  and non-blocking: generated overlays render through the browser source
+  without stalling the capture pipeline (bounded input queue, RGBA frame
+  hand-off), code generation is cancellable and stays within the local-model
+  budget, generated code is reviewed before it reaches a live scene, and the
+  optional emote/asset T2I path degrades gracefully (overlay-only) when the
+  generator or VRAM budget is unavailable. Scope and research live in
+  [`docs/m10-ai-creative-studio.md`](m10-ai-creative-studio.md).
+- **AI off-switches** are the first-class kill path: every AI feature is
+  **off by default** — nothing loads until the user opts in — a global
+  master switch disables the chatbot, the creative studio, and the
+  emote/T2I generator (no model load, no workers), each
+  feature is independently disableable, the switches persist and localize,
+  and an optional "pause while live" override suspends models on Go Live
+  without blocking streaming; the default-off and switch round-trip
+  states are verified by tests. See
+  [`docs/m10-ai-creative-studio.md`](m10-ai-creative-studio.md).
 
 Exit evidence: privacy review, redacted chat transcript, provider failure cases,
 confirmation/permission checks, and a per-platform compliance test matrix
