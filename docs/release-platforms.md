@@ -63,8 +63,14 @@ release asset `rivulet-windows-x86_64.msi` with its SHA-256, the MSI
    MSI, and dry-run reports the payload SHA-256 and package identity.
 5. Submit the generated `<identifier>/<version>/<identifier>.yaml` folder as
    a PR to `microsoft/winget-pkgs` and let the community validation run.
-6. Add an opt-in PR/dispatch workflow that submits only reviewed manifest
-   changes; never upload unsigned binaries.
+6. **Weekly preparation (one release per week):** the **Weekly release
+   promotion** workflow re-renders and byte-verifies the manifest from the
+   real MSI of the promoted `weekly-latest` release and publishes the
+   validated payload as a `winget-manifest-<tag>` artifact. Opening the
+   winget-pkgs PR therefore stays a human, copy-paste step (external
+   review), but it is scoped to exactly one reviewed manifest per week —
+   never a per-alpha chore. Add an opt-in PR/dispatch workflow only after
+   external reviews are flowing; never upload unsigned binaries.
 
 ### Scoop
 
@@ -97,9 +103,10 @@ unverified binary.
 
 The Chocolatey **community repository** accepts unsigned installers (with a
 moderator warning), so it is usable before SignPath approval — but unlike
-Scoop every submission is a **moderated PR per version**. That makes it a
-milestone channel, not a fast-follow: submit the first beta, not weekly
-alphas, or the moderation queue rejects the churn.
+Scoop every submission is a **moderated PR per version**. It consumes the
+**weekly-latest** slow lane: one reviewed package per week, never a
+per-alpha version, so the moderation queue sees exactly one review scope
+per week (see step 3 below).
 
 The package is generated from the portable ZIP asset exactly like the Scoop
 manifest: `generate-chocolatey-package.ps1` takes the SHA-256 from the
@@ -114,7 +121,14 @@ release's own `SHA256SUMS` asset, normalizes the version for Chocolatey
 2. Submit the generated package directory with `choco push` (API key from
    the community repository account) or open the package PR against the
    community repository — both are external and moderated.
-3. When winget goes live later, Chocolatey stays as the second Windows
+3. **Weekly submission (one release per week):** the **Weekly release
+   promotion** workflow re-renders and byte-verifies the package for the
+   promoted `weekly-latest` release and publishes the validated payload as
+   a `chocolatey-package-<tag>` artifact. Upload **one** reviewed package
+   per week with `choco push` — the community repository rejects churn, so
+   never submit per-alpha versions; the weekly-latest artifact is the single
+   review scope per week.
+4. When winget goes live later, Chocolatey stays as the second Windows
    option (winget serves MSI users, Chocolatey serves portable users who
    prefer choco); promote both from the same `weekly-latest` target.
 
@@ -136,7 +150,12 @@ symlinks in `/usr/bin/`, a desktop file, and the 512×512 icon.
    assets (AppImage + icon) exist, and the `.install` file is referenced.
 2. Push the PKGBUILD to the AUR git repo
    (`https://aur.archlinux.org/rivulet.git`) — external, not automated.
-3. Users install with `yay -S rivulet` or `paru -S rivulet`.
+3. **Weekly status (one release per week):** the **Weekly release
+   promotion** workflow checks whether the committed PKGBUILD already pins
+   the promoted version and reports the exact bump (`pkgver` + `sha256sums`
+   + push) when it does not. The AUR push stays external and manual; the
+   weekly run keeps the todo visible and validated.
+4. Users install with `yay -S rivulet` or `paru -S rivulet`.
 
 ### Promotion cadence: fast lane vs. weekly-latest
 
@@ -159,11 +178,24 @@ Mondays 07:09 UTC, manual dispatch supported) is the **slow lane**:
    previous promotion (`generate-release-notes.sh --from-tag <prev>
    --digest`): features stay listed individually, everything else rolls up
    into per-section counts — a natural week of changes, not 30 alpha bullets.
-4. It renders and byte-verifies the Scoop manifest for the promoted release
-   and updates the bucket automatically (with `SCOOP_BUCKET_TOKEN`) or
-   publishes the manifest as an artifact (without). WinGet/Chocolatey/Cask
-   can later consume the same promotion target: the promoted tag + digest
-   notes are exactly what their manifest PRs need.
+4. It **prepares every active channel** for that single promoted release,
+   once per week, on the same tag + digest notes:
+   - **Scoop**: renders and byte-verifies `rivulet.json` and updates the
+     bucket automatically (with `SCOOP_BUCKET_TOKEN`) or publishes the
+     manifest as an artifact (without).
+   - **WinGet**: renders and byte-verifies the manifest from the real MSI
+     (via `generate-winget-manifest.ps1`, including its Pester suite) and
+     publishes the validated payload as a `winget-manifest-<tag>` artifact.
+   - **Chocolatey**: renders and byte-verifies the package (via
+     `generate-chocolatey-package.ps1`, including its Pester suite) and
+     publishes the validated payload as a `chocolatey-package-<tag>`
+     artifact.
+   - **AUR**: validates PKGBUILD structure and reports whether it already
+     pins the promoted version or hands off the exact bump (`pkgver` +
+     `sha256sums` + push).
+   The external pushes (winget-pkgs PR, `choco push`, AUR push) stay human
+   and reviewed; the artifacts make each one a copy-paste of a
+   pre-validated payload, scoped to exactly one release per week.
 
 To promote manually (e.g. right after a big feature lands):
 

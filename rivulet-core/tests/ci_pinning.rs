@@ -3289,6 +3289,34 @@ fn weekly_release_promotion_is_scheduled_and_safe() {
         promo.contains("generate-scoop-manifest.ps1") && promo.contains("-ValidateOnly"),
         "the promotion must render and re-verify the Scoop manifest for the promoted release"
     );
+    // The promotion prepares EVERY active channel once per week. Each
+    // channel job must be gated on the promote job's `up_to_date` output
+    // (no re-render when the slow lane already points at the release) and
+    // must stay a validated payload + hand-off, never an automated external
+    // push: excerpts flow to winget-pkgs PRs, `choco push`, and the AUR git
+    // repo by a human from the published artifacts.
+    assert!(
+        promo.contains("outputs:")
+            && promo.contains("up_to_date:")
+            && promo.contains("needs.promote.outputs.up_to_date"),
+        "the promote job must expose an up_to_date output and each channel job must gate on it"
+    );
+    assert!(
+        promo.contains("prepare-winget:") && promo.contains("winget-manifest-")
+            && promo.contains("Rivulet.Rivulet") && promo.contains("InstallerSha256"),
+        "the weekly run must prepare a byte-verified WinGet manifest (identity Rivulet.Rivulet) as an artifact"
+    );
+    assert!(
+        promo.contains("prepare-chocolatey:") && promo.contains("chocolatey-package-")
+            && promo.contains("choco push") && promo.contains("checksum64"),
+        "the weekly run must prepare a byte-verified Chocolatey package (with a real portable ZIP checksum) as an artifact — external `choco push` stays human"
+    );
+    assert!(
+        promo.contains("prepare-aur:")
+            && promo.contains("pkgver")
+            && promo.contains("https://aur.archlinux.org/rivulet.git"),
+        "the weekly run must validate the AUR PKGBUILD bump status and hand off the exact push"
+    );
     assert!(
         promo.contains("SCOOP_BUCKET_TOKEN") && promo.contains("warning::"),
         "without the bucket token the promotion must warn + publish the manifest as an artifact instead of failing"
