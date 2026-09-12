@@ -4384,6 +4384,17 @@ fn m10_creative_studio_is_specified_in_readme_gate_and_spec() {
             "README M10 off-switches bullet must mention {marker}"
         );
     }
+    // The dual placement marker: infrastructure in Settings, workflow on the
+    // Assistant tab — this is the UX contract for M10 AI settings.
+    for marker in [
+        "Assistant tab",
+        "infrastructure in Settings, workflow on the Assistant tab",
+    ] {
+        assert!(
+            readme.contains(marker),
+            "README M10 off-switches bullet must mention {marker}"
+        );
+    }
 
     let gates = read("docs/milestone-quality-gates.md");
     assert!(
@@ -4395,6 +4406,12 @@ fn m10_creative_studio_is_specified_in_readme_gate_and_spec() {
             && gates.contains("off by default")
             && gates.contains("pause while live"),
         "the M10 gate must review the kill-switch contract (off by default, pause-while-live)"
+    );
+    assert!(
+        gates.contains("Settings stay lean")
+            && gates.contains("Assistant tab")
+            && gates.contains("infrastructure in Settings, workflow on the Assistant tab"),
+        "the M10 gate must review the Settings-placement contract (infrastructure in Settings, workflow on the Assistant tab)"
     );
 
     let spec = read("docs/m10-ai-creative-studio.md");
@@ -4424,6 +4441,13 @@ fn m10_creative_studio_is_specified_in_readme_gate_and_spec() {
             || spec.contains("no public upload API")
             || spec.contains("no public emote-upload API"),
         "the M10 spec must document platform emote-upload constraints"
+    );
+    assert!(
+        spec.contains("## Settings placement")
+            && spec.contains("Assistant tab")
+            && spec.contains("infrastructure in Settings, workflow on the Assistant tab")
+            && spec.contains("AiSwitches"),
+        "the M10 spec must specify the Settings-placement contract (infrastructure in Settings, workflow on the Assistant tab)"
     );
 }
 

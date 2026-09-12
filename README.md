@@ -501,16 +501,21 @@ must not be implied by beta parity.
       additional local T2I pipeline (transparent platform kit + optional 7TV
       push); scope and research in
       [`docs/m10-ai-creative-studio.md`](docs/m10-ai-creative-studio.md)
-- [ ] **AI off-switches (Settings)** — all AI features are **off by default**
-      and independently disableable: a global **"Enable AI features"** master
-      switch (kills the chatbot, the creative studio, and the emote/T2I
-      generator — no model load, no workers spawned) plus per-feature toggles
-      for "AI Chat Assistant", "AI Creative Studio (overlays)", and
-      "Emote/T2I generator", with an optional "pause while live" runtime
-      override (Go Live ⇒ models suspend, streaming stays unblocked); the
-      switches persist (Settings serialization), are localized (EN/DE), and
-      their default-off state is verified by tests — mirrors the M6
-      remote-companion permission-gating pattern
+- [ ] **AI off-switches (Settings + Assistant tab)** — all AI features are
+      **off by default** and independently disableable: a global
+      **"Enable AI features"** master switch (kills the chatbot, the creative
+      studio, and the emote/T2I generator — no model load, no workers
+      spawned) plus per-feature toggles for "AI Chat Assistant", "AI
+      Creative Studio (overlays)", and "Emote/T2I generator", with an
+      optional "pause while live" runtime override (Go Live ⇒ models
+      suspend, streaming stays unblocked); the switches persist (Settings
+      serialization), are localized (EN/DE), and their default-off state is
+      verified by tests — mirrors the M6 remote-companion permission-gating
+      pattern. **Settings stay lean**: infrastructure lives in the Settings
+      page (master switch, Ollama connection, T2I engine, resource budget),
+      feature workflow lives on the **Assistant tab** (per-feature toggles,
+      model choice, overlay folder, test events, gallery) —
+      infrastructure in Settings, workflow on the Assistant tab
 
 **Goal:** A private, subscription-free, API-free AI chat assistant that runs fully locally — the counter-position to cloud chat bots like StreamChatAI.
 

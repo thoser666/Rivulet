@@ -341,7 +341,15 @@ Review privacy, control, and failure boundaries:
   feature is independently disableable, the switches persist and localize,
   and an optional "pause while live" override suspends models on Go Live
   without blocking streaming; the default-off and switch round-trip
-  states are verified by tests. See
+  states are verified by tests.
+- **Settings stay lean** (infrastructure in Settings, workflow on the Assistant tab): the Settings page hosts only the machine-level AI
+  config (master switch, Ollama connection, T2I engine, resource budget,
+  pause-while-live); the work-contextual toggles and studio controls
+  (per-feature switches, model choice, overlay folder, test events,
+  gallery) are rendered on the **Assistant tab**. Placement must not
+  change storage or the kill-path — `AiSwitches` serialization stays in
+  the existing Settings round-trip.
+  See
   [`docs/m10-ai-creative-studio.md`](m10-ai-creative-studio.md).
 
 Exit evidence: privacy review, redacted chat transcript, provider failure cases,

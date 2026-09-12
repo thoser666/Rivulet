@@ -105,6 +105,43 @@ All AI features are **off by default** and independently disableable through **S
 
 The direct precedence pattern is the M6 remote-companion precedent: explicit permission gated behind a toggle (`allow_remote_stream_control`), persisted, localized, and pinned by a ci_pinning guard so the three sources (README / gate / spec) cannot drift.
 
+## Settings placement: infrastructure in Settings, workflow on the Assistant tab
+
+AI settings live on **two levels** so the global Settings page does not get
+overloaded — the Assistant tab (an existing, currently placeholder M9
+navigation view) is the natural home for feature-control that is only
+relevant inside the assistant context.
+
+**Settings page (infrastructure + trust boundary, like OBS-WebSocket /
+remote-companion):**
+- **Master switch "Enable AI features"** (the kill-path, default off).
+- **Runtime override "Pause AI while live"** (suspend models on Go Live).
+- **Ollama connection**: endpoint (default `http://127.0.0.1:11434`),
+  model for orchestrator/code-gen, optional GPU/VRAM budget.
+- **Emote/T2I backend**: generator choice (`stable-diffusion.cpp` /
+  `ComfyUI` / `candle`), endpoint or model file, per-feature toggle
+  "Emote/T2I generator".
+
+**Assistant tab (feature workflow, only while the panel is open):**
+- **Per-feature toggles** for "AI Chat Assistant" and "AI Creative Studio
+  (overlays)" — context switches the streamer flips next to the chat,
+  guarded by the master switch and the resource budget.
+- **Studio-local controls**, where the generated overlay lives:
+  overlay folder (`~/.rivulet/creative/`), model choice for the current
+  session, test-event firing, restore points, and the gallery.
+
+The rule: anything describing **how** the models connect to the machine
+(endpoints, engines, VRAM, kill-path) goes to Settings; anything the user
+touches **while creating** belongs on the Assistant tab. Both serialize
+through the same `AiSwitches`-in-Settings round-trip (see persistence
+above) — placement changes nothing about storage, only about which panel
+renders the control.
+
+These markers are pinned by `ci_pinning` so the two-level placement stays
+true across README / gate / spec:
+`infrastructure in Settings, workflow on the Assistant tab` +
+`Assistant tab`.
+
 ## Proposed architecture (sketch)
 
 ### Pipeline (async, driven from the M10 Assistant chat panel)
