@@ -4314,6 +4314,87 @@ fn m10_platform_compliance_bullets_are_pinned_in_docs() {
 }
 
 #[test]
+fn m10_creative_studio_is_specified_in_readme_gate_and_spec() {
+    // M10 feasibility scratch (Spark-like, local-first): the AI Creative
+    // Studio must be specified in the README roadmap, the M10 quality gate,
+    // AND the spec document, and those three sources must stay in sync. The
+    // spec's kill-switch design (off by default, master + per-feature
+    // toggles, pause-while-live, persisted, localized) is pinned here so a
+    // silent removal of the off-switch contract fails CI.
+    let readme = read("README.md");
+    assert!(
+        readme.contains("AI Creative Studio (Spark-like)"),
+        "README M10 must carry the AI Creative Studio bullet"
+    );
+    for marker in [
+        "chat-driven local code-gen of browser-source overlays",
+        "docs/m10-ai-creative-studio.md",
+    ] {
+        assert!(
+            readme.contains(marker),
+            "README M10 creative-studio bullet must mention {marker}"
+        );
+    }
+    assert!(
+        readme.contains("AI off-switches"),
+        "README M10 must carry the AI off-switches bullet"
+    );
+    for marker in [
+        "off by default",
+        "master switch",
+        "per-feature toggles",
+        "pause while live",
+        "docs/m10-ai-creative-studio.md",
+    ] {
+        assert!(
+            readme.contains(marker),
+            "README M10 off-switches bullet must mention {marker}"
+        );
+    }
+
+    let gates = read("docs/milestone-quality-gates.md");
+    assert!(
+        gates.contains("AI Creative Studio (Spark-like sub-feature)"),
+        "the M10 gate must review the creative-studio sub-feature"
+    );
+    assert!(
+        gates.contains("AI off-switches")
+            && gates.contains("off by default")
+            && gates.contains("pause while live"),
+        "the M10 gate must review the kill-switch contract (off by default, pause-while-live)"
+    );
+
+    let spec = read("docs/m10-ai-creative-studio.md");
+    assert!(
+        spec.contains("## Kill-switch design (off by default)")
+            && spec.contains("master switch")
+            && spec.contains("per-feature")
+            && spec.contains("Pause AI while live")
+            && spec.contains("precedent")
+            && spec.contains("allow_remote_stream_control"),
+        "the M10 spec must specify the kill-switch design with its M6 precedent"
+    );
+    assert!(
+        spec.contains("ACCEPTED") || spec.contains("Accepted into M10"),
+        "the M10 spec must state its acceptance status"
+    );
+    assert!(
+        spec.contains("window.rivulet.on"),
+        "the M10 spec must define the host IPC bridge for reactive overlays"
+    );
+    assert!(
+        spec.contains("qwen3-coder:8b") || spec.contains("qwen3-coder"),
+        "the M10 spec must recommend a code-generation model"
+    );
+    assert!(
+        spec.contains("no public emote upload API")
+            || spec.contains("no public upload API")
+            || spec.contains("no public emote-upload API"),
+        "the M10 spec must document platform emote-upload constraints"
+    );
+}
+
+#[test]
 fn stream_workspace_controls_stay_reachable_on_narrow_windows() {
     // Responsive contract of the Meld-style Stream page: below the narrow
     // width threshold the action bar and every control row wrap and the
