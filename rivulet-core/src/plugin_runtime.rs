@@ -16,7 +16,9 @@ use crate::plugin_manifest::{ManifestError, PluginManifest};
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use wasmtime::*;
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -43,6 +45,8 @@ pub enum RuntimeError {
     Trap(String),
     /// A required host import is missing from the WASM module.
     MissingImport(String),
+    /// The plugin was called from an invalid lifecycle state.
+    InvalidState(String),
     /// The manifest is invalid.
     Manifest(ManifestError),
     /// The WASM file could not be read.
@@ -63,6 +67,7 @@ impl fmt::Display for RuntimeError {
             }
             RuntimeError::Trap(msg) => write!(f, "WASM trap: {msg}"),
             RuntimeError::MissingImport(name) => write!(f, "missing WASM import: {name}"),
+            RuntimeError::InvalidState(msg) => write!(f, "invalid plugin state: {msg}"),
             RuntimeError::Manifest(e) => write!(f, "manifest error: {e}"),
             RuntimeError::IoError(msg) => write!(f, "I/O error: {msg}"),
         }
@@ -219,6 +224,8 @@ pub struct PluginHandle {
     store: Store<PluginStoreData>,
     /// The instantiated WASM module.
     instance: Instance,
+    /// Fuel refilled before each lifecycle call (CPU budget per call).
+    fuel_budget: u64,
 }
 
 impl fmt::Debug for PluginHandle {
@@ -250,6 +257,206 @@ impl PluginHandle {
     pub fn manifest(&self) -> &PluginManifest {
         &self.manifest
     }
+
+    /// Activate the plugin (start processing).
+    ///
+    /// Transitions `Initialized`/`Inactive` → `Active`. If the plugin
+    /// returns an error code it is demoted to `Inactive` (retryable),
+    /// mirroring the RFC error-recovery semantics.
+    pub fn activate(&mut self) -> Result<(), RuntimeError> {
+        if self.state == PluginState::Active {
+            return Ok(());
+        }
+        if !matches!(self.state, PluginState::Initialized | PluginState::Inactive) {
+            return Err(RuntimeError::InvalidState(format!(
+                "plugin_activate called from {:?}",
+                self.state
+            )));
+        }
+        let activate = self
+            .instance
+            .get_typed_func::<(), i32>(&mut self.store, "plugin_activate")
+            .map_err(|_| missing_export("plugin_activate"))?;
+        let code = self.invoke_guarded("plugin_activate", |handle| {
+            activate.call(&mut handle.store, ())
+        })?;
+        if code == 0 {
+            self.state = PluginState::Active;
+            Ok(())
+        } else {
+            self.state = PluginState::Inactive;
+            Err(RuntimeError::LifecycleError {
+                function: "plugin_activate",
+                code,
+            })
+        }
+    }
+
+    /// Process one unit of work (audio samples, video frame, or event).
+    ///
+    /// Only valid while `Active`. The input is copied into guest memory at a
+    /// host-chosen scratch address, `plugin_process` is invoked with
+    /// `(input_ptr, input_len, output_ptr, output_cap)`, and the bytes the
+    /// plugin reports having written are read back. A negative return code is
+    /// treated as a processing failure and demotes the plugin to `Inactive`.
+    pub fn process(&mut self, input: &[u8]) -> Result<Vec<u8>, RuntimeError> {
+        if self.state != PluginState::Active {
+            return Err(RuntimeError::InvalidState(format!(
+                "plugin_process called from {:?}",
+                self.state
+            )));
+        }
+        const INPUT_PTR: u32 = 0x1000;
+        const OUTPUT_PTR: u32 = 0x2000;
+        const OUTPUT_CAP: u32 = 0x1000;
+        if input.len() > INPUT_PTR as usize - 1 {
+            return Err(RuntimeError::InvalidState(
+                "plugin_process input exceeds scratch buffer".into(),
+            ));
+        }
+
+        let memory = self
+            .instance
+            .get_memory(&mut self.store, "memory")
+            .ok_or_else(|| RuntimeError::MissingExport("memory".into()))?;
+        memory
+            .write(&mut self.store, INPUT_PTR as usize, input)
+            .map_err(|e| RuntimeError::Trap(e.to_string()))?;
+
+        let process_fn = self
+            .instance
+            .get_typed_func::<(i32, i32, i32, i32), i32>(&mut self.store, "plugin_process")
+            .map_err(|_| missing_export("plugin_process"))?;
+        let code = self.invoke_guarded("plugin_process", |handle| {
+            process_fn.call(
+                &mut handle.store,
+                (
+                    INPUT_PTR as i32,
+                    input.len() as i32,
+                    OUTPUT_PTR as i32,
+                    OUTPUT_CAP as i32,
+                ),
+            )
+        })?;
+        if code < 0 {
+            self.state = PluginState::Inactive;
+            return Err(RuntimeError::LifecycleError {
+                function: "plugin_process",
+                code,
+            });
+        }
+
+        let len = (code as usize).min(OUTPUT_CAP as usize);
+        let mut output = vec![0u8; len];
+        memory
+            .read(&mut self.store, OUTPUT_PTR as usize, &mut output)
+            .map_err(|e| RuntimeError::Trap(e.to_string()))?;
+        Ok(output)
+    }
+
+    /// Deactivate the plugin (stop processing).
+    ///
+    /// Transitions `Active` → `Inactive`. A failing plugin is unloaded
+    /// (permanent) per the RFC lifecycle table.
+    pub fn deactivate(&mut self) -> Result<(), RuntimeError> {
+        if self.state == PluginState::Inactive {
+            return Ok(());
+        }
+        if self.state != PluginState::Active {
+            return Err(RuntimeError::InvalidState(format!(
+                "plugin_deactivate called from {:?}",
+                self.state
+            )));
+        }
+        let deactivate = self
+            .instance
+            .get_typed_func::<(), i32>(&mut self.store, "plugin_deactivate")
+            .map_err(|_| missing_export("plugin_deactivate"))?;
+        let code = self.invoke_guarded("plugin_deactivate", |handle| {
+            deactivate.call(&mut handle.store, ())
+        })?;
+        if code == 0 {
+            self.state = PluginState::Inactive;
+            Ok(())
+        } else {
+            self.state = PluginState::Unloaded;
+            Err(RuntimeError::LifecycleError {
+                function: "plugin_deactivate",
+                code,
+            })
+        }
+    }
+
+    /// Unload the plugin and free its resources.
+    ///
+    /// Calls `plugin_unload` (best-effort) and transitions to `Unloaded`.
+    /// Idempotent.
+    pub fn unload(&mut self) {
+        if matches!(self.state, PluginState::Unloaded | PluginState::Skipped) {
+            return;
+        }
+        if let Ok(unload) = self
+            .instance
+            .get_typed_func::<(), ()>(&mut self.store, "plugin_unload")
+        {
+            let _ =
+                self.invoke_guarded("plugin_unload", |handle| unload.call(&mut handle.store, ()));
+        }
+        self.state = PluginState::Unloaded;
+    }
+
+    /// Refill the fuel budget before a lifecycle call.
+    fn refill_fuel(&mut self) {
+        if self.store.set_fuel(self.fuel_budget).is_err() {
+            tracing::debug!("fuel metering not enabled; ignoring refill");
+        }
+    }
+
+    /// Run a WASM lifecycle call with a per-call fuel budget, a wall-clock
+    /// timeout (via epoch-based interruption), and panic/trap isolation.
+    ///
+    /// The timeout thread only advances the shared engine epoch while the call
+    /// is still in flight (a cancellation flag), so fast calls never block.
+    /// Traps, out-of-fuel, and deadline interrupts are never propagated as
+    /// panics — they are returned as [`RuntimeError`]s.
+    fn invoke_guarded<T, F>(
+        &mut self,
+        function: &'static str,
+        mut call: F,
+    ) -> Result<T, RuntimeError>
+    where
+        T: Copy,
+        F: FnMut(&mut PluginHandle) -> Result<T, wasmtime::Error>,
+    {
+        self.refill_fuel();
+        let timeout = Duration::from_millis(self.store.data().timeout_ms as u64);
+        self.store.set_epoch_deadline(1);
+
+        let armed = Arc::new(AtomicBool::new(true));
+        let stop = armed.clone();
+        let engine = self.engine.clone();
+        let deadline = Instant::now() + timeout;
+        let timeout_thread = std::thread::spawn(move || {
+            while stop.load(Ordering::Acquire) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            if stop.load(Ordering::Acquire) {
+                engine.increment_epoch();
+            }
+        });
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            call(&mut *self).map_err(|e| classify_wasm_error(e, function))
+        }));
+
+        armed.store(false, Ordering::Release);
+        let _ = timeout_thread.join();
+
+        match result {
+            Ok(ok) => ok,
+            Err(_) => Err(RuntimeError::Trap("panic in WASM host call".into())),
+        }
+    }
 }
 
 // ── Runtime ─────────────────────────────────────────────────────────────────
@@ -259,21 +466,37 @@ impl PluginHandle {
 pub struct WasmPluginRuntime {
     /// Shared wasmtime engine (compiled once, used by all plugins).
     engine: Engine,
+    /// Optional fixed fuel budget per lifecycle call. When `None`, the budget
+    /// is derived from the manifest's `resources.max_cpu_ms`.
+    fuel_budget: Option<u64>,
 }
 
 impl WasmPluginRuntime {
-    /// Create a new plugin runtime with fuel-based CPU metering enabled.
+    /// Create a new plugin runtime with fuel-based CPU metering and
+    /// epoch-based interruption (wall-clock timeouts) enabled.
     pub fn new() -> Result<Self, RuntimeError> {
         let mut config = Config::default();
         config.consume_fuel(true);
+        config.epoch_interruption(true);
         let engine = Engine::new(&config)
             .map_err(|e| RuntimeError::CompileError(format!("failed to create engine: {e}")))?;
-        Ok(Self { engine })
+        Ok(Self {
+            engine,
+            fuel_budget: None,
+        })
     }
 
-    /// Create a runtime with a specific fuel budget per plugin.
-    pub fn with_fuel(_fuel: u64) -> Result<Self, RuntimeError> {
-        Self::new()
+    /// Create a runtime with a specific fuel budget per plugin call.
+    pub fn with_fuel(fuel: u64) -> Result<Self, RuntimeError> {
+        let mut config = Config::default();
+        config.consume_fuel(true);
+        config.epoch_interruption(true);
+        let engine = Engine::new(&config)
+            .map_err(|e| RuntimeError::CompileError(format!("failed to create engine: {e}")))?;
+        Ok(Self {
+            engine,
+            fuel_budget: Some(fuel),
+        })
     }
 
     /// Get a reference to the shared engine.
@@ -336,7 +559,9 @@ impl WasmPluginRuntime {
         };
 
         // Create store with fuel
-        let fuel = manifest.plugin.resources.max_cpu_ms as u64 * 2_000_000;
+        let fuel = self
+            .fuel_budget
+            .unwrap_or(manifest.plugin.resources.max_cpu_ms as u64 * 2_000_000);
         let mut store = Store::new(
             &self.engine,
             PluginStoreData {
@@ -373,6 +598,7 @@ impl WasmPluginRuntime {
             engine: self.engine.clone(),
             store,
             instance,
+            fuel_budget: fuel,
         };
 
         match call_plugin_init(&mut handle) {
@@ -561,44 +787,51 @@ impl Default for WasmPluginRuntime {
 
 // ── Lifecycle helpers ───────────────────────────────────────────────────────
 
+/// Build a [`RuntimeError::MissingExport`] for a lifecycle function.
+fn missing_export(name: &str) -> RuntimeError {
+    RuntimeError::MissingExport(format!("{name} export not found in WASM module"))
+}
+
+/// Map a wasmtime call error onto [`RuntimeError`].
+///
+/// Epoch-interrupt traps (wall-clock timeout) and out-of-fuel traps (CPU
+/// budget) both surface as [`RuntimeError::Timeout`]; everything else is a
+/// regular trap.
+fn classify_wasm_error(e: wasmtime::Error, function: &'static str) -> RuntimeError {
+    match e.downcast_ref::<wasmtime::Trap>() {
+        Some(wasmtime::Trap::Interrupt) | Some(wasmtime::Trap::OutOfFuel) => {
+            RuntimeError::Timeout(function)
+        }
+        Some(trap) => RuntimeError::Trap(trap.to_string()),
+        None => RuntimeError::Trap(e.to_string()),
+    }
+}
+
 /// Call `plugin_init` on a loaded handle. Returns Ok(()) on success (code 0),
 /// or Err(SkipReason) on failure.
 fn call_plugin_init(handle: &mut PluginHandle) -> Result<(), SkipReason> {
-    let timeout = Duration::from_millis(handle.store.data().timeout_ms as u64);
+    let init = match handle
+        .instance
+        .get_typed_func::<i32, i32>(&mut handle.store, "plugin_init")
+    {
+        Ok(f) => f,
+        Err(_) => {
+            return Err(SkipReason::MissingExport(
+                missing_export("plugin_init").to_string(),
+            ))
+        }
+    };
 
-    // Set epoch deadline for timeout
-    handle.store.set_epoch_deadline(1);
-
-    // Start a background thread to advance the epoch after the timeout
-    let engine = handle.engine.clone();
-    let epoch_handle = std::thread::spawn(move || {
-        std::thread::sleep(timeout);
-        engine.increment_epoch();
+    let result = handle.invoke_guarded("plugin_init", |handle| {
+        init.call(&mut handle.store, HOST_API_VERSION as i32)
     });
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let init = handle
-            .instance
-            .get_typed_func::<i32, i32>(&mut handle.store, "plugin_init");
-        match init {
-            Ok(init_fn) => init_fn
-                .call(&mut handle.store, HOST_API_VERSION as i32)
-                .map_err(|e| RuntimeError::Trap(e.to_string())),
-            Err(e) => Err(RuntimeError::MissingExport(e.to_string())),
-        }
-    }));
-
-    // Signal the epoch thread to stop
-    handle.engine.increment_epoch();
-    let _ = epoch_handle.join();
-
     match result {
-        Ok(Ok(0)) => Ok(()),
-        Ok(Ok(code)) => Err(SkipReason::InitFailed(code)),
-        Ok(Err(RuntimeError::MissingExport(e))) => Err(SkipReason::MissingExport(e)),
-        Ok(Err(RuntimeError::Trap(e))) => Err(SkipReason::InitTrap(e)),
-        Ok(Err(_)) => Err(SkipReason::InitTrap("unknown host error".into())),
-        Err(_) => Err(SkipReason::InitTrap("panic in WASM host call".into())),
+        Ok(0) => Ok(()),
+        Ok(code) => Err(SkipReason::InitFailed(code)),
+        Err(RuntimeError::Timeout(_)) => Err(SkipReason::InitTimeout),
+        Err(RuntimeError::MissingExport(e)) => Err(SkipReason::MissingExport(e)),
+        Err(e) => Err(SkipReason::InitTrap(e.to_string())),
     }
 }
 
@@ -791,6 +1024,286 @@ entry_point = "plugin.wasm"
         )
     }
 
+    // WASM module that writes then reads back a config key via the host
+    // imports during init, returning 0 only if the round trip succeeded.
+    fn config_roundtrip_wasm(_engine: &Engine) -> Vec<u8> {
+        wat_to_bytes(
+            r#"
+            (module
+                (import "host" "host_config_write"
+                    (func $write (param i32 i32 i32 i32) (result i32)))
+                (import "host" "host_config_read"
+                    (func $read (param i32 i32 i32 i32) (result i32)))
+                (memory (export "memory") 1)
+                (data (i32.const 0) "theme")
+                (data (i32.const 16) "dark")
+                (func (export "plugin_init") (param i32) (result i32)
+                    i32.const 0
+                    i32.const 5
+                    i32.const 16
+                    i32.const 4
+                    call $write
+                    drop
+                    i32.const 0
+                    i32.const 5
+                    i32.const 32
+                    i32.const 16
+                    call $read
+                    i32.const 4
+                    i32.eq
+                    if (result i32)
+                        i32.const 0
+                    else
+                        i32.const -2
+                    end
+                )
+                (func (export "plugin_activate") (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_process") (param i32 i32 i32 i32) (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_deactivate") (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_unload")
+                )
+            )
+            "#,
+        )
+    }
+
+    // WASM module that calls host_ui_invalidate during init.
+    fn ui_invalidate_wasm(_engine: &Engine) -> Vec<u8> {
+        wat_to_bytes(
+            r#"
+            (module
+                (import "host" "host_ui_invalidate" (func $invalidate))
+                (memory (export "memory") 1)
+                (func (export "plugin_init") (param i32) (result i32)
+                    call $invalidate
+                    i32.const 0
+                )
+                (func (export "plugin_activate") (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_process") (param i32 i32 i32 i32) (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_deactivate") (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_unload")
+                )
+            )
+            "#,
+        )
+    }
+
+    // WASM module whose plugin_process reads one input byte, writes it +1
+    // to the output buffer, and returns 1 (bytes written).
+    fn echo_process_wasm(_engine: &Engine) -> Vec<u8> {
+        wat_to_bytes(
+            r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "plugin_init") (param i32) (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_activate") (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_process")
+                    (param $inp i32) (param $inlen i32)
+                    (param $outp i32) (param $outcap i32)
+                    (result i32)
+                    (local $in_byte i32)
+                    local.get $outcap
+                    i32.const 1
+                    i32.lt_s
+                    if
+                        i32.const -3
+                        return
+                    end
+                    local.get $inlen
+                    i32.const 1
+                    i32.lt_s
+                    if
+                        i32.const -4
+                        return
+                    end
+                    local.get $inp
+                    i32.load8_u
+                    local.set $in_byte
+                    local.get $outp
+                    local.get $in_byte
+                    i32.const 1
+                    i32.add
+                    i32.store8
+                    i32.const 1
+                )
+                (func (export "plugin_deactivate") (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_unload")
+                )
+            )
+            "#,
+        )
+    }
+
+    // WASM module whose plugin_process fails with a negative code.
+    fn failing_process_wasm(_engine: &Engine) -> Vec<u8> {
+        wat_to_bytes(
+            r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "plugin_init") (param i32) (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_activate") (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_process") (param i32 i32 i32 i32) (result i32)
+                    i32.const -7
+                )
+                (func (export "plugin_deactivate") (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_unload")
+                )
+            )
+            "#,
+        )
+    }
+
+    // WASM module whose plugin_activate fails with a negative code.
+    fn failing_activate_wasm(_engine: &Engine) -> Vec<u8> {
+        wat_to_bytes(
+            r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "plugin_init") (param i32) (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_activate") (result i32)
+                    i32.const -5
+                )
+                (func (export "plugin_process") (param i32 i32 i32 i32) (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_deactivate") (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_unload")
+                )
+            )
+            "#,
+        )
+    }
+
+    // WASM module whose plugin_deactivate fails with a negative code.
+    fn failing_deactivate_wasm(_engine: &Engine) -> Vec<u8> {
+        wat_to_bytes(
+            r#"
+            (module
+                (memory (export "memory") 1)
+                (func (export "plugin_init") (param i32) (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_activate") (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_process") (param i32 i32 i32 i32) (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_deactivate") (result i32)
+                    i32.const -8
+                )
+                (func (export "plugin_unload")
+                )
+            )
+            "#,
+        )
+    }
+
+    // WASM module whose plugin_init spins forever (used for timeout/fuel).
+    fn infinite_loop_wasm(_engine: &Engine) -> Vec<u8> {
+        wat_to_bytes(
+            r#"
+            (module
+                (memory (export "memory") 1)
+                (func $spin (result i32)
+                    (loop (result i32)
+                        br 0
+                    )
+                )
+                (func (export "plugin_init") (param i32) (result i32)
+                    call $spin
+                )
+                (func (export "plugin_activate") (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_process") (param i32 i32 i32 i32) (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_deactivate") (result i32)
+                    i32.const 0
+                )
+                (func (export "plugin_unload")
+                )
+            )
+            "#,
+        )
+    }
+
+    // Same manifest as test_manifest but with explicit resource limits.
+    fn manifest_with_resources(timeout_ms: u32, max_cpu_ms: u32) -> PluginManifest {
+        parse_manifest(&format!(
+            r#"
+[plugin]
+id = "com.example.test-plugin"
+version = "1.0.0"
+name = "Test Plugin"
+
+[plugin.api_version]
+min = "1.0"
+
+[plugin.type]
+kind = "ui_panel"
+entry_point = "plugin.wasm"
+
+[plugin.resources]
+timeout_ms = {timeout_ms}
+max_cpu_ms = {max_cpu_ms}
+"#
+        ))
+        .expect("test manifest should parse")
+    }
+
+    // Same manifest as test_manifest but with the ui capability enabled.
+    fn manifest_with_ui() -> PluginManifest {
+        parse_manifest(
+            r#"
+[plugin]
+id = "com.example.test-plugin"
+version = "1.0.0"
+name = "Test Plugin"
+
+[plugin.api_version]
+min = "1.0"
+
+[plugin.type]
+kind = "ui_panel"
+entry_point = "plugin.wasm"
+
+[plugin.capabilities]
+ui = true
+"#,
+        )
+        .expect("test manifest should parse")
+    }
+
     // ── Runtime creation ─────────────────────────────────────────────
 
     #[test]
@@ -908,6 +1421,269 @@ entry_point = "plugin.wasm"
             result.is_loaded(),
             "should load: {}",
             result.status_description()
+        );
+    }
+
+    #[test]
+    fn host_config_write_read_roundtrip() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = config_roundtrip_wasm(runtime.engine());
+        let result = runtime.load_plugin_from_bytes(&wasm, test_manifest());
+        assert!(
+            result.is_loaded(),
+            "config roundtrip should succeed: {}",
+            result.status_description()
+        );
+    }
+
+    #[test]
+    fn ui_invalidate_without_ui_capability_is_safe() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = ui_invalidate_wasm(runtime.engine());
+        let result = runtime.load_plugin_from_bytes(&wasm, test_manifest());
+        assert!(
+            result.is_loaded(),
+            "ui_invalidate without 'ui' capability must remain a no-op: {}",
+            result.status_description()
+        );
+    }
+
+    #[test]
+    fn ui_invalidate_with_ui_capability_is_safe() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = ui_invalidate_wasm(runtime.engine());
+        let result = runtime.load_plugin_from_bytes(&wasm, manifest_with_ui());
+        assert!(
+            result.is_loaded(),
+            "ui_invalidate with 'ui' capability should succeed: {}",
+            result.status_description()
+        );
+    }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────
+
+    #[test]
+    fn lifecycle_activate_process_deactivate_unload() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = echo_process_wasm(runtime.engine());
+        let mut handle = runtime
+            .load_plugin_from_bytes(&wasm, test_manifest())
+            .into_loaded()
+            .unwrap()
+            .handle;
+
+        assert_eq!(handle.state(), PluginState::Initialized);
+
+        handle.activate().unwrap();
+        assert_eq!(handle.state(), PluginState::Active);
+
+        let output = handle.process(&[7]).unwrap();
+        assert_eq!(output, vec![8]);
+
+        handle.deactivate().unwrap();
+        assert_eq!(handle.state(), PluginState::Inactive);
+
+        handle.unload();
+        assert_eq!(handle.state(), PluginState::Unloaded);
+
+        // unload is idempotent
+        handle.unload();
+        assert_eq!(handle.state(), PluginState::Unloaded);
+    }
+
+    #[test]
+    fn reactivation_after_deactivate() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = echo_process_wasm(runtime.engine());
+        let mut handle = runtime
+            .load_plugin_from_bytes(&wasm, test_manifest())
+            .into_loaded()
+            .unwrap()
+            .handle;
+
+        handle.activate().unwrap();
+        handle.deactivate().unwrap();
+        assert_eq!(handle.state(), PluginState::Inactive);
+
+        handle.activate().unwrap();
+        assert_eq!(handle.state(), PluginState::Active);
+        assert_eq!(handle.process(&[41]).unwrap(), vec![42]);
+    }
+
+    #[test]
+    fn activate_is_idempotent() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = echo_process_wasm(runtime.engine());
+        let loaded = runtime.load_plugin_from_bytes(&wasm, test_manifest());
+        assert!(loaded.is_loaded(), "echo module should load: {:?}", loaded);
+        let mut handle = loaded.into_loaded().unwrap().handle;
+
+        handle.activate().unwrap();
+        handle.activate().unwrap();
+        assert_eq!(handle.state(), PluginState::Active);
+    }
+
+    #[test]
+    fn process_requires_active_state() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = echo_process_wasm(runtime.engine());
+        let mut handle = runtime
+            .load_plugin_from_bytes(&wasm, test_manifest())
+            .into_loaded()
+            .unwrap()
+            .handle;
+
+        let err = handle.process(&[1]).unwrap_err();
+        assert!(matches!(err, RuntimeError::InvalidState(_)));
+        assert_eq!(handle.state(), PluginState::Initialized);
+    }
+
+    #[test]
+    fn process_error_demotes_to_inactive() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = failing_process_wasm(runtime.engine());
+        let mut handle = runtime
+            .load_plugin_from_bytes(&wasm, test_manifest())
+            .into_loaded()
+            .unwrap()
+            .handle;
+
+        handle.activate().unwrap();
+        let err = handle.process(&[1]).unwrap_err();
+        assert!(matches!(
+            err,
+            RuntimeError::LifecycleError {
+                function: "plugin_process",
+                ..
+            }
+        ));
+        assert_eq!(handle.state(), PluginState::Inactive);
+    }
+
+    #[test]
+    fn activate_failure_demotes_to_inactive() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = failing_activate_wasm(runtime.engine());
+        let mut handle = runtime
+            .load_plugin_from_bytes(&wasm, test_manifest())
+            .into_loaded()
+            .unwrap()
+            .handle;
+
+        let err = handle.activate().unwrap_err();
+        assert!(matches!(
+            err,
+            RuntimeError::LifecycleError {
+                function: "plugin_activate",
+                ..
+            }
+        ));
+        assert_eq!(handle.state(), PluginState::Inactive);
+    }
+
+    #[test]
+    fn deactivate_failure_unloads_plugin() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = failing_deactivate_wasm(runtime.engine());
+        let mut handle = runtime
+            .load_plugin_from_bytes(&wasm, test_manifest())
+            .into_loaded()
+            .unwrap()
+            .handle;
+
+        handle.activate().unwrap();
+        let err = handle.deactivate().unwrap_err();
+        assert!(matches!(
+            err,
+            RuntimeError::LifecycleError {
+                function: "plugin_deactivate",
+                ..
+            }
+        ));
+        assert_eq!(handle.state(), PluginState::Unloaded);
+    }
+
+    #[test]
+    fn deactivate_requires_active_state() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = echo_process_wasm(runtime.engine());
+        let mut handle = runtime
+            .load_plugin_from_bytes(&wasm, test_manifest())
+            .into_loaded()
+            .unwrap()
+            .handle;
+
+        let err = handle.deactivate().unwrap_err();
+        assert!(matches!(err, RuntimeError::InvalidState(_)));
+    }
+
+    #[test]
+    fn activate_requires_initialized_or_inactive() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = echo_process_wasm(runtime.engine());
+        let mut handle = runtime
+            .load_plugin_from_bytes(&wasm, test_manifest())
+            .into_loaded()
+            .unwrap()
+            .handle;
+
+        handle.unload();
+        let err = handle.activate().unwrap_err();
+        assert!(matches!(err, RuntimeError::InvalidState(_)));
+    }
+
+    // ── Timeout / fuel ────────────────────────────────────────────────
+
+    #[test]
+    fn init_timeout_is_enforced() {
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = infinite_loop_wasm(runtime.engine());
+        let manifest = manifest_with_resources(100, 200); // 100ms wall-clock
+        let result = runtime.load_plugin_from_bytes(&wasm, manifest);
+        assert!(
+            result.is_skipped(),
+            "infinite-loop plugin must not hang the host: {}",
+            result.status_description()
+        );
+        assert!(
+            result.status_description().contains("timed out"),
+            "expected a timeout skip, got: {}",
+            result.status_description()
+        );
+    }
+
+    #[test]
+    fn with_fuel_budget_is_honored() {
+        let runtime = WasmPluginRuntime::with_fuel(1_000).unwrap();
+        let wasm = infinite_loop_wasm(runtime.engine());
+        let manifest = manifest_with_resources(60_000, 200); // generous wall-clock
+        let result = runtime.load_plugin_from_bytes(&wasm, manifest);
+        assert!(
+            result.is_skipped(),
+            "tiny fuel budget must bound the infinite loop: {}",
+            result.status_description()
+        );
+        assert!(
+            result.status_description().contains("timed out"),
+            "expected a timeout skip, got: {}",
+            result.status_description()
+        );
+    }
+
+    #[test]
+    fn load_valid_plugin_is_fast() {
+        // Regression test: the previous join-based timeout arrested every load
+        // for the full timeout value (default 5000ms).
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = minimal_wasm_bytes(runtime.engine());
+        let start = Instant::now();
+        for _ in 0..5 {
+            let result = runtime.load_plugin_from_bytes(&wasm, test_manifest());
+            assert!(result.is_loaded());
+        }
+        assert!(
+            start.elapsed() < Duration::from_millis(2000),
+            "load_plugin should not block for the full timeout"
         );
     }
 
