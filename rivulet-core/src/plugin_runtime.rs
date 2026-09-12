@@ -576,6 +576,12 @@ impl WasmPluginRuntime {
                 reason: SkipReason::CompileError("fuel not enabled".into()),
             }));
         }
+        // With epoch interruption enabled (wasmtime >= 32), a fresh store's
+        // deadline is the current epoch: any instantiation would trap with
+        // "interrupt" before we ever get to arm the real per-call deadline.
+        // Arm a far-future deadline here; `invoke_guarded` sets the actual
+        // wall-clock deadline before every lifecycle call.
+        store.set_epoch_deadline(u64::MAX);
 
         // Build linker with host imports
         let mut linker = Linker::<PluginStoreData>::new(&self.engine);
@@ -1684,6 +1690,25 @@ ui = true
         assert!(
             start.elapsed() < Duration::from_millis(2000),
             "load_plugin should not block for the full timeout"
+        );
+    }
+
+    #[test]
+    fn instantiate_with_epoch_interruption_does_not_trap_immediately() {
+        // Regression (wasmtime >= 32): a fresh store with epoch interruption
+        // enabled starts with its deadline at the current epoch, so
+        // instantiation trapped with `interrupt` before any lifecycle call
+        // could arm a deadline. The runtime must arm a far-future deadline
+        // after store creation; every host-import test module (config
+        // roundtrip, ui_invalidate, host_log, host_time) covers the same
+        // path, but this asserts the contract explicitly on a bare module.
+        let runtime = WasmPluginRuntime::new().unwrap();
+        let wasm = minimal_wasm_bytes(runtime.engine());
+        let result = runtime.load_plugin_from_bytes(&wasm, test_manifest());
+        let description = result.status_description();
+        assert!(
+            result.is_loaded(),
+            "instantiation must not trap with `interrupt`: {description}"
         );
     }
 

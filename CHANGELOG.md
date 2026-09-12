@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- fix(plugins): PR #142 green — three root-cause fixes on the Phase 2 branch:
+  (1) **wasmtime 29 → 48.0.2** clears the six RUSTSEC advisories that failed
+  `cargo audit`/`cargo deny` (RUSTSEC-2025-0046, -0118 and the wasi family);
+  (2) **epoch-deadline arm after store creation** — with wasmtime ≥ 32 a fresh
+  store under `epoch_interruption` traps with `interrupt` on instantiation
+  (deadline == current epoch), so every host-import load skipped with
+  `InstantiateError`; the runtime now arms a far-future deadline after store
+  creation and `invoke_guarded` keeps setting the real per-call wall-clock
+  deadline (new regression test `instantiate_with_epoch_interruption_does_not_trap_immediately`, 79 runtime tests);
+  (3) **G5 benchmark smoke no longer times out** — the wasmtime dependency
+  grew the cold cargo build past the smoke's 120 s subprocess budget; CI now
+  pre-builds with `--no-run` (shared cargo cache) before the smoke step and
+  the smoke's own timeout is 600 s. `packaging/flatpak/cargo/cargo-sources.json`
+  regenerated for the wasmtime tree (1658 new vendored sources).
+
 - spike(m10): code-gen quality spike harness (`scripts/codegen-spike/`) for the Creative Studio's
   model decision — five real overlay prompts (follower alert, goal bar, chat box, poll widget,
   emote rain), `run-spike.sh` driving Ollama with a strict JSON output contract + per-prompt

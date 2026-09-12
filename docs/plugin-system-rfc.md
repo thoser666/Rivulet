@@ -526,7 +526,7 @@ Before any plugin ships to users, it must pass:
 | Phase | Scope | Milestone | Status |
 |-------|-------|-----------|--------|
 | **Phase 1** | Manifest format + validation | M11-P3 | ✅ Shipped (`plugin_manifest.rs`, 35 tests) |
-| **Phase 2** | WASM runtime + sandbox + core imports | M11-P5 | Shipped (`plugin_runtime.rs`, wasmtime; lifecycle, fuel/timeout, host imports) |
+| **Phase 2** | WASM runtime + sandbox + core imports | M11-P5 | Shipped (`plugin_runtime.rs`, wasmtime 48; lifecycle, fuel/timeout, host imports; tracks the RustSec advisory DB — must stay on a patched wasmtime release) |
 | **Phase 3** | Capability system + user approval UI | M11-P4 | |
 | **Phase 4** | UI panel integration + View Registry | M11-P2 | |
 | **Phase 5** | Audio/Video filter integration | M11-P6 | |

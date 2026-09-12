@@ -36,8 +36,8 @@ xcap = "=0.9.8"
 sha2 = "0.10"
 hmac = "0.12"
 base64 = "0.22"
-wasmtime = "29.0"
-wasmtime-wasi = "29.0"
+wasmtime = "48.0"
+wasmtime-wasi = "48.0"
 
 [profile.release]
 # Release build settings. Debug info is deliberately PRESERVED (no `strip`, no
