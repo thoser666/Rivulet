@@ -195,9 +195,14 @@ Review trust, permissions, installation, and cross-platform consistency:
     per-capability user decisions (`plugin_registry.rs`, persisted in the app
     state), and gates enabling on a completed review — sensitive capabilities
     (secrets/capture) stay denied for WASM regardless of the stored approval.
-    M5's remaining plugin item is the OBS compatibility layer (descoped
-    candidate), not the approval flow.
+    The OBS compatibility layer was **descoped to M11**
+    ([#147](https://github.com/thoser666/Rivulet/issues/147)): it is a
+    transition convenience for existing OBS users, not a requirement for
+    Rivulet's own plugin ecosystem, and lives with the M11 plugin-platform
+    work. The gate bullet below applies to that layer once M11 implements it.
 - OBS compatibility mode is explicitly marked as a compatibility/risk boundary.
+  - **Status note:** not implemented in M5 (descoped to M11, #147); the
+    acceptance criteria there include the explicit risk-boundary labeling.
 - Global hotkeys and remapping show conflicts, scope, reserved keys, and reset.
 - Windows, macOS, and Linux expose equivalent core workflows or clearly label
   platform-specific limitations.

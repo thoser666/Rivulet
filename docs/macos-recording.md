@@ -11,9 +11,13 @@ recorded on **separate system/microphone tracks** — the same
 
 > **Scope note:** live on-device verification still needs a real Mac (the
 > CI compile-checks the macOS code paths and runs the audio-DSP unit tests).
-> Audio **filters** (noise suppression, compressor, EQ), per-source volume
-> sliders and live monitoring are not implemented on macOS yet — they remain
-> a documented follow-up.
+> This item is **hardware-blocked, not engineering-blocked**: executing a real
+> capture session requires one manual session on a physical Mac (Screen
+> Recording permission grant included); no code work is pending on it. It is
+> tracked honestly as such in the README M5 section and the platform feature
+> matrix. Audio **filters** (noise suppression, compressor, EQ), per-source
+> volume sliders and live monitoring are not implemented on macOS yet — they
+> remain a documented follow-up.
 
 ## Getting started
 
