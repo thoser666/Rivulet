@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- fix(alerts): **webhook listener closes connections gracefully** — the
+  forged-signature loopback test failed on macOS (`ConnectionReset` while
+  reading the 403): the server rejected on the signature check and closed
+  while the client's request body was still unread, so the peer kernel sent
+  RST and destroyed the queued response (Linux/Windows deliver it anyway;
+  macOS is the strictest). The listener now drains the announced body on the
+  early-reject path (bounded) and every response closes gracefully — flush,
+  `shutdown(Write)` FIN, then a short read-drain before drop — so a response
+  can never be lost to an RST. Same hardening class as the earlier
+  chat-fixture RST fix; no behavior change for valid requests.
 - docs(roadmap): **M5 descope annotations** for an honest milestone closure:
   (1) the OBS plugin compatibility layer moves to M11 (new tracking issue
   [#147](https://github.com/thoser666/Rivulet/issues/147)) — the temporary

@@ -360,6 +360,10 @@ fn handle_connection(
 
     if head.content_length > MAX_WEBHOOK_BODY_BYTES {
         counters.body_overflow.fetch_add(1, Ordering::Relaxed);
+        // Drain the announced body before answering so the client's kernel
+        // never has unread bytes outstanding at close (an RST there can eat
+        // the 413 response before the client reads it — seen on macOS).
+        drain_body(&mut stream, head.content_length);
         return write_status(&mut stream, 413);
     }
 
@@ -388,6 +392,22 @@ fn handle_connection(
             counters.rejected.fetch_add(1, Ordering::Relaxed);
             tracing::debug!(status = reject.status(), "alert webhook rejected");
             write_status(&mut stream, reject.status())
+        }
+    }
+}
+
+/// Read and discard up to `content_length` body bytes (bounded by
+/// [`MAX_WEBHOOK_BODY_BYTES`] + slack so a hostile length cannot pin the
+/// connection). Best-effort: an error just means less to drain.
+fn drain_body(stream: &mut TcpStream, content_length: usize) {
+    let remaining = content_length.min(MAX_WEBHOOK_BODY_BYTES + 1024);
+    let mut to_read = remaining.saturating_sub(0);
+    let mut buffer = [0u8; 4096];
+    while to_read > 0 {
+        let chunk = to_read.min(buffer.len());
+        match stream.read(&mut buffer[..chunk]) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => to_read -= n,
         }
     }
 }
@@ -470,7 +490,23 @@ fn write_status(stream: &mut TcpStream, status: u16) -> std::io::Result<()> {
     write!(
         stream,
         "HTTP/1.1 {status} {reason}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-    )
+    )?;
+    // Graceful close: flush, signal the end of our data (FIN), and give the
+    // client a moment to read the response before the socket is dropped. A
+    // bare drop with unread data still queued can make the peer kernel send
+    // RST, which discards the response buffer client-side (macOS is the
+    // strictest here — Linux/Windows usually deliver it anyway).
+    let _ = stream.flush();
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(50)));
+    let mut sink = [0u8; 1024];
+    loop {
+        match stream.read(&mut sink) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => continue,
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
