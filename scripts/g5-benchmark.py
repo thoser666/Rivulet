@@ -47,13 +47,18 @@ def get_budget_ms(refresh_hz: int) -> float:
 
 
 def run_smoke_test() -> bool:
-    """Run the benchmark module's unit tests as a CI smoke check."""
+    """Run the benchmark module's unit tests as a CI smoke check.
+
+    CI runs `cargo test -p rivulet-core --lib benchmark --no-run` right before
+    this step, so the compile cost is paid there and the actual test run is
+    seconds. The generous timeout only covers cold local runs without cache.
+    """
     print("G5: Running benchmark framework unit tests...")
     result = subprocess.run(
         ["cargo", "test", "-p", "rivulet-core", "--lib", "benchmark"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=600,
     )
     if result.returncode != 0:
         print(f"G5: FAIL Benchmark tests failed:\n{result.stdout}\n{result.stderr}")

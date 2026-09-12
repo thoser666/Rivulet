@@ -185,6 +185,13 @@ Review trust, permissions, installation, and cross-platform consistency:
 - Installer, updater, signing failure, rollback, and restart paths are clear.
 - Plugin installation identifies publisher, permissions, compatibility, and
   sandbox status before activation.
+  - **Status note:** the WASM plugin runtime core (RFC
+    [`docs/plugin-system-rfc.md`](plugin-system-rfc.md) Phases 1–2) is shipped
+    — manifest validation, sandboxed lifecycle with fuel/timeout limits, crash
+    isolation, and core host imports are implemented and tested. The
+    **installation/permission approval UI** ("identifies … before activation")
+    is the outstanding Phase 3 item; M5 closure stays open until the
+    user-facing permission review lands.
 - OBS compatibility mode is explicitly marked as a compatibility/risk boundary.
 - Global hotkeys and remapping show conflicts, scope, reserved keys, and reset.
 - Windows, macOS, and Linux expose equivalent core workflows or clearly label

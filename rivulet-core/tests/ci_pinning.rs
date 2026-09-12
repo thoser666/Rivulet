@@ -4882,3 +4882,145 @@ fn m5_winget_stage2_is_prepared_and_pinned() {
         "CHANGELOG must record the WinGet Stage 2 preparation"
     );
 }
+
+#[test]
+fn plugin_system_rfc_is_wired() {
+    // The plugin system RFC must exist and be cross-referenced from the
+    // extensible UI roadmap and VST3 docs.
+    let rfc = read("docs/plugin-system-rfc.md");
+    for marker in [
+        "rivulet-plugin.toml",
+        "WASM",
+        "WASI",
+        "Capability",
+        "Lifecycle",
+        "plugin_init",
+        "plugin_process",
+        "Skipped",
+    ] {
+        assert!(
+            rfc.contains(marker),
+            "docs/plugin-system-rfc.md must contain the marker {marker}"
+        );
+    }
+    // The roadmap must reference the RFC.
+    let roadmap = read("docs/extensible-ui-roadmap.md");
+    assert!(
+        roadmap.contains("plugin-system-rfc.md"),
+        "docs/extensible-ui-roadmap.md must reference the plugin-system-rfc"
+    );
+    // The VST3 doc must cross-reference the RFC.
+    let vst3_doc = read("docs/vst3.md");
+    assert!(
+        vst3_doc.contains("plugin-system-rfc.md"),
+        "docs/vst3.md must cross-reference the plugin-system-rfc"
+    );
+    // The CHANGELOG must record the RFC.
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        changelog.contains("plugin-system-rfc.md") || changelog.contains("Plugin System RFC"),
+        "CHANGELOG must record the Plugin System RFC"
+    );
+}
+
+#[test]
+fn plugin_manifest_phase1_is_implemented() {
+    // Phase 1 of the plugin system RFC: manifest parser + validator.
+    let manifest_rs = read("rivulet-core/src/plugin_manifest.rs");
+
+    // Core types must exist
+    for marker in [
+        "pub enum ManifestError",
+        "pub enum PluginKind",
+        "pub struct PluginCapabilities",
+        "pub struct PluginResources",
+        "pub struct PluginManifest",
+        "pub fn parse_manifest",
+        "fn validate",
+    ] {
+        assert!(
+            manifest_rs.contains(marker),
+            "rivulet-core/src/plugin_manifest.rs must contain {marker}"
+        );
+    }
+
+    // The module must be wired into lib.rs
+    let lib = read("rivulet-core/src/lib.rs");
+    assert!(
+        lib.contains("pub mod plugin_manifest"),
+        "rivulet-core/src/lib.rs must declare pub mod plugin_manifest"
+    );
+    assert!(
+        lib.contains("pub use plugin_manifest::"),
+        "rivulet-core/src/lib.rs must re-export from plugin_manifest"
+    );
+
+    // CHANGELOG must record Phase 1
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        changelog.contains("plugin_manifest") || changelog.contains("Plugin Manifest"),
+        "CHANGELOG must record the plugin manifest implementation"
+    );
+}
+
+#[test]
+fn plugin_runtime_phase2_is_implemented() {
+    // Phase 2 of the plugin system RFC: WASM runtime + sandbox + lifecycle.
+    let runtime_rs = read("rivulet-core/src/plugin_runtime.rs");
+
+    // Core runtime surface must exist.
+    for marker in [
+        "pub struct WasmPluginRuntime",
+        "pub fn load_plugin",
+        "pub struct PluginHandle",
+        "pub fn activate",
+        "pub fn process",
+        "pub fn deactivate",
+        "pub fn unload",
+        "pub enum PluginState",
+        "pub enum SkipReason",
+        "fn invoke_guarded",
+        "epoch_deadline",
+        "host_config_read",
+        "host_config_write",
+        "host_ui_invalidate",
+    ] {
+        assert!(
+            runtime_rs.contains(marker),
+            "rivulet-core/src/plugin_runtime.rs must contain {marker}"
+        );
+    }
+
+    // The module must be wired into lib.rs.
+    let lib = read("rivulet-core/src/lib.rs");
+    assert!(
+        lib.contains("pub mod plugin_runtime"),
+        "rivulet-core/src/lib.rs must declare pub mod plugin_runtime"
+    );
+    assert!(
+        lib.contains("pub use plugin_runtime::"),
+        "rivulet-core/src/lib.rs must re-export from plugin_runtime"
+    );
+
+    // Runtime tests must cover the lifecycle and the resource guards.
+    let runtime_tests = read("rivulet-core/src/plugin_runtime.rs");
+    for test_marker in [
+        "fn lifecycle_activate_process_deactivate_unload",
+        "fn init_timeout_is_enforced",
+        "fn with_fuel_budget_is_honored",
+        "host_config_write_read_roundtrip",
+        "fn load_valid_plugin_is_fast",
+    ] {
+        assert!(
+            runtime_tests.contains(test_marker),
+            "plugin_runtime.rs tests must contain {test_marker}"
+        );
+    }
+
+    // CHANGELOG must record Phase 2.
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        changelog.contains("plugin_runtime") || changelog.contains("Plugin Runtime"),
+        "CHANGELOG must record the plugin runtime implementation"
+    );
+}

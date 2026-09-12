@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- fix(plugins): PR #142 green — three root-cause fixes on the Phase 2 branch:
+  (1) **wasmtime 29 → 48.0.2** clears the six RUSTSEC advisories that failed
+  `cargo audit`/`cargo deny` (RUSTSEC-2025-0046, -0118 and the wasi family);
+  (2) **epoch-deadline arm after store creation** — with wasmtime ≥ 32 a fresh
+  store under `epoch_interruption` traps with `interrupt` on instantiation
+  (deadline == current epoch), so every host-import load skipped with
+  `InstantiateError`; the runtime now arms a far-future deadline after store
+  creation and `invoke_guarded` keeps setting the real per-call wall-clock
+  deadline (new regression test `instantiate_with_epoch_interruption_does_not_trap_immediately`, 79 runtime tests);
+  (3) **G5 benchmark smoke no longer times out** — the wasmtime dependency
+  grew the cold cargo build past the smoke's 120 s subprocess budget; CI now
+  pre-builds with `--no-run` (shared cargo cache) before the smoke step and
+  the smoke's own timeout is 600 s. `packaging/flatpak/cargo/cargo-sources.json`
+  regenerated for the wasmtime tree (1658 new vendored sources).
+
 - spike(m10): code-gen quality spike harness (`scripts/codegen-spike/`) for the Creative Studio's
   model decision — five real overlay prompts (follower alert, goal bar, chat box, poll widget,
   emote rain), `run-spike.sh` driving Ollama with a strict JSON output contract + per-prompt
@@ -31,6 +46,36 @@
   installs to `/opt/rivulet/` with desktop integration (icon, .desktop file,
   /usr/bin symlinks). CI validates the PKGBUILD against real releases via
   the Distribution Readiness workflow. No signing required.
+- feat(plugins): Plugin System RFC (`docs/plugin-system-rfc.md`) — complete
+  design for manifest format (`rivulet-plugin.toml`), WASM sandbox (WASI-based
+  isolation), host API (core + capability-gated imports), capability model
+  (default denial, user approval, sensitive-capability guardrails), and plugin
+  lifecycle (Discovered → Loaded → Active → Inactive → Unloaded) with crash
+  isolation, timeout enforcement, and resource limits. Builds on the VST3 host
+  boundary shipped in M5 (Z96). Four plugin categories: UI Panel, Audio Effect,
+  Video Filter, Integration. Native DLY bridge for OBS-compat and VST3.
+
+- feat(plugins): Phase 1 — Plugin manifest parser and validator
+  (`rivulet-core/src/plugin_manifest.rs`). Implements `rivulet-plugin.toml`
+  deserialization with strict validation (reverse-DNS ID, semver, resource hard
+  caps, platform whitelist, capability audit). 35 unit tests covering parse,
+  validate, error variants, edge cases, and default denial.
+- feat(plugins): Phase 2 — WASM runtime, sandbox, and lifecycle
+  (`rivulet-core/src/plugin_runtime.rs`). wasmtime-based sandbox with
+  fuel-based CPU metering per call and epoch-based wall-clock timeouts
+  (interrupt traps and out-of-fuel both surface as `InitTimeout`, and the
+  previous join-based timeout that arrested every load for the full timeout
+  value is gone). Full RFC lifecycle on `PluginHandle`: `activate` /
+  `process` / `deactivate` / `unload` with crash isolation and the
+  Loaded → Initialized → Active → Inactive → Unloaded state machine
+  (processing failure demotes to `Inactive`, deactivate failure unloads).
+  Core host imports: `host_log`, `host_config_read`, `host_config_write`
+  (host-managed key-value config), `host_time_now`, `host_ui_invalidate`
+  (no-op without the `ui` capability). `WasmPluginRuntime::with_fuel` now
+  honors its budget. 15 new tests (config round-trip, ui-capability gating,
+  lifecycle transitions, process/data passthrough, timeout and fuel-trap
+  enforcement, fast-load regression), 31 total. CHANGELOG guards pinned in
+  ci_pinning (`plugin_runtime_phase2_is_implemented`).
 - feat(distribution): Chocolatey as a distribution target — the second
   Windows package channel, usable before SignPath approval because the
   community repository accepts unsigned installers (with a moderator
