@@ -8,6 +8,14 @@ This work must not weaken streaming reliability or expose credentials.
 - **Plugin System RFC** ([`docs/plugin-system-rfc.md`](plugin-system-rfc.md)): complete
   design for manifest format, WASM sandbox, host API, capability model, and
   plugin lifecycle. Builds on the VST3 host boundary shipped in M5.
+- **Plugin core (RFC Phases 1–2):** manifest parser/validator
+  (`rivulet-core/src/plugin_manifest.rs`) and the wasmtime-based WASM runtime
+  (`rivulet-core/src/plugin_runtime.rs`) with per-call fuel budgets,
+  epoch-based wall-clock timeouts, the full Loaded → Initialized → Active →
+  Inactive → Unloaded lifecycle, and the core host imports (`host_log`,
+  `host_config_read/write`, `host_time_now`, `host_ui_invalidate`). Both are
+  core-only: the GUI permission/approval flow and panel integration are the
+  remaining Phase 3+ work packages below.
 
 ## Work packages
 

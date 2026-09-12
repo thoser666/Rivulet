@@ -45,6 +45,22 @@
   deserialization with strict validation (reverse-DNS ID, semver, resource hard
   caps, platform whitelist, capability audit). 35 unit tests covering parse,
   validate, error variants, edge cases, and default denial.
+- feat(plugins): Phase 2 — WASM runtime, sandbox, and lifecycle
+  (`rivulet-core/src/plugin_runtime.rs`). wasmtime-based sandbox with
+  fuel-based CPU metering per call and epoch-based wall-clock timeouts
+  (interrupt traps and out-of-fuel both surface as `InitTimeout`, and the
+  previous join-based timeout that arrested every load for the full timeout
+  value is gone). Full RFC lifecycle on `PluginHandle`: `activate` /
+  `process` / `deactivate` / `unload` with crash isolation and the
+  Loaded → Initialized → Active → Inactive → Unloaded state machine
+  (processing failure demotes to `Inactive`, deactivate failure unloads).
+  Core host imports: `host_log`, `host_config_read`, `host_config_write`
+  (host-managed key-value config), `host_time_now`, `host_ui_invalidate`
+  (no-op without the `ui` capability). `WasmPluginRuntime::with_fuel` now
+  honors its budget. 15 new tests (config round-trip, ui-capability gating,
+  lifecycle transitions, process/data passthrough, timeout and fuel-trap
+  enforcement, fast-load regression), 31 total. CHANGELOG guards pinned in
+  ci_pinning (`plugin_runtime_phase2_is_implemented`).
 - feat(distribution): Chocolatey as a distribution target — the second
   Windows package channel, usable before SignPath approval because the
   community repository accepts unsigned installers (with a moderator

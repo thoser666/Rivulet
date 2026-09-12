@@ -1,6 +1,6 @@
 # RFC: Rivulet Plugin System
 
-**Status:** Draft (Phase 1 shipped)  
+**Status:** Draft (Phase 1 + Phase 2 shipped)  
 **Author:** Buffy (AI)  
 **Target Milestone:** M11 – Extensible UI & Plugin Platform  
 **Depends on:** M5 VST3 Host Boundary (Z96), P1–P2 (Layout Persistence, View Registry)
@@ -526,7 +526,7 @@ Before any plugin ships to users, it must pass:
 | Phase | Scope | Milestone | Status |
 |-------|-------|-----------|--------|
 | **Phase 1** | Manifest format + validation | M11-P3 | ✅ Shipped (`plugin_manifest.rs`, 35 tests) |
-| **Phase 2** | WASM runtime + sandbox + core imports | M11-P5 | |
+| **Phase 2** | WASM runtime + sandbox + core imports | M11-P5 | Shipped (`plugin_runtime.rs`, wasmtime; lifecycle, fuel/timeout, host imports) |
 | **Phase 3** | Capability system + user approval UI | M11-P4 | |
 | **Phase 4** | UI panel integration + View Registry | M11-P2 | |
 | **Phase 5** | Audio/Video filter integration | M11-P6 | |

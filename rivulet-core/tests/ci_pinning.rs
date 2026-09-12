@@ -4962,3 +4962,65 @@ fn plugin_manifest_phase1_is_implemented() {
         "CHANGELOG must record the plugin manifest implementation"
     );
 }
+
+#[test]
+fn plugin_runtime_phase2_is_implemented() {
+    // Phase 2 of the plugin system RFC: WASM runtime + sandbox + lifecycle.
+    let runtime_rs = read("rivulet-core/src/plugin_runtime.rs");
+
+    // Core runtime surface must exist.
+    for marker in [
+        "pub struct WasmPluginRuntime",
+        "pub fn load_plugin",
+        "pub struct PluginHandle",
+        "pub fn activate",
+        "pub fn process",
+        "pub fn deactivate",
+        "pub fn unload",
+        "pub enum PluginState",
+        "pub enum SkipReason",
+        "fn invoke_guarded",
+        "epoch_deadline",
+        "host_config_read",
+        "host_config_write",
+        "host_ui_invalidate",
+    ] {
+        assert!(
+            runtime_rs.contains(marker),
+            "rivulet-core/src/plugin_runtime.rs must contain {marker}"
+        );
+    }
+
+    // The module must be wired into lib.rs.
+    let lib = read("rivulet-core/src/lib.rs");
+    assert!(
+        lib.contains("pub mod plugin_runtime"),
+        "rivulet-core/src/lib.rs must declare pub mod plugin_runtime"
+    );
+    assert!(
+        lib.contains("pub use plugin_runtime::"),
+        "rivulet-core/src/lib.rs must re-export from plugin_runtime"
+    );
+
+    // Runtime tests must cover the lifecycle and the resource guards.
+    let runtime_tests = read("rivulet-core/src/plugin_runtime.rs");
+    for test_marker in [
+        "fn lifecycle_activate_process_deactivate_unload",
+        "fn init_timeout_is_enforced",
+        "fn with_fuel_budget_is_honored",
+        "host_config_write_read_roundtrip",
+        "fn load_valid_plugin_is_fast",
+    ] {
+        assert!(
+            runtime_tests.contains(test_marker),
+            "plugin_runtime.rs tests must contain {test_marker}"
+        );
+    }
+
+    // CHANGELOG must record Phase 2.
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        changelog.contains("plugin_runtime") || changelog.contains("Plugin Runtime"),
+        "CHANGELOG must record the plugin runtime implementation"
+    );
+}
