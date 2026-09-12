@@ -116,6 +116,12 @@ pub use plugin_manifest::{
     PluginResources,
 };
 
+pub mod plugin_registry;
+pub use plugin_registry::{
+    default_install_root, scan_install_root, CapabilityDecision, DiscoveredPlugin, PluginApprovals,
+    PluginRecord,
+};
+
 pub mod plugin_runtime;
 pub use plugin_runtime::{
     PluginHandle, PluginLoadResult, PluginState, RuntimeError, SkipReason, WasmPluginRuntime,

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- feat(plugins): **Phase 3 — capability approval + install flow** (plugin-system
+  RFC): `rivulet_core::plugin_registry` scans the per-user install root for
+  plugin bundles and owns the persisted approval store (`PluginApprovals`,
+  per-plugin/per-capability decisions with default denial; sensitive
+  capabilities `secrets`/`capture` stay denied for WASM at the policy choke
+  point regardless of the stored approval). The GUI gains a Settings → Plugins
+  section: discovered bundles show name/version/publisher/type/host-API/sandbox
+  status before activation, a permission-review dialog records Approve/Deny per
+  requested capability, and the enable toggle is blocked until every requested
+  capability is decided. Decisions persist with the app state (eframe storage)
+  and survive restarts. i18n EN/DE; 8 registry unit tests + 6 GUI approval-flow
+  tests + `plugin_registry_phase3_is_implemented` pinning guard.
 - fix(plugins): PR #142 green — three root-cause fixes on the Phase 2 branch:
   (1) **wasmtime 29 → 48.0.2** clears the six RUSTSEC advisories that failed
   `cargo audit`/`cargo deny` (RUSTSEC-2025-0046, -0118 and the wasi family);

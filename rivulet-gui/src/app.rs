@@ -9,6 +9,7 @@ use rivulet_core::{
     StreamConnectionResult, StreamHealthStatus, StreamPlatform, StreamPreset, StreamProbeResult,
     StreamSettings, StreamStats,
 };
+use std::collections::BTreeMap;
 use std::sync::mpsc::Receiver;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -290,6 +291,17 @@ enum ChatAction {
     /// Threaded reply `(text, parent Twitch message id)`, sent via
     /// `@reply-parent-msg-id`.
     SendReply(String, String),
+}
+
+/// Review state of a discovered plugin, shown in the Plugins settings list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PluginReviewState {
+    /// Every requested capability decided and the plugin enabled.
+    Enabled,
+    /// Every requested capability decided, but the plugin disabled.
+    Disabled,
+    /// At least one requested capability is unreviewed.
+    Pending,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -788,6 +800,30 @@ pub struct RivuletApp {
     /// frame). Not persisted.
     #[serde(skip)]
     chat_action_pending: Option<ChatAction>,
+
+    /// Plugins: user approvals / enable decisions per plugin id (persisted
+    /// inside the eframe storage with the rest of the app state). See
+    /// [`rivulet_core::plugin_registry`] for the store semantics and the
+    /// plugin-system RFC for the approval flow.
+    plugin_approvals: rivulet_core::PluginApprovals,
+    /// Plugins: bundles discovered by the last scan of the install root.
+    /// Runtime-only; refreshed on app start and on manual rescan.
+    #[serde(skip)]
+    plugins_discovered: Vec<rivulet_core::DiscoveredPlugin>,
+    /// Plugins: bundle folders that failed to parse (id or manifest broken).
+    /// Runtime-only.
+    #[serde(skip)]
+    plugins_broken: Vec<String>,
+    /// Plugins: plugin id currently open in the permission-review dialog.
+    #[serde(skip)]
+    plugin_review_open: Option<String>,
+    /// Plugins: working copy of per-capability review decisions in the open
+    /// dialog (capability → approved). Applied to the store on "Done".
+    #[serde(skip)]
+    plugin_review_draft: BTreeMap<String, bool>,
+    /// Plugins: last load/start error for display in the list.
+    #[serde(skip)]
+    plugin_load_error: Option<String>,
     /// Chat dock: last connection state shown to the user. Not persisted.
     #[serde(skip)]
     chat_state: rivulet_core::ChatConnState,
@@ -1452,6 +1488,12 @@ impl Default for RivuletApp {
             chat_worker: None,
             chat_messages: Vec::new(),
             chat_action_pending: None,
+            plugin_approvals: rivulet_core::PluginApprovals::default(),
+            plugins_discovered: Vec::new(),
+            plugins_broken: Vec::new(),
+            plugin_review_open: None,
+            plugin_review_draft: BTreeMap::new(),
+            plugin_load_error: None,
             chat_platform: rivulet_core::ChatPlatform::default(),
             chat_state: rivulet_core::ChatConnState::Off,
             alert_ingest: rivulet_core::AlertIngest::default(),
@@ -6395,6 +6437,288 @@ impl RivuletApp {
         }
     }
 
+    // ── Plugins: Phase 3 install/permission flow (plugin-system RFC) ────────
+
+    /// The plugin install root: `<local data dir>/Rivulet/plugins`, mirroring
+    /// the log-directory convention. Falls back to the temp dir when the OS
+    /// data dir is unavailable (same behavior as logging).
+    fn plugin_install_root() -> std::path::PathBuf {
+        dirs::data_local_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("Rivulet")
+            .join(rivulet_core::default_install_root(std::path::Path::new("")))
+            .components()
+            .collect::<std::path::PathBuf>()
+    }
+
+    /// Rescan the install root and update the discovered/broken lists.
+    /// Missing root is not an error: it simply yields no plugins.
+    fn rescan_plugins(&mut self) {
+        let root = Self::plugin_install_root();
+        let (found, broken) = rivulet_core::scan_install_root(&root);
+        self.plugins_discovered = found;
+        self.plugins_broken = broken;
+    }
+
+    /// The review state of one discovered plugin for the UI list.
+    fn plugin_review_state(&self, plugin: &rivulet_core::DiscoveredPlugin) -> PluginReviewState {
+        let record = self.plugin_approvals.record(plugin.id());
+        if record.is_none() || record.is_some_and(|r| !r.enabled) {
+            if self
+                .plugin_approvals
+                .fully_decided(plugin.id(), plugin.capabilities())
+            {
+                PluginReviewState::Disabled
+            } else {
+                PluginReviewState::Pending
+            }
+        } else {
+            PluginReviewState::Enabled
+        }
+    }
+
+    /// Open the permission-review dialog for a plugin (seeding the working
+    /// copy from the persisted decisions).
+    fn open_plugin_review(&mut self, plugin_id: &str) {
+        self.plugin_load_error = None;
+        self.plugin_review_draft.clear();
+        if let Some(plugin) = self.plugins_discovered.iter().find(|p| p.id() == plugin_id) {
+            for cap in plugin.capabilities().requested() {
+                let approved = self
+                    .plugin_approvals
+                    .record(plugin_id)
+                    .and_then(|r| r.capabilities.get(cap))
+                    .is_some_and(|d| *d == rivulet_core::CapabilityDecision::Approved);
+                self.plugin_review_draft.insert((*cap).to_owned(), approved);
+            }
+        }
+        self.plugin_review_open = Some(plugin_id.to_owned());
+    }
+
+    /// Apply the dialog's working copy to the persisted approval store.
+    fn apply_plugin_review(&mut self) {
+        let Some(plugin_id) = self.plugin_review_open.clone() else {
+            return;
+        };
+        // Deny everything not explicitly approved (default denial, RFC §6.1).
+        let approved: Vec<String> = self
+            .plugin_review_draft
+            .iter()
+            .filter(|(_, &ok)| ok)
+            .map(|(cap, _)| cap.clone())
+            .collect();
+        for cap in self.plugin_review_draft.keys() {
+            self.plugin_approvals.deny(&plugin_id, cap);
+        }
+        for cap in &approved {
+            self.plugin_approvals.approve(&plugin_id, cap);
+        }
+        // Enabling a plugin is only valid when every requested capability
+        // has a decision; otherwise the enable flag is reset conservatively.
+        if let Some(plugin) = self.plugins_discovered.iter().find(|p| p.id() == plugin_id) {
+            if self
+                .plugin_approvals
+                .fully_decided(plugin.id(), plugin.capabilities())
+            {
+                // Keep the previous enabled choice if it was already valid.
+            } else {
+                self.plugin_approvals.set_enabled(&plugin_id, false);
+            }
+        }
+        self.plugin_review_open = None;
+        self.plugin_review_draft.clear();
+    }
+
+    /// Toggle the enabled flag of a fully-decided plugin.
+    fn set_plugin_enabled(&mut self, plugin_id: &str, enabled: bool) {
+        if let Some(plugin) = self.plugins_discovered.iter().find(|p| p.id() == plugin_id) {
+            if self
+                .plugin_approvals
+                .fully_decided(plugin.id(), plugin.capabilities())
+            {
+                self.plugin_approvals.set_enabled(plugin_id, enabled);
+            }
+        }
+    }
+
+    /// Draw the Settings → Plugins section (list + review dialog). Returns
+    /// after drawing; the dialog is rendered on top of the settings view.
+    fn draw_plugins_section(&mut self, ui: &mut egui::Ui) {
+        let colors = theme::StatusColors::for_ui(ui);
+        ui.separator();
+        ui.label(egui::RichText::new(self.tr("plugins_section")).strong());
+        if ui.button(self.tr("plugins_scan")).clicked() {
+            self.rescan_plugins();
+        }
+        ui.small(self.tr("plugins_install_root_hint"));
+
+        if self.plugins_discovered.is_empty() {
+            ui.label(self.tr("plugins_none"));
+        }
+        for plugin in self.plugins_discovered.clone() {
+            let state = self.plugin_review_state(&plugin);
+            let caps = plugin.capabilities();
+            ui.horizontal(|ui| {
+                let state_text = match state {
+                    PluginReviewState::Enabled => self.tr("plugins_status_enabled"),
+                    PluginReviewState::Disabled => self.tr("plugins_status_disabled"),
+                    PluginReviewState::Pending => self.tr("plugins_status_pending"),
+                };
+                let state_color = match state {
+                    PluginReviewState::Enabled => colors.success,
+                    PluginReviewState::Disabled => colors.warning,
+                    PluginReviewState::Pending => colors.info,
+                };
+                ui.label(
+                    egui::RichText::new(format!("{} v{}", plugin.name(), plugin.version()))
+                        .strong(),
+                );
+                ui.label(format!("— {}", state_text));
+                ui.colored_label(state_color, "●");
+            });
+            ui.indent(plugin.id(), |ui| {
+                egui::Grid::new(format!("plugin_details_{}", plugin.id()))
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label(self.tr("plugins_type"));
+                        ui.label(plugin.manifest.plugin.type_info.kind.as_str());
+                        ui.end_row();
+                        ui.label(self.tr("plugins_publisher"));
+                        if plugin.manifest.plugin.author.is_empty() {
+                            ui.label("—");
+                        } else {
+                            ui.label(&plugin.manifest.plugin.author);
+                        }
+                        ui.end_row();
+                        ui.label(self.tr("plugins_api"));
+                        ui.label(format!(">= {}", plugin.manifest.plugin.api_version.min));
+                        ui.end_row();
+                        ui.label(self.tr("plugins_sandbox"));
+                        ui.label(self.tr("plugins_sandbox_wasm"));
+                        ui.end_row();
+                    });
+                let caps_label = if caps.requested().is_empty() {
+                    self.tr("plugins_dialog_denied_note").to_owned()
+                } else {
+                    caps.requested().join(", ")
+                };
+                ui.label(caps_label);
+                ui.horizontal(|ui| {
+                    if ui.button(self.tr("plugins_review")).clicked() {
+                        self.open_plugin_review(plugin.id());
+                    }
+                    let review_done = self
+                        .plugin_approvals
+                        .fully_decided(plugin.id(), plugin.capabilities());
+                    let enabled_now = self
+                        .plugin_approvals
+                        .record(plugin.id())
+                        .is_some_and(|r| r.enabled);
+                    if !review_done {
+                        ui.small(self.tr("plugins_enable_blocked_hint"));
+                    } else if enabled_now && ui.button(self.tr("plugins_disable")).clicked() {
+                        self.set_plugin_enabled(plugin.id(), false);
+                    } else if !enabled_now && ui.button(self.tr("plugins_enable")).clicked() {
+                        self.set_plugin_enabled(plugin.id(), true);
+                    }
+                    if ui.button(self.tr("plugins_forget")).clicked() {
+                        self.plugin_approvals.forget(plugin.id());
+                    }
+                });
+                if let Some(err) = &self.plugin_load_error {
+                    ui.colored_label(colors.error, format!("{}: {err}", plugin.id()));
+                }
+            });
+        }
+        if !self.plugins_broken.is_empty() {
+            ui.label(egui::RichText::new(self.tr("plugins_broken")).weak());
+            for entry in &self.plugins_broken {
+                ui.small(format!("⚠ {entry}"));
+            }
+        }
+    }
+
+    /// Draw the permission-review dialog (RFC §6.2) for the plugin currently
+    /// open. Every requested capability shows its sensitive note (RFC §6.3)
+    /// and an Approve/Deny choice; the working copy lands in the store on
+    /// Done. While the dialog is open the store is untouched.
+    fn draw_plugin_review_dialog(&mut self, ctx: &egui::Context) {
+        let Some(plugin_id) = self.plugin_review_open.clone() else {
+            return;
+        };
+        let Some(plugin) = self
+            .plugins_discovered
+            .iter()
+            .find(|p| p.id() == plugin_id)
+            .cloned()
+        else {
+            self.plugin_review_open = None;
+            return;
+        };
+        let title = format!("{} — {}", self.tr("plugins_dialog_title"), plugin.name());
+        let mut done = false;
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "{} v{}",
+                    plugin.name(),
+                    plugin.manifest.plugin.version
+                ));
+                ui.label(self.tr("plugins_dialog_requests"));
+                let caps = plugin.capabilities();
+                if caps.requested().is_empty() {
+                    ui.label(self.tr("plugins_none"));
+                }
+                for cap in caps.requested() {
+                    let sensitive = matches!(cap, "secrets" | "capture" | "chat");
+                    ui.horizontal(|ui| {
+                        let approved = self.plugin_review_draft.get(cap).copied().unwrap_or(false);
+                        ui.label(cap);
+                        if ui
+                            .selectable_label(approved, self.tr("plugins_dialog_approve"))
+                            .clicked()
+                        {
+                            self.plugin_review_draft.insert((*cap).to_owned(), true);
+                        }
+                        if ui
+                            .selectable_label(!approved, self.tr("plugins_dialog_deny"))
+                            .clicked()
+                        {
+                            self.plugin_review_draft.insert((*cap).to_owned(), false);
+                        }
+                        if sensitive {
+                            ui.small(format!("({})", self.tr("plugins_dialog_sensitive")));
+                        }
+                    });
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button(self.tr("plugins_dialog_approve_all")).clicked() {
+                        for cap in caps.requested() {
+                            let sensitive = matches!(cap, "secrets" | "capture" | "chat");
+                            self.plugin_review_draft
+                                .insert((*cap).to_owned(), !sensitive);
+                        }
+                    }
+                    if ui.button(self.tr("plugins_dialog_deny_all")).clicked() {
+                        for cap in caps.requested() {
+                            self.plugin_review_draft.insert((*cap).to_owned(), false);
+                        }
+                    }
+                    if ui.button(self.tr("plugins_dialog_done")).clicked() {
+                        done = true;
+                    }
+                });
+                ui.small(self.tr("plugins_dialog_denied_note"));
+            });
+        if done {
+            self.apply_plugin_review();
+        }
+    }
+
     /// Mirror the persisted alert-ingestion toggle into the runtime queue.
     /// Turning it off discards any pending entries (like telemetry: disabling
     /// clears what was queued). The queue is purely local — nothing is ever
@@ -7468,6 +7792,9 @@ impl RivuletApp {
         // Mirror the persisted webhook-receiver settings into the loopback
         // listener (disabled by default).
         app.apply_alerts_receiver();
+        // Discover plugin bundles so the Settings → Plugins list is populated
+        // on first paint (re-scanned on demand via the Rescan button).
+        app.rescan_plugins();
         app
     }
 }
@@ -9023,6 +9350,10 @@ impl eframe::App for RivuletApp {
                         self.draw_update_status(ui);
                         self.handle_update_actions(ui.ctx().clone());
 
+                        // Plugin permission-review dialog (drawn on top of
+                        // the settings view while a review is open).
+                        self.draw_plugin_review_dialog(ui.ctx());
+
                         // Settings: appearance (color scheme)
                         ui.separator();
                         ui.label(egui::RichText::new(self.tr("theme")).strong());
@@ -9483,6 +9814,10 @@ impl eframe::App for RivuletApp {
                             self.open_remote_companion_page();
                         }
                         ui.small(self.tr("remote_companion_hint"));
+
+                        // Settings: Plugins — discovered bundles, permission
+                        // review and enable/disable (plugin-system RFC Phase 3).
+                        self.draw_plugins_section(ui);
 
                         // Settings: MIDI controller mapping (Korg NanoKontrol etc.).
                         // Maps MIDI messages (note/CC on a channel) to actions such as
@@ -13967,5 +14302,206 @@ mod tests {
         };
         let target = config.to_stream_target().expect("should produce target");
         assert!(target.settings.ingest_url.contains("youtube.com"));
+    }
+
+    // ── Plugin Phase 3: approval flow contract (plugin-system RFC) ──────
+
+    /// A discovered plugin fixture with the given capabilities, parsed
+    /// through the real manifest parser.
+    fn discovered_plugin(caps: &str) -> rivulet_core::DiscoveredPlugin {
+        let toml = format!(
+            r#"
+[plugin]
+id = "com.example.demo"
+version = "1.2.0"
+api_version = {{ min = "1.0", max = "2.0" }}
+name = "Demo"
+author = "Demo Author"
+type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
+[plugin.capabilities]
+{caps}
+"#
+        );
+        let manifest = rivulet_core::parse_manifest(&toml).expect("manifest parses");
+        rivulet_core::DiscoveredPlugin {
+            manifest,
+            bundle_dir: std::path::PathBuf::from("/plugins/com.example.demo"),
+            binary_path: std::path::PathBuf::from("/plugins/com.example.demo/plugin.wasm"),
+        }
+    }
+
+    #[test]
+    fn plugin_review_state_reflects_decisions_and_enable_flag() {
+        let mut app = RivuletApp {
+            ..Default::default()
+        };
+        let plugin = discovered_plugin("ui = true\naudio_in = true");
+        app.plugins_discovered.push(plugin.clone());
+
+        // Nothing decided yet → Pending (enable blocked).
+        assert_eq!(app.plugin_review_state(&plugin), PluginReviewState::Pending);
+
+        // One capability approved, one denied → fully decided + disabled.
+        app.plugin_approvals.approve("com.example.demo", "ui");
+        app.plugin_approvals.deny("com.example.demo", "audio_in");
+        assert_eq!(
+            app.plugin_review_state(&plugin),
+            PluginReviewState::Disabled
+        );
+
+        // Enabling flips the state to Enabled.
+        app.set_plugin_enabled("com.example.demo", true);
+        assert_eq!(app.plugin_review_state(&plugin), PluginReviewState::Enabled);
+        assert!(app
+            .plugin_approvals
+            .record("com.example.demo")
+            .is_some_and(|r| r.enabled));
+    }
+
+    #[test]
+    fn set_plugin_enabled_is_blocked_until_fully_decided() {
+        let mut app = RivuletApp {
+            ..Default::default()
+        };
+        let plugin = discovered_plugin("ui = true");
+        // Review pending: enabling must be a no-op (gate before activation).
+        app.set_plugin_enabled("com.example.demo", true);
+        assert!(app.plugin_approvals.record("com.example.demo").is_none());
+        let _ = &plugin; // fixtures share the manifest id
+    }
+
+    #[test]
+    fn plugin_review_round_trip_draft_to_store() {
+        let mut app = RivuletApp {
+            ..Default::default()
+        };
+        let plugin = discovered_plugin("ui = true\nsecrets = true");
+        app.plugins_discovered.push(plugin);
+
+        // Open the dialog: the draft mirrors the persisted decisions.
+        app.open_plugin_review("com.example.demo");
+        assert_eq!(app.plugin_review_open.as_deref(), Some("com.example.demo"));
+        assert!(app.plugin_review_draft.contains_key("ui"));
+        assert!(app.plugin_review_draft.contains_key("secrets"));
+
+        // Approve both in the draft and apply.
+        app.plugin_review_draft.insert("ui".to_owned(), true);
+        app.plugin_review_draft.insert("secrets".to_owned(), true);
+        app.apply_plugin_review();
+
+        // Dialog closed; both decisions persisted (secrets stays recorded —
+        // but the runtime never grants it to WASM, RFC §6.3).
+        assert!(app.plugin_review_open.is_none());
+        assert!(app.plugin_review_draft.is_empty());
+        let record = app
+            .plugin_approvals
+            .record("com.example.demo")
+            .expect("record exists");
+        assert_eq!(
+            record.capabilities.get("ui"),
+            Some(&rivulet_core::CapabilityDecision::Approved)
+        );
+        assert_eq!(
+            record.capabilities.get("secrets"),
+            Some(&rivulet_core::CapabilityDecision::Approved)
+        );
+        // Enable stays off until the user explicitly enables.
+        assert!(!record.enabled);
+    }
+
+    #[test]
+    fn apply_plugin_review_denies_unreviewed_capabilities() {
+        let mut app = RivuletApp {
+            ..Default::default()
+        };
+        app.plugins_discovered.push(discovered_plugin(
+            "ui = true\naudio_in = true\nvideo_out = true",
+        ));
+
+        app.open_plugin_review("com.example.demo");
+        // Approve only ui in the draft.
+        app.plugin_review_draft.insert("ui".to_owned(), true);
+        app.plugin_review_draft.insert("audio_in".to_owned(), false);
+        app.plugin_review_draft
+            .insert("video_out".to_owned(), false);
+        app.apply_plugin_review();
+
+        let record = app
+            .plugin_approvals
+            .record("com.example.demo")
+            .expect("record exists");
+        assert_eq!(
+            record.capabilities.get("ui"),
+            Some(&rivulet_core::CapabilityDecision::Approved)
+        );
+        assert_eq!(
+            record.capabilities.get("audio_in"),
+            Some(&rivulet_core::CapabilityDecision::Denied)
+        );
+        assert_eq!(
+            record.capabilities.get("video_out"),
+            Some(&rivulet_core::CapabilityDecision::Denied)
+        );
+    }
+
+    #[test]
+    fn open_plugin_review_seeds_draft_from_previous_decisions() {
+        let mut app = RivuletApp {
+            ..Default::default()
+        };
+        app.plugins_discovered
+            .push(discovered_plugin("ui = true\naudio_in = true"));
+        app.plugin_approvals.approve("com.example.demo", "ui");
+        app.plugin_approvals.deny("com.example.demo", "audio_in");
+
+        app.open_plugin_review("com.example.demo");
+        assert_eq!(app.plugin_review_draft.get("ui"), Some(&true));
+        assert_eq!(app.plugin_review_draft.get("audio_in"), Some(&false));
+    }
+
+    #[test]
+    fn plugin_approvals_persist_through_serde_round_trip() {
+        // The approvals live inside RivuletApp's serde state (eframe storage);
+        // a round trip through serde must preserve every decision + flag.
+        let mut app = RivuletApp {
+            ..Default::default()
+        };
+        app.plugins_discovered
+            .push(discovered_plugin("ui = true\nsecrets = true"));
+        app.open_plugin_review("com.example.demo");
+        app.plugin_review_draft.insert("ui".to_owned(), true);
+        app.plugin_review_draft.insert("secrets".to_owned(), true);
+        app.apply_plugin_review();
+        app.set_plugin_enabled("com.example.demo", true);
+
+        let json = serde_json::to_string(&app.plugin_approvals).unwrap();
+        let restored: rivulet_core::PluginApprovals = serde_json::from_str(&json).unwrap();
+        let record = restored.record("com.example.demo").expect("record exists");
+        assert!(record.enabled);
+        assert_eq!(
+            record.capabilities.get("ui"),
+            Some(&rivulet_core::CapabilityDecision::Approved)
+        );
+    }
+
+    #[test]
+    fn sensitive_capability_never_granted_to_wasm_even_after_approval() {
+        let mut app = RivuletApp {
+            ..Default::default()
+        };
+        app.plugins_discovered
+            .push(discovered_plugin("secrets = true"));
+        app.open_plugin_review("com.example.demo");
+        app.plugin_review_draft.insert("secrets".to_owned(), true);
+        app.apply_plugin_review();
+        app.set_plugin_enabled("com.example.demo", true);
+
+        let plugin = &app.plugins_discovered[0];
+        assert!(!app.plugin_approvals.effective_grant(
+            plugin.id(),
+            plugin.capabilities(),
+            "secrets",
+            true,
+        ));
     }
 }

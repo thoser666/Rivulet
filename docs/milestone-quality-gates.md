@@ -188,10 +188,15 @@ Review trust, permissions, installation, and cross-platform consistency:
   - **Status note:** the WASM plugin runtime core (RFC
     [`docs/plugin-system-rfc.md`](plugin-system-rfc.md) Phases 1–2) is shipped
     — manifest validation, sandboxed lifecycle with fuel/timeout limits, crash
-    isolation, and core host imports are implemented and tested. The
-    **installation/permission approval UI** ("identifies … before activation")
-    is the outstanding Phase 3 item; M5 closure stays open until the
-    user-facing permission review lands.
+    isolation, and core host imports are implemented and tested. Phase 3 (the
+    **installation/permission approval UI**, "identifies … before activation")
+    is also shipped: the Settings → Plugins section scans the install root,
+    shows publisher/type/host-API/sandbox status per bundle, records
+    per-capability user decisions (`plugin_registry.rs`, persisted in the app
+    state), and gates enabling on a completed review — sensitive capabilities
+    (secrets/capture) stay denied for WASM regardless of the stored approval.
+    M5's remaining plugin item is the OBS compatibility layer (descoped
+    candidate), not the approval flow.
 - OBS compatibility mode is explicitly marked as a compatibility/risk boundary.
 - Global hotkeys and remapping show conflicts, scope, reserved keys, and reset.
 - Windows, macOS, and Linux expose equivalent core workflows or clearly label

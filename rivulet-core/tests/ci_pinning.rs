@@ -5052,3 +5052,101 @@ fn plugin_runtime_phase2_is_implemented() {
         "CHANGELOG must record the plugin runtime implementation"
     );
 }
+
+#[test]
+fn plugin_registry_phase3_is_implemented() {
+    // Phase 3 of the plugin system RFC: capability approval + install flow.
+    // Core registry: install-root scan + persisted approval store.
+    let registry_rs = read("rivulet-core/src/plugin_registry.rs");
+    for marker in [
+        "pub fn scan_install_root",
+        "pub struct DiscoveredPlugin",
+        "pub struct PluginApprovals",
+        "pub struct PluginRecord",
+        "pub enum CapabilityDecision",
+        "pub fn fully_decided",
+        "pub fn effective_grant",
+        "pub fn default_install_root",
+    ] {
+        assert!(
+            registry_rs.contains(marker),
+            "rivulet-core/src/plugin_registry.rs must contain {marker}"
+        );
+    }
+
+    // Sensitive capabilities must stay load-time-denied for WASM (RFC §6.3).
+    assert!(
+        registry_rs.contains("secrets"),
+        "plugin_registry.rs must special-case the sensitive 'secrets' capability"
+    );
+    assert!(
+        registry_rs.contains("is_wasm && matches!(capability, \"secrets\" | \"capture\")"),
+        "plugin_registry.rs must deny secrets/capture for WASM at the policy choke point"
+    );
+
+    // Registry must be wired into lib.rs.
+    let lib = read("rivulet-core/src/lib.rs");
+    assert!(
+        lib.contains("pub mod plugin_registry"),
+        "rivulet-core/src/lib.rs must declare pub mod plugin_registry"
+    );
+
+    // GUI surface: plugins section, review dialog, enable gating.
+    let app_rs = read("rivulet-gui/src/app.rs");
+    for marker in [
+        "fn draw_plugins_section",
+        "fn draw_plugin_review_dialog",
+        "fn open_plugin_review",
+        "fn apply_plugin_review",
+        "fn set_plugin_enabled",
+        "fn plugin_review_state",
+        "plugin_approvals: rivulet_core::PluginApprovals",
+    ] {
+        assert!(
+            app_rs.contains(marker),
+            "rivulet-gui/src/app.rs must contain {marker}"
+        );
+    }
+    // The enable toggle must be gated on the full-decision review.
+    assert!(
+        app_rs.contains("fully_decided"),
+        "GUI enable path must consult PluginApprovals::fully_decided"
+    );
+
+    // i18n: both locales must carry the plugins keys (EN and DE blocks).
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in [
+        "plugins_section",
+        "plugins_review",
+        "plugins_enable_blocked_hint",
+        "plugins_dialog_title",
+        "plugins_dialog_sensitive",
+        "plugins_dialog_done",
+    ] {
+        let needle = format!("(\"{key}\"");
+        assert_eq!(
+            i18n.matches(&needle).count(),
+            2,
+            "i18n key {key} must exist in both locale tables"
+        );
+    }
+
+    // Docs: RFC phase table + M5 gate status note must reflect Phase 3.
+    let rfc = read("docs/plugin-system-rfc.md");
+    assert!(
+        rfc.contains("Shipped (`plugin_registry.rs`"),
+        "RFC phase table must mark Phase 3 as shipped via plugin_registry.rs"
+    );
+    let gates = read("docs/milestone-quality-gates.md");
+    assert!(
+        gates.contains("plugin_registry.rs") || gates.contains("Settings → Plugins"),
+        "M5 gate note must reference the shipped Phase 3 registry/UI"
+    );
+
+    // CHANGELOG must record Phase 3.
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        changelog.contains("Phase 3") && changelog.contains("plugin_registry"),
+        "CHANGELOG must record the plugin registry / approval UI implementation"
+    );
+}
