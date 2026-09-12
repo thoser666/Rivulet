@@ -1,10 +1,10 @@
 # Weekly release promotion — the slow lane for Stage-2/4 distribution
-# channels (Scoop, WinGet, Chocolatey, ...).
+# channels (Scoop, WinGet, Chocolatey, AUR, ...).
 #
 # Rivulet publishes an alpha release on every green push (the fast lane).
 # Package-manager channels must not consume that firehose: moderators reject
-# per-release churn and store listings read better with one bigger, coarser
-# changelog per week. This scheduled workflow therefore:
+# per-release churn and store listings read better with ONE bigger, coarser
+# release per week. This scheduled workflow therefore:
 #
 #   1. picks the newest published release (releases only exist after the
 #      gated pipeline succeeded, so "published" == "green"; the check-runs
@@ -16,11 +16,21 @@
 #   3. generates one digest changelog covering everything since the previous
 #      promotion (`--from-tag` + `--digest` modes of
 #      scripts/generate-release-notes.sh),
-#   4. updates the Scoop bucket automatically when the SCOOP_BUCKET_TOKEN
-#      secret exists (a fine-grained PAT with contents:write on
-#      thoser666/scoop-bucket — the default GITHUB_TOKEN cannot push
-#      cross-repo); otherwise it publishes the manifest as an artifact with
-#      copy-paste instructions instead of failing.
+#   4. prepares EVERY active distribution channel for that single promoted
+#      release, once per week:
+#        - Scoop:     render + byte-verify the manifest; push it to the bucket
+#                     automatically when SCOOP_BUCKET_TOKEN exists, otherwise
+#                     publish it as an artifact with copy-paste instructions,
+#        - WinGet:    render + byte-verify the manifest from the real MSI and
+#                     publish the payload as an artifact (the winget-pkgs
+#                     submission PR stays external and human-reviewed),
+#        - Chocolatey render + byte-verify the package and publish it as an
+#                     artifact (the moderated `choco push` stays external),
+#        - AUR:       report whether the committed PKGBUILD already pins the
+#                     promoted version and hand over the exact bump+push task
+#                     when it does not (the AUR push stays external).
+#   Channel downloads, PR submissions, and store reviews therefore happen at
+#   most once per week, against the same reviewed release + digest changelog.
 #
 # Usage:
 #   scheduled: Mondays 07:09 UTC
@@ -54,6 +64,9 @@ jobs:
   promote:
     name: Promote newest green release to weekly-latest
     runs-on: ubuntu-latest
+    outputs:
+      chosen: ${{ steps.resolve.outputs.chosen }}
+      up_to_date: ${{ steps.previous.outputs.up_to_date }}
     steps:
       - name: Checkout repository (full history for the changelog range)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -256,3 +269,217 @@ jobs:
           path: scoop-manifest.json
           if-no-files-found: error
           retention-days: 30
+
+  # WinGet — weekly preparation only. Renders the manifest from the real MSI
+  # (ProductCode/UpgradeCode read via WindowsInstaller COM), byte-verifies it,
+  # and publishes the payload as an artifact. The actual winget-pkgs
+  # submission PR remains external and human-reviewed; this job makes that PR
+  # a copy-paste of a pre-validated folder instead of a per-alpha chore.
+  prepare-winget:
+    name: Prepare WinGet manifest (weekly)
+    if: needs.promote.outputs.up_to_date == 'false'
+    needs: promote
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.promote.outputs.chosen }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Derive MSI version from the release tag
+        shell: bash
+        run: echo "MSI_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Download the MSI release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p msi
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern rivulet-windows-x86_64.msi \
+            --dir msi
+
+      - name: Run the winget manifest Pester tests
+        shell: pwsh
+        run: |
+          $env:NO_COLOR = "1"
+          Invoke-Pester -CI -Path packaging/windows/generate-winget-manifest.tests.ps1 -Output Detailed
+
+      - name: Generate the winget manifest (real MSI metadata)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-winget-manifest.ps1" `
+            -Version "$env:MSI_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG" `
+            -MsiPath "$env:GITHUB_WORKSPACE/msi/rivulet-windows-x86_64.msi" `
+            -OutDir "$env:GITHUB_WORKSPACE/winget-manifests"
+
+      - name: Verify the generated manifest (byte-exact re-render)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-winget-manifest.ps1" `
+            -ValidateOnly `
+            -ManifestPath "$env:GITHUB_WORKSPACE/winget-manifests/Rivulet.Rivulet/$env:MSI_VERSION/Rivulet.Rivulet.yaml" `
+            -Version "$env:MSI_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG"
+
+      - name: Publish the WinGet manifest as an artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "winget-manifest-${{ needs.promote.outputs.chosen }}"
+          path: winget-manifests
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish WinGet plan
+        shell: pwsh
+        run: |
+          $sha = (Select-String -LiteralPath "$env:GITHUB_WORKSPACE/winget-manifests/Rivulet.Rivulet/$env:MSI_VERSION/Rivulet.Rivulet.yaml" `
+            -Pattern "InstallerSha256:\s*([0-9A-F]{64})").Matches.Groups[1].Value
+          @"
+          ## WinGet (weekly preparation)
+          - Release: $env:RELEASE_TAG (MSI version $env:MSI_VERSION)
+          - Manifest byte-verified against the real MSI; Installer SHA-256: $sha
+          - Winget package identity: Rivulet.Rivulet (publisher Rivulet)
+
+          Submission stays external: open a PR against microsoft/winget-pkgs carrying the
+          generated Rivulet.Rivulet/$env:MSI_VERSION/Rivulet.Rivulet.yaml folder from the
+          winget-manifest-$env:RELEASE_TAG artifact. No external store was modified.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  # Chocolatey — weekly preparation only. Renders the package from the
+  # portable ZIP SHA-256 in the release's SHA256SUMS, byte-verifies it, and
+  # publishes it as an artifact. The moderated `choco push` stays external;
+  # submitting one validated package per week keeps the community repository
+  # (which rejects churn) reviewable and review-scoped.
+  prepare-chocolatey:
+    name: Prepare Chocolatey package (weekly)
+    if: needs.promote.outputs.up_to_date == 'false'
+    needs: promote
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.promote.outputs.chosen }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Derive version from the release tag
+        shell: bash
+        run: echo "CHOCO_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Run the chocolatey package Pester tests
+        shell: pwsh
+        run: |
+          $env:NO_COLOR = "1"
+          Invoke-Pester -CI -Path packaging/windows/generate-chocolatey-package.tests.ps1 -Output Detailed
+
+      - name: Generate the chocolatey package (SHA-256 from SHA256SUMS)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-chocolatey-package.ps1" `
+            -Version "$env:CHOCO_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG" `
+            -OutDir "$env:GITHUB_WORKSPACE/chocolatey-packages"
+
+      - name: Verify the generated package (byte-exact re-render)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          pwsh -NoProfile -File "$env:GITHUB_WORKSPACE/packaging/windows/generate-chocolatey-package.ps1" `
+            -ValidateOnly `
+            -ManifestPath "$env:GITHUB_WORKSPACE/chocolatey-packages/rivulet" `
+            -Version "$env:CHOCO_VERSION" `
+            -ReleaseTag "$env:RELEASE_TAG"
+
+      - name: Publish the Chocolatey package as an artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: "chocolatey-package-${{ needs.promote.outputs.chosen }}"
+          path: chocolatey-packages
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish Chocolatey plan
+        shell: pwsh
+        run: |
+          $install = "$env:GITHUB_WORKSPACE/chocolatey-packages/rivulet/tools/chocolateyInstall.ps1"
+          $sha = (Select-String -LiteralPath $install -Pattern "checksum64\s*=\s*'([0-9a-f]{64})'").Matches.Groups[1].Value
+          @"
+          ## Chocolatey (weekly preparation)
+          - Release: $env:RELEASE_TAG (version $env:CHOCO_VERSION)
+          - Package byte-verified against the release SHA256SUMS; portable ZIP SHA-256: $sha
+          - Submission target: Chocolatey community repository (moderated push)
+
+          Submission stays external: upload the generated package directory from the
+          chocolatey-package-$env:RELEASE_TAG artifact with `choco push` (API key required)
+          or open the package PR against the community repository — one reviewed package
+          per week keeps the moderation queue clean. No external store was modified.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  # AUR — weekly status + hand-off, never an automated push. The AUR PKGBUILD
+  # is committed (packaging/aur/PKGBUILD) and must be bumped by a maintainer
+  # to the promoted version; this job validates the bump consistency and
+  # surfaces the exact task when the version has not been bumped yet.
+  prepare-aur:
+    name: Check AUR PKGBUILD version (weekly)
+    if: needs.promote.outputs.up_to_date == 'false'
+    needs: promote
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ needs.promote.outputs.chosen }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate PKGBUILD structure and bump status
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKGBUILD="packaging/aur/PKGBUILD"
+          if [[ ! -f "$PKGBUILD" ]]; then
+            echo "::error::PKGBUILD not found at $PKGBUILD"
+            exit 1
+          fi
+          [[ -f "packaging/aur/rivulet.install" ]] || {
+            echo "::error::rivulet.install file missing"
+            exit 1
+          }
+          [[ -f "packaging/aur/rivulet.desktop" ]] || {
+            echo "::error::rivulet.desktop file missing"
+            exit 1
+          }
+
+          AUR_VERSION="${RELEASE_TAG#v}"
+          PKGVER=$(grep '^pkgver=' "$PKGBUILD" | cut -d= -f2)
+          if [[ "$PKGVER" == "$AUR_VERSION" ]]; then
+            echo "bumped=true" >> "$GITHUB_ENV"
+            echo "PKGBUILD already pins the promoted version ($AUR_VERSION)."
+          else
+            echo "bumped=false" >> "$GITHUB_ENV"
+            echo "::warning::PKGBUILD pkgver ($PKGVER) does not match the promoted release ($AUR_VERSION) — bump pkgver and sha256sums, commit, and push to https://aur.archlinux.org/rivulet.git"
+          fi
+
+      - name: Publish AUR plan
+        shell: bash
+        run: |
+          if [[ "$bumped" == "true" ]]; then
+            STATUS="PKGBUILD already pins the promoted version — the AUR package is up to date."
+          else
+            STATUS="PKGBUILD needs a maintainer bump to the promoted version (pkgver + sha256sums + \`git push\` to https://aur.archlinux.org/rivulet.git)."
+          fi
+          {
+            echo "## AUR (weekly status)"
+            echo
+            echo "- Release: $RELEASE_TAG"
+            echo "- Status: $STATUS"
+            echo
+            echo "The AUR push is external and manual by design; this run only validates"
+            echo "structure (PKGBUILD/rivulet.install/rivulet.desktop) and hands off the bump."
+          } >> "$GITHUB_STEP_SUMMARY"
