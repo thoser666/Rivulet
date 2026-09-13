@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- feat(telemetry): **defined events are now emitted** — the M5 follow-up
+  closed by issue #127. `SceneSwitch` lands once per successful scene change
+  (studio take, scene list, in-app/global hotkeys, MIDI, OBS WebSocket);
+  `ChatConnect { ok }` is recorded on each chat connection transition (true on
+  `Connected`, false on `Disconnected`, `Off` and steady state stay silent);
+  `RecordingError` accompanies every unhealthy `RecordingStop`, with the
+  localized error text classified into a stable `TelemetryErrorKind`
+  (`classify_record_error` in the GUI) so free-form text still never enters a
+  batch. Pinned by the `m5_telemetry_opt_in_is_privacy_safe_and_pinned` guard
+  and documented in `docs/telemetry.md`.
+
 - docs(m10): **AI settings placement** — two levels so the Settings page stays
   lean: infrastructure lives in Settings (master switch, Ollama connection +
   model, pause-while-live, T2I backend), feature workflow lives on the
