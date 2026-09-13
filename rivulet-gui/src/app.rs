@@ -1819,8 +1819,6 @@ impl Default for RivuletApp {
     }
 }
 
-// --- Game-window live preview (shared by Linux + Windows) ---
-#[cfg(any(target_os = "linux", target_os = "windows"))]
 impl RivuletApp {
     // == Multi-track audio routing (issue #154 Phase 2) ==================
 
@@ -2115,6 +2113,11 @@ impl RivuletApp {
             _ => "audio_source_kind_mixed",
         }
     }
+}
+
+// --- Game-window live preview (shared by Linux + Windows) ---
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+impl RivuletApp {
     /// Refresh the list of game-like windows for game capture mode.
     ///
     /// On Linux the list comes from `rivulet-core` (xdotool + xcap). The
