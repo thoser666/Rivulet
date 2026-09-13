@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- docs(roadmap): **M6 status updated to 🚧 In progress** — 3 of 4 features
+  are shipped and closed (#97 chat auto-clips, #98 multi-platform restream,
+  #99 mobile/HTTP remote companion); multi-track audio routing remains the
+  last item (design complete in `docs/m6-audio-routing.md`, implementation
+  not started). The M6 quality-gate section now carries per-criterion status
+  notes separating the shipped criteria from the pending routing/mixer-parity
+  criteria and the resource report due with the routing implementation.
+
 - feat(telemetry): **defined events are now emitted** — the M5 follow-up
   closed by issue #127. `SceneSwitch` lands once per successful scene change
   (studio take, scene list, in-app/global hotkeys, MIDI, OBS WebSocket);

@@ -220,27 +220,59 @@ trust/permission review.
 
 ### M6: Creator Toolkit and Interactivity
 
+**Status: In progress** — 3 of 4 features are shipped and their issues closed
+(#97 auto-clips, #98 restream, #99 remote companion); multi-track audio
+routing remains (designed in
+[`docs/m6-audio-routing.md`](m6-audio-routing.md)). Per-criterion status
+below; the milestone closes when the routing criteria and the resource
+report pass.
+
 Review creator workflows that build on shipped chat/replay/remote building
 blocks:
 
 - Chat-driven auto-clips respect per-channel enable/disable, thresholds,
   cooldown, and duration; a clip is only saved when a real replay buffer is
   available and the save reports the exact output path.
+  - **Status note:** shipped (PR merged, #97 closed) — sliding-window
+    message-rate detector plus `!clip` command, threshold/window/cooldown
+    configurable in the Stream view, replay-buffer availability checked
+    before saving, i18n EN/DE.
 - Restreaming to multiple platforms keeps per-platform keys, bitrates, and
   health independent; one failing target never takes down the others or the
   local recording.
+  - **Status note:** shipped (PR merged, #98 closed) — per-target name/
+    platform/ingest/key persisted, independent per-target health
+    (Connecting/Live/Degraded/Failed), max 4 targets with duplicate-name
+    protection.
 - Mobile/HTTP remote control is authenticated, bound to the LAN where
   configured, and cannot start or stop streams without explicit permission.
+  - **Status note:** shipped (PR merged, #99 closed) — self-contained
+    mobile page (no CDN), explicit LAN bind, LAN-requires-password policy,
+    permission gate for remote stream start/stop; see
+    [`docs/remote-companion.md`](remote-companion.md).
 - Multi-track audio routing: per-source volume/mute/filter settings and the
   record/stream routing matrix survive a persist→restore round-trip; a source
   routed to record never reaches the stream and vice versa; zero record-routed
   sources starts recording with a warning and no audio tracks; per-app capture
   degrades gracefully where the platform lacks it (macOS loopback hint).
+  - **Status note:** the remaining engineering item — design complete
+    (types, engine API, pipeline diagram, persistence schema, i18n keys);
+    implementation not started. The three per-platform capture backends
+    (WASAPI per-app, PipeWire, macOS loopback fallback) are marked
+    "research needed" in the design doc and are the main risk area.
 - Mixer parity: the same per-source controls (volume, mute, filters) are
   reachable in the Record view, the Stream view, and the Mixer view — macOS
   ships the same mixer controls as Windows/Linux (closes the M5 mixer follow-up).
+  - **Status note:** pending with the audio-routing feature — the current
+    mixer shows System/Microphone only; the design doc requires one shared
+    implementation across all three placements and closes the M5 macOS
+    mixer follow-up as part of it.
 - Clip writes, restream fan-out, and remote sessions stay within the
   documented CPU/memory/frame-time budgets (see the resource table above).
+  - **Status note:** partially evidenced — clip/restream/remote shipped and
+    tested; the formal resource report for active creator sessions (incl.
+    5+ audio sources with full filter chains) is due with the routing
+    implementation.
 
 Exit evidence: clip trigger/save tests, per-target restream failure tests,
 remote-auth tests, audio-routing round-trip/routing-separation tests, and a
