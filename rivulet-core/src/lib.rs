@@ -26,7 +26,8 @@ pub mod chat;
 pub use chat::{Chat, ChatConfig, ChatPlatform};
 pub mod telemetry;
 pub use telemetry::{
-    platform_code, TelemetryBatch, TelemetryEvent, TelemetryReporter, TelemetrySink,
+    platform_code, TelemetryBatch, TelemetryErrorKind, TelemetryEvent, TelemetryReporter,
+    TelemetrySink,
 };
 pub mod alerts_ingest;
 pub use alerts_ingest::{

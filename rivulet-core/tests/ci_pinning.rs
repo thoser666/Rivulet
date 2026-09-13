@@ -295,6 +295,10 @@ fn m5_telemetry_opt_in_is_privacy_safe_and_pinned() {
         "telemetry_enabled",
         "apply_telemetry_policy",
         "complete_recording_session_telemetry",
+        "switch_active_scene",
+        "switch_scene_back",
+        "apply_chat_state",
+        "classify_record_error",
     ] {
         assert!(gui.contains(required), "GUI must wire {required}");
     }

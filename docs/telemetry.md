@@ -33,9 +33,9 @@ cannot accidentally leak user data, and the shipped build transmits
 |---|---|---|
 | `Startup` | — | Once per session, after restore while opted in |
 | `RecordingStop` | `duration_secs: u32`, `healthy: bool` | Emitted by every platform stop path (Windows/Linux/macOS/aux); `healthy` is best-effort at stop time |
-| `RecordingError` | `error: TelemetryErrorKind` | Defined for future error wiring |
-| `SceneSwitch` | — | Defined for future scene-switch wiring |
-| `ChatConnect` | `ok: bool` | Defined for future chat wiring |
+| `RecordingError` | `error: TelemetryErrorKind` | Emitted together with an unhealthy `RecordingStop`; the localized error text is classified into a stable category (`classify_record_error` in the GUI) and never serialized |
+| `SceneSwitch` | — | Emitted once per landed scene switch (studio take, scene list, hotkeys, MIDI, OBS WebSocket); `switch_active_scene`/`switch_scene_back` in the GUI |
+| `ChatConnect` | `ok: bool` | Emitted on every chat connection transition: `ok: true` when the worker reaches `Connected`, `ok: false` when it drops to `Disconnected`; `Off` (worker stopped) is not reported and steady state does not re-report |
 
 Every batch additionally carries the compile-time app version
 (`CARGO_PKG_VERSION`) and a `cfg!`-resolved platform code (`windows`,
@@ -60,8 +60,10 @@ follow-up. This mirrors how other staged contracts ship (e.g. the NDI
   opt-out, JSON round-trip and free-form-text redaction.
 - **GUI:** `rivulet-gui/src/app.rs` — persisted `telemetry_enabled` toggle
   (Settings → Telemetry), runtime `TelemetryReporter` (`#[serde(skip)]`),
-  `apply_telemetry_policy()` after restore, and
-  `complete_recording_session_telemetry()` in every platform stop path.
+  `apply_telemetry_policy()` after restore,
+  `complete_recording_session_telemetry()` in every platform stop path,
+  `switch_active_scene`/`switch_scene_back` on every scene change, and
+  `apply_chat_state()` mirroring each chat connection transition.
 - **Security:** the privacy posture is documented in
   [`docs/security.md`](security.md) and pinned by the ci_pinning guard
   `m5_telemetry_opt_in_is_privacy_safe_and_pinned`.

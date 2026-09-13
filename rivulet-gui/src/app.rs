@@ -3461,7 +3461,7 @@ impl RivuletApp {
                     ) {
                         if let Some(target) = self.studio_mode.program() {
                             let from = self.scenes.active();
-                            if self.scenes.switch_to(target) {
+                            if self.switch_active_scene(target) {
                                 self.scene_transition = transition;
                                 self.scene_status =
                                     Some(self.tr_fmt(
@@ -3498,7 +3498,7 @@ impl RivuletApp {
                 .on_hover_text(self.tr("scenes_switch_back"));
             theme::paint_interaction_stroke(ui, &switch_back_response);
             let switched_back = switch_back_response.clicked();
-            if switched_back && self.scenes.switch_back() {
+            if switched_back && self.switch_scene_back() {
                 self.scene_status = None;
             }
         });
@@ -3714,7 +3714,7 @@ impl RivuletApp {
                 if self.studio_mode.enabled() {
                     self.studio_mode.set_preview(Some(id));
                     self.scene_status = Some(self.tr_fmt("studio_preview_selected", &[name]));
-                } else if self.scenes.switch_to(id) {
+                } else if self.switch_active_scene(id) {
                     let now = Instant::now();
                     self.scene_transition = rivulet_core::SceneTransition::new(
                         self.transition_kind,
@@ -5401,6 +5401,30 @@ impl RivuletApp {
     /// channel into the bounded list. Non-blocking: called once per frame.
     /// The worker is rebuilt for the currently selected platform (Twitch
     /// IRC, Kick WebSocket or YouTube polling).
+    /// Store the current chat connection state, reporting a `ChatConnect`
+    /// telemetry event on every transition into a terminal state: reaching
+    /// `Connected` records `ok: true`, losing the connection records
+    /// `ok: false`. `Off` (worker not running) is not a connection attempt
+    /// and is never reported. Only transitions emit, so a steady-state
+    /// connection does not flood the batch.
+    fn apply_chat_state(&mut self, state: rivulet_core::ChatConnState) {
+        if state == self.chat_state {
+            return;
+        }
+        match state {
+            rivulet_core::ChatConnState::Connected => {
+                self.telemetry
+                    .record(rivulet_core::TelemetryEvent::ChatConnect { ok: true });
+            }
+            rivulet_core::ChatConnState::Disconnected => {
+                self.telemetry
+                    .record(rivulet_core::TelemetryEvent::ChatConnect { ok: false });
+            }
+            rivulet_core::ChatConnState::Off => {}
+        }
+        self.chat_state = state;
+    }
+
     fn reconcile_chat(&mut self) {
         match self.chat_action_pending.take() {
             Some(ChatAction::Connect) => {
@@ -5415,11 +5439,12 @@ impl RivuletApp {
                     self.chat_oauth_token.clone(),
                 );
                 self.chat_worker = Some(rivulet_core::Chat::new(&cfg));
-                self.chat_state = self
-                    .chat_worker
-                    .as_ref()
-                    .map(|w| w.connection_state())
-                    .unwrap_or(rivulet_core::ChatConnState::Off);
+                self.apply_chat_state(
+                    self.chat_worker
+                        .as_ref()
+                        .map(|w| w.connection_state())
+                        .unwrap_or(rivulet_core::ChatConnState::Off),
+                );
             }
             Some(ChatAction::Disconnect) => {
                 if let Some(mut worker) = self.chat_worker.take() {
@@ -5427,7 +5452,7 @@ impl RivuletApp {
                 }
                 self.chat_messages.clear();
                 self.chat_reply_target = None;
-                self.chat_state = rivulet_core::ChatConnState::Off;
+                self.apply_chat_state(rivulet_core::ChatConnState::Off);
             }
             Some(ChatAction::Send(text)) => {
                 self.send_chat_message(text);
@@ -5439,8 +5464,12 @@ impl RivuletApp {
         }
 
         // Drain incoming messages (bounded to the newest MAX_CHAT_MESSAGES).
+        let worker_state = self
+            .chat_worker
+            .as_ref()
+            .map(|w| w.connection_state())
+            .unwrap_or(rivulet_core::ChatConnState::Off);
         if let Some(worker) = &self.chat_worker {
-            self.chat_state = worker.connection_state();
             if let Some(rx) = worker.messages() {
                 while let Ok(msg) = rx.try_recv() {
                     self.chat_messages.push(msg);
@@ -5451,6 +5480,7 @@ impl RivuletApp {
                 }
             }
         }
+        self.apply_chat_state(worker_state);
 
         // Keep the loopback webhook receiver in sync with the persisted
         // settings (start/restart/stop), then drain its parsed alert events
@@ -5762,7 +5792,7 @@ impl RivuletApp {
         for action in fired {
             if let Some(stripped) = action.strip_prefix("scene:") {
                 if let Ok(id) = stripped.parse::<uuid::Uuid>() {
-                    self.scenes.switch_to(id);
+                    self.switch_active_scene(id);
                 }
             } else {
                 self.dispatch_hotkey_action(&action);
@@ -5851,7 +5881,7 @@ impl RivuletApp {
     fn apply_midi_action(&mut self, action: &rivulet_core::MidiAction, raw_value: u8) {
         match action {
             rivulet_core::MidiAction::SwitchScene(id) => {
-                self.scenes.switch_to(*id);
+                self.switch_active_scene(*id);
             }
             rivulet_core::MidiAction::ToggleRecord => {
                 if self.any_recording_active() {
@@ -6197,7 +6227,7 @@ impl RivuletApp {
                         comment: format!("Scene '{name}' not found"),
                     };
                 };
-                self.scenes.switch_to(scene.id);
+                self.switch_active_scene(scene.id);
                 self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
                 rivulet_obs_websocket::ObsCommandResult::Success(vec![
                     ObsEvent::CurrentProgramSceneChanged { scene_name: name },
@@ -6821,15 +6851,48 @@ impl RivuletApp {
     /// Classify one finished recording session for telemetry. `healthy` is
     /// best-effort at the moment the session ends (`last_error` empty); events
     /// are only collected while the user opted in and never leave the device
-    /// in the shipped build (no transport sink is wired).
+    /// in the shipped build (no transport sink is wired). An unhealthy
+    /// session also records the classified error category (`RecordingError`),
+    /// never the raw error text.
     fn complete_recording_session_telemetry(&mut self) {
         let duration_secs = self.record_started.elapsed().as_secs().min(u32::MAX as u64) as u32;
         let healthy = self.last_error.is_none();
+        if let Some(error) = &self.last_error {
+            self.telemetry
+                .record(rivulet_core::TelemetryEvent::RecordingError {
+                    error: classify_record_error(error),
+                });
+        }
         self.telemetry
             .record(rivulet_core::TelemetryEvent::RecordingStop {
                 duration_secs,
                 healthy,
             });
+    }
+
+    /// Switch the active scene and report the `SceneSwitch` telemetry event
+    /// only when the switch actually landed (mirrors `SceneManager::switch_to`
+    /// success semantics, e.g. unknown ids do not count as a switch).
+    fn switch_active_scene(&mut self, id: uuid::Uuid) -> bool {
+        if self.scenes.switch_to(id) {
+            self.telemetry
+                .record(rivulet_core::TelemetryEvent::SceneSwitch);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move back to the previous scene, reporting `SceneSwitch` like every
+    /// other scene change.
+    fn switch_scene_back(&mut self) -> bool {
+        if self.scenes.switch_back() {
+            self.telemetry
+                .record(rivulet_core::TelemetryEvent::SceneSwitch);
+            true
+        } else {
+            false
+        }
     }
 
     fn draw_presence_status(&mut self, ui: &mut egui::Ui) {
@@ -7914,10 +7977,14 @@ impl eframe::App for RivuletApp {
             // Scene history shortcuts are handled globally, but only when a
             // text field is not focused so normal editing remains unaffected.
             if !wants_keyboard_input {
+                let mut switch_targets: Vec<uuid::Uuid> = Vec::new();
                 for (scene_id, binding) in &self.hotkeys.scene_hotkeys {
                     if binding.pressed_in(i) {
-                        self.scenes.switch_to(*scene_id);
+                        switch_targets.push(*scene_id);
                     }
+                }
+                for scene_id in switch_targets {
+                    self.switch_active_scene(scene_id);
                 }
                 // Delete the selected composition source. Destructive and
                 // repeat-sensitive: it is in-app only (never OS-global) and
@@ -10195,6 +10262,49 @@ fn drain_error_receiver(receiver: &std::sync::mpsc::Receiver<String>) -> Option<
     last
 }
 
+/// Best-effort, deterministic classification of a recording error into a
+/// stable telemetry category. The raw error text is localized and free-form,
+/// so it can never be serialized; only the category code is reported. The
+/// mapping is intentionally conservative — unrecognized text falls back to
+/// `Unknown` instead of being guessed.
+fn classify_record_error(error: &str) -> rivulet_core::TelemetryErrorKind {
+    let hay = error.to_lowercase();
+    for (needles, kind) in [
+        (
+            &["permission", "denied", "access is denied", "zugriff"][..],
+            rivulet_core::TelemetryErrorKind::Permission,
+        ),
+        (
+            &[
+                "source",
+                "quelle",
+                "capture",
+                "frame",
+                "graphics capture",
+                "desktop duplication",
+            ][..],
+            rivulet_core::TelemetryErrorKind::Capture,
+        ),
+        (
+            &["encode", "encoder", "output", "mp4", "mux", "container"][..],
+            rivulet_core::TelemetryErrorKind::Output,
+        ),
+        (
+            &["io", "disk", "write", "file", "eingabe/ausgabe"][..],
+            rivulet_core::TelemetryErrorKind::Io,
+        ),
+        (
+            &["engine", "pipeline", "gstreamer", "element", "session"][..],
+            rivulet_core::TelemetryErrorKind::Engine,
+        ),
+    ] {
+        if needles.iter().any(|n| hay.contains(n)) {
+            return kind;
+        }
+    }
+    rivulet_core::TelemetryErrorKind::Unknown
+}
+
 /// Format a localized warning listing the audio filters that were skipped
 /// because their GStreamer elements are not installed (e.g. `webrtcdsp` on
 /// distros that do not ship it). Platform-neutral so the warning formatting
@@ -10905,10 +11015,141 @@ mod tests {
         assert_eq!(batches.len(), 1);
         assert_eq!(
             batches[0].events[1],
+            rivulet_core::TelemetryEvent::RecordingError {
+                error: rivulet_core::TelemetryErrorKind::Capture,
+            }
+        );
+        assert_eq!(
+            batches[0].events[2],
             rivulet_core::TelemetryEvent::RecordingStop {
                 duration_secs: 5,
                 healthy: false,
             }
+        );
+    }
+
+    #[test]
+    fn recording_errors_classify_into_telemetry_categories() {
+        // The raw, localized error text never enters the event stream: only the
+        // deterministic category code is recorded. Text is locale-dependent and
+        // free-form, so it must not leave the device even as a serialized batch.
+        let classifications = [
+            (
+                "no source selected",
+                rivulet_core::TelemetryErrorKind::Capture,
+            ),
+            (
+                "Keine Aufnahmequelle ausgewählt.",
+                rivulet_core::TelemetryErrorKind::Capture,
+            ),
+            (
+                "recording produced no frames",
+                rivulet_core::TelemetryErrorKind::Capture,
+            ),
+            (
+                "pipeline failed to start",
+                rivulet_core::TelemetryErrorKind::Engine,
+            ),
+            (
+                "encoder rejected the format",
+                rivulet_core::TelemetryErrorKind::Output,
+            ),
+            ("disk write failed", rivulet_core::TelemetryErrorKind::Io),
+            (
+                "access is denied",
+                rivulet_core::TelemetryErrorKind::Permission,
+            ),
+            ("mystery failure", rivulet_core::TelemetryErrorKind::Unknown),
+        ];
+        for (error, expected) in classifications {
+            assert_eq!(classify_record_error(error), expected, "classify {error:?}");
+        }
+    }
+
+    #[test]
+    fn scene_switches_report_telemetry_once_per_landed_switch() {
+        let mut app = RivuletApp {
+            telemetry_enabled: true,
+            ..Default::default()
+        };
+        app.apply_telemetry_policy();
+        let captured = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        {
+            let batch = captured.clone();
+            app.telemetry
+                .set_sink(Box::new(move |b: &rivulet_core::TelemetryBatch| {
+                    batch.borrow_mut().push(b.clone())
+                }));
+        }
+        let _ = app.scenes.add(rivulet_core::Scene::new("A".to_owned()));
+        let second = app.scenes.add(rivulet_core::Scene::new("B".to_owned()));
+
+        assert!(app.switch_active_scene(second));
+        // Unknown ids are ignored by SceneManager, so no telemetry either.
+        assert!(!app.switch_active_scene(uuid::Uuid::new_v4()));
+        assert!(app.switch_scene_back(), "back to the first scene must land");
+        assert!(!app.switch_scene_back(), "empty history must stay silent");
+
+        app.telemetry.flush();
+        let batches = captured.borrow();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(
+            batches[0].events,
+            vec![
+                rivulet_core::TelemetryEvent::Startup,
+                rivulet_core::TelemetryEvent::SceneSwitch,
+                rivulet_core::TelemetryEvent::SceneSwitch,
+            ]
+        );
+    }
+
+    #[test]
+    fn scene_switch_without_active_scene_stays_silent() {
+        // A fresh app has no scenes: switching must not record anything.
+        let mut app = RivuletApp {
+            telemetry_enabled: true,
+            ..Default::default()
+        };
+        app.apply_telemetry_policy();
+        assert!(!app.switch_active_scene(uuid::Uuid::new_v4()));
+        assert_eq!(app.telemetry.pending_len(), 1, "only the Startup event");
+    }
+
+    #[test]
+    fn chat_connections_report_telemetry_on_each_transition() {
+        let mut app = RivuletApp {
+            telemetry_enabled: true,
+            ..Default::default()
+        };
+        app.apply_telemetry_policy();
+        let captured = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        {
+            let batch = captured.clone();
+            app.telemetry
+                .set_sink(Box::new(move |b: &rivulet_core::TelemetryBatch| {
+                    batch.borrow_mut().push(b.clone())
+                }));
+        }
+        app.apply_chat_state(rivulet_core::ChatConnState::Connected);
+        app.apply_chat_state(rivulet_core::ChatConnState::Connected);
+        assert_eq!(
+            app.telemetry.pending_len(),
+            2,
+            "a steady connected state must not flood the batch"
+        );
+        app.apply_chat_state(rivulet_core::ChatConnState::Disconnected);
+        app.apply_chat_state(rivulet_core::ChatConnState::Off);
+
+        app.telemetry.flush();
+        let batches = captured.borrow();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(
+            batches[0].events,
+            vec![
+                rivulet_core::TelemetryEvent::Startup,
+                rivulet_core::TelemetryEvent::ChatConnect { ok: true },
+                rivulet_core::TelemetryEvent::ChatConnect { ok: false },
+            ]
         );
     }
 
