@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- docs(roadmap): **M5 closed.** The last open issue, #50 (code signing), was
+  kept open but moved out of the milestone — the remaining work is a
+  maintainer certificate purchase (SignPath Foundation declined the free tier;
+  Windows OV ~$100–200/yr, Apple Developer $99/yr; Linux GPG already active),
+  not engineering. README M5 status flipped to ✅ Complete with honest
+  annotations: the OBS compatibility bullet is reformatted as *moved to M11*
+  (#147) instead of an open checkbox, the multi-channel distribution rollout
+  is marked as continuing past the milestone (Stage 2 waits on external
+  package reviews), and the quality-gates doc records the M5 closure with all
+  three descopes. Milestone closed on GitHub with 5/5 issues resolved.
+
 - fix(alerts): **webhook listener closes connections gracefully** — the
   forged-signature loopback test failed on macOS (`ConnectionReset` while
   reading the 403): the server rejected on the signature check and closed
