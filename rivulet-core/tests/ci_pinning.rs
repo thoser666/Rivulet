@@ -595,6 +595,62 @@ fn m6_audio_routing_phase2_gui_surface_is_pinned() {
 }
 
 #[test]
+fn m6_audio_routing_phase3_windows_backend_is_pinned() {
+    // Issue #154 Phase 3: the WASAPI per-application capture backend in
+    // rivulet-audio plus the GUI wiring (picker, lifecycle, drain).
+    // Renames or removals must fail CI, not drift silently.
+    let loopback = read("rivulet-audio/src/process_loopback.rs");
+    let audio_lib = read("rivulet-audio/src/lib.rs");
+    let gui = read("rivulet-gui/src/app.rs");
+
+    // Backend surface: activation, capture loop, process list, ownership.
+    for required in [
+        "fn activate_process_loopback_client",
+        "fn capture_loop",
+        "pub fn list_audio_processes",
+        "pub struct AppAudioCapture",
+        "VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK",
+        "AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK",
+        // The double-free guard: the PROPVARIANT must never run
+        // PropVariantClear on a blob pointing into Rust-owned memory.
+        "ManuallyDrop",
+    ] {
+        assert!(
+            loopback.contains(required) || audio_lib.contains(required),
+            "process-loopback backend must pin {required}"
+        );
+    }
+
+    // The GUI mirror contract lives in a pure, cross-platform helper, and
+    // frames cross to the UI thread through an mpsc channel (the engine is
+    // only touched from the UI thread).
+    assert!(
+        gui.contains("fn routed_application_targets"),
+        "GUI must derive per-app capture targets from the routed sources"
+    );
+    assert!(
+        gui.contains("std::sync::mpsc::channel::<rivulet_core::AudioFrame>()"),
+        "per-app frames must travel through an mpsc channel drained on the UI thread"
+    );
+
+    // Phase-3 i18n keys in both locales.
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in [
+        "audio_source_pick_process",
+        "audio_source_refresh_processes",
+        "audio_source_no_process_selected",
+        "audio_source_pid_required",
+        "audio_app_capture_failed",
+    ] {
+        assert_eq!(
+            i18n.matches(&format!("(\"{key}\"")).count(),
+            2,
+            "i18n key {key} must exist in EN and DE"
+        );
+    }
+}
+
+#[test]
 fn m6_audio_routing_phase1_is_documented() {
     // The Phase-1 milestone state must stay documented: the spec carries a
     // status, the README bullet reflects it, and the CHANGELOG records the
@@ -611,9 +667,13 @@ fn m6_audio_routing_phase1_is_documented() {
         "spec must record the Phase-2 status"
     );
     assert!(
-        readme.contains("engine core + GUI mixer implemented (Phases 1\u{2013}2")
+        spec.contains("Phase 3 (Windows WASAPI per-app capture, 2026-09-13)"),
+        "spec must record the Phase-3 status"
+    );
+    assert!(
+        readme.contains("Windows WASAPI per-app capture implemented (Phases 1\u{2013}3")
             && readme.contains("#154"),
-        "README M6 bullet must reflect the Phase 1+2 state"
+        "README M6 bullet must reflect the Phase 1-3 state"
     );
     assert!(
         changelog.contains("feat(audio): **multi-track audio routing engine core"),
@@ -622,6 +682,10 @@ fn m6_audio_routing_phase1_is_documented() {
     assert!(
         changelog.contains("feat(gui): **multi-track audio routing mixer"),
         "CHANGELOG must record the Phase-2 delivery"
+    );
+    assert!(
+        changelog.contains("feat(audio): **WASAPI per-application capture backend"),
+        "CHANGELOG must record the Phase-3 delivery"
     );
 }
 

@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+- feat(audio): **WASAPI per-application capture backend (Phase 3 of issue
+  [#154](https://github.com/thoser666/Rivulet/issues/154), M6, Windows)** —
+  Application-kind audio sources now capture the exact process tree they
+  target via the WASAPI process-loopback virtual audio device
+  (`VAD\Process_Loopback`, Windows 10 2004+). `rivulet-audio` gains
+  `AppAudioCapture` (event-driven shared-mode capture thread delivering
+  48 kHz stereo f32 frames) and `list_audio_processes` (ToolHelp snapshot for
+  the picker). The Mixer's Application-kind row shows a refreshable process
+  picker; the selected pid becomes the source's `pid:<n>` device id. While a
+  session is active the GUI starts one capture per routed Application source
+  and drains frames through an mpsc channel into the engine's routed appsrcs
+  (the engine is only touched from the UI thread). The activation's
+  `PROPVARIANT` is `ManuallyDrop`-wrapped with a documented ownership contract
+  so `PropVariantClear` can never free the Rust-owned params blob — a
+  double-free caught by the round-trip test. Sources without a pid stay
+  `pending_app` and are never activated; non-Windows platforms keep the
+  pending-backend hint.
+
 - feat(gui): **multi-track audio routing mixer (Phase 2 of issue
   [#154](https://github.com/thoser666/Rivulet/issues/154), M6)** — the Mixer
   view now hosts the routing matrix: add/remove sources (application, input

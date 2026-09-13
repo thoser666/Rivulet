@@ -80,6 +80,8 @@ windows-capture = { version = "2.0.0" }
 # the active backend or whether the GUI fell back to Windows Graphics
 # Capture, plus the fallback reason.
 rivulet-capture = { path = "../rivulet-capture" }
+# WASAPI per-application process-loopback capture (Phase 3, issue #154).
+rivulet-audio = { path = "../rivulet-audio" }
 
 # Build dependencies
 [build-dependencies]

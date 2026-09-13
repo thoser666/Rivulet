@@ -8,6 +8,10 @@
 
 pub mod capture;
 pub(crate) mod messages;
+#[cfg(target_os = "windows")]
+pub mod process_loopback;
 
 pub use capture::{AudioCapture, AudioConfig, AudioFilters};
+#[cfg(target_os = "windows")]
+pub use process_loopback::{list_audio_processes, AppAudioCapture, AppAudioProcess};
 pub use rivulet_core::SkippedFilter;
