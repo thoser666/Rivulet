@@ -1,7 +1,7 @@
 # M6 — Multi-Track Audio Routing (Record / Stream)
 
-**Status:** Planned (M6)
-**Date:** 2026-09-05
+**Status:** In progress — **Phase 1 (engine core) implemented** (issue [#154](https://github.com/thoser666/Rivulet/issues/154)): the `AudioSource`/`AudioRouting`/`AudioFilterConfig` types, the per-source engine API (`add_audio_source`, `set_audio_source_volume/muted/routing/filters`, `push_audio_source`), the versioned `AudioRoutingConfig` persistence (v1, unknown versions rejected, legacy System/Microphone defaults), and the routing-aware pipeline composition for recording (one branch per record-routed source), streaming (stream-routed sources mixed into the single FLV track), and dual output (both legs) are shipped with unit, pipeline-parse, and end-to-end tests. The GUI mixer (Phase 2) and the platform capture backends (Phase 3) are not implemented yet.
+**Date:** 2026-09-05 (Phase 1: 2026-09-13)
 **Tracked in:** Milestone M6 — Creator Toolkit & Interactivity
 
 ## Problem

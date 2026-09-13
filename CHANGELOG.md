@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+- feat(audio): **multi-track audio routing engine core (Phase 1 of issue
+  [#154](https://github.com/thoser666/Rivulet/issues/154), M6)** — audio
+  sources are now first-class entities instead of a hardcoded
+  System/Microphone pair: each `AudioSource` carries a stable id, its own
+  volume/mute, a per-source filter chain (noise gate, expander, compressor,
+  limiter, gain, 10-band EQ — availability-checked against the installed
+  GStreamer element factories), and an independent record/stream routing
+  decision. The engine API (`add_audio_source`, `set_audio_source_volume/
+  muted/routing/filters`, `push_audio_source`) builds recording pipelines
+  with one branch per record-routed source (its own AAC track in MP4/MKV),
+  mixes all stream-routed sources into the single FLV track via `audiomixer`
+  (single source bypasses the mixer), and wires both legs in dual output.
+  Configuration persists as versioned `AudioRoutingConfig` JSON
+  (`audio_routing_v1`; unknown schema versions are rejected, missing fields
+  get defaults, and the legacy System/Microphone pair maps to two default
+  sources). Starting a recording with audio enabled but no record-routed
+  source logs a warning and produces a trackless recording instead of
+  failing. 33 source-type tests, 10 engine tests (API round-trip, pipeline
+  parse in all three output modes, per-source filter/volume rendering,
+  end-to-end one-track-per-source), 2 new ci_pinning guards.
+
 - docs(roadmap): **M6 status updated to 🚧 In progress** — 3 of 4 features
   are shipped and closed (#97 chat auto-clips, #98 multi-platform restream,
   #99 mobile/HTTP remote companion); multi-track audio routing remains the

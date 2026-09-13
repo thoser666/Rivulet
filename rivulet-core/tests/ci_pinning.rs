@@ -473,6 +473,87 @@ fn m6_audio_routing_is_specified_in_readme_gate_and_spec() {
 }
 
 #[test]
+fn m6_audio_routing_phase1_engine_surface_is_pinned() {
+    // Issue #154 Phase 1: the engine core ships the routing types, the
+    // per-source API, the versioned persistence schema, and the routing-aware
+    // pipeline composition. The public surface and the persisted schema are
+    // contract — a rename or a schema change must fail CI, not drift silently.
+    let lib = read("rivulet-core/src/lib.rs");
+    let source = read("rivulet-core/src/audio_source.rs");
+
+    // Engine API surface (the GUI will build on exactly these names).
+    for required in [
+        "pub fn set_audio_sources(&mut self, sources: Vec<AudioSource>)",
+        "pub fn audio_sources(&self) -> &[AudioSource]",
+        "pub fn add_audio_source(&mut self, mut source: AudioSource) -> Uuid",
+        "pub fn remove_audio_source(&mut self, id: Uuid) -> bool",
+        "pub fn set_audio_source_volume(&mut self, id: Uuid, volume: f32) -> bool",
+        "pub fn set_audio_source_muted(&mut self, id: Uuid, muted: bool) -> bool",
+        "pub fn set_audio_source_routing(&mut self, id: Uuid, routing: AudioRouting) -> bool",
+        "pub fn set_audio_source_filters(&mut self, id: Uuid, filters: AudioFilterConfig) -> bool",
+        "pub fn push_audio_source(&mut self, id: Uuid, frame: &AudioFrame)",
+        "pub fn audio_routing_warning(&self) -> Option<&'static str>",
+    ] {
+        assert!(
+            lib.contains(required),
+            "engine audio-routing API must pin {required}"
+        );
+    }
+
+    // Persistence schema: versioned, rejects unknown versions, legacy
+    // defaults map System/Microphone to two sources.
+    for required in [
+        "AUDIO_ROUTING_SCHEMA_VERSION: u32 = 1",
+        "pub struct AudioRoutingConfig",
+        "UnknownVersion { found: u32, supported: u32 }",
+        "pub fn legacy_defaults() -> Self",
+        "fn system_default() -> Self",
+        "fn microphone_default() -> Self",
+    ] {
+        assert!(
+            source.contains(required),
+            "audio routing schema must pin {required}"
+        );
+    }
+
+    // Routing-aware pipeline composition exists for all three output modes.
+    assert!(
+        lib.contains("fn routed_audio_branch_str"),
+        "recording/streaming routed branch builder"
+    );
+    assert!(
+        lib.contains("fn routed_dual_audio_str"),
+        "dual-output routed audio section"
+    );
+    assert!(
+        lib.contains("AUDIO_MIXER_INPUT_CAPS"),
+        "stream mixer input legs must carry explicit caps (1.24 strict parser)"
+    );
+}
+
+#[test]
+fn m6_audio_routing_phase1_is_documented() {
+    // The Phase-1 milestone state must stay documented: the spec carries a
+    // status, the README bullet reflects it, and the CHANGELOG records the
+    // delivery.
+    let spec = read("docs/m6-audio-routing.md");
+    let readme = read("README.md");
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        spec.contains("Phase 1 (engine core) implemented"),
+        "spec must record the Phase-1 status"
+    );
+    assert!(
+        readme.contains("engine core implemented (Phase 1") && readme.contains("#154"),
+        "README M6 bullet must reflect the Phase-1 state"
+    );
+    assert!(
+        changelog.contains("feat(audio): **multi-track audio routing engine core"),
+        "CHANGELOG must record the Phase-1 delivery"
+    );
+}
+
+#[test]
 fn code_scanning_alerts_are_resolved_and_pinned() {
     // Alerts #79/#80 (DangerousWorkflowID / untrusted code checkout): the
     // release workflow must never check out a workflow_run event head — a

@@ -1,34 +1,286 @@
-/// An audio source — captures audio from an application or hardware device.
+//! Audio source model for multi-track audio routing (issue #154, M6).
+//!
+//! A source captures audio from an application or a hardware device, carries
+//! its own filter chain and volume, and has an independent routing decision
+//! for the Record and Stream outputs. The design lives in
+//! [`docs/m6-audio-routing.md`](../../docs/m6-audio-routing.md); the
+//! versioned persistence schema is [`AudioRoutingConfig`].
+//!
+//! Phase 1 (engine core) provides the types, the engine API, and the
+//! routing-aware pipeline composition. Per-platform capture backends and the
+//! GUI mixer are later phases of the same issue.
+
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+/// Identifies which outputs receive a source's audio.
 ///
-/// Supports two modes:
-/// - **Application**: Per-app audio capture (Windows WASAPI loopback, macOS coreaudio).
-/// - **Device**: System audio input/output device (microphone, speaker loopback).
+/// The routing matrix is a simple cross product: every source independently
+/// decides for the Record output and the Stream output. A source can go to
+/// record only, stream only, both, or neither.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioRouting {
+    /// The source is mixed into (or recorded as its own track of) the
+    /// recording output.
+    pub record: bool,
+    /// The source is mixed into the streaming output (FLV carries a single
+    /// audio track, so all stream-routed sources are mixed).
+    pub stream: bool,
+}
+
+impl AudioRouting {
+    /// To both outputs (the default for new sources).
+    pub const BOTH: Self = Self {
+        record: true,
+        stream: true,
+    };
+    /// Recording only.
+    pub const RECORD_ONLY: Self = Self {
+        record: true,
+        stream: false,
+    };
+    /// Streaming only.
+    pub const STREAM_ONLY: Self = Self {
+        record: false,
+        stream: true,
+    };
+    /// No output (the source is captured but silent everywhere).
+    pub const NONE: Self = Self {
+        record: false,
+        stream: false,
+    };
+}
+
+impl Default for AudioRouting {
+    fn default() -> Self {
+        Self::BOTH
+    }
+}
+
+/// Noise gate (downward expansion that closes fully below the threshold).
 ///
-/// The actual capture is handled by the platform-specific audio layer.
-#[derive(Debug, Clone)]
-pub struct AudioSource {
-    /// User-visible name (e.g. "Discord", "Microphone (Realtek)").
-    pub name: String,
-    /// Platform-specific device/application identifier.
-    pub device_id: String,
-    /// Source kind.
-    pub kind: AudioSourceKind,
-    /// Capture volume (0.0–1.0).
-    pub volume: f32,
-    /// Whether the source is muted.
-    pub muted: bool,
-    /// Whether the source is currently active (capturing).
-    pub active: bool,
+/// Realised with the `audiodynamic` element in `expander`/`hard-knee` mode.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct NoiseGateConfig {
+    /// Threshold in the 0.0–1.0 sample range below which the gate closes.
+    pub threshold: f32,
+    /// Expansion ratio (e.g. `10.0` ≈ a hard gate).
+    pub ratio: f32,
+}
+
+impl Default for NoiseGateConfig {
+    fn default() -> Self {
+        Self {
+            threshold: 0.03,
+            ratio: 10.0,
+        }
+    }
+}
+
+/// Expander (gentle downward expansion below a mid threshold).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ExpanderConfig {
+    pub threshold: f32,
+    pub ratio: f32,
+}
+
+impl Default for ExpanderConfig {
+    fn default() -> Self {
+        Self {
+            threshold: 0.3,
+            ratio: 1.5,
+        }
+    }
+}
+
+/// Compressor (dynamic range compression).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CompressorConfig {
+    pub threshold: f32,
+    pub ratio: f32,
+}
+
+impl Default for CompressorConfig {
+    fn default() -> Self {
+        Self {
+            threshold: 0.5,
+            ratio: 4.0,
+        }
+    }
+}
+
+/// Hard limiter (prevents clipping).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct LimiterConfig {
+    pub threshold: f32,
+    pub ratio: f32,
+}
+
+impl Default for LimiterConfig {
+    fn default() -> Self {
+        Self {
+            threshold: 0.95,
+            ratio: 20.0,
+        }
+    }
+}
+
+/// 10-band equalizer (`equalizer-10bands`), band gains in dB (`-24..=+12`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct EqConfig {
+    /// Gains for `band0` (lowest) … `band9` (highest).
+    pub bands: [f32; 10],
+}
+
+impl Default for EqConfig {
+    fn default() -> Self {
+        Self { bands: [0.0; 10] }
+    }
+}
+
+/// Per-source audio filter chain.
+///
+/// Every stage is optional; an all-`None` chain renders an empty filter
+/// fragment. The GStreamer element parameters mirror the proven chain in
+/// `rivulet-audio` (`filter_chain_str_with`) so a source's filters sound the
+/// same as the legacy System/Microphone filters. `rivulet-audio` cannot be
+/// reused directly because it depends on `rivulet-core` (no dependency
+/// cycles), so the two implementations must stay in sync by review.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AudioFilterConfig {
+    pub noise_gate: Option<NoiseGateConfig>,
+    pub expander: Option<ExpanderConfig>,
+    pub compressor: Option<CompressorConfig>,
+    pub limiter: Option<LimiterConfig>,
+    /// Makeup gain in decibels (`-30..=+30`); `0.0` (±0.1 tolerance)
+    /// disables the `audioamplify` stage.
+    pub gain_db: f64,
+    pub eq: Option<EqConfig>,
+}
+
+impl Default for AudioFilterConfig {
+    fn default() -> Self {
+        Self {
+            noise_gate: None,
+            expander: None,
+            compressor: None,
+            limiter: None,
+            gain_db: 0.0,
+            eq: None,
+        }
+    }
+}
+
+impl AudioFilterConfig {
+    /// True when no stage is active.
+    pub fn is_empty(&self) -> bool {
+        self.noise_gate.is_none()
+            && self.expander.is_none()
+            && self.compressor.is_none()
+            && self.limiter.is_none()
+            && self.gain_db.abs() < 0.1
+            && !self
+                .eq
+                .map(|eq| eq.bands.iter().any(|db| db.abs() >= 0.5))
+                .unwrap_or(false)
+    }
+
+    /// The GStreamer fragment for this chain (`element ! element ! …`),
+    /// excluding the surrounding `audioconvert ! audioresample`.
+    ///
+    /// Deterministic: identical configs always render identical fragments
+    /// (a requirement of the M7 deterministic-pipeline goal).
+    pub fn chain_fragment(&self) -> String {
+        self.chain_fragment_with_availability(|_| true).0
+    }
+
+    /// Availability-aware variant of [`Self::chain_fragment`]: the `available`
+    /// predicate decides which GStreamer element factories exist (mirrors the
+    /// graceful degradation in `rivulet-audio`). Returns the joined chain and
+    /// the factory names that were requested but not available.
+    pub fn chain_fragment_with_availability(
+        &self,
+        available: impl Fn(&str) -> bool,
+    ) -> (String, Vec<&'static str>) {
+        let mut elements: Vec<String> = Vec::new();
+        let mut skipped: Vec<&'static str> = Vec::new();
+
+        let mut push = |factory: &'static str, fragment: String| {
+            if available(factory) {
+                elements.push(fragment);
+            } else if !skipped.contains(&factory) {
+                skipped.push(factory);
+            }
+        };
+
+        if let Some(gate) = self.noise_gate {
+            push(
+                "audiodynamic",
+                format!(
+                    "audiodynamic mode=expander characteristics=hard-knee threshold={} ratio={}",
+                    gate.threshold, gate.ratio
+                ),
+            );
+        }
+        if let Some(exp) = self.expander {
+            push(
+                "audiodynamic",
+                format!(
+                    "audiodynamic mode=expander characteristics=soft-knee threshold={} ratio={}",
+                    exp.threshold, exp.ratio
+                ),
+            );
+        }
+        if let Some(comp) = self.compressor {
+            push(
+                "audiodynamic",
+                format!(
+                    "audiodynamic mode=compressor characteristics=soft-knee threshold={} ratio={}",
+                    comp.threshold, comp.ratio
+                ),
+            );
+        }
+        if let Some(lim) = self.limiter {
+            push(
+                "audiodynamic",
+                format!(
+                    "audiodynamic mode=compressor characteristics=hard-knee threshold={} ratio={}",
+                    lim.threshold, lim.ratio
+                ),
+            );
+        }
+        if self.gain_db.abs() >= 0.1 {
+            let factor = 10f64.powf(self.gain_db / 20.0);
+            push(
+                "audioamplify",
+                format!("audioamplify amplification={factor:.4}"),
+            );
+        }
+        if let Some(eq) = self.eq {
+            if eq.bands.iter().any(|db| db.abs() >= 0.5) {
+                let mut frag = String::from("equalizer-10bands");
+                for (i, db) in eq.bands.iter().enumerate() {
+                    frag.push_str(&format!(" band{i}={db:.1}"));
+                }
+                push("equalizer-10bands", frag);
+            }
+        }
+
+        (elements.join(" ! "), skipped)
+    }
 }
 
 /// The type of audio source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AudioSourceKind {
-    /// Per-app audio capture (e.g. WASAPI loopback on Windows).
+    /// Per-app audio capture (e.g. WASAPI per-app on Windows, PipeWire node
+    /// on Linux).
     Application,
     /// System audio input device (e.g. microphone).
     InputDevice,
-    /// System audio output device loopback (e.g. speaker capture).
+    /// System audio output device loopback (e.g. speaker capture). Also the
+    /// fallback kind where per-app capture is unavailable (macOS system
+    /// loopback).
     OutputDevice,
     /// Mixed (system + mic combined).
     Mixed,
@@ -55,20 +307,61 @@ impl AudioSourceKind {
     }
 }
 
+/// An audio source — captures audio from an application or hardware device,
+/// with its own filter chain and an independent record/stream routing
+/// decision.
+///
+/// Supports two modes:
+/// - **Application**: Per-app audio capture (Windows WASAPI per-app, macOS
+///   coreaudio).
+/// - **Device**: System audio input/output device (microphone, speaker
+///   loopback).
+///
+/// The actual capture is handled by the platform-specific audio layer
+/// (later phase); the engine consumes PCM frames pushed per source id.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioSource {
+    /// Stable, persisted identity. Assigned by the engine on add when nil.
+    #[serde(default = "Uuid::nil")]
+    pub id: Uuid,
+    /// User-visible name (e.g. "Discord", "Microphone (Realtek)").
+    pub name: String,
+    /// Platform-specific device/application identifier.
+    pub device_id: String,
+    /// Source kind.
+    pub kind: AudioSourceKind,
+    /// Capture volume (0.0–2.0).
+    pub volume: f32,
+    /// Whether the source is muted.
+    pub muted: bool,
+    /// Whether the source is currently active (capturing).
+    #[serde(default)]
+    pub active: bool,
+    /// Which outputs receive this source.
+    #[serde(default)]
+    pub routing: AudioRouting,
+    /// Per-source filter chain.
+    #[serde(default)]
+    pub filters: AudioFilterConfig,
+}
+
 impl AudioSource {
-    /// Create a new audio source.
+    /// Create a new audio source (fresh random id).
     pub fn new(
         name: impl Into<String>,
         device_id: impl Into<String>,
         kind: AudioSourceKind,
     ) -> Self {
         Self {
+            id: Uuid::new_v4(),
             name: name.into(),
             device_id: device_id.into(),
             kind,
             volume: 1.0,
             muted: false,
             active: false,
+            routing: AudioRouting::default(),
+            filters: AudioFilterConfig::default(),
         }
     }
 
@@ -85,6 +378,35 @@ impl AudioSource {
     /// Create an output device loopback source.
     pub fn output_device(name: impl Into<String>, device_id: impl Into<String>) -> Self {
         Self::new(name, device_id, AudioSourceKind::OutputDevice)
+    }
+
+    /// The legacy default "System" source (backward compatibility: the
+    /// hardcoded System/Microphone pair becomes two default sources).
+    pub fn system_default() -> Self {
+        Self::output_device("System", "system_loopback")
+    }
+
+    /// The legacy default "Microphone" source.
+    pub fn microphone_default() -> Self {
+        Self::input_device("Microphone", "default_input")
+    }
+
+    /// Builder: override the id (used when restoring a persisted config).
+    pub fn with_id(mut self, id: Uuid) -> Self {
+        self.id = id;
+        self
+    }
+
+    /// Builder: set the routing decision.
+    pub fn with_routing(mut self, routing: AudioRouting) -> Self {
+        self.routing = routing;
+        self
+    }
+
+    /// Builder: set the filter chain.
+    pub fn with_filters(mut self, filters: AudioFilterConfig) -> Self {
+        self.filters = filters;
+        self
     }
 
     /// Returns true if the device_id is set and non-empty.
@@ -116,6 +438,83 @@ impl AudioSource {
 impl Default for AudioSource {
     fn default() -> Self {
         Self::new("", "", AudioSourceKind::Mixed)
+    }
+}
+
+/// Schema version of [`AudioRoutingConfig`]. Bump on breaking changes and
+/// add a migration; old versions are rejected rather than silently misread.
+pub const AUDIO_ROUTING_SCHEMA_VERSION: u32 = 1;
+
+/// The persisted multi-track audio routing configuration.
+///
+/// Serialized as JSON (`audio_routing_v1` in the app storage). Secrets and
+/// stream keys are never stored here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioRoutingConfig {
+    pub version: u32,
+    pub sources: Vec<AudioSource>,
+}
+
+/// Errors from [`AudioRoutingConfig::from_json`].
+#[derive(Debug)]
+pub enum AudioRoutingConfigError {
+    /// The JSON could not be parsed.
+    Parse(serde_json::Error),
+    /// The document declares a schema version this build does not understand.
+    UnknownVersion { found: u32, supported: u32 },
+}
+
+impl std::fmt::Display for AudioRoutingConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Parse(e) => write!(f, "invalid audio routing config JSON: {e}"),
+            Self::UnknownVersion { found, supported } => write!(
+                f,
+                "audio routing config schema v{found} is not supported (this build supports v{supported})"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AudioRoutingConfigError {}
+
+impl AudioRoutingConfig {
+    /// An empty v1 config.
+    pub fn empty() -> Self {
+        Self {
+            version: AUDIO_ROUTING_SCHEMA_VERSION,
+            sources: Vec::new(),
+        }
+    }
+
+    /// The backward-compatible default: the legacy System + Microphone pair
+    /// as two default sources, both routed to both outputs.
+    pub fn legacy_defaults() -> Self {
+        Self {
+            version: AUDIO_ROUTING_SCHEMA_VERSION,
+            sources: vec![
+                AudioSource::system_default(),
+                AudioSource::microphone_default(),
+            ],
+        }
+    }
+
+    /// Serialize to JSON.
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).expect("audio routing config serializes")
+    }
+
+    /// Parse from JSON, rejecting unknown schema versions instead of
+    /// silently misreading them.
+    pub fn from_json(json: &str) -> Result<Self, AudioRoutingConfigError> {
+        let config: Self = serde_json::from_str(json).map_err(AudioRoutingConfigError::Parse)?;
+        if config.version != AUDIO_ROUTING_SCHEMA_VERSION {
+            return Err(AudioRoutingConfigError::UnknownVersion {
+                found: config.version,
+                supported: AUDIO_ROUTING_SCHEMA_VERSION,
+            });
+        }
+        Ok(config)
     }
 }
 
@@ -152,6 +551,17 @@ mod tests {
         assert_eq!(asrc.volume, 1.0);
         assert!(!asrc.muted);
         assert!(!asrc.active);
+        // Phase-1 invariants: fresh id, both-outputs routing, empty filters.
+        assert!(!asrc.id.is_nil(), "new sources get a fresh id");
+        assert_eq!(asrc.routing, AudioRouting::BOTH);
+        assert!(asrc.filters.is_empty());
+    }
+
+    #[test]
+    fn audio_source_ids_are_unique() {
+        let a = AudioSource::application("A", "pid:1");
+        let b = AudioSource::application("B", "pid:2");
+        assert_ne!(a.id, b.id);
     }
 
     #[test]
@@ -174,11 +584,36 @@ mod tests {
     }
 
     #[test]
+    fn legacy_default_sources_exist() {
+        let sys = AudioSource::system_default();
+        let mic = AudioSource::microphone_default();
+        assert_eq!(sys.kind, AudioSourceKind::OutputDevice);
+        assert_eq!(mic.kind, AudioSourceKind::InputDevice);
+        assert_eq!(sys.routing, AudioRouting::BOTH);
+        assert_eq!(mic.routing, AudioRouting::BOTH);
+        assert_ne!(sys.id, mic.id);
+    }
+
+    #[test]
     fn audio_source_default() {
         let asrc = AudioSource::default();
         assert!(asrc.name.is_empty());
         assert!(asrc.device_id.is_empty());
         assert_eq!(asrc.kind, AudioSourceKind::Mixed);
+    }
+
+    #[test]
+    fn builders_override_routing_and_filters() {
+        let filters = AudioFilterConfig {
+            compressor: Some(CompressorConfig::default()),
+            ..AudioFilterConfig::default()
+        };
+        let asrc = AudioSource::application("Game", "pid:1")
+            .with_routing(AudioRouting::RECORD_ONLY)
+            .with_filters(filters);
+        assert_eq!(asrc.routing, AudioRouting::RECORD_ONLY);
+        assert!(asrc.filters.compressor.is_some());
+        assert!(!asrc.id.is_nil(), "application() assigns a fresh id");
     }
 
     // ── Device check ─────────────────────────────────────────────
@@ -212,7 +647,227 @@ mod tests {
         assert_eq!(asrc.effective_volume(), 0.0);
     }
 
-    // ── Summary ──────────────────────────────────────────────────
+    // ── Routing ──────────────────────────────────────────────────
+
+    #[test]
+    fn routing_constants() {
+        assert_eq!(
+            (AudioRouting::BOTH.record, AudioRouting::BOTH.stream),
+            (true, true)
+        );
+        assert_eq!(
+            (
+                AudioRouting::RECORD_ONLY.record,
+                AudioRouting::RECORD_ONLY.stream
+            ),
+            (true, false)
+        );
+        assert_eq!(
+            (
+                AudioRouting::STREAM_ONLY.record,
+                AudioRouting::STREAM_ONLY.stream
+            ),
+            (false, true)
+        );
+        assert_eq!(
+            (AudioRouting::NONE.record, AudioRouting::NONE.stream),
+            (false, false)
+        );
+    }
+
+    #[test]
+    fn routing_default_is_both() {
+        assert_eq!(AudioRouting::default(), AudioRouting::BOTH);
+    }
+
+    // ── Filter chain ─────────────────────────────────────────────
+
+    #[test]
+    fn filter_config_default_is_empty() {
+        let filters = AudioFilterConfig::default();
+        assert!(filters.is_empty());
+        assert_eq!(filters.chain_fragment(), "");
+    }
+
+    #[test]
+    fn filter_chain_single_stage() {
+        let filters = AudioFilterConfig {
+            compressor: Some(CompressorConfig::default()),
+            ..AudioFilterConfig::default()
+        };
+        let frag = filters.chain_fragment();
+        assert_eq!(
+            frag,
+            "audiodynamic mode=compressor characteristics=soft-knee threshold=0.5 ratio=4"
+        );
+    }
+
+    #[test]
+    fn filter_chain_full_order_is_deterministic() {
+        let filters = AudioFilterConfig {
+            noise_gate: Some(NoiseGateConfig::default()),
+            expander: Some(ExpanderConfig::default()),
+            compressor: Some(CompressorConfig::default()),
+            limiter: Some(LimiterConfig::default()),
+            gain_db: 3.0,
+            eq: Some(EqConfig {
+                bands: [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -2.0],
+            }),
+        };
+        let frag = filters.chain_fragment();
+        assert_eq!(frag, "audiodynamic mode=expander characteristics=hard-knee threshold=0.03 ratio=10 ! audiodynamic mode=expander characteristics=soft-knee threshold=0.3 ratio=1.5 ! audiodynamic mode=compressor characteristics=soft-knee threshold=0.5 ratio=4 ! audiodynamic mode=compressor characteristics=hard-knee threshold=0.95 ratio=20 ! audioamplify amplification=1.4125 ! equalizer-10bands band0=1.0 band1=0.0 band2=0.0 band3=0.0 band4=0.0 band5=0.0 band6=0.0 band7=0.0 band8=0.0 band9=-2.0");
+        // Determinism: identical config → identical fragment.
+        assert_eq!(frag, filters.chain_fragment());
+    }
+
+    #[test]
+    fn filter_chain_tiny_gain_and_tiny_eq_are_skipped() {
+        let filters = AudioFilterConfig {
+            gain_db: 0.05,
+            eq: Some(EqConfig {
+                bands: [0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            }),
+            ..AudioFilterConfig::default()
+        };
+        assert!(filters.is_empty());
+        assert_eq!(filters.chain_fragment(), "");
+    }
+
+    #[test]
+    fn filter_chain_negative_gain() {
+        let filters = AudioFilterConfig {
+            gain_db: -6.0,
+            ..AudioFilterConfig::default()
+        };
+        let frag = filters.chain_fragment();
+        assert_eq!(frag, "audioamplify amplification=0.5012");
+    }
+
+    #[test]
+    fn filter_chain_availability_skips_missing_factories() {
+        let filters = AudioFilterConfig {
+            noise_gate: Some(NoiseGateConfig::default()),
+            compressor: Some(CompressorConfig::default()),
+            gain_db: 2.0,
+            ..AudioFilterConfig::default()
+        };
+        // Only `audiodynamic` is available: the gate and compressor survive,
+        // the `audioamplify` gain stage is skipped and reported.
+        let (frag, skipped) = filters.chain_fragment_with_availability(|f| f == "audiodynamic");
+        assert!(frag.starts_with("audiodynamic"));
+        assert!(frag.contains("mode=compressor"));
+        assert!(!frag.contains("audioamplify"));
+        assert_eq!(skipped, vec!["audioamplify"]);
+    }
+
+    // ── Persistence round-trip ───────────────────────────────────
+
+    #[test]
+    fn routing_config_round_trip_preserves_everything() {
+        let mut source = AudioSource::application("Spotify", "pid:5678")
+            .with_routing(AudioRouting::STREAM_ONLY)
+            .with_id(Uuid::from_u128(0x1234_5678_9abc_def0_1234_5678_9abc_def0));
+        source.volume = 1.75;
+        source.muted = true;
+        source.filters = AudioFilterConfig {
+            noise_gate: Some(NoiseGateConfig {
+                threshold: 0.02,
+                ratio: 12.0,
+            }),
+            expander: None,
+            compressor: Some(CompressorConfig::default()),
+            limiter: None,
+            gain_db: -3.5,
+            eq: Some(EqConfig {
+                bands: [0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            }),
+        };
+        let config = AudioRoutingConfig {
+            version: AUDIO_ROUTING_SCHEMA_VERSION,
+            sources: vec![
+                source,
+                AudioSource::microphone_default().with_routing(AudioRouting::RECORD_ONLY),
+            ],
+        };
+
+        let json = config.to_json();
+        let restored = AudioRoutingConfig::from_json(&json).expect("round-trip parses");
+
+        assert_eq!(restored.version, AUDIO_ROUTING_SCHEMA_VERSION);
+        assert_eq!(restored.sources.len(), 2);
+        let back = &restored.sources[0];
+        assert_eq!(
+            back.id,
+            Uuid::from_u128(0x1234_5678_9abc_def0_1234_5678_9abc_def0)
+        );
+        assert_eq!(back.name, "Spotify");
+        assert_eq!(back.device_id, "pid:5678");
+        assert_eq!(back.kind, AudioSourceKind::Application);
+        assert!((back.volume - 1.75).abs() < f32::EPSILON);
+        assert!(back.muted);
+        assert_eq!(back.routing, AudioRouting::STREAM_ONLY);
+        assert_eq!(
+            back.filters.noise_gate,
+            Some(NoiseGateConfig {
+                threshold: 0.02,
+                ratio: 12.0,
+            })
+        );
+        assert!(back.filters.compressor.is_some());
+        assert!((back.filters.gain_db + 3.5).abs() < 1e-9);
+        assert_eq!(back.filters.eq.unwrap().bands[1], 1.5);
+        let mic = &restored.sources[1];
+        assert_eq!(mic.routing, AudioRouting::RECORD_ONLY);
+    }
+
+    #[test]
+    fn routing_config_rejects_unknown_version() {
+        let json = r#"{"version": 99, "sources": []}"#;
+        let err = AudioRoutingConfig::from_json(json).expect_err("unknown version rejected");
+        match err {
+            AudioRoutingConfigError::UnknownVersion { found, supported } => {
+                assert_eq!(found, 99);
+                assert_eq!(supported, AUDIO_ROUTING_SCHEMA_VERSION);
+            }
+            other => panic!("expected UnknownVersion, got {other:?}"),
+        }
+        let msg = format!("{err}");
+        assert!(msg.contains("v99"), "error mentions the found version");
+    }
+
+    #[test]
+    fn routing_config_rejects_garbage() {
+        assert!(AudioRoutingConfig::from_json("not json at all").is_err());
+    }
+
+    #[test]
+    fn routing_config_legacy_defaults() {
+        let config = AudioRoutingConfig::legacy_defaults();
+        assert_eq!(config.version, 1);
+        assert_eq!(config.sources.len(), 2);
+        assert_eq!(config.sources[0].name, "System");
+        assert_eq!(config.sources[1].name, "Microphone");
+        // Round-trips like any other config.
+        let restored = AudioRoutingConfig::from_json(&config.to_json()).unwrap();
+        assert_eq!(restored, config);
+    }
+
+    #[test]
+    fn routing_config_missing_fields_get_defaults() {
+        // A minimal legacy-ish document (no routing/filters/active/id).
+        let json = r#"{"version": 1, "sources": [{"id": "00000000-0000-0000-0000-000000000000", "name": "Game", "device_id": "pid:1", "kind": "Application", "volume": 1.0, "muted": false}]}"#;
+        let config = AudioRoutingConfig::from_json(json).expect("parses");
+        let source = &config.sources[0];
+        assert_eq!(
+            source.routing,
+            AudioRouting::BOTH,
+            "routing defaults to both"
+        );
+        assert!(source.filters.is_empty(), "filters default to empty");
+        assert!(!source.active);
+    }
+
+    // ── Summary, Clone, Debug ────────────────────────────────────
 
     #[test]
     fn summary_inactive() {
@@ -247,8 +902,6 @@ mod tests {
         assert!(s.contains("vol=50%"));
     }
 
-    // ── Clone, Debug ─────────────────────────────────────────────
-
     #[test]
     fn audio_source_clone() {
         let mut asrc = AudioSource::new("Clone", "id", AudioSourceKind::Application);
@@ -257,6 +910,7 @@ mod tests {
         let asrc2 = asrc.clone();
         assert_eq!(asrc2.volume, 0.5);
         assert!(asrc2.active);
+        assert_eq!(asrc2.id, asrc.id, "id is cloned");
     }
 
     #[test]
