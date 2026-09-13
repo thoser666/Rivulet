@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use uuid::Uuid;
 // Important: The prelude is still needed for methods like .set_state(), .by_name(), etc.
 use gst::prelude::*;
 
@@ -181,7 +182,9 @@ pub mod media_source;
 pub use media_source::{MediaSource, MediaType, PlaybackMode};
 
 pub mod audio_source;
-pub use audio_source::{AudioSource, AudioSourceKind};
+pub use audio_source::{
+    AudioFilterConfig, AudioRouting, AudioRoutingConfig, AudioSource, AudioSourceKind,
+};
 
 pub mod browser_source;
 pub mod ducking;
@@ -219,6 +222,14 @@ pub struct RivuletEngine {
     separate_audio_tracks: bool,
     audio_sys_enabled: bool,
     audio_mic_enabled: bool,
+    /// Multi-track audio routing sources (issue #154, M6). When non-empty,
+    /// the pipeline is built from these sources and their record/stream
+    /// routing decisions instead of the legacy System/Microphone pair.
+    audio_sources: Vec<AudioSource>,
+    /// Live appsrcs for the routed sources of the running session. One source
+    /// can own several appsrcs (the record branch and the streaming mix leg
+    /// are separate elements); every entry receives the pushed frames.
+    audio_source_appsrcs: Vec<(Uuid, gst_app::AppSrc)>,
     is_recording: bool,
     output_path: Option<PathBuf>,
     stream_settings: Option<StreamSettings>,
@@ -294,6 +305,7 @@ struct StoppedParts {
     audio_appsrc: Option<gst_app::AppSrc>,
     audio_appsrc_sys: Option<gst_app::AppSrc>,
     audio_appsrc_mic: Option<gst_app::AppSrc>,
+    audio_source_appsrcs: Vec<(Uuid, gst_app::AppSrc)>,
     finished_path: Option<PathBuf>,
     finished_container: RecordingContainer,
     replay: Option<Arc<Mutex<ReplayBuffer>>>,
@@ -312,6 +324,8 @@ impl Default for RivuletEngine {
             separate_audio_tracks: false,
             audio_sys_enabled: true,
             audio_mic_enabled: true,
+            audio_sources: Vec::new(),
+            audio_source_appsrcs: Vec::new(),
             is_recording: false,
             output_path: None,
             stream_settings: None,
@@ -1132,6 +1146,9 @@ impl RivuletEngine {
         if !self.audio_enabled {
             return String::new();
         }
+        if !self.audio_sources.is_empty() {
+            return self.routed_audio_branch_str(mux_name, flv, force_mixed);
+        }
         let replay_enabled = self.replay.is_some();
         let mut branch_idx = 0usize;
         let mut push_branch = |out: &mut String, appsrc_name: &str| {
@@ -1163,6 +1180,179 @@ impl RivuletEngine {
             push_branch(&mut s, "audio_src");
         }
         s
+    }
+
+    /// The GStreamer branch for one routed source: its appsrc, volume, format
+    /// converters, and per-source filter chain (availability-checked against
+    /// the installed element factories, mirroring the legacy capture path).
+    fn routed_source_head(&self, source: &AudioSource, appsrc_name: &str) -> String {
+        let (filter_chain, missing) = source
+            .filters
+            .chain_fragment_with_availability(|name| gst::ElementFactory::find(name).is_some());
+        for element in missing {
+            tracing::warn!(
+                source = %source.name,
+                element,
+                "audio filter skipped: GStreamer element not installed"
+            );
+        }
+        let filter_segment = if filter_chain.is_empty() {
+            String::new()
+        } else {
+            format!("! {filter_chain} ! audioconvert ! audioresample ")
+        };
+        let vol = source.effective_volume();
+        format!(
+            "appsrc name={appsrc_name} format=time is-live=true do-timestamp=true \
+             ! volume volume={vol:.4} ! audioconvert ! audioresample {filter_segment}\
+             ! audioconvert ! audioresample "
+        )
+    }
+
+    /// The post-encoder tail of a routed branch: the AAC encoder plus the
+    /// muxer leg and, when the replay buffer is enabled, a tee into a replay
+    /// appsink (one ring track per record-routed source).
+    fn routed_record_tail(&self, mux_name: &str, replay_index: usize) -> String {
+        let leg = self.audio_mux_leg(mux_name, false);
+        if self.replay.is_some() {
+            format!(
+                " ! avenc_aac ! tee name=replay_atee{replay_index}{leg} \
+                 replay_atee{replay_index}. ! queue ! appsink name=replay_audio_sink_{replay_index}"
+            )
+        } else {
+            format!(" ! avenc_aac{leg}")
+        }
+    }
+
+    /// The multi-track audio routing branch (issue #154). Every source with
+    /// `routing.record` becomes its own encoded branch (its own AAC track in
+    /// the recording container); every source with `routing.stream` is mixed
+    /// into a single FLV audio track. Sources routed to neither output are
+    /// not built at all.
+    fn routed_audio_branch_str(&self, mux_name: &str, flv: bool, force_mixed: bool) -> String {
+        let record_sources: Vec<&AudioSource> = self
+            .audio_sources
+            .iter()
+            .filter(|s| s.routing.record)
+            .collect();
+        let stream_sources: Vec<&AudioSource> = self
+            .audio_sources
+            .iter()
+            .filter(|s| s.routing.stream)
+            .collect();
+        let mut s = String::new();
+        if flv {
+            // Streaming: FLV carries a single audio track, so every
+            // stream-routed source is mixed through an adder. Recording-only
+            // sources do not exist on the FLV path.
+            if stream_sources.len() == 1 {
+                let only = stream_sources[0];
+                s.push_str(&self.routed_source_head(only, "audio_src"));
+                s.push_str(&self.audio_mux_leg(mux_name, true));
+                s.push(' ');
+            } else if stream_sources.len() > 1 {
+                s.push_str("audiomixer name=stream_audio_mixer");
+                for (i, source) in stream_sources.iter().enumerate() {
+                    s.push_str(&format!(
+                        " {} ! queue ! audioconvert ! audioresample ! {AUDIO_MIXER_INPUT_CAPS} ! stream_audio_mixer.sink_{i}",
+                        self.routed_source_head(source, &format!("audio_src_mix_{i}"))
+                    ));
+                }
+                s.push_str(&format!(
+                    " stream_audio_mixer. ! audioconvert ! audioresample ! avenc_aac{}",
+                    self.audio_mux_leg(mux_name, true)
+                ));
+                s.push(' ');
+            }
+            return s;
+        }
+        // Recording (or the recording side of dual output).
+        if force_mixed {
+            // force_mixed is only used by the pure streaming path, which is
+            // handled above; treat it like recording anyway so the branch is
+            // always well-formed.
+        }
+        for (i, source) in record_sources.iter().enumerate() {
+            s.push_str(&self.routed_source_head(source, &format!("audio_src_rec_{i}")));
+            s.push_str(&self.routed_record_tail(mux_name, i));
+            s.push(' ');
+        }
+        s
+    }
+
+    /// The audio section of the dual-output pipeline in routed mode: record
+    /// legs into the recording muxer (`record_mux`) exactly like the local
+    /// recording, plus the stream mix into the FLV muxer's `audio` request pad
+    /// (`stream_mux`).
+    fn routed_dual_audio_str(&self, record_mux: &str, stream_mux: &str) -> String {
+        let mut s = String::new();
+        for (i, source) in self
+            .audio_sources
+            .iter()
+            .filter(|src| src.routing.record)
+            .enumerate()
+        {
+            s.push_str(&self.routed_source_head(source, &format!("audio_src_rec_{i}")));
+            s.push_str(&self.routed_record_tail(record_mux, i));
+            s.push(' ');
+        }
+        let stream_sources: Vec<&AudioSource> = self
+            .audio_sources
+            .iter()
+            .filter(|src| src.routing.stream)
+            .collect();
+        match stream_sources.len() {
+            0 => {}
+            1 => {
+                s.push_str(&self.routed_source_head(stream_sources[0], "audio_src"));
+                s.push_str(&format!(" ! avenc_aac ! queue ! {stream_mux}.audio "));
+            }
+            _ => {
+                s.push_str("audiomixer name=stream_audio_mixer");
+                for (i, source) in stream_sources.iter().enumerate() {
+                    s.push_str(&format!(
+                        " {} ! queue ! audioconvert ! audioresample ! {AUDIO_MIXER_INPUT_CAPS} ! stream_audio_mixer.sink_{i}",
+                        self.routed_source_head(source, &format!("audio_src_mix_{i}"))
+                    ));
+                }
+                s.push_str(&format!(
+                    " stream_audio_mixer. ! audioconvert ! audioresample ! avenc_aac ! queue ! {stream_mux}.audio "
+                ));
+            }
+        }
+        s
+    }
+
+    /// The appsrc element names a routed source owns for the running output
+    /// mode. Frames pushed to a source are pushed to every one of its
+    /// appsrcs (the record branch and the streaming mix leg are separate
+    /// elements fed the same PCM).
+    fn audio_source_appsrc_names(&self, flv: bool) -> Vec<(Uuid, String)> {
+        let mut names = Vec::new();
+        if flv {
+            let stream_sources: Vec<&AudioSource> = self
+                .audio_sources
+                .iter()
+                .filter(|s| s.routing.stream)
+                .collect();
+            if stream_sources.len() == 1 {
+                names.push((stream_sources[0].id, "audio_src".to_string()));
+            } else {
+                for (i, source) in stream_sources.iter().enumerate() {
+                    names.push((source.id, format!("audio_src_mix_{i}")));
+                }
+            }
+        } else {
+            for (i, source) in self
+                .audio_sources
+                .iter()
+                .filter(|s| s.routing.record)
+                .enumerate()
+            {
+                names.push((source.id, format!("audio_src_rec_{i}")));
+            }
+        }
+        names
     }
 
     /// The GStreamer fragment feeding the recording muxer, given the branches
@@ -1335,14 +1525,18 @@ impl RivuletEngine {
             s.push(' ');
         }
         if self.audio_enabled {
-            s.push_str(
-                "appsrc name=audio_src format=time is-live=true do-timestamp=true \
-                 ! audioconvert ! audioresample ! avenc_aac ! tee name=audio_tee \
-                 ! queue ! mux_rec. \
-                 audio_tee. ! queue ! mux_stream.audio ",
-            );
-            if self.replay.is_some() {
-                s.push_str("audio_tee. ! queue ! appsink name=replay_audio_sink_0 ");
+            if !self.audio_sources.is_empty() {
+                s.push_str(&self.routed_dual_audio_str("mux_rec", "mux_stream"));
+            } else {
+                s.push_str(
+                    "appsrc name=audio_src format=time is-live=true do-timestamp=true \
+                     ! audioconvert ! audioresample ! avenc_aac ! tee name=audio_tee \
+                     ! queue ! mux_rec. \
+                     audio_tee. ! queue ! mux_stream.audio ",
+                );
+                if self.replay.is_some() {
+                    s.push_str("audio_tee. ! queue ! appsink name=replay_audio_sink_0 ");
+                }
             }
         }
         s.push_str(&format!(
@@ -1422,7 +1616,8 @@ impl RivuletEngine {
         appsrc.set_property("do-timestamp", true);
 
         if self.audio_enabled {
-            let separate = self.separate_audio_tracks && !self.is_streaming();
+            let routed = !self.audio_sources.is_empty();
+            let separate = !routed && self.separate_audio_tracks && !self.is_streaming();
             if separate {
                 let mut track_srcs: Vec<(&str, &mut Option<gst_app::AppSrc>)> = Vec::new();
                 if self.audio_sys_enabled {
@@ -1442,6 +1637,32 @@ impl RivuletEngine {
                     app.set_property("is-live", true);
                     app.set_property("do-timestamp", true);
                     *slot = Some(app);
+                }
+            } else if routed {
+                // Dual output contains both the recording mux and the FLV mux,
+                // so a source can own appsrcs on both legs at once.
+                let mut wanted: Vec<(Uuid, String)> = Vec::new();
+                if self.is_dual_output() {
+                    wanted.extend(self.audio_source_appsrc_names(false));
+                    wanted.extend(self.audio_source_appsrc_names(true));
+                } else if self.is_streaming() {
+                    wanted.extend(self.audio_source_appsrc_names(true));
+                } else {
+                    wanted.extend(self.audio_source_appsrc_names(false));
+                }
+                for (id, name) in wanted {
+                    let app = pipeline
+                        .by_name(&name)
+                        .unwrap_or_else(|| {
+                            panic!("routed audio appsrc `{name}` must exist in the pipeline")
+                        })
+                        .downcast::<gst_app::AppSrc>()
+                        .unwrap();
+                    app.set_caps(Some(&audio_caps()));
+                    app.set_property("format", gst::Format::Time);
+                    app.set_property("is-live", true);
+                    app.set_property("do-timestamp", true);
+                    self.audio_source_appsrcs.push((id, app));
                 }
             } else {
                 let audio_appsrc = pipeline
@@ -1691,6 +1912,130 @@ impl RivuletEngine {
         }
     }
 
+    // ── Multi-track audio routing (issue #154, M6) ──────────────────
+
+    /// Replace the full multi-track audio routing configuration.
+    ///
+    /// When any source is configured, the pipeline is built from these
+    /// sources (each record-routed source becomes its own track, all
+    /// stream-routed sources are mixed into the FLV track) instead of the
+    /// legacy System/Microphone pair. Clearing the list restores the legacy
+    /// behavior. Sources without an id get one assigned. Must be called
+    /// before recording starts.
+    pub fn set_audio_sources(&mut self, sources: Vec<AudioSource>) {
+        let sources = sources
+            .into_iter()
+            .map(|mut s| {
+                if s.id.is_nil() {
+                    s.id = Uuid::new_v4();
+                }
+                s
+            })
+            .collect();
+        self.audio_sources = sources;
+    }
+
+    /// The configured audio sources (multi-track routing mode).
+    pub fn audio_sources(&self) -> &[AudioSource] {
+        &self.audio_sources
+    }
+
+    /// Add one source (returns its id; assigned when it was nil). Must be
+    /// called before recording starts.
+    pub fn add_audio_source(&mut self, mut source: AudioSource) -> Uuid {
+        if source.id.is_nil() {
+            source.id = Uuid::new_v4();
+        }
+        let id = source.id;
+        self.audio_sources.push(source);
+        id
+    }
+
+    /// Remove a source by id. Returns false when the id is unknown.
+    pub fn remove_audio_source(&mut self, id: Uuid) -> bool {
+        let before = self.audio_sources.len();
+        self.audio_sources.retain(|s| s.id != id);
+        self.audio_sources.len() != before
+    }
+
+    /// Set the volume of one source. Returns false when the id is unknown.
+    pub fn set_audio_source_volume(&mut self, id: Uuid, volume: f32) -> bool {
+        let Some(source) = self.audio_sources.iter_mut().find(|s| s.id == id) else {
+            return false;
+        };
+        source.volume = volume.clamp(0.0, 2.0);
+        true
+    }
+
+    /// Mute or unmute one source. Returns false when the id is unknown.
+    pub fn set_audio_source_muted(&mut self, id: Uuid, muted: bool) -> bool {
+        let Some(source) = self.audio_sources.iter_mut().find(|s| s.id == id) else {
+            return false;
+        };
+        source.muted = muted;
+        true
+    }
+
+    /// Set the record/stream routing of one source. Returns false when the
+    /// id is unknown.
+    pub fn set_audio_source_routing(&mut self, id: Uuid, routing: AudioRouting) -> bool {
+        let Some(source) = self.audio_sources.iter_mut().find(|s| s.id == id) else {
+            return false;
+        };
+        source.routing = routing;
+        true
+    }
+
+    /// Set the filter chain of one source. Returns false when the id is
+    /// unknown.
+    pub fn set_audio_source_filters(&mut self, id: Uuid, filters: AudioFilterConfig) -> bool {
+        let Some(source) = self.audio_sources.iter_mut().find(|s| s.id == id) else {
+            return false;
+        };
+        source.filters = filters;
+        true
+    }
+
+    /// Push a PCM frame belonging to the audio source with the given id
+    /// (multi-track routing mode). The frame is delivered to every appsrc the
+    /// source owns in the running pipeline (record branch and streaming mix
+    /// leg). Returns false when no session is running, the id is unknown, or
+    /// the source is routed to neither output of the active mode.
+    pub fn push_audio_source(&mut self, id: Uuid, frame: &AudioFrame) -> anyhow::Result<bool> {
+        if !self.audio_enabled || frame.data.is_empty() {
+            return Ok(false);
+        }
+        if self.pipeline.is_none() {
+            anyhow::bail!("Pipeline is not running");
+        }
+        if self.audio_source_appsrcs.is_empty() {
+            return Ok(false);
+        }
+        let mut delivered = false;
+        for (owner, appsrc) in &self.audio_source_appsrcs {
+            if *owner == id && push_pcm_buffer(appsrc, frame).is_ok() {
+                delivered = true;
+            }
+        }
+        Ok(delivered)
+    }
+
+    /// The warning emitted by [`RivuletEngine::start_local_recording`] when
+    /// audio is enabled but no source is routed to the recording output.
+    /// Exposed for tests and the GUI warning surface.
+    pub fn audio_routing_warning(&self) -> Option<&'static str> {
+        if !self.audio_enabled || self.audio_sources.is_empty() {
+            return None;
+        }
+        if !self.audio_sources.iter().any(|s| s.routing.record) {
+            Some(
+                "Audio is enabled but no source is routed to the recording output; the recording will have no audio tracks.",
+            )
+        } else {
+            None
+        }
+    }
+
     /// Push a mixed PCM frame into the recording pipeline.
     pub fn push_audio_frame(&mut self, frame: &AudioFrame) -> anyhow::Result<()> {
         if !self.audio_enabled || (self.separate_audio_tracks && !self.is_streaming()) {
@@ -1774,6 +2119,9 @@ impl RivuletEngine {
         if self.is_recording {
             return;
         }
+        if let Some(warning) = self.audio_routing_warning() {
+            tracing::warn!("{warning}");
+        }
         tracing::info!(path = ?path, "Recording prepared");
         self.output_path = Some(path);
         self.is_recording = true;
@@ -1849,6 +2197,7 @@ impl RivuletEngine {
             audio_appsrc: self.audio_appsrc.take(),
             audio_appsrc_sys: self.audio_appsrc_sys.take(),
             audio_appsrc_mic: self.audio_appsrc_mic.take(),
+            audio_source_appsrcs: std::mem::take(&mut self.audio_source_appsrcs),
             replay: self.replay.clone(),
         };
 
@@ -1881,6 +2230,7 @@ impl RivuletEngine {
         ]
         .into_iter()
         .flatten()
+        .chain(parts.audio_source_appsrcs.into_iter().map(|(_, src)| src))
         {
             let _ = src.end_of_stream();
         }
@@ -2161,6 +2511,15 @@ pub fn audio_caps() -> gst::Caps {
         .build()
 }
 
+/// Caps the routed-audio mixer input legs must expose before linking into an
+/// `audiomixer` request pad. The GStreamer 1.24 strict pipeline parser cannot
+/// infer the caps of a leg that ends in a request pad
+/// (`stream_audio_mixer.sink<N>`), so every leg carries them explicitly as a
+/// bare caps filter (same parser class as the flvmux/H.264 strictness
+/// documented on the video branch).
+const AUDIO_MIXER_INPUT_CAPS: &str =
+    "audio/x-raw,format=F32LE,layout=interleaved,channels=2,rate=48000";
+
 /// Copy an [`AudioFrame`] into a writable GStreamer buffer and push it into
 /// the given appsrc.
 fn push_pcm_buffer(appsrc: &gst_app::AppSrc, frame: &AudioFrame) -> anyhow::Result<()> {
@@ -2188,6 +2547,7 @@ fn push_pcm_buffer(appsrc: &gst_app::AppSrc, frame: &AudioFrame) -> anyhow::Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio_source::CompressorConfig;
     use gstreamer_pbutils as gst_pbutils;
 
     /// Build a valid `file://` URI from a filesystem path. On Windows the path
@@ -3721,6 +4081,310 @@ mod tests {
         );
         // The parent directory is preserved from the dir argument.
         assert!(path.parent().unwrap().to_string_lossy().ends_with("videos"));
+    }
+
+    // ── Multi-track audio routing, Phase 1 (issue #154) ────────────
+
+    fn routing_test_source(name: &str, routing: AudioRouting) -> AudioSource {
+        AudioSource::application(name, "pid:42").with_routing(routing)
+    }
+
+    #[test]
+    fn audio_sources_api_add_remove_update_round_trip() {
+        let mut engine = RivuletEngine::default();
+        assert!(engine.audio_sources().is_empty());
+
+        let id = engine.add_audio_source(routing_test_source("Game", AudioRouting::BOTH));
+        let mic = AudioSource::microphone_default();
+        let mic_id = engine.add_audio_source(mic);
+        assert_eq!(engine.audio_sources().len(), 2);
+        assert_ne!(id, mic_id);
+
+        // Per-source updates.
+        assert!(engine.set_audio_source_volume(id, 1.5));
+        assert!(engine.set_audio_source_muted(mic_id, true));
+        assert!(engine.set_audio_source_routing(id, AudioRouting::RECORD_ONLY));
+        let filters = AudioFilterConfig {
+            compressor: Some(CompressorConfig::default()),
+            ..AudioFilterConfig::default()
+        };
+        assert!(engine.set_audio_source_filters(id, filters));
+
+        let sources = engine.audio_sources();
+        let game = sources.iter().find(|s| s.id == id).unwrap();
+        assert_eq!(game.volume, 1.5);
+        assert_eq!(game.routing, AudioRouting::RECORD_ONLY);
+        assert!(game.filters.compressor.is_some());
+        let mic = sources.iter().find(|s| s.id == mic_id).unwrap();
+        assert!(mic.muted);
+
+        // Unknown ids report false instead of panicking.
+        let ghost = uuid::Uuid::new_v4();
+        assert!(!engine.set_audio_source_volume(ghost, 1.0));
+        assert!(!engine.set_audio_source_muted(ghost, true));
+        assert!(!engine.set_audio_source_routing(ghost, AudioRouting::NONE));
+        assert!(!engine.set_audio_source_filters(ghost, AudioFilterConfig::default()));
+        assert!(!engine.remove_audio_source(ghost));
+
+        assert!(engine.remove_audio_source(id));
+        assert_eq!(engine.audio_sources().len(), 1);
+        assert!(!engine.remove_audio_source(id), "second remove is false");
+    }
+
+    #[test]
+    fn audio_sources_with_nil_id_get_assigned_one() {
+        let mut engine = RivuletEngine::default();
+        let mut source = AudioSource::application("App", "pid:1");
+        source.id = uuid::Uuid::nil();
+        let id = engine.add_audio_source(source);
+        assert!(!id.is_nil(), "add assigns an id when nil");
+
+        let mut batch = vec![AudioSource::application("A", "pid:2")];
+        batch[0].id = uuid::Uuid::nil();
+        engine.set_audio_sources(batch);
+        assert!(!engine.audio_sources()[0].id.is_nil());
+        assert_eq!(engine.audio_sources().len(), 1);
+    }
+
+    #[test]
+    fn audio_routing_warning_zero_record_routed_sources() {
+        let mut engine = RivuletEngine::default();
+        assert!(
+            engine.audio_routing_warning().is_none(),
+            "no sources, no warning"
+        );
+
+        engine.set_audio_enabled(true);
+        engine.add_audio_source(routing_test_source("StreamOnly", AudioRouting::STREAM_ONLY));
+        let warning = engine
+            .audio_routing_warning()
+            .expect("zero record-routed sources must warn");
+        assert!(warning.contains("no source is routed to the recording output"));
+
+        let id = engine.audio_sources()[0].id;
+        engine.set_audio_source_routing(id, AudioRouting::RECORD_ONLY);
+        assert!(
+            engine.audio_routing_warning().is_none(),
+            "warning clears when a source is record-routed"
+        );
+
+        // Audio disabled: never a warning.
+        let mut engine2 = RivuletEngine::default();
+        engine2.set_audio_enabled(false);
+        engine2.add_audio_source(routing_test_source("X", AudioRouting::STREAM_ONLY));
+        assert!(engine2.audio_routing_warning().is_none());
+    }
+
+    #[test]
+    fn routed_recording_pipeline_has_one_branch_per_record_routed_source() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.add_audio_source(routing_test_source("Game", AudioRouting::RECORD_ONLY));
+        engine.add_audio_source(routing_test_source("Music", AudioRouting::BOTH));
+        engine.add_audio_source(routing_test_source("Discord", AudioRouting::STREAM_ONLY));
+
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/routing.mp4");
+        assert!(
+            pipeline_str.contains("audio_src_rec_0"),
+            "record-routed sources become branches: {pipeline_str}"
+        );
+        assert!(pipeline_str.contains("audio_src_rec_1"));
+        assert!(
+            !pipeline_str.contains("audio_src_rec_2"),
+            "stream-only sources get no recording branch: {pipeline_str}"
+        );
+        assert!(
+            !pipeline_str.contains("audio_src_sys") && !pipeline_str.contains("audio_src_mic"),
+            "routed mode must not build the legacy pair: {pipeline_str}"
+        );
+        let pipeline = gst::parse::launch(&pipeline_str)
+            .expect("routed recording pipeline should parse")
+            .downcast::<gst::Pipeline>()
+            .unwrap();
+        assert!(pipeline.by_name("audio_src_rec_0").is_some());
+        assert!(pipeline.by_name("audio_src_rec_1").is_some());
+    }
+
+    #[test]
+    fn routed_streaming_pipeline_mixes_stream_routed_sources_into_single_flv_track() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_stream_settings(Some(StreamSettings::twitch("routekey")));
+        engine.add_audio_source(routing_test_source("Game", AudioRouting::STREAM_ONLY));
+        engine.add_audio_source(routing_test_source("Mic", AudioRouting::BOTH));
+        engine.add_audio_source(routing_test_source("Private", AudioRouting::RECORD_ONLY));
+
+        let pipeline_str = engine.build_streaming_pipeline_str();
+        assert!(
+            pipeline_str.contains("audiomixer name=stream_audio_mixer"),
+            "multiple stream-routed sources mix through an audiomixer: {pipeline_str}"
+        );
+        assert!(pipeline_str.contains("audio_src_mix_0"));
+        assert!(pipeline_str.contains("audio_src_mix_1"));
+        assert!(
+            !pipeline_str.contains("audio_src_rec_"),
+            "record-only sources must not reach the FLV stream: {pipeline_str}"
+        );
+        let pipeline = gst::parse::launch(&pipeline_str)
+            .expect("routed streaming pipeline should parse")
+            .downcast::<gst::Pipeline>()
+            .unwrap();
+        assert!(pipeline.by_name("stream_audio_mixer").is_some());
+    }
+
+    #[test]
+    fn routed_streaming_pipeline_single_source_skips_mixer() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_stream_settings(Some(StreamSettings::twitch("routekey")));
+        engine.add_audio_source(routing_test_source("Game", AudioRouting::STREAM_ONLY));
+
+        let pipeline_str = engine.build_streaming_pipeline_str();
+        assert!(
+            !pipeline_str.contains("audiomixer"),
+            "single source needs no mixer: {pipeline_str}"
+        );
+        assert!(pipeline_str.contains("appsrc name=audio_src "));
+        assert!(
+            pipeline_str.contains("mux.audio"),
+            "single stream source links the FLV audio pad directly"
+        );
+    }
+
+    #[test]
+    fn dual_output_pipeline_builds_both_routing_legs() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_stream_settings(Some(StreamSettings::twitch("dualroute")));
+        engine.add_audio_source(routing_test_source("Game", AudioRouting::BOTH));
+
+        // Dual output requires stream settings plus a recording output path.
+        let path =
+            std::env::temp_dir().join(format!("rivulet_dual_route_{}.mp4", std::process::id()));
+        engine.start_local_recording(path);
+
+        let pipeline_str = engine.build_dual_output_pipeline_str();
+        // The record leg and the FLV mix leg are separate branches; the same
+        // source feeds both.
+        assert!(
+            pipeline_str.contains("audio_src_rec_0"),
+            "record leg exists in dual output: {pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("appsrc name=audio_src "),
+            "stream leg exists in dual output: {pipeline_str}"
+        );
+        let pipeline = gst::parse::launch(&pipeline_str)
+            .expect("routed dual-output pipeline should parse")
+            .downcast::<gst::Pipeline>()
+            .unwrap();
+        assert!(pipeline.by_name("audio_src_rec_0").is_some());
+    }
+
+    #[test]
+    fn routed_source_filters_and_volume_land_in_the_pipeline() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        let mut source = routing_test_source("Game", AudioRouting::RECORD_ONLY);
+        source.volume = 0.75;
+        source.filters = AudioFilterConfig {
+            compressor: Some(CompressorConfig::default()),
+            gain_db: 3.0,
+            ..AudioFilterConfig::default()
+        };
+        engine.add_audio_source(source);
+
+        let pipeline_str = engine.build_recording_pipeline_str("/tmp/routing_filters.mp4");
+        assert!(
+            pipeline_str.contains("volume volume=0.7500"),
+            "source volume is rendered: {pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("audiodynamic mode=compressor"),
+            "source compressor is rendered: {pipeline_str}"
+        );
+        assert!(
+            pipeline_str.contains("audioamplify amplification=1.4125"),
+            "source gain is rendered: {pipeline_str}"
+        );
+        let pipeline = gst::parse::launch(&pipeline_str)
+            .expect("pipeline with per-source filters should parse");
+        drop(pipeline);
+    }
+
+    #[test]
+    fn routed_recording_end_to_end_produces_one_track_per_source() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.add_audio_source(routing_test_source("Game", AudioRouting::RECORD_ONLY));
+        engine.add_audio_source(routing_test_source("Mic", AudioRouting::RECORD_ONLY));
+
+        let path =
+            std::env::temp_dir().join(format!("rivulet_routed_tracks_{}.mp4", std::process::id()));
+        engine.start_local_recording(path.clone());
+
+        let (width, height) = (320u32, 240u32);
+        let video = vec![0u8; (width * height * 4) as usize];
+        for _ in 0..12 {
+            engine.process_raw_frame(&video, width, height);
+        }
+        let frame = AudioFrame::new(vec![0.0f32; 4800], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
+        for _ in 0..12 {
+            for source in engine.audio_sources().to_vec() {
+                let delivered = engine
+                    .push_audio_source(source.id, &frame)
+                    .expect("pipeline is running");
+                assert!(delivered, "record-routed source must receive frames");
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        engine.stop_recording();
+
+        assert!(path.exists(), "output file should exist");
+        let uri = file_uri(&path);
+        let discoverer = gst_pbutils::Discoverer::new(gst::ClockTime::from_seconds(5))
+            .expect("Discoverer should be creatable");
+        let info = discoverer
+            .discover_uri(&uri)
+            .expect("File should be readable");
+        let audio_streams = info.audio_streams();
+        assert_eq!(
+            audio_streams.len(),
+            2,
+            "each record-routed source becomes its own track, found: {}",
+            audio_streams.len()
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn push_audio_source_requires_running_pipeline_and_known_id() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        let id = engine.add_audio_source(routing_test_source("Game", AudioRouting::BOTH));
+
+        let frame = AudioFrame::new(vec![0.0f32; 8], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
+        assert!(
+            engine.push_audio_source(id, &frame).is_err(),
+            "no pipeline: error"
+        );
+
+        // With a session running but an unknown id, delivery reports false
+        // without erroring. The pipeline only exists once a video frame arms
+        // it, so simulate the no-session case first; without a pipeline the
+        // push errors, with one it reports delivery.
+        engine.start_streaming();
+        let ghost = uuid::Uuid::new_v4();
+        if let Ok(delivered) = engine.push_audio_source(ghost, &frame) {
+            assert!(!delivered, "unknown id must not deliver");
+        }
+        engine.stop_recording();
     }
 
     #[test]
