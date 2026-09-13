@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+- docs(m10): **AI settings placement** — two levels so the Settings page stays
+  lean: infrastructure lives in Settings (master switch, Ollama connection +
+  model, pause-while-live, T2I backend), feature workflow lives on the
+  Assistant tab (per-feature toggles, model choice, overlay folder, test
+  events, gallery). `AiSwitches` serialization and the kill-path are
+  unchanged. Pinned in README, the M10 quality gate, the spec, and
+  `ci_pinning` (infrastructure in Settings, workflow on the Assistant tab).
+- ci(distribution): **every active channel consumes the weekly promotion
+  once per week** — the Weekly release promotion workflow now prepares Scoop
+  (bucket push or artifact), WinGet (byte-verified manifest from the real
+  MSI), Chocolatey (byte-verified package from SHA256SUMS), and AUR (bump
+  status + hand-off) from the same promoted `weekly-latest` release, behind
+  an `up_to_date` gate. External pushes (winget-pkgs PR, `choco push`, AUR)
+  stay human-reviewed; artifacts make each a single copy-paste review per
+  week.
+
 - docs(roadmap): **M5 closed.** The last open issue, #50 (code signing), was
   kept open but moved out of the milestone — the remaining work is a
   maintainer certificate purchase (SignPath Foundation declined the free tier;
