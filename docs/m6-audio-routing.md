@@ -1,7 +1,12 @@
 # M6 — Multi-Track Audio Routing (Record / Stream)
 
-**Status:** In progress — **Phase 1 (engine core) implemented** (issue [#154](https://github.com/thoser666/Rivulet/issues/154)): the `AudioSource`/`AudioRouting`/`AudioFilterConfig` types, the per-source engine API (`add_audio_source`, `set_audio_source_volume/muted/routing/filters`, `push_audio_source`), the versioned `AudioRoutingConfig` persistence (v1, unknown versions rejected, legacy System/Microphone defaults), and the routing-aware pipeline composition for recording (one branch per record-routed source), streaming (stream-routed sources mixed into the single FLV track), and dual output (both legs) are shipped with unit, pipeline-parse, and end-to-end tests. The GUI mixer (Phase 2) and the platform capture backends (Phase 3) are not implemented yet.
-**Date:** 2026-09-05 (Phase 1: 2026-09-13)
+**Status:** In progress — **Phases 1 and 2 implemented** (issue [#154](https://github.com/thoser666/Rivulet/issues/154)).
+
+**Phase 1 (engine core, 2026-09-13):** the `AudioSource`/`AudioRouting`/`AudioFilterConfig` types, the per-source engine API (`add_audio_source`, `set_audio_source_volume/muted/routing/filters`, `push_audio_source`), the versioned `AudioRoutingConfig` persistence (v1, unknown versions rejected, legacy System/Microphone defaults), and the routing-aware pipeline composition for recording (one branch per record-routed source), streaming (stream-routed sources mixed into the single FLV track), and dual output (both legs). Per-source `volume` elements are named (`<appsrc>_vol`) so volume/mute changes apply live to a running session.
+
+**Phase 2 (GUI, 2026-09-13):** the Mixer view with the full routing matrix (add/remove sources, per-source volume/mute/routing checkboxes), the shared per-source strip reused as inline mixers in the Record and Stream views (badges instead of the matrix, single implementation, three placements), the per-source filter panel (gate, compressor, limiter, expander, gain, 10-band EQ), `audio_routing_v1` persistence in the eframe app storage with restore-to-engine seeding, and the i18n keys (EN/DE). An empty source list keeps the legacy System/Microphone capture fully functional (opt-in routed mode). Application-kind sources are created with a `pending_app` device id until the Phase-3 capture backends resolve them.
+
+**Not implemented yet:** the platform capture backends (Phase 3 — WASAPI per-app on Windows, PipeWire node picking on Linux, macOS loopback hint) and the 5+ source resource report.
 **Tracked in:** Milestone M6 — Creator Toolkit & Interactivity
 
 ## Problem

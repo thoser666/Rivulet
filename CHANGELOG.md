@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+- feat(gui): **multi-track audio routing mixer (Phase 2 of issue
+  [#154](https://github.com/thoser666/Rivulet/issues/154), M6)** — the Mixer
+  view now hosts the routing matrix: add/remove sources (application, input
+  device, output device, mixed), per-source volume slider, mute toggle, and
+  the Record/Stream routing checkboxes. The same shared per-source strip is
+  embedded as inline mixers in the Record and Stream views (routing badges
+  instead of the matrix — one implementation, three placements, no UI drift).
+  The per-source filter panel edits gate, compressor, limiter, expander,
+  gain and the 10-band EQ, mirroring the legacy per-track filters so a
+  source's chain sounds the same as the old System/Mic filters. Volume and
+  mute changes apply live to a running session (the routed branches name
+  their `volume` elements, and the engine retunes them in place).
+  `audio_routing_v1` persists in the eframe app storage and the restore path
+  seeds the engine so the first session starts with the saved routing. An
+  empty source list keeps the legacy System/Microphone capture fully
+  functional (opt-in routed mode); Application-kind sources carry a
+  `pending_app` device id until the Phase-3 capture backends resolve them.
+  i18n EN/DE with parity. 9 new GUI tests (persistence round-trip, engine
+  sync, badges, placements wiring, i18n) + a ci_pinning guard for the GUI
+  surface, the live-volume plumbing, and both-locale key parity.
+
 - feat(audio): **multi-track audio routing engine core (Phase 1 of issue
   [#154](https://github.com/thoser666/Rivulet/issues/154), M6)** — audio
   sources are now first-class entities instead of a hardcoded
