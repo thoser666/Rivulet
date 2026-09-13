@@ -478,6 +478,12 @@ impl std::fmt::Display for AudioRoutingConfigError {
 
 impl std::error::Error for AudioRoutingConfigError {}
 
+impl Default for AudioRoutingConfig {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
 impl AudioRoutingConfig {
     /// An empty v1 config.
     pub fn empty() -> Self {

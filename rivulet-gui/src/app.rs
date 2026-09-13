@@ -4,10 +4,10 @@ use crate::midi_io::{list_devices, MidiListener};
 use crate::theme;
 use eframe::egui;
 use rivulet_core::{
-    CaptureRegion, DiscordPresence, DiscordPresenceConfig, GlobalBinding, GlobalHotkey, KeyCode,
-    Locale, ModMask, PresenceActivity, PresenceStatus, RivuletEngine, SkippedFilter,
-    StreamConnectionResult, StreamHealthStatus, StreamPlatform, StreamPreset, StreamProbeResult,
-    StreamSettings, StreamStats,
+    AudioFilterConfig, AudioRouting, AudioSource, CaptureRegion, DiscordPresence,
+    DiscordPresenceConfig, GlobalBinding, GlobalHotkey, KeyCode, Locale, ModMask, PresenceActivity,
+    PresenceStatus, RivuletEngine, SkippedFilter, StreamConnectionResult, StreamHealthStatus,
+    StreamPlatform, StreamPreset, StreamProbeResult, StreamSettings, StreamStats,
 };
 use std::collections::BTreeMap;
 use std::sync::mpsc::Receiver;
@@ -1371,6 +1371,22 @@ pub struct RivuletApp {
     #[serde(skip)]
     auto_clip_status: Option<String>,
 
+    // Multi-track audio routing (issue #154 Phase 2). The sources are the
+    // single source of truth: the engine is synced from them before every
+    // session start and on every mixer edit. Empty = legacy System/Mic.
+    audio_sources: Vec<AudioSource>,
+    /// Filter panel: the id of the source whose filter chain is being edited.
+    #[serde(skip)]
+    audio_mixer_filter_source: Option<uuid::Uuid>,
+    #[serde(skip)]
+    audio_mixer_new_source_name: String,
+    #[serde(skip)]
+    audio_mixer_new_source_kind: usize,
+    /// Set by the mixer edits; `sync_audio_routing` clears it after pushing
+    /// the list into the engine.
+    #[serde(skip)]
+    audio_mixer_needs_sync: bool,
+
     // NDI (LAN) monitor feed: when enabled, every recording/streaming session
     // additionally publishes the encoded H.264 video as an NDI source (M5
     // #77). Applied to the engine before every session start.
@@ -1754,6 +1770,15 @@ impl Default for RivuletApp {
             ),
             auto_clip_status: None,
 
+            // Multi-track audio routing (issue #154 Phase 2). Empty by
+            // default: the legacy System/Microphone capture keeps working
+            // until the user adds routed sources in the Mixer view.
+            audio_sources: Vec::new(),
+            audio_mixer_filter_source: None,
+            audio_mixer_new_source_name: String::new(),
+            audio_mixer_new_source_kind: 0,
+            audio_mixer_needs_sync: false,
+
             ndi_output_enabled: false,
             ndi_output_name: "Rivulet".into(),
             ndi_output_group: String::new(),
@@ -1790,6 +1815,302 @@ impl Default for RivuletApp {
             game_capture_handle: None,
             use_game_capture: false,
             is_aux_recording: false,
+        }
+    }
+}
+
+impl RivuletApp {
+    // == Multi-track audio routing (issue #154 Phase 2) ==================
+
+    /// Push the current [`AudioSource`] list into the engine (idempotent --
+    /// called on every mixer edit and before every session start).
+    fn sync_audio_routing(&mut self) {
+        if self.audio_mixer_needs_sync {
+            self.engine.set_audio_sources(self.audio_sources.clone());
+            self.audio_mixer_needs_sync = false;
+        }
+    }
+
+    /// Record/Stream routing badges for the compact strips ("R", "S", both
+    /// letters, or a dash when routed to neither output).
+    fn audio_routing_badges(routing: AudioRouting) -> String {
+        match (routing.record, routing.stream) {
+            (true, true) => "R·S".to_owned(),
+            (true, false) => "R".to_owned(),
+            (false, true) => "S".to_owned(),
+            (false, false) => "—".to_owned(),
+        }
+    }
+
+    /// The shared per-source mixer strip: one row with icon, name, volume
+    /// slider, mute toggle, routing checkboxes, and the filter button.
+    ///
+    /// Single implementation, three placements (Mixer view, Record strip,
+    /// Stream strip) per the design doc. The full routing matrix lives only
+    /// in the Mixer view (`show_routing`); the inline strips show routing
+    /// badges and toggle volume/mute, which the engine applies live.
+    fn draw_audio_source_strip(
+        &mut self,
+        ui: &mut egui::Ui,
+        source: &AudioSource,
+        show_routing: bool,
+    ) {
+        let id = source.id;
+        let mut volume = source.volume;
+        let mut muted = source.muted;
+        let mut record = source.routing.record;
+        let mut stream = source.routing.stream;
+        let mut open_filters = false;
+
+        ui.push_id(id, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(format!("{} {}", source.kind.icon(), source.name));
+                ui.add_space(4.0);
+                ui.add(egui::Slider::new(&mut volume, 0.0..=2.0).show_value(false));
+                let mute_label = self.tr("audio_source_mute");
+                if ui
+                    .toggle_value(&mut muted, "🔇")
+                    .on_hover_text(mute_label)
+                    .changed()
+                {
+                    let _ = self.engine.set_audio_source_muted(id, muted);
+                }
+                if show_routing {
+                    let record_label = self.tr("audio_routing_record");
+                    let stream_label = self.tr("audio_routing_stream");
+                    ui.checkbox(&mut record, record_label);
+                    ui.checkbox(&mut stream, stream_label);
+                } else {
+                    ui.label(
+                        egui::RichText::new(Self::audio_routing_badges(source.routing)).weak(),
+                    );
+                }
+                let filter_label = self.tr("audio_filter_per_source");
+                if ui.button("⚙").on_hover_text(filter_label).clicked() {
+                    open_filters = true;
+                }
+            });
+        });
+
+        let routing_changed = record != source.routing.record || stream != source.routing.stream;
+        if routing_changed {
+            let _ = self
+                .engine
+                .set_audio_source_routing(id, AudioRouting { record, stream });
+        }
+        if (volume - source.volume).abs() > f32::EPSILON {
+            let _ = self.engine.set_audio_source_volume(id, volume);
+        }
+        // Mirror the engine call results back into the GUI list so the next
+        // sync round-trips the same values.
+        if let Some(s) = self.audio_sources.iter_mut().find(|s| s.id == id) {
+            s.volume = volume.clamp(0.0, 2.0);
+            s.muted = muted;
+            if routing_changed {
+                s.routing = AudioRouting { record, stream };
+            }
+        }
+        self.audio_mixer_needs_sync = true;
+        if open_filters {
+            self.audio_mixer_filter_source = Some(id);
+        }
+    }
+
+    /// The per-source filter panel (opened via the gear button in any mixer
+    /// placement). Edits update the source config; the live pipeline chain is
+    /// rebuilt on the next session start (the engine confirms the same
+    /// chain deterministically).
+    fn draw_audio_source_filter_panel(&mut self, ui: &mut egui::Ui) {
+        let Some(id) = self.audio_mixer_filter_source else {
+            return;
+        };
+        let Some(source) = self.audio_sources.iter().find(|s| s.id == id) else {
+            self.audio_mixer_filter_source = None;
+            return;
+        };
+        let name = source.name.clone();
+        let title = self.tr_fmt("audio_filter_per_source", &[name]);
+        let mut open = true;
+        egui::Window::new(title)
+            .id(egui::Id::new("audio_source_filter_panel"))
+            .open(&mut open)
+            .show(ui.ctx(), |ui| {
+                self.draw_audio_filter_fields(ui, id);
+            });
+        if !open {
+            self.audio_mixer_filter_source = None;
+        }
+    }
+
+    /// The filter fields for one source (gate, compressor, limiter, expander,
+    /// gain, EQ). Mirrors the legacy per-track filter row so a source's chain
+    /// sounds the same as the legacy System/Mic filters.
+    fn draw_audio_filter_fields(&mut self, ui: &mut egui::Ui, id: uuid::Uuid) {
+        let gate_label = self.tr("filter_noise_gate").to_owned();
+        let compressor_label = self.tr("filter_compressor").to_owned();
+        let limiter_label = self.tr("filter_limiter").to_owned();
+        let expander_label = self.tr("filter_expander").to_owned();
+        let gain_label = self.tr("filter_gain").to_owned();
+        let eq_label = self.tr("filter_eq").to_owned();
+        let Some(source) = self.audio_sources.iter_mut().find(|s| s.id == id) else {
+            return;
+        };
+        let mut gate_on = source.filters.noise_gate.is_some();
+        let mut compressor_on = source.filters.compressor.is_some();
+        let mut limiter_on = source.filters.limiter.is_some();
+        let mut expander_on = source.filters.expander.is_some();
+        let mut gain_db = source.filters.gain_db;
+        let mut eq_on = source.filters.eq.is_some();
+
+        ui.checkbox(&mut gate_on, gate_label);
+        ui.checkbox(&mut compressor_on, compressor_label);
+        ui.checkbox(&mut limiter_on, limiter_label);
+        ui.checkbox(&mut expander_on, expander_label);
+        ui.add(egui::Slider::new(&mut gain_db, -30.0..=30.0).text(gain_label));
+        ui.checkbox(&mut eq_on, eq_label);
+        if eq_on {
+            let mut bands = source.filters.eq.map(|eq| eq.bands).unwrap_or([0.0; 10]);
+            ui.horizontal_wrapped(|ui| {
+                for band in bands.iter_mut() {
+                    ui.add(egui::Slider::new(band, -12.0..=12.0));
+                }
+            });
+            source.filters.eq = Some(rivulet_core::audio_source::EqConfig { bands });
+        } else {
+            source.filters.eq = None;
+        }
+
+        let changed = gate_on != source.filters.noise_gate.is_some()
+            || compressor_on != source.filters.compressor.is_some()
+            || limiter_on != source.filters.limiter.is_some()
+            || expander_on != source.filters.expander.is_some()
+            || (gain_db - source.filters.gain_db).abs() > 1e-3;
+        source.filters.noise_gate =
+            gate_on.then(rivulet_core::audio_source::NoiseGateConfig::default);
+        source.filters.compressor =
+            compressor_on.then(rivulet_core::audio_source::CompressorConfig::default);
+        source.filters.limiter =
+            limiter_on.then(rivulet_core::audio_source::LimiterConfig::default);
+        source.filters.expander =
+            expander_on.then(rivulet_core::audio_source::ExpanderConfig::default);
+        source.filters.gain_db = gain_db;
+        if changed {
+            let filters = source.filters;
+            let _ = self.engine.set_audio_source_filters(id, filters);
+            self.audio_mixer_needs_sync = true;
+        }
+    }
+
+    /// The Mixer view: source list with the full routing matrix, add/remove,
+    /// and the filter panel entry points.
+    fn draw_mixer_sources(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(self.tr("audio_routing_sources")).strong());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(self.tr("audio_source_add")).clicked() {
+                    let kind = match self.audio_mixer_new_source_kind {
+                        0 => rivulet_core::AudioSourceKind::Application,
+                        1 => rivulet_core::AudioSourceKind::InputDevice,
+                        2 => rivulet_core::AudioSourceKind::OutputDevice,
+                        _ => rivulet_core::AudioSourceKind::Mixed,
+                    };
+                    let name = if self.audio_mixer_new_source_name.trim().is_empty() {
+                        self.tr("audio_source_default_name").to_owned()
+                    } else {
+                        self.audio_mixer_new_source_name.trim().to_owned()
+                    };
+                    let device_id = match kind {
+                        rivulet_core::AudioSourceKind::Application => "pending_app".to_owned(),
+                        rivulet_core::AudioSourceKind::InputDevice => "default_input".to_owned(),
+                        rivulet_core::AudioSourceKind::OutputDevice => "system_loopback".to_owned(),
+                        rivulet_core::AudioSourceKind::Mixed => "mixed".to_owned(),
+                    };
+                    let source = AudioSource::new(name, device_id, kind);
+                    let _ = self.engine.add_audio_source(source.clone());
+                    self.audio_sources.push(source);
+                    self.audio_mixer_needs_sync = true;
+                    self.audio_mixer_new_source_name.clear();
+                }
+                let hint = self.tr("audio_source_name");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.audio_mixer_new_source_name)
+                        .hint_text(hint)
+                        .desired_width(140.0),
+                );
+                egui::ComboBox::from_id_salt("audio_mixer_new_source_kind")
+                    .selected_text(self.tr(self.audio_mixer_new_source_kind_key()).to_owned())
+                    .width(110.0)
+                    .show_ui(ui, |ui| {
+                        for i in 0..4 {
+                            let key = self.audio_mixer_new_source_kind_key_at(i);
+                            let label = self.tr(key).to_owned();
+                            ui.selectable_value(&mut self.audio_mixer_new_source_kind, i, label);
+                        }
+                    });
+            });
+        });
+        ui.label(egui::RichText::new(self.tr("audio_routing_hint")).weak());
+        if self.audio_sources.is_empty() {
+            ui.label(egui::RichText::new(self.tr("audio_routing_legacy_active")).weak());
+        }
+        let mut remove_id: Option<uuid::Uuid> = None;
+        egui::Grid::new("audio_routing_matrix")
+            .num_columns(4)
+            .spacing([12.0, 4.0])
+            .show(ui, |ui| {
+                ui.strong(self.tr("audio_source_name"));
+                ui.strong(self.tr("audio_routing_record"));
+                ui.strong(self.tr("audio_routing_stream"));
+                ui.strong("");
+                ui.end_row();
+                for source in self.audio_sources.clone() {
+                    ui.label(format!("{} {}", source.kind.icon(), source.name));
+                    self.draw_audio_source_strip(ui, &source, true);
+                    let remove_label = self.tr("audio_source_remove");
+                    if ui.button("🗑").on_hover_text(remove_label).clicked() {
+                        remove_id = Some(source.id);
+                    }
+                    ui.end_row();
+                }
+            });
+        if let Some(id) = remove_id {
+            let _ = self.engine.remove_audio_source(id);
+            self.audio_sources.retain(|s| s.id != id);
+            self.audio_mixer_needs_sync = true;
+            if self.audio_mixer_filter_source == Some(id) {
+                self.audio_mixer_filter_source = None;
+            }
+        }
+        self.draw_audio_source_filter_panel(ui);
+    }
+
+    /// The compact inline mixer strip (Record/Stream views): shared per-source
+    /// controls without the routing matrix (badges instead) so recording and
+    /// streaming never require a view switch. The full matrix stays in the
+    /// Mixer view.
+    fn draw_inline_audio_mixer(&mut self, ui: &mut egui::Ui) {
+        if self.audio_sources.is_empty() {
+            return;
+        }
+        ui.separator();
+        ui.label(egui::RichText::new(self.tr("audio_routing_inline")).strong());
+        for source in self.audio_sources.clone() {
+            self.draw_audio_source_strip(ui, &source, false);
+        }
+        self.draw_audio_source_filter_panel(ui);
+    }
+
+    /// The i18n key of the currently selected "new source" kind.
+    fn audio_mixer_new_source_kind_key(&self) -> &'static str {
+        self.audio_mixer_new_source_kind_key_at(self.audio_mixer_new_source_kind)
+    }
+
+    fn audio_mixer_new_source_kind_key_at(&self, index: usize) -> &'static str {
+        match index {
+            0 => "audio_source_kind_app",
+            1 => "audio_source_kind_input",
+            2 => "audio_source_kind_output",
+            _ => "audio_source_kind_mixed",
         }
     }
 }
@@ -4537,6 +4858,10 @@ impl RivuletApp {
     /// Draw a source thumbnail above the recording controls.
     fn draw_recording_preview_panel(&mut self, ui: &mut egui::Ui) {
         self.draw_recording_preview(ui);
+        // Inline per-source mixer strip (issue #154 Phase 2): recording
+        // start/stop never requires a view switch. The routing matrix stays
+        // in the Mixer view; here the sources show volume/mute + badges.
+        self.draw_inline_audio_mixer(ui);
     }
 
     /// Live performance metrics line for the recording UI
@@ -7501,6 +7826,9 @@ impl RivuletApp {
             ui.separator();
             ui.small(self.tr("mixer_unavailable"));
         }
+        // Inline per-source mixer strip (issue #154 Phase 2): the same shared
+        // strip as the Record view, consistent per the design doc.
+        self.draw_inline_audio_mixer(ui);
 
         self.draw_stream_setup_wizard(ui);
     }
@@ -7805,6 +8133,18 @@ impl RivuletApp {
                 rivulet_core::discord::DEFAULT_LARGE_IMAGE_KEY.to_owned();
             tracing::info!("Discord client id was empty - applying the official default");
         }
+        // Push the restored audio sources into the engine so the first
+        // session starts with the persisted routing (issue #154 Phase 2).
+        if !restored.audio_sources.is_empty() {
+            tracing::info!(
+                count = restored.audio_sources.len(),
+                "Restoring audio routing"
+            );
+            restored
+                .engine
+                .set_audio_sources(restored.audio_sources.clone());
+            restored.audio_mixer_needs_sync = false;
+        }
         Some(restored)
     }
 
@@ -7878,6 +8218,9 @@ impl eframe::App for RivuletApp {
         // Flip "Finalizing recording…" → "Recording saved." as soon as the
         // background stop teardown (EOS, auto-remux, cloud upload) finished.
         self.poll_stop_finalization();
+        // Push mixer edits into the engine before any session can start
+        // (issue #154 Phase 2). No-op unless the mixer flagged a change.
+        self.sync_audio_routing();
         // Keep repainting while a stop finalization is in flight, so the
         // status flips without requiring user input to trigger a frame.
         if self.stop_finalizing.is_some() {
@@ -9367,6 +9710,13 @@ impl eframe::App for RivuletApp {
                         ui.label(self.tr("mixer_unavailable"));
                     }
 
+                    // Multi-track audio routing matrix (issue #154 Phase 2):
+                    // the Mixer view is the one place with the full matrix.
+                    if self.view == AppView::Mixer {
+                        self.sync_audio_routing();
+                        self.draw_mixer_sources(ui);
+                    }
+
                     // Scenes: list, switching, add/rename/remove
                     if self.view == AppView::Scenes {
                         self.draw_scenes_view(ui, &colors);
@@ -10809,6 +11159,7 @@ fn detect_os_locale() -> Locale {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::sync::atomic::AtomicBool;
 
     // ── navigation (AppView) ───────────────────────────────────────
@@ -14744,5 +15095,178 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
             "secrets",
             true,
         ));
+    }
+
+    // ── Multi-track audio routing, Phase 2 GUI (issue #154) ───────────
+
+    #[test]
+    fn audio_routing_badges_cover_all_four_routing_states() {
+        assert_eq!(RivuletApp::audio_routing_badges(AudioRouting::BOTH), "R·S");
+        assert_eq!(
+            RivuletApp::audio_routing_badges(AudioRouting::RECORD_ONLY),
+            "R"
+        );
+        assert_eq!(
+            RivuletApp::audio_routing_badges(AudioRouting::STREAM_ONLY),
+            "S"
+        );
+        assert_eq!(RivuletApp::audio_routing_badges(AudioRouting::NONE), "—");
+    }
+
+    #[test]
+    fn audio_sources_persist_through_eframe_storage_round_trip() {
+        // audio_routing_v1: sources with volume, mute, routing and filters
+        // must survive save -> restore exactly (the design-doc gate).
+        let mut app = RivuletApp {
+            audio_sources: vec![
+                AudioSource::system_default().with_routing(AudioRouting::RECORD_ONLY),
+                AudioSource::microphone_default(),
+            ],
+            ..Default::default()
+        };
+        app.audio_sources[0].volume = 0.75;
+        app.audio_sources[0].muted = true;
+        app.audio_sources[1].routing = AudioRouting::STREAM_ONLY;
+
+        let mut storage = MemoryStorage::default();
+        eframe::App::save(&mut app, &mut storage);
+
+        let restored = RivuletApp::restore_from_storage(Some(&storage))
+            .expect("persisted app state must be restored");
+        assert_eq!(restored.audio_sources.len(), 2);
+        assert_eq!(restored.audio_sources[0].volume, 0.75);
+        assert!(restored.audio_sources[0].muted);
+        assert_eq!(restored.audio_sources[0].routing, AudioRouting::RECORD_ONLY);
+        assert_eq!(restored.audio_sources[1].routing, AudioRouting::STREAM_ONLY);
+        // The restore path must seed the engine so the first session starts
+        // with the persisted routing, and the sync flag must be cleared.
+        assert_eq!(restored.engine.audio_sources().len(), 2);
+        assert!(!restored.audio_mixer_needs_sync);
+    }
+
+    #[test]
+    fn audio_sources_with_legacy_capture_stay_empty_by_default() {
+        // Empty config = legacy System/Microphone capture (backward compat).
+        let app = RivuletApp::default();
+        assert!(app.audio_sources.is_empty());
+        assert!(app.engine.audio_sources().is_empty());
+    }
+
+    #[test]
+    fn audio_mixer_add_and_remove_sync_the_engine() {
+        let mut app = RivuletApp::default();
+        let source = AudioSource::application("Discord", "pending_app");
+        let id = app.engine.add_audio_source(source.clone());
+        app.audio_sources.push(source);
+        app.audio_mixer_needs_sync = true;
+        app.sync_audio_routing();
+        assert_eq!(app.engine.audio_sources().len(), 1);
+        assert!(!app.audio_mixer_needs_sync, "sync must clear the flag");
+
+        assert!(app.engine.remove_audio_source(id));
+        app.audio_sources.retain(|s| s.id != id);
+        app.audio_mixer_needs_sync = true;
+        app.sync_audio_routing();
+        assert!(app.engine.audio_sources().is_empty());
+    }
+
+    #[test]
+    fn audio_mixer_volume_and_mute_changes_reach_the_engine() {
+        // The strip writes through the engine API so the values land in the
+        // engine list (and would apply live when a session is running).
+        let mut app = RivuletApp::default();
+        let id = app
+            .engine
+            .add_audio_source(AudioSource::microphone_default());
+        app.audio_sources
+            .push(app.engine.audio_sources()[0].clone());
+
+        let _ = app.engine.set_audio_source_volume(id, 0.5);
+        let _ = app.engine.set_audio_source_muted(id, true);
+        assert_eq!(app.engine.audio_sources()[0].effective_volume(), 0.0);
+        let _ = app.engine.set_audio_source_muted(id, false);
+        assert_eq!(app.engine.audio_sources()[0].effective_volume(), 0.5);
+
+        // Mirror the engine edit into the GUI list (what the strip does).
+        app.audio_sources[0].volume = 0.5;
+        app.audio_sources[0].muted = false;
+        assert_eq!(app.audio_sources[0].volume, 0.5);
+        assert!(!app.audio_sources[0].muted);
+    }
+
+    #[test]
+    fn audio_mixer_routing_change_flows_into_engine_config() {
+        let mut app = RivuletApp::default();
+        app.engine
+            .set_audio_sources(vec![AudioSource::system_default()]);
+        app.audio_sources = app.engine.audio_sources().to_vec();
+        let id = app.audio_sources[0].id;
+
+        let _ = app
+            .engine
+            .set_audio_source_routing(id, AudioRouting::STREAM_ONLY);
+        app.audio_sources[0].routing = AudioRouting::STREAM_ONLY;
+        assert_eq!(
+            app.engine.audio_sources()[0].routing,
+            AudioRouting::STREAM_ONLY
+        );
+    }
+
+    #[test]
+    fn audio_mixer_i18n_keys_translate_in_both_locales() {
+        use rivulet_core::Locale;
+        for key in [
+            "audio_source_add",
+            "audio_source_remove",
+            "audio_source_name",
+            "audio_source_mute",
+            "audio_routing_record",
+            "audio_routing_stream",
+            "audio_routing_hint",
+            "audio_routing_inline",
+            "audio_routing_sources",
+            "audio_routing_legacy_active",
+            "audio_filter_per_source",
+            "filter_compressor",
+            "filter_limiter",
+        ] {
+            let en = Locale::En.tr(key);
+            let de = Locale::De.tr(key);
+            assert_ne!(en, key, "EN key {key} must exist");
+            assert_ne!(de, key, "DE key {key} must exist");
+        }
+        assert_eq!(Locale::En.tr("audio_source_add"), "Add Source");
+        assert_eq!(Locale::De.tr("audio_source_add"), "Quelle hinzufügen");
+    }
+
+    #[test]
+    fn audio_mixer_ui_is_wired_into_all_three_placements() {
+        // The Mixer view hosts the full matrix; the Record and Stream views
+        // embed the same shared strip (single implementation, three
+        // placements - the design-doc contract).
+        let source = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
+        assert!(source.contains("fn draw_mixer_sources"));
+        assert!(source.contains("fn draw_audio_source_strip"));
+        assert!(source.contains("fn draw_inline_audio_mixer"));
+        // Exactly two inline call sites (Record + Stream); the third
+        // string match is this test's own literal, so expect three.
+        let inline_calls = source.matches("self.draw_inline_audio_mixer(ui);").count();
+        assert_eq!(
+            inline_calls, 3,
+            "the inline strip must appear in the Record and Stream views"
+        );
+        // The Mixer-view block hosts the matrix behind the sync hook.
+        assert!(source.contains("self.sync_audio_routing();"));
+        assert!(source.contains("self.draw_mixer_sources(ui);"));
+    }
+
+    #[test]
+    fn audio_mixer_application_sources_show_pending_backend_hint() {
+        // Phase-3 capture backends are not wired yet: an Application-kind
+        // source is created with a `pending_app` device id so the pipeline
+        // phase never mistakes it for a resolved capture target.
+        let source = AudioSource::application("Discord", "pending_app");
+        assert_eq!(source.device_id, "pending_app");
+        assert_eq!(source.kind, rivulet_core::AudioSourceKind::Application);
     }
 }

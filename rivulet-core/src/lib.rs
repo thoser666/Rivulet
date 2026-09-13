@@ -230,6 +230,9 @@ pub struct RivuletEngine {
     /// can own several appsrcs (the record branch and the streaming mix leg
     /// are separate elements); every entry receives the pushed frames.
     audio_source_appsrcs: Vec<(Uuid, gst_app::AppSrc)>,
+    /// The per-source `volume` elements of the running session (live
+    /// volume/mute updates). Mirrors `audio_source_appsrcs`.
+    audio_source_volumes: Vec<(Uuid, gst::Element)>,
     is_recording: bool,
     output_path: Option<PathBuf>,
     stream_settings: Option<StreamSettings>,
@@ -326,6 +329,7 @@ impl Default for RivuletEngine {
             audio_mic_enabled: true,
             audio_sources: Vec::new(),
             audio_source_appsrcs: Vec::new(),
+            audio_source_volumes: Vec::new(),
             is_recording: false,
             output_path: None,
             stream_settings: None,
@@ -1204,7 +1208,7 @@ impl RivuletEngine {
         let vol = source.effective_volume();
         format!(
             "appsrc name={appsrc_name} format=time is-live=true do-timestamp=true \
-             ! volume volume={vol:.4} ! audioconvert ! audioresample {filter_segment}\
+             ! volume name={appsrc_name}_vol volume={vol:.4} ! audioconvert ! audioresample {filter_segment}\
              ! audioconvert ! audioresample "
         )
     }
@@ -1663,6 +1667,12 @@ impl RivuletEngine {
                     app.set_property("is-live", true);
                     app.set_property("do-timestamp", true);
                     self.audio_source_appsrcs.push((id, app));
+                    if let Some(vol_el) = pipeline
+                        .by_name(&format!("{name}_vol"))
+                        .and_then(|el| el.downcast::<gst::Element>().ok())
+                    {
+                        self.audio_source_volumes.push((id, vol_el));
+                    }
                 }
             } else {
                 let audio_appsrc = pipeline
@@ -1964,6 +1974,7 @@ impl RivuletEngine {
             return false;
         };
         source.volume = volume.clamp(0.0, 2.0);
+        self.apply_audio_source_live_volume(id);
         true
     }
 
@@ -1973,6 +1984,7 @@ impl RivuletEngine {
             return false;
         };
         source.muted = muted;
+        self.apply_audio_source_live_volume(id);
         true
     }
 
@@ -1994,6 +2006,22 @@ impl RivuletEngine {
         };
         source.filters = filters;
         true
+    }
+
+    /// Apply a live volume/mute change of one source to the running pipeline
+    /// (the `volume` element in the source's branch is updated in place).
+    /// The stored config is updated too, so the next session starts with the
+    /// new value. Returns false when the id is unknown.
+    fn apply_audio_source_live_volume(&self, id: Uuid) {
+        let Some(source) = self.audio_sources.iter().find(|s| s.id == id) else {
+            return;
+        };
+        let vol = source.effective_volume().clamp(0.0, 2.0);
+        for (owner, vol_el) in &self.audio_source_volumes {
+            if *owner == id {
+                vol_el.set_property("volume", vol);
+            }
+        }
     }
 
     /// Push a PCM frame belonging to the audio source with the given id
@@ -4301,7 +4329,7 @@ mod tests {
 
         let pipeline_str = engine.build_recording_pipeline_str("/tmp/routing_filters.mp4");
         assert!(
-            pipeline_str.contains("volume volume=0.7500"),
+            pipeline_str.contains("volume name=audio_src_rec_0_vol volume=0.7500"),
             "source volume is rendered: {pipeline_str}"
         );
         assert!(

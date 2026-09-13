@@ -532,6 +532,69 @@ fn m6_audio_routing_phase1_engine_surface_is_pinned() {
 }
 
 #[test]
+fn m6_audio_routing_phase2_gui_surface_is_pinned() {
+    // Issue #154 Phase 2: the mixer GUI ships the routing matrix, the shared
+    // per-source strip (single implementation, three placements), the inline
+    // strips in Record/Stream, the engine-sync hook, and the i18n keys.
+    // Renames or removals must fail CI, not drift silently.
+    let gui = read("rivulet-gui/src/app.rs");
+    let lib = read("rivulet-core/src/lib.rs");
+    let i18n = read("rivulet-core/src/i18n.rs");
+
+    for required in [
+        "fn sync_audio_routing",
+        "fn draw_mixer_sources",
+        "fn draw_audio_source_strip",
+        "fn draw_inline_audio_mixer",
+        "fn draw_audio_source_filter_panel",
+        "fn draw_audio_filter_fields",
+        "fn audio_routing_badges",
+        "self.engine.set_audio_sources(self.audio_sources.clone())",
+        "audio_mixer_needs_sync",
+        "audio_mixer_filter_source",
+    ] {
+        assert!(
+            gui.contains(required),
+            "mixer GUI surface must pin {required}"
+        );
+    }
+
+    // Live volume/mute: the per-source volume element is named so the
+    // engine can retune it while a session runs.
+    assert!(
+        lib.contains("audio_source_volumes: Vec<(Uuid, gst::Element)>")
+            && lib.contains("fn apply_audio_source_live_volume"),
+        "engine must support live per-source volume application"
+    );
+    assert!(
+        lib.contains("{appsrc_name}_vol"),
+        "routed source volume elements must be named for live updates"
+    );
+
+    // i18n keys in both locales (EN and DE are one array each; the parity
+    // test asserts lengths, here we pin the keys themselves).
+    for key in [
+        "audio_source_add",
+        "audio_source_remove",
+        "audio_source_name",
+        "audio_source_mute",
+        "audio_routing_record",
+        "audio_routing_stream",
+        "audio_routing_hint",
+        "audio_routing_inline",
+        "audio_routing_sources",
+        "audio_routing_legacy_active",
+        "audio_filter_per_source",
+    ] {
+        assert_eq!(
+            i18n.matches(&format!("(\"{key}\"")).count(),
+            2,
+            "i18n key {key} must exist in EN and DE"
+        );
+    }
+}
+
+#[test]
 fn m6_audio_routing_phase1_is_documented() {
     // The Phase-1 milestone state must stay documented: the spec carries a
     // status, the README bullet reflects it, and the CHANGELOG records the
@@ -540,16 +603,25 @@ fn m6_audio_routing_phase1_is_documented() {
     let readme = read("README.md");
     let changelog = read("CHANGELOG.md");
     assert!(
-        spec.contains("Phase 1 (engine core) implemented"),
+        spec.contains("Phase 1 (engine core, 2026-09-13)"),
         "spec must record the Phase-1 status"
     );
     assert!(
-        readme.contains("engine core implemented (Phase 1") && readme.contains("#154"),
-        "README M6 bullet must reflect the Phase-1 state"
+        spec.contains("Phase 2 (GUI, 2026-09-13)"),
+        "spec must record the Phase-2 status"
+    );
+    assert!(
+        readme.contains("engine core + GUI mixer implemented (Phases 1\u{2013}2")
+            && readme.contains("#154"),
+        "README M6 bullet must reflect the Phase 1+2 state"
     );
     assert!(
         changelog.contains("feat(audio): **multi-track audio routing engine core"),
         "CHANGELOG must record the Phase-1 delivery"
+    );
+    assert!(
+        changelog.contains("feat(gui): **multi-track audio routing mixer"),
+        "CHANGELOG must record the Phase-2 delivery"
     );
 }
 
