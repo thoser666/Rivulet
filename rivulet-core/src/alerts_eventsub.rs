@@ -268,6 +268,14 @@ impl WsCounters {
     }
 }
 
+/// Connection-state machine for the worker thread (stored in an `AtomicU8`):
+/// `0` off/idle, `1` dialing (handshake in flight), `2` connected or
+/// backing off after a session end.
+const CONN_IDLE: u8 = 0;
+const CONN_CONNECTING: u8 = 1;
+const CONN_CONNECTED_OR_BACKOFF: u8 = 2;
+const CONN_CONNECTED: u8 = 3;
+
 /// A running outbound EventSub WebSocket transport. Drop or call
 /// [`EventsubReceiver::shutdown`] to stop the worker and close the socket.
 pub struct EventsubReceiver {
@@ -338,10 +346,11 @@ impl EventsubReceiver {
         &self.events
     }
 
-    /// Whether a session is currently established (`true` between the Moment a
-    /// socket connects and the session ends or the transport stops).
+    /// Whether a session is currently established (`true` between the moment
+    /// the WebSocket handshake completes and the session ends or the
+    /// transport stops). Dialing counts as connecting, not connected.
     pub fn connected(&self) -> bool {
-        self.conn.load(Ordering::SeqCst) == 1
+        self.conn.load(Ordering::SeqCst) == CONN_CONNECTED
     }
 
     /// Diagnostics counters: `(delivered, rejected, subscription_created,
@@ -386,7 +395,7 @@ fn worker_loop(
     if cfg.client_id.is_empty() || cfg.token.is_empty() || cfg.broadcaster_id.is_empty() {
         // Missing credentials: nothing to dial. The GUI gates the toggle on
         // credentials and surface the notes instead.
-        conn.store(0, Ordering::SeqCst);
+        conn.store(CONN_IDLE, Ordering::SeqCst);
         return;
     }
     let mut endpoint = cfg.ws_endpoint.clone();
@@ -395,25 +404,25 @@ fn worker_loop(
         if stop.load(Ordering::SeqCst) {
             break;
         }
-        conn.store(1, Ordering::SeqCst);
-        match run_session(&cfg, &endpoint, &stop, &counters, &events_tx) {
+        conn.store(CONN_CONNECTING, Ordering::SeqCst);
+        match run_session(&cfg, &endpoint, &stop, &conn, &counters, &events_tx) {
             SessionOutcome::Disconnected => {
                 if stop.load(Ordering::SeqCst) {
                     break;
                 }
-                conn.store(2, Ordering::SeqCst);
+                conn.store(CONN_CONNECTED_OR_BACKOFF, Ordering::SeqCst);
                 std::thread::sleep(backoff);
                 backoff = (backoff * 2).min(Duration::from_secs(30));
             }
             SessionOutcome::Reconnect(url) => {
-                conn.store(2, Ordering::SeqCst);
+                conn.store(CONN_CONNECTED_OR_BACKOFF, Ordering::SeqCst);
                 counters.reconnect.fetch_add(1, Ordering::Relaxed);
                 endpoint = url;
                 backoff = Duration::from_secs(1);
                 std::thread::sleep(Duration::from_secs(2));
             }
             SessionOutcome::Failed(error) => {
-                conn.store(2, Ordering::SeqCst);
+                conn.store(CONN_CONNECTED_OR_BACKOFF, Ordering::SeqCst);
                 tracing::warn!(
                     error = %error,
                     backoff_secs = backoff.as_secs(),
@@ -433,6 +442,7 @@ fn run_session(
     cfg: &EventsubWsConfig,
     endpoint: &str,
     stop: &AtomicBool,
+    conn: &AtomicU8,
     counters: &Arc<WsCounters>,
     events_tx: &Sender<AlertEvent>,
 ) -> SessionOutcome {
@@ -452,6 +462,10 @@ fn run_session(
     let mut subscribed_session: Option<String> = None;
     let mut keepalive_timeout = Duration::from_secs(10);
     let mut last_message = Instant::now();
+    // The handshake has fully completed — only now is the session connected
+    // (the `connected()` contract; during dialing the state stays
+    // "connecting").
+    conn.store(CONN_CONNECTED, Ordering::SeqCst);
     tracing::info!(endpoint, "EventSub WebSocket connected");
 
     loop {

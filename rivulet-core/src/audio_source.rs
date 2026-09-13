@@ -270,6 +270,15 @@ impl AudioFilterConfig {
     }
 }
 
+/// Parse the `pid:<number>` convention used by application audio sources.
+///
+/// Returns [`None`] for every other device id form (loopback placeholders,
+/// device names, or the `pending_app` marker).
+pub fn device_pid(device_id: &str) -> Option<u32> {
+    let rest = device_id.strip_prefix("pid:")?;
+    rest.parse::<u32>().ok().filter(|pid| *pid != 0)
+}
+
 /// The type of audio source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AudioSourceKind {
@@ -368,6 +377,17 @@ impl AudioSource {
     /// Create an application audio source (per-app capture).
     pub fn application(name: impl Into<String>, device_id: impl Into<String>) -> Self {
         Self::new(name, device_id, AudioSourceKind::Application)
+    }
+
+    /// Extract the OS process id from an application source's `device_id`.
+    ///
+    /// Application sources store their capture target as `pid:<number>` once
+    /// the user picked a process (Phase 3 of the multi-track audio routing
+    /// design, [`docs/m6-audio-routing.md`](../../docs/m6-audio-routing.md)).
+    /// Sources created before a process was chosen carry the `pending_app`
+    /// placeholder and yield [`None`].
+    pub fn device_pid(&self) -> Option<u32> {
+        device_pid(&self.device_id)
     }
 
     /// Create an input device source (microphone).
@@ -925,5 +945,35 @@ mod tests {
         let dbg = format!("{asrc:?}");
         assert!(dbg.contains("AudioSource"));
         assert!(dbg.contains("Debug"));
+    }
+
+    #[test]
+    fn device_pid_parses_pid_prefix() {
+        assert_eq!(device_pid("pid:1234"), Some(1234));
+        assert_eq!(device_pid("pid:0"), None, "pid 0 is the idle process");
+        assert_eq!(device_pid("pid:4294967295"), Some(u32::MAX));
+    }
+
+    #[test]
+    fn device_pid_rejects_non_pid_forms() {
+        assert_eq!(device_pid("pending_app"), None);
+        assert_eq!(device_pid("default_input"), None);
+        assert_eq!(device_pid("system_loopback"), None);
+        assert_eq!(device_pid("pid:notanumber"), None);
+        assert_eq!(device_pid("pid:"), None);
+        assert_eq!(device_pid(""), None);
+        assert_eq!(device_pid("PID:1234"), None, "prefix is case sensitive");
+    }
+
+    #[test]
+    fn audio_source_device_pid_delegates() {
+        let app = AudioSource::application("Game", "pid:4711");
+        assert_eq!(app.device_pid(), Some(4711));
+
+        let pending = AudioSource::application("Pending", "pending_app");
+        assert_eq!(pending.device_pid(), None);
+
+        let mic = AudioSource::input_device("Mic", "default_input");
+        assert_eq!(mic.device_pid(), None);
     }
 }

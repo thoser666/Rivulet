@@ -44,6 +44,7 @@ use {
 // --- Windows imports (for windows-capture v1.5.0) ---
 #[cfg(target_os = "windows")]
 use {
+    rivulet_audio::{AppAudioCapture, AppAudioProcess},
     rivulet_capture::backend::{BackendKind, BackendStatus},
     rivulet_capture::dxgi::DxgiDesktopDuplication,
     std::sync::mpsc::{self, Sender},
@@ -1187,6 +1188,31 @@ pub struct RivuletApp {
     #[serde(skip)]
     raw_rx: Option<std_mpsc::Receiver<RawFrame>>,
 
+    /// Live WASAPI process-loopback captures for Application-kind sources
+    /// (Phase 3, Windows). One capture per routed Application source with a
+    /// resolved `pid:<n>` device id; frames are pushed into the engine's
+    /// routed appsrcs every UI tick.
+    #[cfg(target_os = "windows")]
+    #[serde(skip)]
+    app_audio_captures: Vec<(uuid::Uuid, rivulet_audio::AppAudioCapture)>,
+    /// Frame channels for the live per-app captures; drained on the UI tick.
+    #[cfg(target_os = "windows")]
+    #[serde(skip)]
+    app_audio_frame_receivers: Vec<(
+        uuid::Uuid,
+        std::sync::mpsc::Receiver<rivulet_core::AudioFrame>,
+    )>,
+    /// Cache of the process list for the Application-source picker, refreshed
+    /// when the picker is opened (a ToolHelp snapshot on every frame would be
+    /// wasteful).
+    #[cfg(target_os = "windows")]
+    #[serde(skip)]
+    app_audio_processes: Option<Vec<rivulet_audio::AppAudioProcess>>,
+    /// pid selection for the source being added (Application kind).
+    #[cfg(target_os = "windows")]
+    #[serde(skip)]
+    audio_mixer_new_source_pid: Option<u32>,
+
     #[serde(skip)]
     error_receiver: Option<Receiver<String>>,
     #[serde(skip)]
@@ -1778,6 +1804,14 @@ impl Default for RivuletApp {
             audio_mixer_new_source_name: String::new(),
             audio_mixer_new_source_kind: 0,
             audio_mixer_needs_sync: false,
+            #[cfg(target_os = "windows")]
+            app_audio_captures: Vec::new(),
+            #[cfg(target_os = "windows")]
+            app_audio_frame_receivers: Vec::new(),
+            #[cfg(target_os = "windows")]
+            app_audio_processes: None,
+            #[cfg(target_os = "windows")]
+            audio_mixer_new_source_pid: None,
 
             ndi_output_enabled: false,
             ndi_output_name: "Rivulet".into(),
@@ -1831,6 +1865,72 @@ impl RivuletApp {
         }
     }
 
+    /// Start or stop the WASAPI per-application captures so they exactly
+    /// mirror the Application-kind sources with a resolved `pid:<n>` target
+    /// while a capture session is active (Phase 3, Windows). Called every UI
+    /// tick; starting is idempotent per source id and stopping joins the
+    /// capture threads.
+    ///
+    /// Frames travel through an mpsc channel and are drained on the UI thread
+    /// (the same architecture as the macOS audio capture), so the engine is
+    /// only ever touched from the UI thread.
+    #[cfg(target_os = "windows")]
+    fn sync_app_audio_captures(&mut self) {
+        let session_active = self.is_recording_active() || self.engine.is_streaming();
+        if !session_active {
+            if !self.app_audio_captures.is_empty() {
+                self.app_audio_captures.clear(); // Drop joins each capture thread.
+            }
+            return;
+        }
+        // Desired set: routed Application sources with a resolvable pid.
+        let wanted = routed_application_targets(&self.audio_sources);
+        // Stop captures whose source disappeared, was unrouted, or changed pid.
+        self.app_audio_captures
+            .retain(|(id, _)| wanted.iter().any(|(wid, _)| wid == id));
+        // Start missing captures with an mpsc sender as the frame sink.
+        for (id, pid) in wanted {
+            if self.app_audio_captures.iter().any(|(wid, _)| *wid == id) {
+                continue;
+            }
+            let (tx, rx) = std::sync::mpsc::channel::<rivulet_core::AudioFrame>();
+            match AppAudioCapture::start(
+                pid,
+                Box::new(move |frame| {
+                    let _ = tx.send(frame); // Receiver gone (stopped) => drop frames.
+                }),
+            ) {
+                Ok(capture) => {
+                    self.app_audio_captures.push((id, capture));
+                    self.app_audio_frame_receivers.push((id, rx));
+                }
+                Err(err) => {
+                    tracing::warn!(pid, %err, "WASAPI per-app capture failed to start");
+                    self.last_error = Some(self.tr_fmt(
+                        "audio_app_capture_failed",
+                        &[pid.to_string(), err.to_string()],
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Drain the per-app audio channels into the engine's routed appsrcs.
+    /// Runs on the UI thread once per tick while a session is active.
+    #[cfg(target_os = "windows")]
+    fn drain_app_audio_frames(&mut self) {
+        if self.app_audio_frame_receivers.is_empty() {
+            return;
+        }
+        let paused = self.is_paused;
+        for (id, rx) in &self.app_audio_frame_receivers {
+            while let Ok(frame) = rx.try_recv() {
+                if !paused {
+                    let _ = self.engine.push_audio_source(*id, &frame);
+                }
+            }
+        }
+    }
     /// Record/Stream routing badges for the compact strips ("R", "S", both
     /// letters, or a dash when routed to neither output).
     fn audio_routing_badges(routing: AudioRouting) -> String {
@@ -2020,11 +2120,21 @@ impl RivuletApp {
                         self.audio_mixer_new_source_name.trim().to_owned()
                     };
                     let device_id = match kind {
+                        #[cfg(target_os = "windows")]
+                        rivulet_core::AudioSourceKind::Application => self
+                            .audio_mixer_new_source_pid
+                            .map(|pid| format!("pid:{pid}"))
+                            .unwrap_or_else(|| "pending_app".to_owned()),
+                        #[cfg(not(target_os = "windows"))]
                         rivulet_core::AudioSourceKind::Application => "pending_app".to_owned(),
                         rivulet_core::AudioSourceKind::InputDevice => "default_input".to_owned(),
                         rivulet_core::AudioSourceKind::OutputDevice => "system_loopback".to_owned(),
                         rivulet_core::AudioSourceKind::Mixed => "mixed".to_owned(),
                     };
+                    #[cfg(target_os = "windows")]
+                    {
+                        self.audio_mixer_new_source_pid = None;
+                    }
                     let source = AudioSource::new(name, device_id, kind);
                     let _ = self.engine.add_audio_source(source.clone());
                     self.audio_sources.push(source);
@@ -2050,6 +2160,47 @@ impl RivuletApp {
             });
         });
         ui.label(egui::RichText::new(self.tr("audio_routing_hint")).weak());
+        // Phase 3 (Windows): process picker for Application-kind sources.
+        #[cfg(target_os = "windows")]
+        if self.audio_mixer_new_source_kind == 0 {
+            ui.horizontal(|ui| {
+                ui.label(self.tr("audio_source_pick_process"));
+                let refresh_clicked = ui
+                    .button("⟳")
+                    .on_hover_text(self.tr("audio_source_refresh_processes"))
+                    .clicked();
+                if refresh_clicked || self.app_audio_processes.is_none() {
+                    self.app_audio_processes = Some(rivulet_audio::list_audio_processes());
+                }
+                let picker_label = self
+                    .audio_mixer_new_source_pid
+                    .and_then(|pid| {
+                        self.app_audio_processes
+                            .as_ref()
+                            .and_then(|ps| ps.iter().find(|p| p.pid == pid))
+                            .map(|p| format!("{} ({pid})", p.name))
+                    })
+                    .unwrap_or_else(|| self.tr("audio_source_no_process_selected").to_owned());
+                egui::ComboBox::from_id_salt("audio_mixer_new_source_pid")
+                    .selected_text(picker_label)
+                    .width(260.0)
+                    .show_ui(ui, |ui| {
+                        if let Some(processes) = &self.app_audio_processes {
+                            for proc in processes {
+                                let label = format!("{} ({})", proc.name, proc.pid);
+                                ui.selectable_value(
+                                    &mut self.audio_mixer_new_source_pid,
+                                    Some(proc.pid),
+                                    label,
+                                );
+                            }
+                        }
+                    });
+            });
+            if self.audio_mixer_new_source_pid.is_none() {
+                ui.label(egui::RichText::new(self.tr("audio_source_pid_required")).weak());
+            }
+        }
         if self.audio_sources.is_empty() {
             ui.label(egui::RichText::new(self.tr("audio_routing_legacy_active")).weak());
         }
@@ -8423,6 +8574,10 @@ impl eframe::App for RivuletApp {
                     self.last_error = Some(err);
                 }
             }
+
+            // ── Phase 3: WASAPI per-application audio capture (issue #154) ──
+            self.sync_app_audio_captures();
+            self.drain_app_audio_frames();
         }
 
         // ── Aux recording drain (camera / game capture) ─────────────
@@ -10610,6 +10765,22 @@ fn drain_error_receiver(receiver: &std::sync::mpsc::Receiver<String>) -> Option<
         last = Some(err);
     }
     last
+}
+
+/// The capture targets for the WASAPI per-application backend (Phase 3,
+/// issue #154): every Application-kind source that is routed to at least one
+/// output and carries a resolved `pid:<n>` device id. Pure so the mirror
+/// contract is testable on every platform.
+fn routed_application_targets(sources: &[AudioSource]) -> Vec<(uuid::Uuid, u32)> {
+    sources
+        .iter()
+        .filter(|s| {
+            s.kind == rivulet_core::AudioSourceKind::Application
+                && s.device_pid().is_some()
+                && (s.routing.record || s.routing.stream)
+        })
+        .map(|s| (s.id, s.device_pid().expect("filtered above")))
+        .collect()
 }
 
 /// Best-effort, deterministic classification of a recording error into a
@@ -15261,12 +15432,54 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
     }
 
     #[test]
-    fn audio_mixer_application_sources_show_pending_backend_hint() {
-        // Phase-3 capture backends are not wired yet: an Application-kind
-        // source is created with a `pending_app` device id so the pipeline
-        // phase never mistakes it for a resolved capture target.
+    fn audio_mixer_application_sources_without_pid_stay_pending() {
+        // An Application-kind source without a process selection keeps the
+        // `pending_app` device id: the pipeline phase must never mistake it
+        // for a resolved capture target (and the WASAPI backend must never
+        // try to activate pid-less sources).
         let source = AudioSource::application("Discord", "pending_app");
         assert_eq!(source.device_id, "pending_app");
         assert_eq!(source.kind, rivulet_core::AudioSourceKind::Application);
+        assert_eq!(source.device_pid(), None);
+    }
+
+    // ── Multi-track audio routing, Phase 3 (issue #154, Windows WASAPI) ──
+
+    #[test]
+    fn routed_application_targets_selects_only_routed_pid_sources() {
+        // Exactly the contract `sync_app_audio_captures` implements: routed
+        // Application sources with a pid, nothing else.
+        let routed_app = AudioSource::application("Game", "pid:111");
+        let unrouted_app =
+            AudioSource::application("Updater", "pid:222").with_routing(AudioRouting::NONE);
+        let pending_app = AudioSource::application("Discord", "pending_app");
+        let system = AudioSource::system_default();
+        let sources = vec![routed_app, unrouted_app, pending_app, system];
+
+        let targets = routed_application_targets(&sources);
+        assert_eq!(targets.len(), 1, "only the routed pid source is captured");
+        assert_eq!(targets[0].1, 111);
+    }
+
+    #[test]
+    fn routed_application_targets_is_empty_without_sources() {
+        // The legacy capture path stays untouched when no routed sources exist.
+        assert!(routed_application_targets(&[]).is_empty());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn app_audio_process_picker_ui_is_wired() {
+        // The Mixer's Application-kind row shows the process picker; the
+        // selected pid becomes the source's `pid:<n>` device id on add.
+        let source = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
+        assert!(source.contains("fn list_audio_processes"));
+        assert!(source.contains("audio_mixer_new_source_pid"));
+        assert!(source.contains("fn sync_app_audio_captures"));
+        assert!(source.contains("fn drain_app_audio_frames"));
+        assert!(source.contains("self.sync_app_audio_captures();"));
+        assert!(source.contains("self.drain_app_audio_frames();"));
+        assert!(source.contains("AppAudioCapture::start"));
+        assert!(source.contains("push_audio_source"));
     }
 }
