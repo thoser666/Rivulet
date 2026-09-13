@@ -180,6 +180,13 @@ Exit evidence: valid output files, failure/recovery cases, and a data-loss revie
 
 ### M5: Ecosystem and Platform Parity
 
+**Milestone closed.** All engineering criteria below are met (plugin Phase 3
+shipped via PR #146). Recorded descopes: the OBS compatibility layer moved to
+M11 ([#147](https://github.com/thoser666/Rivulet/issues/147)); real signing
+identities wait on certificate purchase ([#50](https://github.com/thoser666/Rivulet/issues/50),
+kept open outside the milestone); macOS live on-device verification is
+hardware-blocked (one manual session on a physical Mac).
+
 Review trust, permissions, installation, and cross-platform consistency:
 
 - Installer, updater, signing failure, rollback, and restart paths are clear.
