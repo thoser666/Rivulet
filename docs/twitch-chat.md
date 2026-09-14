@@ -20,10 +20,13 @@ and **YouTube** (Innertube polling) from one unified UI.
   are routed back to the platform the parent message came from.
 - **Account management**: the "Add" row (platform, channel, optional token)
   appends an account; duplicates per platform are refused with a hint, and
-  removing an account re-arms the worker rebuild. The account list persists
-  with the rest of the app state; configs saved before the combined dock
-  migrate their single platform/channel/token triple into the list on
-  restore.
+  removing an account re-arms the worker rebuild and deletes its vault
+  entry. Only platform and channel persist with the app state; the token
+  lives in the OS credential vault (Windows Credential Manager / kernel
+  keyutils / macOS Keychain) and is hydrated into memory on Connect. A
+  failed vault write is reported via a status hint. Configs saved before
+  the combined dock migrate their single platform/channel/token triple
+  into the list on restore and move the legacy token into the vault.
 - **Native Twitch IRC client** (`rivulet-core::twitch_chat`): connects to
   `irc.chat.twitch.tv`, handles the CAP/PASS/NICK/JOIN handshake, answers
   PING/PONG keepalives and parses IRCv3 tags (display name, color, badges,
@@ -68,8 +71,9 @@ and **YouTube** (Innertube polling) from one unified UI.
   with `msg_id=msg_requires_verified_phone_number`, the worker sets a flag
   and the dock shows a warning that the bot account must be phone-verified
   before it can chat (cleared on reconnect).
-- **Privacy-safe**: tokens are never written to logs or the message model;
-  the message serialization is covered by a dedicated test.
+- **Privacy-safe**: tokens are never written to logs or the message model
+  (dedicated test) and never persisted to the config file (serde skip +
+  JSON-absence test) — they live in the OS credential vault.
 
 ## Setup
 

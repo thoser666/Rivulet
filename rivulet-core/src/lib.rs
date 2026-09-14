@@ -24,7 +24,7 @@ pub use kick_chat::{KickChat, KickChatConfig};
 pub mod youtube_chat;
 pub use youtube_chat::{YouTubeChat, YouTubeChatConfig};
 pub mod chat;
-pub use chat::{Chat, ChatAccount, ChatConfig, ChatPlatform, MultiChat};
+pub use chat::{Chat, ChatAccount, ChatConfig, ChatPlatform, ChatTokenStore, MultiChat};
 pub mod telemetry;
 pub use telemetry::{
     platform_code, TelemetryBatch, TelemetryErrorKind, TelemetryEvent, TelemetryReporter,

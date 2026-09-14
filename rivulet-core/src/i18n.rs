@@ -537,6 +537,10 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("chat_account_remove", "Remove"),
                 ("chat_account_duplicate", "This platform already has an account."),
                 ("chat_account_channel_required", "Enter a channel first."),
+                (
+                    "chat_token_store_failed",
+                    "Token could not be stored in the OS credential vault: {0}",
+                ),
                 ("chat_channel_empty", "(no channel)"),
                 ("chat_send_partial", "Not delivered on: {0}."),
                 ("chat_state_connected", "Connected"),
@@ -1216,6 +1220,10 @@ Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."
                 ("chat_account_remove", "Entfernen"),
                 ("chat_account_duplicate", "Für diese Plattform existiert bereits ein Konto."),
                 ("chat_account_channel_required", "Zuerst einen Kanal eingeben."),
+                (
+                    "chat_token_store_failed",
+                    "Token konnte nicht im Betriebssystem-Tresor gespeichert werden: {0}",
+                ),
                 ("chat_channel_empty", "(kein Kanal)"),
                 ("chat_send_partial", "Nicht zugestellt auf: {0}."),
                 ("chat_state_connected", "Verbunden"),

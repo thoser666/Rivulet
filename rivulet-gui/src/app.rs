@@ -5955,6 +5955,23 @@ impl RivuletApp {
                 self.chat_messages.clear();
                 self.chat_reply_target = None;
                 self.chat_last_send_outcomes.clear();
+                // Tokens live in the OS credential vault (the config file
+                // keeps only platform + channel); hydrate the in-memory
+                // accounts before spawning the workers. A missing entry
+                // leaves the token empty — the platform worker treats it
+                // like a read-only/anonymous connect, and the user can
+                // re-enter the token via the add-account row.
+                let store = rivulet_core::ChatTokenStore::default();
+                for account in &mut self.chat_accounts {
+                    if account.platform == rivulet_core::ChatPlatform::YouTube
+                        || !account.token.trim().is_empty()
+                    {
+                        continue;
+                    }
+                    if let Ok(Some(token)) = store.load(account.platform, &account.channel) {
+                        account.token = token;
+                    }
+                }
                 let multi = rivulet_core::MultiChat::new(&self.chat_accounts);
                 self.apply_chat_state(multi.connection_state());
                 self.chat_worker_multi = Some(multi);
@@ -7560,6 +7577,26 @@ impl RivuletApp {
         self.chat_action_pending = Some(ChatAction::Disconnect);
     }
 
+    /// Persist the newly added account's token in the OS credential vault
+    /// and clear it from memory drafts. Empty tokens (YouTube, or a Kick
+    /// read-only setup) skip the vault. Failure keeps a status hint but the
+    /// account stays configured — the token can be re-entered later.
+    fn store_chat_account_token(&mut self) {
+        let Some(account) = self.chat_accounts.last() else {
+            return;
+        };
+        if account.token.trim().is_empty() {
+            return;
+        }
+        let platform = account.platform;
+        let channel = account.channel.clone();
+        let token = account.token.clone();
+        if let Err(error) = rivulet_core::ChatTokenStore::default().save(platform, &channel, &token)
+        {
+            self.chat_add_error = Some(self.tr_fmt("chat_token_store_failed", &[error]).to_owned());
+        }
+    }
+
     fn draw_chat_dock(&mut self, ui: &mut egui::Ui, max_list_height: f32) {
         ui.add_space(8.0);
         ui.label(egui::RichText::new(self.tr("chat_title")).strong());
@@ -7607,6 +7644,10 @@ impl RivuletApp {
                 // disconnected worker means the change takes effect on the
                 // next Connect.
                 if ui.small_button(self.tr("chat_account_remove")).clicked() {
+                    // Best-effort vault cleanup; a stale entry for a removed
+                    // account is harmless but we try not to leave one.
+                    let _ = rivulet_core::ChatTokenStore::default()
+                        .delete(account.platform, &account.channel);
                     self.chat_accounts.remove(index);
                     self.chat_action_pending = Some(ChatAction::Disconnect);
                 }
@@ -7652,6 +7693,9 @@ impl RivuletApp {
             }
             if ui.button(self.tr("chat_account_add")).clicked() {
                 self.apply_chat_add_account();
+                if self.chat_add_error.is_none() {
+                    self.store_chat_account_token();
+                }
             }
         });
         if let Some(error) = &self.chat_add_error {
@@ -8454,11 +8498,18 @@ impl RivuletApp {
                 platform = ?restored.chat_platform,
                 "Migrating legacy single-platform chat config into the account list"
             );
-            restored.chat_accounts.push(rivulet_core::ChatAccount::new(
-                restored.chat_platform,
-                std::mem::take(&mut restored.chat_channel),
-                std::mem::take(&mut restored.chat_oauth_token),
-            ));
+            // The legacy token was stored in the config file; move it to the
+            // OS credential vault and wipe the in-memory copy so the next
+            // save writes a token-free config.
+            let platform = restored.chat_platform;
+            let channel = std::mem::take(&mut restored.chat_channel);
+            let token = std::mem::take(&mut restored.chat_oauth_token);
+            if !token.trim().is_empty() {
+                let _ = rivulet_core::ChatTokenStore::default().save(platform, &channel, &token);
+            }
+            restored
+                .chat_accounts
+                .push(rivulet_core::ChatAccount::new(platform, channel, token));
         }
         // Push the restored audio sources into the engine so the first
         // session starts with the persisted routing (issue #154 Phase 2).
@@ -15167,13 +15218,16 @@ mod tests {
 
     #[test]
     fn chat_accounts_persist_and_legacy_configs_migrate() {
-        // Round-trip: a configured account list survives save/restore.
+        // Round-trip: a configured account list survives save/restore. The
+        // token is NOT part of the persisted JSON (serde(skip)) — it lives
+        // in the OS credential vault. The save below therefore proves the
+        // secret never reaches the config file.
         let mut app = RivuletApp {
             chat_accounts: vec![
                 rivulet_core::ChatAccount::new(
                     rivulet_core::ChatPlatform::Twitch,
                     "rivulet".to_owned(),
-                    "oauth:abc".to_owned(),
+                    "oauth:round-trip-secret".to_owned(),
                 ),
                 rivulet_core::ChatAccount::new(
                     rivulet_core::ChatPlatform::Kick,
@@ -15185,6 +15239,15 @@ mod tests {
         };
         let mut storage = MemoryStorage::default();
         eframe::App::save(&mut app, &mut storage);
+        let stored_json = storage
+            .values
+            .get(eframe::APP_KEY)
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            !stored_json.contains("round-trip-secret"),
+            "the OAuth token must never be written to persisted state"
+        );
 
         let restored = RivuletApp::restore_from_storage(Some(&storage))
             .expect("persisted app state must be restored");
@@ -15194,23 +15257,29 @@ mod tests {
             rivulet_core::ChatPlatform::Twitch
         );
         assert_eq!(restored.chat_accounts[0].channel, "rivulet");
-        assert_eq!(restored.chat_accounts[0].token, "oauth:abc");
+        // The in-memory token of a fresh restore is empty (hydrated from
+        // the vault only when Connect runs).
+        assert_eq!(restored.chat_accounts[0].token, "");
         assert_eq!(
             restored.chat_accounts[1].platform,
             rivulet_core::ChatPlatform::Kick
         );
 
         // Migration: a legacy single-platform config (channel set) becomes
-        // the first account entry; a fully empty config is left alone.
+        // the first account entry; a fully empty config is left alone. The
+        // legacy token moves to the OS credential vault (best effort) and
+        // the in-memory copy is consumed so the next save is token-free.
         let mut legacy = RivuletApp {
             chat_platform: rivulet_core::ChatPlatform::Kick,
             chat_channel: "legacychan".to_owned(),
-            chat_oauth_token: "session-token".to_owned(),
+            chat_oauth_token: "legacy-migrate-secret".to_owned(),
             ..Default::default()
         };
+        // The legacy config itself was saved with its token (that is the
+        // pre-migration reality), so the storage JSON may contain it here.
         let mut storage = MemoryStorage::default();
         eframe::App::save(&mut legacy, &mut storage);
-        let restored =
+        let mut restored =
             RivuletApp::restore_from_storage(Some(&storage)).expect("legacy state must restore");
         assert_eq!(
             restored.chat_accounts.len(),
@@ -15222,11 +15291,26 @@ mod tests {
             rivulet_core::ChatPlatform::Kick
         );
         assert_eq!(restored.chat_accounts[0].channel, "legacychan");
-        assert_eq!(restored.chat_accounts[0].token, "session-token");
         assert!(
             restored.chat_channel.is_empty() && restored.chat_oauth_token.is_empty(),
             "the legacy fields must be consumed by the migration"
         );
+        // The next save after the migration must be token-free: the in-memory
+        // token was moved to the OS credential vault and wiped.
+        let mut post = MemoryStorage::default();
+        eframe::App::save(&mut restored, &mut post);
+        let post_json = post
+            .values
+            .get(eframe::APP_KEY)
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            !post_json.contains("legacy-migrate-secret"),
+            "post-migration state must not contain the legacy token"
+        );
+        // Clean the vault entry the migration created.
+        let _ = rivulet_core::ChatTokenStore::default()
+            .delete(rivulet_core::ChatPlatform::Kick, "legacychan");
 
         let mut fresh = RivuletApp::default();
         let mut storage = MemoryStorage::default();
@@ -15236,6 +15320,40 @@ mod tests {
         assert!(
             restored.chat_accounts.is_empty(),
             "a fresh config must not grow a phantom account"
+        );
+    }
+
+    #[test]
+    fn chat_token_store_round_trips_through_the_os_vault() {
+        // Real keyring round trip (Windows credential vault in CI). Proves
+        // save/load/delete for chat tokens, and that the hydrated value
+        // matches what the add-account flow stored.
+        let store = rivulet_core::ChatTokenStore::default();
+        let channel = "rivulet-vault-test";
+        // Clean any stale entry from an earlier run.
+        let _ = store.delete(rivulet_core::ChatPlatform::Twitch, channel);
+        assert_eq!(
+            store.load(rivulet_core::ChatPlatform::Twitch, channel),
+            Ok(None),
+            "no entry yet"
+        );
+        store
+            .save(
+                rivulet_core::ChatPlatform::Twitch,
+                channel,
+                "oauth:vault-secret",
+            )
+            .expect("save token to vault");
+        assert_eq!(
+            store.load(rivulet_core::ChatPlatform::Twitch, channel),
+            Ok(Some("oauth:vault-secret".to_owned())),
+        );
+        store
+            .delete(rivulet_core::ChatPlatform::Twitch, channel)
+            .expect("delete token from vault");
+        assert_eq!(
+            store.load(rivulet_core::ChatPlatform::Twitch, channel),
+            Ok(None),
         );
     }
 

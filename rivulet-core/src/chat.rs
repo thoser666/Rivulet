@@ -91,15 +91,20 @@ impl ChatConfig {
 
 /// One configured chat account: platform + channel + optional token. The
 /// combined dock connects one worker per platform from the persisted account
-/// list (see [`MultiChat`]). Persisted with the rest of the app state.
+/// list (see [`MultiChat`]).
+///
+/// Only `platform` and `channel` are persisted: `token` is `serde(skip)` so
+/// the secret never reaches the config file — it lives in the OS credential
+/// vault ([`ChatTokenStore`]) and is hydrated into memory on connect.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatAccount {
     pub platform: ChatPlatform,
     /// Twitch channel / Kick slug / YouTube video id.
     pub channel: String,
-    /// Twitch OAuth (`oauth:...`) or Kick session token. Never logged.
-    /// YouTube is read-only and ignores it.
-    #[serde(default)]
+    /// Twitch OAuth (`oauth:...`) or Kick session token. Held in memory
+    /// only; persisted via the OS credential vault, never the config file,
+    /// and never logged. YouTube is read-only and ignores it.
+    #[serde(skip)]
     pub token: String,
 }
 
@@ -109,6 +114,62 @@ impl ChatAccount {
             platform,
             channel,
             token,
+        }
+    }
+}
+
+/// OS-backed storage for chat account tokens (Twitch OAuth, Kick session
+/// token). Mirrors [`crate::StreamKeyStore`]: the secret is stored in the OS
+/// credential vault and never serialized with the app config or included in
+/// diagnostics — the config file keeps only platform + channel.
+pub struct ChatTokenStore {
+    service: String,
+}
+
+impl Default for ChatTokenStore {
+    fn default() -> Self {
+        Self::new("Rivulet")
+    }
+}
+
+impl ChatTokenStore {
+    pub fn new(service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+        }
+    }
+
+    /// Stable per-account credential key. Includes the platform label and
+    /// trimmed channel so several accounts can coexist in one vault.
+    pub fn key(platform: ChatPlatform, channel: &str) -> String {
+        format!("chat-token/{}/{}", platform.label(), channel.trim())
+    }
+
+    pub fn save(&self, platform: ChatPlatform, channel: &str, token: &str) -> Result<(), String> {
+        keyring::Entry::new(&self.service, &Self::key(platform, channel))
+            .map_err(|error| error.to_string())?
+            .set_password(token)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn load(&self, platform: ChatPlatform, channel: &str) -> Result<Option<String>, String> {
+        match keyring::Entry::new(&self.service, &Self::key(platform, channel))
+            .map_err(|error| error.to_string())?
+            .get_password()
+        {
+            Ok(token) => Ok(Some(token)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    pub fn delete(&self, platform: ChatPlatform, channel: &str) -> Result<(), String> {
+        match keyring::Entry::new(&self.service, &Self::key(platform, channel))
+            .map_err(|error| error.to_string())?
+            .delete_credential()
+        {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error.to_string()),
         }
     }
 }
@@ -813,5 +874,41 @@ mod tests {
         assert!(multi.send_message("hello").is_empty());
         // Repeated calls must stay safe.
         multi.disconnect_all();
+    }
+
+    #[test]
+    fn chat_account_token_is_never_serialized() {
+        // The OAuth/session token must not reach the config file. The
+        // serde(skip) on ChatAccount::token is the CodeQL
+        // rust/cleartext-logging root fix: eframe persists the whole app
+        // struct, so a serialized token would land in cleartext storage.
+        let account = account(ChatPlatform::Twitch, "rivulet", "oauth:super-secret");
+        let json = serde_json::to_string(&account).expect("serialize account");
+        assert!(
+            !json.contains("super-secret"),
+            "the token must never appear in serialized state"
+        );
+        assert!(!json.contains("token"), "no token key at all");
+        // The non-secret fields survive the round trip.
+        let back: ChatAccount = serde_json::from_str(&json).expect("deserialize account");
+        assert_eq!(back.platform, ChatPlatform::Twitch);
+        assert_eq!(back.channel, "rivulet");
+        assert_eq!(back.token, "", "deserialized token stays empty");
+    }
+
+    #[test]
+    fn chat_token_store_keys_are_stable_per_platform_and_channel() {
+        let twitch = ChatTokenStore::key(ChatPlatform::Twitch, " rivulet ");
+        assert_eq!(twitch, "chat-token/Twitch/rivulet");
+        assert_ne!(
+            twitch,
+            ChatTokenStore::key(ChatPlatform::Kick, "rivulet"),
+            "platforms must not share credential entries"
+        );
+        assert_ne!(
+            ChatTokenStore::key(ChatPlatform::Twitch, "a"),
+            ChatTokenStore::key(ChatPlatform::Twitch, "b"),
+            "channels must not share credential entries"
+        );
     }
 }
