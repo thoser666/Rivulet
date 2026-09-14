@@ -41,10 +41,13 @@ use {
     tokio::runtime::Runtime,
 };
 
+// --- Per-app audio capture (Windows WASAPI loopback / Linux PipeWire) ---
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use rivulet_audio::{AppAudioCapture, AppAudioProcess};
+
 // --- Windows imports (for windows-capture v1.5.0) ---
 #[cfg(target_os = "windows")]
 use {
-    rivulet_audio::{AppAudioCapture, AppAudioProcess},
     rivulet_capture::backend::{BackendKind, BackendStatus},
     rivulet_capture::dxgi::DxgiDesktopDuplication,
     std::sync::mpsc::{self, Sender},
@@ -1192,11 +1195,11 @@ pub struct RivuletApp {
     /// (Phase 3, Windows). One capture per routed Application source with a
     /// resolved `pid:<n>` device id; frames are pushed into the engine's
     /// routed appsrcs every UI tick.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     #[serde(skip)]
     app_audio_captures: Vec<(uuid::Uuid, rivulet_audio::AppAudioCapture)>,
     /// Frame channels for the live per-app captures; drained on the UI tick.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     #[serde(skip)]
     app_audio_frame_receivers: Vec<(
         uuid::Uuid,
@@ -1205,7 +1208,7 @@ pub struct RivuletApp {
     /// Cache of the process list for the Application-source picker, refreshed
     /// when the picker is opened (a ToolHelp snapshot on every frame would be
     /// wasteful).
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     #[serde(skip)]
     app_audio_processes: Option<Vec<rivulet_audio::AppAudioProcess>>,
     /// pid selection for the source being added (Application kind).
@@ -1804,11 +1807,11 @@ impl Default for RivuletApp {
             audio_mixer_new_source_name: String::new(),
             audio_mixer_new_source_kind: 0,
             audio_mixer_needs_sync: false,
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             app_audio_captures: Vec::new(),
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             app_audio_frame_receivers: Vec::new(),
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             app_audio_processes: None,
             #[cfg(target_os = "windows")]
             audio_mixer_new_source_pid: None,
@@ -1867,14 +1870,14 @@ impl RivuletApp {
 
     /// Start or stop the WASAPI per-application captures so they exactly
     /// mirror the Application-kind sources with a resolved `pid:<n>` target
-    /// while a capture session is active (Phase 3, Windows). Called every UI
-    /// tick; starting is idempotent per source id and stopping joins the
-    /// capture threads.
+    /// while a capture session is active (Phase 3 Windows / Phase 4 Linux,
+    /// issue #154). Called every UI tick; starting is idempotent per source id
+    /// and stopping joins the capture threads.
     ///
     /// Frames travel through an mpsc channel and are drained on the UI thread
     /// (the same architecture as the macOS audio capture), so the engine is
     /// only ever touched from the UI thread.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     fn sync_app_audio_captures(&mut self) {
         let session_active = self.is_recording_active() || self.engine.is_streaming();
         if !session_active {
@@ -1905,7 +1908,7 @@ impl RivuletApp {
                     self.app_audio_frame_receivers.push((id, rx));
                 }
                 Err(err) => {
-                    tracing::warn!(pid, %err, "WASAPI per-app capture failed to start");
+                    tracing::warn!(pid, %err, "per-app audio capture failed to start");
                     self.last_error = Some(self.tr_fmt(
                         "audio_app_capture_failed",
                         &[pid.to_string(), err.to_string()],
@@ -1917,7 +1920,7 @@ impl RivuletApp {
 
     /// Drain the per-app audio channels into the engine's routed appsrcs.
     /// Runs on the UI thread once per tick while a session is active.
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     fn drain_app_audio_frames(&mut self) {
         if self.app_audio_frame_receivers.is_empty() {
             return;
@@ -2160,8 +2163,9 @@ impl RivuletApp {
             });
         });
         ui.label(egui::RichText::new(self.tr("audio_routing_hint")).weak());
-        // Phase 3 (Windows): process picker for Application-kind sources.
-        #[cfg(target_os = "windows")]
+        // Phase 3 (Windows) / Phase 4 (Linux): process picker for
+        // Application-kind sources.
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
         if self.audio_mixer_new_source_kind == 0 {
             ui.horizontal(|ui| {
                 ui.label(self.tr("audio_source_pick_process"));
@@ -8575,7 +8579,14 @@ impl eframe::App for RivuletApp {
                 }
             }
 
-            // ── Phase 3: WASAPI per-application audio capture (issue #154) ──
+            // ── Phase 3/4: per-application audio capture (issue #154) ──
+            self.sync_app_audio_captures();
+            self.drain_app_audio_frames();
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            // ── Phase 4: PipeWire per-application audio capture (issue #154) ──
             self.sync_app_audio_captures();
             self.drain_app_audio_frames();
         }

@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+- feat(audio): **PipeWire per-application capture backend (Phase 4 of issue
+  [#154](https://github.com/thoser666/Rivulet/issues/154), M6, Linux)** —
+  Application-kind audio sources now capture exactly one application's audio
+  on Linux via a native PipeWire capture stream whose `target.object` points
+  at the app's sink-input node (`media.class = Stream/Output/Audio`).
+  `rivulet-audio` gains a linux-gated `app_audio_pw` module with the same
+  surface as the Windows backend (`AppAudioCapture` delivering 48 kHz stereo
+  f32 frames matching the engine's routed appsrc caps, `list_audio_processes`
+  enumerating sink-input nodes via a registry roundtrip, ascending node-id
+  order). Each capture owns a private PipeWire loop/context/connection so
+  teardown never disturbs other captures; stopping is signaled via an atomic
+  flag between iterate slices, with ordered teardown (listener → disconnect →
+  drops). On Linux the `pid:<n>` device id carries the PipeWire node id —
+  session-scoped handles on both platforms keep the engine and persistence
+  platform-agnostic. The GUI picker/lifecycle/drain wiring is unified across
+  Windows and Linux (`cfg(any(windows, linux))`); classification helpers are
+  unit-tested without a daemon on every CI run; new ci_pinning guard
+  `m6_audio_routing_phase4_linux_backend_is_pinned`; the Linux compile is
+  verified against the CI package set (libpipewire-0.3-dev, libclang for
+  bindgen).
+
 - feat(audio): **WASAPI per-application capture backend (Phase 3 of issue
   [#154](https://github.com/thoser666/Rivulet/issues/154), M6, Windows)** —
   Application-kind audio sources now capture the exact process tree they
