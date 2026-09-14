@@ -166,6 +166,11 @@ jobs:
         if: steps.previous.outputs.up_to_date == 'false'
         run: |
           set -euo pipefail
+          # The tag is annotated (-m), so git needs a committer identity --
+          # checkout does not configure one and the run died with "empty
+          # ident name". Same bot identity release.yml uses for its commits.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # -f is required by design: the pointer moves forward to the newest
           # green release every week. Only ever moved to a NEWER commit — the
           # resolve step picks the newest published release.
