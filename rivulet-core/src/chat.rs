@@ -187,10 +187,7 @@ impl MultiChat {
     /// `Off`. Mirrors the old single-platform status line semantics.
     pub fn connection_state(&self) -> ChatConnState {
         let states = self.connection_states();
-        if states
-            .iter()
-            .any(|(_, s)| *s == ChatConnState::Connected)
-        {
+        if states.iter().any(|(_, s)| *s == ChatConnState::Connected) {
             ChatConnState::Connected
         } else if states
             .iter()
@@ -205,9 +202,7 @@ impl MultiChat {
     /// Receivers for parsed chat messages, polled by the GUI each frame.
     /// Every message carries its platform tag (the parsers set it), so the
     /// combined dock can badge lines without tracking the source receiver.
-    pub fn messages(
-        &self,
-    ) -> impl Iterator<Item = &Receiver<ChatMessage>> + '_ {
+    pub fn messages(&self) -> impl Iterator<Item = &Receiver<ChatMessage>> + '_ {
         self.workers.iter().map(|(_, chat)| {
             chat.messages()
                 .expect("configured worker always has a receiver")
@@ -236,7 +231,9 @@ impl MultiChat {
         self.workers
             .iter()
             .filter(|(_, chat)| {
-                chat.enabled() && chat.can_send() && chat.connection_state() == ChatConnState::Connected
+                chat.enabled()
+                    && chat.can_send()
+                    && chat.connection_state() == ChatConnState::Connected
             })
             .map(|(account, _)| account.platform)
             .collect()
@@ -276,10 +273,7 @@ impl MultiChat {
     /// Outbound rate-limit detail `(remaining, capacity, window_secs)` of the
     /// named platform's worker, for the per-account budget line. `None` when
     /// that platform has no running worker.
-    pub fn rate_limit_detail(
-        &self,
-        platform: ChatPlatform,
-    ) -> Option<(f64, u32, u64)> {
+    pub fn rate_limit_detail(&self, platform: ChatPlatform) -> Option<(f64, u32, u64)> {
         let chat = &self
             .workers
             .iter()
@@ -777,8 +771,7 @@ mod tests {
             account(ChatPlatform::Twitch, "rivulet", "oauth:x"),
             account(ChatPlatform::YouTube, "abc123", ""),
         ]);
-        let (remaining, capacity, window) =
-            multi.rate_limit_detail(ChatPlatform::Twitch).unwrap();
+        let (remaining, capacity, window) = multi.rate_limit_detail(ChatPlatform::Twitch).unwrap();
         assert_eq!((remaining, capacity, window), (20.0, 20, 30));
         assert_eq!(
             multi.rate_limit_detail(ChatPlatform::YouTube).unwrap(),
@@ -811,7 +804,10 @@ mod tests {
         ]);
         assert!(multi.enabled());
         multi.disconnect_all();
-        assert!(!multi.enabled(), "workers must be dropped on disconnect_all");
+        assert!(
+            !multi.enabled(),
+            "workers must be dropped on disconnect_all"
+        );
         assert_eq!(multi.worker_count(), 0);
         assert_eq!(multi.connection_state(), ChatConnState::Off);
         assert!(multi.send_message("hello").is_empty());

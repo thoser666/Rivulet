@@ -440,10 +440,12 @@ mod tests {
         assert_eq!(messages[1].text, "second message");
         assert!(!messages[1].broadcaster);
         assert_eq!(next.as_deref(), Some("TOKEN_2"));
-        assert!(messages
-            .iter()
-            .all(|m| m.platform == Some(crate::chat::ChatPlatform::YouTube)),
-        "the youtube parser must tag its messages");
+        assert!(
+            messages
+                .iter()
+                .all(|m| m.platform == Some(crate::chat::ChatPlatform::YouTube)),
+            "the youtube parser must tag its messages"
+        );
     }
 
     #[test]

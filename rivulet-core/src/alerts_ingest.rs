@@ -277,7 +277,7 @@ pub fn parse_streamlabs_webhook(json: &str) -> Result<AlertEvent, AlertIngestErr
                 currency,
                 message,
                 timestamp: 0,
-            platform: None,
+                platform: None,
             })
         }
         other => Err(AlertIngestError::UnsupportedKind(other.to_owned())),
@@ -314,7 +314,7 @@ pub fn parse_twitch_eventsub_notification(json: &str) -> Result<AlertEvent, Aler
                 currency: None,
                 message: None,
                 timestamp: 0,
-            platform: Some(crate::chat::ChatPlatform::Twitch),
+                platform: Some(crate::chat::ChatPlatform::Twitch),
             })
         }
         "channel.subscribe" => {
@@ -331,7 +331,7 @@ pub fn parse_twitch_eventsub_notification(json: &str) -> Result<AlertEvent, Aler
                 currency: None,
                 message: None,
                 timestamp: 0,
-            platform: Some(crate::chat::ChatPlatform::Twitch),
+                platform: Some(crate::chat::ChatPlatform::Twitch),
             })
         }
         "channel.subscription.gift" => {
@@ -349,7 +349,7 @@ pub fn parse_twitch_eventsub_notification(json: &str) -> Result<AlertEvent, Aler
                 currency: None,
                 message: None,
                 timestamp: 0,
-            platform: Some(crate::chat::ChatPlatform::Twitch),
+                platform: Some(crate::chat::ChatPlatform::Twitch),
             })
         }
         "channel.raid" => {
@@ -368,7 +368,7 @@ pub fn parse_twitch_eventsub_notification(json: &str) -> Result<AlertEvent, Aler
                 currency: None,
                 message: None,
                 timestamp: 0,
-            platform: Some(crate::chat::ChatPlatform::Twitch),
+                platform: Some(crate::chat::ChatPlatform::Twitch),
             })
         }
         other => Err(AlertIngestError::UnsupportedKind(other.to_owned())),

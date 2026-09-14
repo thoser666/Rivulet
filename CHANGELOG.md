@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- feat(chat): **combined multi-platform chat dock** — the dock no longer
+  selects a single platform: it manages a list of accounts (one per
+  platform) and connects one worker per account via the new
+  `rivulet_core::MultiChat` facade. Messages from every connected
+  platform appear in the same list with per-line platform badges; the
+  send box broadcasts to all capable accounts with per-platform
+  delivery feedback; threaded replies route back to the parent
+  message's platform; alert entries keep their ingestion source's
+  platform. The account list persists; legacy single-platform configs
+  migrate on restore. 9 new core tests + 6 new GUI tests, i18n EN/DE.
+
 - test(resources): **M6 resource report — 6 routed audio sources with full
   filter chains stay within the resource budget (final gate evidence for
   issue [#154](https://github.com/thoser666/Rivulet/issues/154))** —
