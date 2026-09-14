@@ -1212,7 +1212,7 @@ pub struct RivuletApp {
     #[serde(skip)]
     app_audio_processes: Option<Vec<rivulet_audio::AppAudioProcess>>,
     /// pid selection for the source being added (Application kind).
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     #[serde(skip)]
     audio_mixer_new_source_pid: Option<u32>,
 
@@ -1813,7 +1813,7 @@ impl Default for RivuletApp {
             app_audio_frame_receivers: Vec::new(),
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             app_audio_processes: None,
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             audio_mixer_new_source_pid: None,
 
             ndi_output_enabled: false,
@@ -2123,12 +2123,13 @@ impl RivuletApp {
                         self.audio_mixer_new_source_name.trim().to_owned()
                     };
                     let device_id = match kind {
-                        #[cfg(target_os = "windows")]
+                        #[cfg(any(target_os = "windows", target_os = "linux"))]
                         rivulet_core::AudioSourceKind::Application => self
                             .audio_mixer_new_source_pid
                             .map(|pid| format!("pid:{pid}"))
                             .unwrap_or_else(|| "pending_app".to_owned()),
-                        #[cfg(not(target_os = "windows"))]
+                        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                        #[allow(unused_variables)]
                         rivulet_core::AudioSourceKind::Application => "pending_app".to_owned(),
                         rivulet_core::AudioSourceKind::InputDevice => "default_input".to_owned(),
                         rivulet_core::AudioSourceKind::OutputDevice => "system_loopback".to_owned(),
