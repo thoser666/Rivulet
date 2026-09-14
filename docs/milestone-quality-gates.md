@@ -368,12 +368,17 @@ Review privacy, control, and failure boundaries:
   hand-off), code generation is cancellable and stays within the local-model
   budget, generated code is reviewed before it reaches a live scene, and the
   optional emote/asset T2I path degrades gracefully (overlay-only) when the
-  generator or VRAM budget is unavailable. Scope and research live in
-  [`docs/m10-ai-creative-studio.md`](m10-ai-creative-studio.md).
+  generator or VRAM budget is unavailable. The **sound/voice sub-feature**
+  (alert SFX, jingles, spoken read-outs) follows the same contract: local
+  T2S/TTS in a separate worker, CPU fallback for the small TTS model, and
+  graceful degradation to user-supplied sound files when the worker is
+  unavailable — generated audio never blocks the audio mux. Scope and
+  research live in [`docs/m10-ai-creative-studio.md`](m10-ai-creative-studio.md).
 - **AI off-switches** are the first-class kill path: every AI feature is
   **off by default** — nothing loads until the user opts in — a global
-  master switch disables the chatbot, the creative studio, and the
-  emote/T2I generator (no model load, no workers), each
+  master switch disables the chatbot, the creative studio, the
+  emote/T2I generator, and the sound/voice generator (no model load, no
+  workers), each
   feature is independently disableable, the switches persist and localize,
   and an optional "pause while live" override suspends models on Go Live
   without blocking streaming; the default-off and switch round-trip
