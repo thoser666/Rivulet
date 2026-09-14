@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+- feat(audio): **macOS system-loopback per-app fallback (Phase 5 of issue
+  [#154](https://github.com/thoser666/Rivulet/issues/154), M6, macOS)** —
+  Application-kind audio sources now capture on macOS via the honest
+  fallback: macOS has no per-application capture API, so the system loopback
+  (the first input device matching BlackHole/Soundflower/VB-Cable — the same
+  keyword list as the legacy System capture) is captured once and delivered
+  to every routed Application source, with per-source volume/filters/mute
+  still applied independently by the engine. `rivulet-audio` gains a
+  macos-gated `app_audio_macos` module with the same surface as the Windows
+  and Linux backends (`AppAudioCapture` delivering 48 kHz stereo f32 frames
+  matching the routed appsrc caps, `list_audio_processes` with the loopback
+  device listed first, cpal typed streams with the mandatory explicit
+  `play()`, conversion/resampling on the worker thread). The Mixer shows a
+  hint about the sharing semantics (`audio_app_fallback_hint`, EN/DE); the
+  GUI per-app wiring is now `cfg(any(windows, linux, macos))` everywhere,
+  pinned by the new `per_app_capture_gating_covers_all_backends` GUI test
+  and the `m6_audio_routing_phase5_macos_fallback_is_pinned` ci_pinning
+  guard. Without a loopback driver installed, capture fails with the
+  descriptive install hint instead of recording silence.
+
 - feat(audio): **PipeWire per-application capture backend (Phase 4 of issue
   [#154](https://github.com/thoser666/Rivulet/issues/154), M6, Linux)** —
   Application-kind audio sources now capture exactly one application's audio

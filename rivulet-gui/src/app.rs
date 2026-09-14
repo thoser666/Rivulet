@@ -42,7 +42,7 @@ use {
 };
 
 // --- Per-app audio capture (Windows WASAPI loopback / Linux PipeWire) ---
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use rivulet_audio::{AppAudioCapture, AppAudioProcess};
 
 // --- Windows imports (for windows-capture v1.5.0) ---
@@ -1195,11 +1195,11 @@ pub struct RivuletApp {
     /// (Phase 3, Windows). One capture per routed Application source with a
     /// resolved `pid:<n>` device id; frames are pushed into the engine's
     /// routed appsrcs every UI tick.
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[serde(skip)]
     app_audio_captures: Vec<(uuid::Uuid, rivulet_audio::AppAudioCapture)>,
     /// Frame channels for the live per-app captures; drained on the UI tick.
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[serde(skip)]
     app_audio_frame_receivers: Vec<(
         uuid::Uuid,
@@ -1208,11 +1208,11 @@ pub struct RivuletApp {
     /// Cache of the process list for the Application-source picker, refreshed
     /// when the picker is opened (a ToolHelp snapshot on every frame would be
     /// wasteful).
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[serde(skip)]
     app_audio_processes: Option<Vec<rivulet_audio::AppAudioProcess>>,
     /// pid selection for the source being added (Application kind).
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[serde(skip)]
     audio_mixer_new_source_pid: Option<u32>,
 
@@ -1807,13 +1807,13 @@ impl Default for RivuletApp {
             audio_mixer_new_source_name: String::new(),
             audio_mixer_new_source_kind: 0,
             audio_mixer_needs_sync: false,
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             app_audio_captures: Vec::new(),
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             app_audio_frame_receivers: Vec::new(),
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             app_audio_processes: None,
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             audio_mixer_new_source_pid: None,
 
             ndi_output_enabled: false,
@@ -1877,7 +1877,7 @@ impl RivuletApp {
     /// Frames travel through an mpsc channel and are drained on the UI thread
     /// (the same architecture as the macOS audio capture), so the engine is
     /// only ever touched from the UI thread.
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     fn sync_app_audio_captures(&mut self) {
         let session_active = self.is_recording_active() || self.engine.is_streaming();
         if !session_active {
@@ -1920,7 +1920,7 @@ impl RivuletApp {
 
     /// Drain the per-app audio channels into the engine's routed appsrcs.
     /// Runs on the UI thread once per tick while a session is active.
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     fn drain_app_audio_frames(&mut self) {
         if self.app_audio_frame_receivers.is_empty() {
             return;
@@ -2123,12 +2123,20 @@ impl RivuletApp {
                         self.audio_mixer_new_source_name.trim().to_owned()
                     };
                     let device_id = match kind {
-                        #[cfg(any(target_os = "windows", target_os = "linux"))]
+                        #[cfg(any(
+                            target_os = "windows",
+                            target_os = "linux",
+                            target_os = "macos"
+                        ))]
                         rivulet_core::AudioSourceKind::Application => self
                             .audio_mixer_new_source_pid
                             .map(|pid| format!("pid:{pid}"))
                             .unwrap_or_else(|| "pending_app".to_owned()),
-                        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                        #[cfg(not(any(
+                            target_os = "windows",
+                            target_os = "linux",
+                            target_os = "macos"
+                        )))]
                         #[allow(unused_variables)]
                         rivulet_core::AudioSourceKind::Application => "pending_app".to_owned(),
                         rivulet_core::AudioSourceKind::InputDevice => "default_input".to_owned(),
@@ -2166,7 +2174,7 @@ impl RivuletApp {
         ui.label(egui::RichText::new(self.tr("audio_routing_hint")).weak());
         // Phase 3 (Windows) / Phase 4 (Linux): process picker for
         // Application-kind sources.
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         if self.audio_mixer_new_source_kind == 0 {
             ui.horizontal(|ui| {
                 ui.label(self.tr("audio_source_pick_process"));
@@ -2205,6 +2213,10 @@ impl RivuletApp {
             if self.audio_mixer_new_source_pid.is_none() {
                 ui.label(egui::RichText::new(self.tr("audio_source_pid_required")).weak());
             }
+            // macOS fallback semantics: Application sources all share the
+            // system loopback mix (macOS has no per-app capture API).
+            #[cfg(target_os = "macos")]
+            ui.label(egui::RichText::new(self.tr("audio_app_fallback_hint")).weak());
         }
         if self.audio_sources.is_empty() {
             ui.label(egui::RichText::new(self.tr("audio_routing_legacy_active")).weak());
@@ -8668,6 +8680,10 @@ impl eframe::App for RivuletApp {
                     self.stop_macos_recording();
                 }
             }
+
+            // ── Phase 5: per-application audio fallback capture (issue #154) ──
+            self.sync_app_audio_captures();
+            self.drain_app_audio_frames();
         }
 
         self.update_recording_preview(ctx);
@@ -15493,5 +15509,38 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         assert!(source.contains("self.drain_app_audio_frames();"));
         assert!(source.contains("AppAudioCapture::start"));
         assert!(source.contains("push_audio_source"));
+    }
+
+    #[test]
+    fn per_app_capture_gating_covers_all_backends() {
+        // Phase 5 (issue #154): the per-app capture wiring must be compiled
+        // on all three desktop platforms — Windows WASAPI loopback, Linux
+        // PipeWire, and the macOS system-loopback fallback. Every cfg gate
+        // on the picker/lifecycle/drain surface must name all three, so a
+        // new backend cannot silently regress to Windows-only (the Phase-4
+        // field-gating CI failure).
+        let source = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
+        let triple = "any(target_os = \"windows\", target_os = \"linux\", target_os = \"macos\")";
+        let wiring_markers = [
+            "fn sync_app_audio_captures(&mut self)",
+            "fn drain_app_audio_frames(&mut self)",
+            "audio_mixer_new_source_pid: Option<u32>",
+            "audio_mixer_new_source_pid: None,",
+        ];
+        for marker in wiring_markers {
+            // The definition site is the first occurrence; the attribute
+            // gating it is the nearest `#[cfg(` before it.
+            let pos = source
+                .find(marker)
+                .unwrap_or_else(|| panic!("wiring marker {marker:?} must exist"));
+            let from = source[..pos]
+                .rfind("#[cfg(")
+                .unwrap_or_else(|| panic!("wiring marker {marker:?} must carry a cfg gate"));
+            let gate = &source[from..pos];
+            assert!(
+                gate.contains(triple),
+                "per-app wiring marker {marker:?} must be gated on all three platforms, found gate: {gate}"
+            );
+        }
     }
 }
