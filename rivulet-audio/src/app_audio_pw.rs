@@ -398,14 +398,15 @@ mod tests {
     #[test]
     fn capture_rejects_zero_node_id() {
         let (tx, _rx) = std::sync::mpsc::channel::<rivulet_core::AudioFrame>();
-        let err = AppAudioCapture::start(
+        let result = AppAudioCapture::start(
             0,
             Box::new(move |frame| {
                 let _ = tx.send(frame);
             }),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("node id 0"));
+        );
+        // `is_err` instead of `unwrap_err`: AppAudioCapture holds a thread
+        // handle and deliberately does not implement Debug.
+        assert!(result.is_err(), "node id 0 (ID_ANY) is uncapturable");
     }
 
     #[test]
