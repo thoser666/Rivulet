@@ -651,6 +651,64 @@ fn m6_audio_routing_phase3_windows_backend_is_pinned() {
 }
 
 #[test]
+fn m6_audio_routing_phase4_linux_backend_is_pinned() {
+    // Issue #154 Phase 4: the PipeWire per-application capture backend in
+    // rivulet-audio plus the GUI unification (the picker/lifecycle/drain
+    // contract is now platform-gated on Windows AND Linux, not Windows only).
+    let pw = read("rivulet-audio/src/app_audio_pw.rs");
+    let audio_lib = read("rivulet-audio/src/lib.rs");
+    let gui = read("rivulet-gui/src/app.rs");
+
+    // Backend surface: targeting, format contract, enumeration, teardown.
+    for required in [
+        "pub struct AppAudioCapture",
+        "pub struct AppAudioProcess",
+        "pub fn list_audio_processes",
+        "fn capture_thread",
+        "TARGET_OBJECT",
+        "STREAM_CAPTURE_SINK",
+        "Stream/Output/Audio",
+        // Fixed 48 kHz stereo f32 — the engine's routed appsrc caps.
+        "PW_CAPTURE_RATE",
+        // Pure classification helpers (daemon-free CI coverage).
+        "fn is_sink_input_media_class",
+        "fn node_display_label",
+        // Ordered teardown: listener dropped before disconnect.
+        "stream.disconnect()",
+    ] {
+        assert!(
+            pw.contains(required),
+            "PipeWire per-app backend must pin {required}"
+        );
+    }
+
+    // Module registration is linux-gated and re-exports the shared contract.
+    for required in [
+        "#[cfg(target_os = \"linux\")]",
+        "pub mod app_audio_pw",
+        "pub use app_audio_pw::{list_audio_processes, AppAudioCapture, AppAudioProcess}",
+    ] {
+        assert!(
+            audio_lib.contains(required),
+            "rivulet-audio lib.rs must pin {required}"
+        );
+    }
+
+    // The GUI picker/lifecycle/drain contract must now cover both backends.
+    for required in [
+        "#[cfg(any(target_os = \"windows\", target_os = \"linux\"))]",
+        "fn sync_app_audio_captures",
+        "fn drain_app_audio_frames",
+        "AppAudioCapture::start",
+    ] {
+        assert!(
+            gui.contains(required),
+            "GUI per-app capture wiring must pin {required}"
+        );
+    }
+}
+
+#[test]
 fn m6_audio_routing_phase1_is_documented() {
     // The Phase-1 milestone state must stay documented: the spec carries a
     // status, the README bullet reflects it, and the CHANGELOG records the
@@ -671,9 +729,14 @@ fn m6_audio_routing_phase1_is_documented() {
         "spec must record the Phase-3 status"
     );
     assert!(
-        readme.contains("Windows WASAPI per-app capture implemented (Phases 1\u{2013}3")
-            && readme.contains("#154"),
-        "README M6 bullet must reflect the Phase 1-3 state"
+        spec.contains("Phase 4 (Linux PipeWire per-app capture, 2026-09-14)"),
+        "spec must record the Phase-4 status"
+    );
+    assert!(
+        readme.contains(
+            "Windows WASAPI and Linux PipeWire per-app capture implemented (Phases 1\u{2013}4"
+        ) && readme.contains("#154"),
+        "README M6 bullet must reflect the Phase 1-4 state"
     );
     assert!(
         changelog.contains("feat(audio): **multi-track audio routing engine core"),
@@ -686,6 +749,10 @@ fn m6_audio_routing_phase1_is_documented() {
     assert!(
         changelog.contains("feat(audio): **WASAPI per-application capture backend"),
         "CHANGELOG must record the Phase-3 delivery"
+    );
+    assert!(
+        changelog.contains("feat(audio): **PipeWire per-application capture backend"),
+        "CHANGELOG must record the Phase-4 delivery"
     );
 }
 

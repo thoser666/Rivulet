@@ -4722,6 +4722,7 @@ dependencies = [
  "cpal",
  "gstreamer",
  "gstreamer-app",
+ "pipewire",
  "rivulet-core",
  "tracing",
  "tracing-subscriber",
