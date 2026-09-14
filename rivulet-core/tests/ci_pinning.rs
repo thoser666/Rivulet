@@ -4886,6 +4886,48 @@ fn m10_creative_studio_is_specified_in_readme_gate_and_spec() {
             && spec.contains("AiSwitches"),
         "the M10 spec must specify the Settings-placement contract (infrastructure in Settings, workflow on the Assistant tab)"
     );
+    // Sound/voice sub-feature (T2S/TTS): the spec must keep the researched
+    // model choices, the per-alert-kind delivery and the dedicated
+    // per-feature switch so the audio path cannot be silently dropped or
+    // re-licensed into a non-free model.
+    for marker in [
+        "Stable Audio Open Small",
+        "Kokoro",
+        "assigned per alert kind",
+        "SoundGeneratorProvider",
+        "sound_enabled",
+        "Full music generation",
+    ] {
+        assert!(
+            spec.contains(marker),
+            "the M10 spec must carry the sound-sub-feature marker {marker}"
+        );
+    }
+    assert!(
+        !spec.contains("AudioLDM 2 \" — ✅"),
+        "the non-commercial AudioLDM 2 must stay excluded from the sound stack"
+    );
+    for marker in [
+        "sound/voice sub-feature",
+        "CPU fallback",
+        "never blocks the audio mux",
+    ] {
+        assert!(
+            gates.contains(marker),
+            "the M10 gate must review the sound-sub-feature contract: {marker}"
+        );
+    }
+    for marker in [
+        "alert-sound/voice generation",
+        "Stable Audio Open Small SFX/jingles",
+        "Kokoro voice read-outs",
+        "Sound/voice generator",
+    ] {
+        assert!(
+            readme.contains(marker),
+            "README M10 must mention the sound sub-feature: {marker}"
+        );
+    }
 }
 
 #[test]
