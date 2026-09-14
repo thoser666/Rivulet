@@ -292,9 +292,9 @@ enum ChatAction {
     Connect,
     Disconnect,
     Send(String),
-    /// Threaded reply `(text, parent Twitch message id)`, sent via
-    /// `@reply-parent-msg-id`.
-    SendReply(String, String),
+    /// Threaded reply `(text, parent Twitch message id, parent platform)`,
+    /// sent via `@reply-parent-msg-id` on the parent's platform.
+    SendReply(String, String, rivulet_core::ChatPlatform),
 }
 
 /// Review state of a discovered plugin, shown in the Plugins settings list.
@@ -774,28 +774,45 @@ pub struct RivuletApp {
     #[serde(skip)]
     telemetry_startup_reported: bool,
 
-    /// Chat dock: selected platform (Twitch, Kick or YouTube). Persisted;
-    /// defaults to Twitch for existing configs.
+    /// Chat dock: configured accounts (one per platform). Persisted; the
+    /// combined dock connects one worker per configured account.
+    #[serde(default)]
+    chat_accounts: Vec<rivulet_core::ChatAccount>,
+    /// Legacy single-platform fields (configs saved before the combined
+    /// dock). Kept so old persisted state deserializes; `restore_from_storage`
+    /// migrates them into `chat_accounts`, after which they stay empty.
     #[serde(default)]
     chat_platform: rivulet_core::ChatPlatform,
-    /// Chat dock: channel to join — Twitch channel / Kick slug / YouTube
-    /// video id (persisted).
+    #[serde(default)]
     chat_channel: String,
-    /// Chat dock: token — Twitch OAuth (`oauth:...`) or Kick session token
-    /// (persisted, but never shown in logs/UI). Empty connects anonymously.
+    #[serde(default)]
     chat_oauth_token: String,
+    /// Chat dock: platform selected in the "add account" row. Persisted so
+    /// the row reopens with the last used platform.
+    #[serde(default)]
+    chat_add_platform: rivulet_core::ChatPlatform,
+    /// Chat dock: draft fields of the "add account" row. Not persisted.
+    #[serde(skip)]
+    chat_add_channel: String,
+    #[serde(skip)]
+    chat_add_token: String,
+    /// Chat dock: per-platform outcome of the last broadcast send (false =
+    /// rejected by that platform: read-only, no token or rate-limited).
+    /// Shown until the next send. Not persisted.
+    #[serde(skip)]
+    chat_last_send_outcomes: Vec<(rivulet_core::ChatPlatform, bool)>,
     /// Chat dock: pending message text to send on Enter. Not persisted.
     #[serde(skip)]
     chat_input: String,
-    /// Chat dock: threaded reply target `(display name, Twitch message id)`.
-    /// Armed by the reply affordance on a message; cleared on send, cancel,
-    /// connect and disconnect. Not persisted. Only Twitch messages carry an
-    /// IRC id, so this stays `None` on Kick/YouTube.
+    /// Chat dock: threaded reply target `(display name, platform, message
+    /// id)`. Armed by the reply affordance on a message; cleared on send,
+    /// cancel, connect and disconnect. Not persisted. Only Twitch messages
+    /// carry an IRC id, so the send path rejects the other platforms.
     #[serde(skip)]
-    chat_reply_target: Option<(String, String)>,
-    /// Chat dock: running worker handle. Not persisted.
+    chat_reply_target: Option<(String, rivulet_core::ChatPlatform, String)>,
+    /// Chat dock: running multi-platform worker handle. Not persisted.
     #[serde(skip)]
-    chat_worker: Option<rivulet_core::Chat>,
+    chat_worker_multi: Option<rivulet_core::MultiChat>,
     /// Chat dock: messages collected from the worker since connect. Not
     /// persisted. Bounded to the newest entries (oldest dropped).
     #[serde(skip)]
@@ -1526,11 +1543,17 @@ impl Default for RivuletApp {
             alert_ingest_enabled: true,
             telemetry: rivulet_core::TelemetryReporter::default(),
             telemetry_startup_reported: false,
+            chat_accounts: Vec::new(),
+            chat_platform: rivulet_core::ChatPlatform::default(),
             chat_channel: String::new(),
             chat_oauth_token: String::new(),
+            chat_add_platform: rivulet_core::ChatPlatform::default(),
+            chat_add_channel: String::new(),
+            chat_add_token: String::new(),
+            chat_last_send_outcomes: Vec::new(),
             chat_input: String::new(),
             chat_reply_target: None,
-            chat_worker: None,
+            chat_worker_multi: None,
             chat_messages: Vec::new(),
             chat_action_pending: None,
             plugin_approvals: rivulet_core::PluginApprovals::default(),
@@ -1539,7 +1562,6 @@ impl Default for RivuletApp {
             plugin_review_open: None,
             plugin_review_draft: BTreeMap::new(),
             plugin_load_error: None,
-            chat_platform: rivulet_core::ChatPlatform::default(),
             chat_state: rivulet_core::ChatConnState::Off,
             alert_ingest: rivulet_core::AlertIngest::default(),
             alert_preview_dirty: false,
@@ -5921,49 +5943,45 @@ impl RivuletApp {
     fn reconcile_chat(&mut self) {
         match self.chat_action_pending.take() {
             Some(ChatAction::Connect) => {
-                if let Some(mut worker) = self.chat_worker.take() {
-                    worker.disconnect();
+                if let Some(mut multi) = self.chat_worker_multi.take() {
+                    multi.disconnect_all();
                 }
                 self.chat_messages.clear();
                 self.chat_reply_target = None;
-                let cfg = rivulet_core::ChatConfig::new(
-                    self.chat_platform,
-                    self.chat_channel.trim().to_owned(),
-                    self.chat_oauth_token.clone(),
-                );
-                self.chat_worker = Some(rivulet_core::Chat::new(&cfg));
-                self.apply_chat_state(
-                    self.chat_worker
-                        .as_ref()
-                        .map(|w| w.connection_state())
-                        .unwrap_or(rivulet_core::ChatConnState::Off),
-                );
+                self.chat_last_send_outcomes.clear();
+                let multi =
+                    rivulet_core::MultiChat::new(&self.chat_accounts);
+                self.apply_chat_state(multi.connection_state());
+                self.chat_worker_multi = Some(multi);
             }
             Some(ChatAction::Disconnect) => {
-                if let Some(mut worker) = self.chat_worker.take() {
-                    worker.disconnect();
+                if let Some(mut worker) = self.chat_worker_multi.take() {
+                    worker.disconnect_all();
                 }
                 self.chat_messages.clear();
                 self.chat_reply_target = None;
+                self.chat_last_send_outcomes.clear();
                 self.apply_chat_state(rivulet_core::ChatConnState::Off);
             }
             Some(ChatAction::Send(text)) => {
                 self.send_chat_message(text);
             }
-            Some(ChatAction::SendReply(text, parent)) => {
-                self.send_chat_reply(text, parent);
+            Some(ChatAction::SendReply(text, parent, platform)) => {
+                self.send_chat_reply(text, parent, platform);
             }
             None => {}
         }
 
-        // Drain incoming messages (bounded to the newest MAX_CHAT_MESSAGES).
+        // Drain every worker's message stream (bounded to the newest
+        // MAX_CHAT_MESSAGES). Each message carries its platform tag, so the
+        // combined dock needs no per-receiver bookkeeping.
         let worker_state = self
-            .chat_worker
+            .chat_worker_multi
             .as_ref()
             .map(|w| w.connection_state())
             .unwrap_or(rivulet_core::ChatConnState::Off);
-        if let Some(worker) = &self.chat_worker {
-            if let Some(rx) = worker.messages() {
+        if let Some(multi) = &self.chat_worker_multi {
+            for rx in multi.messages() {
                 while let Ok(msg) = rx.try_recv() {
                     self.chat_messages.push(msg);
                     if self.chat_messages.len() > MAX_CHAT_MESSAGES {
@@ -6055,6 +6073,7 @@ impl RivuletApp {
             broadcaster: false,
             id: None,
             timestamp: event.timestamp,
+            platform: event.platform,
         }
     }
 
@@ -6106,13 +6125,16 @@ impl RivuletApp {
     /// worker (non-blocking enqueue).
     fn send_chat_message(&mut self, text: String) -> bool {
         let text = text.trim().to_owned();
-        if text.is_empty() || self.chat_oauth_token.trim().is_empty() {
+        if text.is_empty() {
             return false;
         }
-        let Some(worker) = &self.chat_worker else {
+        let Some(multi) = &self.chat_worker_multi else {
             return false;
         };
-        worker.send_message(&text)
+        let outcomes = multi.send_message(&text);
+        let any_ok = outcomes.iter().any(|(_, ok)| *ok);
+        self.chat_last_send_outcomes = outcomes;
+        any_ok
     }
 
     /// Consume the pending chat input on Send/Enter: clear the text field
@@ -6128,8 +6150,9 @@ impl RivuletApp {
             return false;
         }
         match self.chat_reply_target.take() {
-            Some((_, parent)) => {
-                self.chat_action_pending = Some(ChatAction::SendReply(text.to_owned(), parent));
+            Some((_, platform, parent)) => {
+                self.chat_action_pending =
+                    Some(ChatAction::SendReply(text.to_owned(), parent, platform));
             }
             None => self.chat_action_pending = Some(ChatAction::Send(text.to_owned())),
         }
@@ -6145,17 +6168,19 @@ impl RivuletApp {
 
     /// Send a threaded reply through the running worker. Only Twitch
     /// supports replies (`@reply-parent-msg-id`); the worker enqueues the
-    /// reply non-blocking and the shared per-platform rate limiter applies.
-    fn send_chat_reply(&mut self, text: String, parent_id: String) -> bool {
+    /// reply non-blocking and that platform's rate limiter applies. The
+    /// platform comes with the armed reply target, so the reply always
+    /// lands where the parent message was written.
+    fn send_chat_reply(&mut self, text: String, parent_id: String, platform: rivulet_core::ChatPlatform) -> bool {
         let text = text.trim().to_owned();
-        if text.is_empty() || parent_id.trim().is_empty() || self.chat_oauth_token.trim().is_empty()
-        {
+        let parent_id = parent_id.trim().to_owned();
+        if text.is_empty() || parent_id.is_empty() {
             return false;
         }
-        let Some(worker) = &self.chat_worker else {
+        let Some(multi) = &self.chat_worker_multi else {
             return false;
         };
-        worker.send_reply(&text, &parent_id)
+        multi.send_reply(&text, &parent_id, platform)
     }
 
     /// Live rate-limit detail `(remaining, capacity, window_secs, platform
@@ -6164,14 +6189,28 @@ impl RivuletApp {
     /// worker is running. `remaining` is fractional (tokens refill
     /// continuously over the window); the UI floors it.
     fn chat_rate_limit_detail(&self) -> Option<(f64, u32, u64, &'static str)> {
-        let worker = self.chat_worker.as_ref()?;
-        let cfg = worker.rate_limit_config();
-        Some((
-            worker.rate_limit_remaining(),
-            cfg.capacity,
-            cfg.window_secs,
-            worker.platform().label(),
-        ))
+        let multi = self.chat_worker_multi.as_ref()?;
+        // The combined dock shows the tightest budget across accounts so a
+        // near-empty bucket on one platform still warns before sends drop.
+        let mut best: Option<(f64, u32, u64, &'static str)> = None;
+        let mut seen: Vec<rivulet_core::ChatPlatform> = Vec::new();
+        for (platform, _state) in multi.connection_states() {
+            if seen.contains(&platform) {
+                continue;
+            }
+            seen.push(platform);
+            let Some((remaining, capacity, window)) = multi.rate_limit_detail(platform) else {
+                continue;
+            };
+            let better = match best {
+                None => true,
+                Some((r, _, _, _)) => remaining < r,
+            };
+            if better {
+                best = Some((remaining, capacity, window, platform.label()));
+            }
+        }
+        best
     }
 
     /// Remaining outbound chat budget `(available, capacity)` of the running
@@ -7585,11 +7624,10 @@ impl RivuletApp {
         // Twitch-only server requirement surfaced as soon as the worker sees
         // the notice: the bot account must be phone-verified before it can
         // send. Shown until reconnect so the streamer fixes the account.
-        if self.chat_platform == rivulet_core::ChatPlatform::Twitch
-            && self
-                .chat_worker
-                .as_ref()
-                .is_some_and(|w| w.phone_verification_required())
+        if self
+            .chat_worker_multi
+            .as_ref()
+            .is_some_and(|w| w.phone_verification_required())
         {
             let colors = theme::StatusColors::for_ui(ui);
             ui.colored_label(colors.warning, self.tr("chat_phone_verification"));
@@ -7629,8 +7667,12 @@ impl RivuletApp {
                                 .on_hover_text(&reply_tooltip)
                                 .clicked()
                             {
-                                self.chat_reply_target =
-                                    Some((message.user.clone(), msg_id.clone()));
+                                self.chat_reply_target = Some((
+                                    message.user.clone(),
+                                    message.platform
+                                        .unwrap_or(rivulet_core::ChatPlatform::Twitch),
+                                    msg_id.clone(),
+                                ));
                             }
                         }
                     });
@@ -7664,7 +7706,7 @@ impl RivuletApp {
             let reply_user = self
                 .chat_reply_target
                 .as_ref()
-                .map(|(user, _)| user.clone());
+                .map(|(user, _, _)| user.clone());
             if let Some(user) = reply_user {
                 let reply_label = self.tr_fmt("chat_reply_to", &[user]);
                 let reply_cancel = self.tr("chat_reply_cancel").to_owned();
@@ -8300,6 +8342,23 @@ impl RivuletApp {
             restored.discord_presence_large_image =
                 rivulet_core::discord::DEFAULT_LARGE_IMAGE_KEY.to_owned();
             tracing::info!("Discord client id was empty - applying the official default");
+        }
+        // Migration: configs saved before the combined chat dock carried a
+        // single platform/channel/token triple. Those become the first entry
+        // of the account list; fresh configs (all empty) are left alone.
+        if restored.chat_accounts.is_empty()
+            && (!restored.chat_channel.trim().is_empty()
+                || !restored.chat_oauth_token.trim().is_empty())
+        {
+            tracing::info!(
+                platform = ?restored.chat_platform,
+                "Migrating legacy single-platform chat config into the account list"
+            );
+            restored.chat_accounts.push(rivulet_core::ChatAccount::new(
+                restored.chat_platform,
+                std::mem::take(&mut restored.chat_channel),
+                std::mem::take(&mut restored.chat_oauth_token),
+            ));
         }
         // Push the restored audio sources into the engine so the first
         // session starts with the persisted routing (issue #154 Phase 2).
@@ -14683,21 +14742,25 @@ mod tests {
         // unreachable loopback so the test never touches the network and the
         // worker just backs off. Sending is a non-blocking enqueue.
         let mut app = RivuletApp {
-            chat_oauth_token: "oauth:abc123".to_owned(),
-            chat_channel: "rivulet".to_owned(),
-            chat_worker: Some(rivulet_core::Chat::new(&rivulet_core::ChatConfig {
-                platform: rivulet_core::ChatPlatform::Twitch,
-                twitch_endpoint: "127.0.0.1:1".to_owned(),
-                channel: "rivulet".to_owned(),
-                token: "oauth:abc123".to_owned(),
-                ..Default::default()
-            })),
+            chat_worker_multi: Some(rivulet_core::MultiChat::from_configs(
+                &[rivulet_core::ChatConfig {
+                    platform: rivulet_core::ChatPlatform::Twitch,
+                    twitch_endpoint: "127.0.0.1:1".to_owned(),
+                    channel: "rivulet".to_owned(),
+                    token: "oauth:abc123".to_owned(),
+                    ..Default::default()
+                }],
+            )),
             chat_state: rivulet_core::ChatConnState::Connected,
             ..Default::default()
         };
         assert!(app.send_chat_message(" hello there ".to_owned()));
-        // The trimmed message goes through the worker channel (best effort;
-        // the worker is not reachable here), so the app reports success.
+        // The broadcast outcome is reported per platform so partial failures
+        // (read-only YouTube, rate-limited accounts) stay visible.
+        assert_eq!(
+            std::mem::take(&mut app.chat_last_send_outcomes),
+            vec![(rivulet_core::ChatPlatform::Twitch, true)]
+        );
     }
 
     #[test]
@@ -14705,24 +14768,23 @@ mod tests {
         // Threaded replies need the same authenticated connection as plain
         // sends plus a parent Twitch message id.
         let mut app = RivuletApp::default();
+        let twitch = rivulet_core::ChatPlatform::Twitch;
+        let youtube = rivulet_core::ChatPlatform::YouTube;
         assert!(
-            !app.send_chat_reply("hello".to_owned(), "parent-1".to_owned()),
-            "no token must block replies"
+            !app.send_chat_reply("hello".to_owned(), "parent-1".to_owned(), twitch),
+            "no worker must block replies"
         );
         assert!(
-            !app.send_chat_reply("   ".to_owned(), "parent-1".to_owned()),
+            !app.send_chat_reply("   ".to_owned(), "parent-1".to_owned(), twitch),
             "whitespace text must be rejected"
         );
         assert!(
-            !app.send_chat_reply("hello".to_owned(), "   ".to_owned()),
+            !app.send_chat_reply("hello".to_owned(), "   ".to_owned(), twitch),
             "missing parent id must be rejected"
         );
-
-        // Token configured but no worker connected yet: still rejected.
-        app.chat_oauth_token = "oauth:abc123".to_owned();
         assert!(
-            !app.send_chat_reply("hello".to_owned(), "parent-1".to_owned()),
-            "no worker must block replies"
+            !app.send_chat_reply("hello".to_owned(), "parent-1".to_owned(), youtube),
+            "the read-only platform must reject replies"
         );
     }
 
@@ -14731,20 +14793,24 @@ mod tests {
         // Mirror of the plain-send enqueue test: with a token, a worker and a
         // parent id the reply is handed to the worker non-blocking.
         let mut app = RivuletApp {
-            chat_oauth_token: "oauth:abc123".to_owned(),
-            chat_channel: "rivulet".to_owned(),
-            chat_worker: Some(rivulet_core::Chat::new(&rivulet_core::ChatConfig {
-                platform: rivulet_core::ChatPlatform::Twitch,
-                twitch_endpoint: "127.0.0.1:1".to_owned(),
-                channel: "rivulet".to_owned(),
-                token: "oauth:abc123".to_owned(),
-                ..Default::default()
-            })),
+            chat_worker_multi: Some(rivulet_core::MultiChat::from_configs(
+                &[rivulet_core::ChatConfig {
+                    platform: rivulet_core::ChatPlatform::Twitch,
+                    twitch_endpoint: "127.0.0.1:1".to_owned(),
+                    channel: "rivulet".to_owned(),
+                    token: "oauth:abc123".to_owned(),
+                    ..Default::default()
+                }],
+            )),
             chat_state: rivulet_core::ChatConnState::Connected,
             ..Default::default()
         };
         assert!(
-            app.send_chat_reply(" thanks! ".to_owned(), "parent-1".to_owned()),
+            app.send_chat_reply(
+                " thanks! ".to_owned(),
+                "parent-1".to_owned(),
+                rivulet_core::ChatPlatform::Twitch
+            ),
             "a trimmed reply with a parent id must be enqueued"
         );
         // Dropping the app disconnects the worker (Chat::drop stops the
@@ -14770,7 +14836,11 @@ mod tests {
     fn chat_submit_arms_threaded_reply_and_clears_reply_target() {
         let mut app = RivuletApp {
             chat_input: "thanks!".to_owned(),
-            chat_reply_target: Some(("ViewerOne".to_owned(), "msg-1".to_owned())),
+            chat_reply_target: Some((
+                "ViewerOne".to_owned(),
+                rivulet_core::ChatPlatform::Twitch,
+                "msg-1".to_owned(),
+            )),
             ..Default::default()
         };
         assert!(app.submit_chat_input());
@@ -14783,7 +14853,8 @@ mod tests {
             app.chat_action_pending,
             Some(ChatAction::SendReply(
                 "thanks!".to_owned(),
-                "msg-1".to_owned()
+                "msg-1".to_owned(),
+                rivulet_core::ChatPlatform::Twitch
             ))
         );
     }
@@ -14791,7 +14862,11 @@ mod tests {
     #[test]
     fn chat_submit_rejects_whitespace_and_keeps_reply_target() {
         let mut app = RivuletApp {
-            chat_reply_target: Some(("ViewerOne".to_owned(), "msg-1".to_owned())),
+            chat_reply_target: Some((
+                "ViewerOne".to_owned(),
+                rivulet_core::ChatPlatform::Twitch,
+                "msg-1".to_owned(),
+            )),
             chat_input: "   ".to_owned(),
             ..Default::default()
         };
@@ -14816,13 +14891,15 @@ mod tests {
         // The real clock may have refilled nothing beyond capacity, so the
         // available budget equals the capacity.
         let app = RivuletApp {
-            chat_worker: Some(rivulet_core::Chat::new(&rivulet_core::ChatConfig {
-                platform: rivulet_core::ChatPlatform::Twitch,
-                twitch_endpoint: "127.0.0.1:1".to_owned(), // worker backs off
-                channel: "rivulet".to_owned(),
-                token: "oauth:abc123".to_owned(),
-                ..Default::default()
-            })),
+            chat_worker_multi: Some(rivulet_core::MultiChat::from_configs(
+                &[rivulet_core::ChatConfig {
+                    platform: rivulet_core::ChatPlatform::Twitch,
+                    twitch_endpoint: "127.0.0.1:1".to_owned(), // worker backs off
+                    channel: "rivulet".to_owned(),
+                    token: "oauth:abc123".to_owned(),
+                    ..Default::default()
+                }],
+            )),
             ..Default::default()
         };
         let (remaining, capacity) = app.chat_rate_budget().expect("budget with a worker");
@@ -14839,13 +14916,15 @@ mod tests {
         // applies over, not just the remaining budget. A fresh Twitch worker
         // must report its documented default (20 msgs / 30 s).
         let app = RivuletApp {
-            chat_worker: Some(rivulet_core::Chat::new(&rivulet_core::ChatConfig {
-                platform: rivulet_core::ChatPlatform::Twitch,
-                twitch_endpoint: "127.0.0.1:1".to_owned(), // worker backs off
-                channel: "rivulet".to_owned(),
-                token: "oauth:abc123".to_owned(),
-                ..Default::default()
-            })),
+            chat_worker_multi: Some(rivulet_core::MultiChat::from_configs(
+                &[rivulet_core::ChatConfig {
+                    platform: rivulet_core::ChatPlatform::Twitch,
+                    twitch_endpoint: "127.0.0.1:1".to_owned(), // worker backs off
+                    channel: "rivulet".to_owned(),
+                    token: "oauth:abc123".to_owned(),
+                    ..Default::default()
+                }],
+            )),
             ..Default::default()
         };
         let (remaining, capacity, window_secs, platform) =
@@ -14870,7 +14949,11 @@ mod tests {
         // is a plain message again. Cancelling never enqueues anything and
         // never touches the draft text.
         let mut app = RivuletApp {
-            chat_reply_target: Some(("ViewerOne".to_owned(), "msg-1".to_owned())),
+            chat_reply_target: Some((
+                "ViewerOne".to_owned(),
+                rivulet_core::ChatPlatform::Twitch,
+                "msg-1".to_owned(),
+            )),
             chat_input: "draft that stays".to_owned(),
             ..Default::default()
         };

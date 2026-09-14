@@ -160,6 +160,7 @@ pub fn parse_youtube_payload(payload: &str) -> (Vec<ChatMessage>, Option<String>
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
+            platform: Some(crate::chat::ChatPlatform::YouTube),
         });
     }
     (messages, continuation)
@@ -439,6 +440,10 @@ mod tests {
         assert_eq!(messages[1].text, "second message");
         assert!(!messages[1].broadcaster);
         assert_eq!(next.as_deref(), Some("TOKEN_2"));
+        assert!(messages
+            .iter()
+            .all(|m| m.platform == Some(crate::chat::ChatPlatform::YouTube)),
+        "the youtube parser must tag its messages");
     }
 
     #[test]

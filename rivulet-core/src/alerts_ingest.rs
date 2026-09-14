@@ -107,6 +107,10 @@ pub struct AlertEvent {
     pub message: Option<String>,
     /// Unix timestamp (seconds) from the payload, `0` when absent.
     pub timestamp: u64,
+    /// Platform the alert originated from, when known: EventSub notifications
+    /// are always Twitch; Streamlabs aggregates several providers, so those
+    /// payloads stay `None` and the dock renders them without a badge.
+    pub platform: Option<crate::chat::ChatPlatform>,
 }
 
 impl PartialEq for AlertEvent {
@@ -122,6 +126,7 @@ impl PartialEq for AlertEvent {
             && self.currency == other.currency
             && self.message == other.message
             && self.timestamp == other.timestamp
+            && self.platform == other.platform
     }
 }
 
@@ -152,6 +157,7 @@ impl AlertEvent {
             currency: None,
             message: None,
             timestamp: 0,
+            platform: Some(crate::chat::ChatPlatform::Twitch),
         }
     }
 
@@ -271,6 +277,7 @@ pub fn parse_streamlabs_webhook(json: &str) -> Result<AlertEvent, AlertIngestErr
                 currency,
                 message,
                 timestamp: 0,
+            platform: None,
             })
         }
         other => Err(AlertIngestError::UnsupportedKind(other.to_owned())),
@@ -307,6 +314,7 @@ pub fn parse_twitch_eventsub_notification(json: &str) -> Result<AlertEvent, Aler
                 currency: None,
                 message: None,
                 timestamp: 0,
+            platform: Some(crate::chat::ChatPlatform::Twitch),
             })
         }
         "channel.subscribe" => {
@@ -323,6 +331,7 @@ pub fn parse_twitch_eventsub_notification(json: &str) -> Result<AlertEvent, Aler
                 currency: None,
                 message: None,
                 timestamp: 0,
+            platform: Some(crate::chat::ChatPlatform::Twitch),
             })
         }
         "channel.subscription.gift" => {
@@ -340,6 +349,7 @@ pub fn parse_twitch_eventsub_notification(json: &str) -> Result<AlertEvent, Aler
                 currency: None,
                 message: None,
                 timestamp: 0,
+            platform: Some(crate::chat::ChatPlatform::Twitch),
             })
         }
         "channel.raid" => {
@@ -358,6 +368,7 @@ pub fn parse_twitch_eventsub_notification(json: &str) -> Result<AlertEvent, Aler
                 currency: None,
                 message: None,
                 timestamp: 0,
+            platform: Some(crate::chat::ChatPlatform::Twitch),
             })
         }
         other => Err(AlertIngestError::UnsupportedKind(other.to_owned())),

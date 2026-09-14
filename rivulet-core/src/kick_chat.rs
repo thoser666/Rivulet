@@ -132,6 +132,7 @@ pub fn parse_kick_event(payload: &str) -> Option<ChatMessage> {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0),
+        platform: Some(crate::chat::ChatPlatform::Kick),
     })
 }
 
@@ -478,6 +479,11 @@ mod tests {
         assert_eq!(msg.color.as_deref(), Some("#00FF00"));
         assert!(msg.badges.contains(&"broadcaster".to_owned()));
         assert!(msg.broadcaster);
+        assert_eq!(
+            msg.platform,
+            Some(crate::chat::ChatPlatform::Kick),
+            "the kick parser must tag its messages"
+        );
     }
 
     #[test]
