@@ -1,6 +1,6 @@
 # M6 — Multi-Track Audio Routing (Record / Stream)
 
-**Status:** In progress — **Phases 1–3 implemented, Linux backend in review** (issue [#154](https://github.com/thoser666/Rivulet/issues/154)).
+**Status:** In progress — **Phases 1–4 implemented, macOS fallback in review** (issue [#154](https://github.com/thoser666/Rivulet/issues/154)).
 
 **Phase 1 (engine core, 2026-09-13):** the `AudioSource`/`AudioRouting`/`AudioFilterConfig` types, the per-source engine API (`add_audio_source`, `set_audio_source_volume/muted/routing/filters`, `push_audio_source`), the versioned `AudioRoutingConfig` persistence (v1, unknown versions rejected, legacy System/Microphone defaults), and the routing-aware pipeline composition for recording (one branch per record-routed source), streaming (stream-routed sources mixed into the single FLV track), and dual output (both legs). Per-source `volume` elements are named (`<appsrc>_vol`) so volume/mute changes apply live to a running session.
 
@@ -10,7 +10,9 @@
 
 **Phase 4 (Linux PipeWire per-app capture, 2026-09-14):** the Linux equivalent rides on a native PipeWire capture stream whose `target.object` points at the application's *sink-input* node (`media.class = Stream/Output/Audio`) — PipeWire routes everything a client plays through such a node, so a targeted capture stream receives exactly its audio. `rivulet-audio` gains a linux-gated `app_audio_pw` module with the same `AppAudioCapture`/`AppAudioProcess`/`list_audio_processes` contract as the Windows backend (48 kHz stereo f32, matching the routed appsrc caps; enumeration via a registry roundtrip; per-source private loop/context/connection so teardown never disturbs other captures; stop signaled via an atomic flag between iterate slices). On Linux the `pid:<n>` device id carries the PipeWire *node id* — both are session-scoped handles to "the thing the user picked", so the engine and persistence layers stay platform-agnostic. The GUI picker/lifecycle/drain wiring is now unified across Windows and Linux (`cfg(any(windows, linux))`), and the classification helpers (`is_sink_input_media_class`, `node_display_label`) are unit-tested without a daemon on every CI run.
 
-**Not implemented yet:** the macOS capture backend (system loopback fallback) and the 5+ source resource report.
+**Phase 5 (macOS system-loopback fallback for Application sources, 2026-09-14):** macOS has no per-application capture API, so the fallback is the honest one: the system loopback — the first input device matching a known loopback driver (BlackHole, Soundflower, VB-Cable; the same keyword list as the legacy System capture) — is captured **once** and delivered to *every* routed Application source, with per-source volume/filters/mute still applied independently by the engine. `rivulet-audio` gains a macos-gated `app_audio_macos` module with the same `AppAudioCapture`/`AppAudioProcess`/`list_audio_processes` surface as the other backends (48 kHz stereo f32 matching the routed appsrc caps; cpal typed streams with the mandatory explicit `play()`; convert + resample on the worker thread so the realtime callback only copies bytes; atomic-flag stop with clean joins). The picker lists the loopback device first (capturable) followed by regular inputs; a Mixer hint states the sharing semantics (`audio_app_fallback_hint`, EN/DE). Without a loopback driver installed, capture fails with the descriptive install hint instead of recording silence. GUI wiring is now `cfg(any(windows, linux, macos))` everywhere, pinned by the new `per_app_capture_gating_covers_all_backends` GUI test and the `m6_audio_routing_phase5_macos_fallback_is_pinned` ci_pinning guard.
+
+**Not implemented yet:** the 5+ source resource report.
 **Tracked in:** Milestone M6 — Creator Toolkit & Interactivity
 
 ## Problem
@@ -44,7 +46,7 @@ A **multi-track audio routing system** that lets the user:
 | --- | --- | --- |
 | Windows | WASAPI process loopback (`ActivateAudioInterfaceAsync` on the virtual audio device) | **Implemented** (Phase 3) |
 | Linux | PipeWire capture stream targeted at the app's sink-input node (`target.object=<node-id>`) | **Implemented** (Phase 4) |
-| macOS | Core Audio per-app capture (requires `kAudioHardwareServiceDeviceProperty_VirtualDevice` or third-party driver) | Research needed |
+| macOS | **System-loopback fallback**: one shared capture of the loopback device delivered to every Application source (no per-app capture API) | **Implemented** (Phase 5) |
 
 > **Note:** per-app capture on macOS is limited. A fallback is to capture
 > the system loopback and let the user split via routing in OS audio settings.

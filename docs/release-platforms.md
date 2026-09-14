@@ -26,12 +26,15 @@ MSIX-based installer is justified.
 
 ## Prepared workflow
 
-`.github/workflows/distribution-readiness.yml` is a manual, dry-run-first
-workflow. Select an existing GitHub release tag and a channel in **Actions →
-Distribution Readiness**. It verifies that the channel's expected release
-assets exist and writes a plan to the step summary. It does not submit anything
-to a store and deliberately fails if `dry_run` is set to `false`; this prevents
-accidental publication before credentials and manifests have been reviewed.
+`.github/workflows/distribution-readiness.yml` is a dry-run-first workflow
+triggered weekly (Mondays at 07:25 UTC) against the newest published release
+and manually on demand. For a manual run, select an existing GitHub release
+tag and a channel in **Actions → Distribution Readiness**; the weekly run
+defaults to the newest published release on the GitHub channel. It verifies
+that the channel's expected release assets exist and writes a plan to the step
+summary. It does not submit anything to a store and deliberately fails if
+`dry_run` is set to `false`; this prevents accidental publication before
+credentials and manifests have been reviewed.
 
 Once a channel is ready, its publishing implementation should be added as a
 separate, explicitly permissioned job with:

@@ -395,7 +395,7 @@ must not be implied by beta parity.
 
 - [x] **Chat-driven auto-clips** — save replay-buffer highlight clips automatically when chat activity spikes (sliding-window message-rate detector, configurable threshold + window + cooldown) or on a `!clip` command (customizable command name); builds on the shipped chat dock (Twitch/Kick/YouTube) and M4 replay buffer; auto-clip toggle and settings in the Stream view, i18n (EN/DE)
 - [x] **Multi-platform restream** — one pipeline to Twitch, YouTube, and Kick simultaneously via the Stream view restream section: add/remove targets with per-platform name, platform selector, ingest URL, and stream key (persisted), independent health per target (Connecting/Live/Degraded/Failed), wired into `MultistreamSettings` before every stream start; max 4 targets, duplicate-name protection, i18n (EN/DE)
-- [ ] **Multi-track audio routing** — capture individual app audio streams (game, Spotify, Discord) as separate named sources with independent filters and volume; route each source independently to Record and/or Stream outputs via a checkbox matrix; persists across restarts with i18n (EN+DE); per-platform capture: WASAPI per-app (Windows), PipeWire/PulseAudio per-app (Linux), system loopback fallback (macOS) — **engine core + GUI mixer + Windows WASAPI and Linux PipeWire per-app capture implemented (Phases 1–4, issue [#154](https://github.com/thoser666/Rivulet/issues/154))**: source/routing/filter types, per-source engine API with live volume/mute, versioned `audio_routing_v1` persistence, routing-aware pipelines for record (per-source tracks), stream (mixed FLV track), and dual output, the Mixer-view routing matrix with per-source filter panel, shared inline mixers in the Record/Stream views, the Windows process-loopback backend and the Linux PipeWire backend (capture stream targeted at the app's sink-input node) with a unified process/node picker (macOS backend remains; Application sources show a pending-backend placeholder there); see [`docs/m6-audio-routing.md`](docs/m6-audio-routing.md)
+- [ ] **Multi-track audio routing** — capture individual app audio streams (game, Spotify, Discord) as separate named sources with independent filters and volume; route each source independently to Record and/or Stream outputs via a checkbox matrix; persists across restarts with i18n (EN+DE); per-platform capture: WASAPI per-app (Windows), PipeWire/PulseAudio per-app (Linux), system loopback fallback (macOS) — **engine core + GUI mixer + Windows WASAPI, Linux PipeWire and macOS system-loopback fallback per-app capture implemented (Phases 1–5, issue [#154](https://github.com/thoser666/Rivulet/issues/154))**: source/routing/filter types, per-source engine API with live volume/mute, versioned `audio_routing_v1` persistence, routing-aware pipelines for record (per-source tracks), stream (mixed FLV track), and dual output, the Mixer-view routing matrix with per-source filter panel, shared inline mixers in the Record/Stream views, the Windows process-loopback backend and the Linux PipeWire backend (capture stream targeted at the app's sink-input node) with a unified process/node picker, and the macOS fallback (the system loopback mix delivered to every routed Application source, with a Mixer hint about the sharing semantics); see [`docs/m6-audio-routing.md`](docs/m6-audio-routing.md)
 - [x] **Mobile & HTTP remote companion** — drive scenes, record, and stream from the phone or a browser on the LAN, building on the shipped obs-websocket v5 server (M5) with optional auth; self-contained mobile page (no CDN) served over HTTP with explicit LAN bind, LAN-requires-password policy, and a permission gate for remote stream start/stop (see [`docs/remote-companion.md`](docs/remote-companion.md))
 
 **Goal:** The creator workflows that make a streamer choose Rivulet — clips appear when chat pops off, the stream reaches every platform at once, and the setup is controllable from the couch.
@@ -658,11 +658,13 @@ Microsoft Store/MSIX is a later option. All external channels must publish the
 same version and checksums as GitHub Releases and should initially be limited
 to beta/stable builds.
 
-The manual, dry-run-first workflow
+The dry-run-first workflow
 [Distribution Readiness](.github/workflows/distribution-readiness.yml)
 checks release assets for each planned channel without submitting anything
-externally. See [docs/release-platforms.md](docs/release-platforms.md) for
-prerequisites and activation checklists.
+externally. It runs on a weekly schedule (Mondays) against the newest
+published release and can be triggered manually per channel. See
+[docs/release-platforms.md](docs/release-platforms.md) for prerequisites and
+activation checklists.
 
 ---
 

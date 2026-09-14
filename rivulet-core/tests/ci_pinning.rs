@@ -695,8 +695,15 @@ fn m6_audio_routing_phase4_linux_backend_is_pinned() {
     }
 
     // The GUI picker/lifecycle/drain contract must now cover both backends.
+    // The cfg accepts either operand order (rustc treats the disjunction the
+    // same way), so the pin must not depend on file text ordering.
+    assert!(
+        gui.contains("#[cfg(any(target_os = \"windows\", target_os = \"linux\"))]")
+            || gui.contains("#[cfg(any(target_os = \"linux\", target_os = \"windows\"))]")
+            || gui.contains("#[cfg(any(target_os = \"windows\", target_os = \"linux\", target_os = \"macos\"))]"),
+        "GUI per-app capture wiring must be gated on Windows and Linux (order-insensitive)"
+    );
     for required in [
-        "#[cfg(any(target_os = \"windows\", target_os = \"linux\"))]",
         "fn sync_app_audio_captures",
         "fn drain_app_audio_frames",
         "AppAudioCapture::start",
@@ -706,6 +713,70 @@ fn m6_audio_routing_phase4_linux_backend_is_pinned() {
             "GUI per-app capture wiring must pin {required}"
         );
     }
+}
+
+#[test]
+fn m6_audio_routing_phase5_macos_fallback_is_pinned() {
+    // Issue #154 Phase 5: the macOS per-app fallback — the system loopback
+    // mix delivered to every routed Application source, because macOS has
+    // no per-application capture API. The GUI wiring must now cover all
+    // three desktop platforms.
+    let mac = read("rivulet-audio/src/app_audio_macos.rs");
+    let audio_lib = read("rivulet-audio/src/lib.rs");
+    let gui = read("rivulet-gui/src/app.rs");
+
+    // Backend surface: the honest fallback semantics.
+    for required in [
+        "pub struct AppAudioCapture",
+        "pub struct AppAudioProcess",
+        "pub fn list_audio_processes",
+        "fn capture_loop",
+        "pub fn is_fallback_pid",
+        "pub const FALLBACK_PID",
+        // The system-mix contract: one loopback stream, fanned out.
+        "system loopback",
+        "LOOPBACK_DEVICE_KEYWORDS",
+        // Classification helpers (daemon-free CI coverage).
+        "fn is_loopback_device_name",
+        "fn classify_device",
+        // Known loopback drivers, same list as the legacy backend.
+        "blackhole",
+        "soundflower",
+        // cpal 0.15 requires an explicit play() or no callback fires.
+        ".play()",
+    ] {
+        assert!(
+            mac.contains(required),
+            "macOS fallback backend must pin {required}"
+        );
+    }
+
+    // Module registration is macos-gated and re-exports the shared contract.
+    for required in [
+        "#[cfg(target_os = \"macos\")]",
+        "pub mod app_audio_macos",
+        "pub use app_audio_macos::{list_audio_processes, AppAudioCapture, AppAudioProcess}",
+    ] {
+        assert!(
+            audio_lib.contains(required),
+            "rivulet-audio lib.rs must pin {required}"
+        );
+    }
+
+    // The GUI wiring must now name macOS in its cfg gates and carry the
+    // fallback hint in the Mixer.
+    assert!(
+        gui.contains("any(target_os = \"windows\", target_os = \"linux\", target_os = \"macos\")"),
+        "GUI per-app wiring must gate on all three platforms"
+    );
+    assert!(
+        gui.contains("audio_app_fallback_hint"),
+        "GUI must show the macOS fallback hint in the Mixer"
+    );
+    assert!(
+        gui.contains("fn per_app_capture_gating_covers_all_backends"),
+        "GUI tests must pin the triple-platform gating"
+    );
 }
 
 #[test]
@@ -733,10 +804,16 @@ fn m6_audio_routing_phase1_is_documented() {
         "spec must record the Phase-4 status"
     );
     assert!(
+        spec.contains(
+            "Phase 5 (macOS system-loopback fallback for Application sources, 2026-09-14)"
+        ),
+        "spec must record the Phase-5 status"
+    );
+    assert!(
         readme.contains(
-            "Windows WASAPI and Linux PipeWire per-app capture implemented (Phases 1\u{2013}4"
+            "Windows WASAPI, Linux PipeWire and macOS system-loopback fallback per-app capture implemented (Phases 1\u{2013}5"
         ) && readme.contains("#154"),
-        "README M6 bullet must reflect the Phase 1-4 state"
+        "README M6 bullet must reflect the Phase 1-5 state"
     );
     assert!(
         changelog.contains("feat(audio): **multi-track audio routing engine core"),
@@ -753,6 +830,10 @@ fn m6_audio_routing_phase1_is_documented() {
     assert!(
         changelog.contains("feat(audio): **PipeWire per-application capture backend"),
         "CHANGELOG must record the Phase-4 delivery"
+    );
+    assert!(
+        changelog.contains("feat(audio): **macOS system-loopback per-app fallback"),
+        "CHANGELOG must record the Phase-5 delivery"
     );
 }
 
@@ -3020,7 +3101,19 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
             && workflow.contains("type: choice")
             && workflow.contains("default: true")
             && workflow.contains("DRY_RUN"),
-        "distribution workflow must be manually triggered and dry-run-first"
+        "distribution workflow must be dispatchable and dry-run-first"
+    );
+    assert!(
+        workflow.contains("schedule:")
+            && workflow.contains("cron:")
+            && workflow.contains("25 7 * * 1"),
+        "distribution workflow must run on a Monday-morning weekly schedule fronting the newest published release"
+    );
+    assert!(
+        workflow.contains("resolve_tag")
+            || workflow.contains("resolved_tag")
+            || workflow.contains("gh release list"),
+        "the scheduled distribution run must resolve the newest published release when no tag is given"
     );
     assert!(
         workflow.contains("platform:")
