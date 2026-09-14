@@ -69,7 +69,9 @@ libc = "0.2"
 #    locked version or the Cargo.lock checksum).
 # -  winuser: global hotkeys (global_hotkey.rs — RegisterHotKey/UnregisterHotKey
 #    behind a message pump).
-winapi = { version = "0.3", features = ["memoryapi", "winbase", "winnt", "handleapi", "fileapi", "namedpipeapi", "winuser"] }
+# -  psapi / processthreadsapi: M6 resource report (tests/m6_resource_report.rs —
+#    GetProcessMemoryInfo working-set sampling and GetProcessTimes CPU deltas).
+winapi = { version = "0.3", features = ["memoryapi", "winbase", "winnt", "handleapi", "fileapi", "namedpipeapi", "winuser", "psapi", "processthreadsapi"] }
 # VST3 host skeleton: LoadLibraryW / FreeLibrary for plugin DLL loading
 # (vst3.rs — only the LibraryLoader feature is enabled, keeping the
 # attack surface minimal).
