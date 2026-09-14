@@ -143,10 +143,12 @@ impl MultiChat {
                 .iter()
                 .any(|(existing, _)| existing.platform == account.platform)
             {
-                tracing::warn!(
-                    platform = ?account.platform,
-                    "multi-chat: duplicate platform account ignored (first wins)"
-                );
+                // Static message on purpose: the account struct carries the
+                // OAuth token, so no account-derived value may flow into a
+                // log sink (CodeQL rust/cleartext-logging). The GUI refuses
+                // duplicate platforms at add time, making this warn purely
+                // defensive.
+                tracing::warn!("multi-chat: duplicate platform account ignored (first wins)");
                 continue;
             }
             let cfg = ChatConfig::new(
@@ -442,10 +444,9 @@ impl Chat {
         {
             let mut limiter = self.limiter.lock().unwrap_or_else(|e| e.into_inner());
             if !limiter.try_acquire() {
-                tracing::warn!(
-                    platform = ?self.platform(),
-                    "chat send dropped: platform rate limit exhausted"
-                );
+                // Static message: no account-derived value in log sinks
+                // (CodeQL rust/cleartext-logging).
+                tracing::warn!("chat send dropped: platform rate limit exhausted");
                 return false;
             }
         }
@@ -470,10 +471,9 @@ impl Chat {
         {
             let mut limiter = self.limiter.lock().unwrap_or_else(|e| e.into_inner());
             if !limiter.try_acquire() {
-                tracing::warn!(
-                    platform = ?self.platform(),
-                    "chat reply dropped: platform rate limit exhausted"
-                );
+                // Static message: no account-derived value in log sinks
+                // (CodeQL rust/cleartext-logging).
+                tracing::warn!("chat reply dropped: platform rate limit exhausted");
                 return false;
             }
         }
