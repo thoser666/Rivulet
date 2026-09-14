@@ -499,14 +499,17 @@ must not be implied by beta parity.
       awareness, conversational refinement, per-message restore points,
       test-event firing, and a gallery; **emote/asset generation** is an
       additional local T2I pipeline (transparent platform kit + optional 7TV
-      push); scope and research in
+      push) and **alert-sound/voice generation** an additional local T2S/TTS
+      pipeline (Stable Audio Open Small SFX/jingles, Kokoro voice read-outs,
+      assigned per alert kind); scope and research in
       [`docs/m10-ai-creative-studio.md`](docs/m10-ai-creative-studio.md)
 - [ ] **AI off-switches (Settings + Assistant tab)** — all AI features are
       **off by default** and independently disableable: a global
       **"Enable AI features"** master switch (kills the chatbot, the creative
-      studio, and the emote/T2I generator — no model load, no workers
-      spawned) plus per-feature toggles for "AI Chat Assistant", "AI
-      Creative Studio (overlays)", and "Emote/T2I generator", with an
+      studio, the emote/T2I generator, and the sound/voice generator — no
+      model load, no workers spawned) plus per-feature toggles for "AI Chat
+      Assistant", "AI Creative Studio (overlays)", "Emote/T2I generator", and
+      "Sound/voice generator", with an
       optional "pause while live" runtime override (Go Live ⇒ models
       suspend, streaming stays unblocked); the switches persist (Settings
       serialization), are localized (EN/DE), and their default-off state is

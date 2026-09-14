@@ -17,7 +17,8 @@ A **local-first "AI Creative Studio"** inside Rivulet, driven by the M10 Assista
 2. **Live-event reactivity** — generated overlays react to follows, subs, raids, chat messages, and custom `!commands` across Twitch, Kick, and YouTube, through the already-shipped chat and alert pipelines (M5/M6).
 3. **Studio-grade UX** — conversational refinement, reference-image color pickups, per-message restore points (undo/redo), test-event firing, and a pre-made gallery, all local.
 4. **Emote/asset generation (additional feature)** — an optional local T2I pipeline produces platform-ready channel emotes (transparent PNG, Twitch/Kick sizes), reusing the same chat brain for prompt crafting.
-5. **First-class off-switches** — the AI chatbot, the creative studio, and the emote/T2I generator are **off by default** and independently disableable, so a streamer pays no model/resource cost and gives up no trust unless they opt in.
+5. **Alert-sound & voice generation (additional feature)** — an optional local sound pipeline produces alert SFX (follow/sub/raid/donation stingers), short jingles and TTS voice read-outs ("Kira spent 20 euros") from natural-language prompts, wired into the alert settings per alert kind — the audio counterpart to the emote pipeline.
+6. **First-class off-switches** — the AI chatbot, the creative studio, the emote/T2I generator, and the sound/voice generator are **off by default** and independently disableable, so a streamer pays no model/resource cost and gives up no trust unless they opt in.
 
 Everything runs locally: **Ollama** for the chat brain and code generation, Rivulet's own browser source (on top of `wry`) for rendering, and a local T2I backend for images. Free open-weights models (Apache-2.0) throughout — no API keys, no accounts, no throttles.
 
@@ -86,6 +87,21 @@ Runtime options (via local HTTP, like Ollama): **stable-diffusion.cpp** (single 
 
 Reachable feature: **generate + validate + export a platform kit** (Twitch/Kick PNGs incl. alpha/28/56/112, 7TV-ready) and, where a free API exists, publish to a **7TV emote set**. Native Twitch/Kick uploads stay a "open dashboard / copy files" manual step.
 
+### 6. Sound generation — free local T2S/TTS (additional feature)
+
+Researched 2026-09-14. The alert/overlay feature set needs three audio classes: short **SFX stingers** (follow/sub/donation, ≤ 3 s), **jingles/stingers** (raid intro, BRB loop, ≤ 47 s) and **spoken read-outs** (donation/subscription text-to-speech). All three have local, free options:
+
+| Model | License | Class | Notes |
+| --- | --- | --- | --- |
+| **Stable Audio Open Small** (341M) | Stability AI Community License (free commercial use) | SFX/stingers ≤ 11 s | Co-developed with Arm for **on-device** inference; runs on phones, so an 8 GB desktop GPU is comfortable. The alert-stinger default. |
+| **Stable Audio Open 1.0** (1.1B) | Stability AI Community License (free commercial use) | Samples/jingles ≤ 47 s | Higher quality, heavier; the quality pick for intros/jingles on 12+ GB cards. |
+| **Kokoro-82M** | **Apache-2.0** | TTS read-outs | 82M params, runs fast on CPU, competitive voice quality; the default for donation/sub read-outs. English first; check voice coverage for DE before promising it. |
+| AudioLDM 2 | research license (non-commercial) | SFX/music | **Excluded** — license does not fit Rivulet's free-for-everyone positioning. |
+
+Runtime options mirror the T2I decision space: **stable-audio-tools / audio-diffusion-python via local HTTP** (separate process, like ComfyUI), or a **`candle`**-style in-process port (pure Rust — matches the engine philosophy, more integration work; no known Kokoro/stable-audio port today, so phase 1 uses the local-HTTP shape with a small worker). Prompt crafting for SFX is a chat-model strength: the Ollama code model turns "upbeat 1-second donation ding, glassy, not cheesy" into a structured generation prompt (style, duration, BPM, avoid-list), exactly like the emote T2I prompt path.
+
+Delivery: generated audio is trimmed/normalized (44.1 kHz stereo WAV → OGG), stored under `~/.rivulet/creative/sounds/`, and **assigned per alert kind** in the alert settings (reusing the alert-settings surface that overlays already target). A generated sound is previewable in the studio and replaceable by the user's own file at any time — generation is an aid, not a lock-in.
+
 ## Kill-switch design (off by default)
 
 All AI features are **off by default** and independently disableable through **Settings**. This is the resource-budget, trust, and failure-isolation boundary at once — a streamer with a mid-range GPU plays without any model resident, and a broken Ollama/T2I install cannot produce error states, only a disabled feature.
@@ -93,7 +109,7 @@ All AI features are **off by default** and independently disableable through **S
 ### Switch hierarchy
 
 1. **Master switch — "Enable AI features"** (default **off**). Kills the chatbot, the creative studio, and the emote/T2I generator together: no model load, no worker threads, no queues. This is the single kill-path for users who want no AI at all (mirrors Meld Spark being optional).
-2. **Per-feature toggles** (default **off**, independent): "AI Chat Assistant", "AI Creative Studio (overlays)", "Emote/T2I generator". Enabling a per-feature toggle while the master is off is rejected (or implies the master).
+2. **Per-feature toggles** (default **off**, independent): "AI Chat Assistant", "AI Creative Studio (overlays)", "Emote/T2I generator", "Sound/voice generator". Enabling a per-feature toggle while the master is off is rejected (or implies the master).
 3. **Runtime override — "Pause AI while live"** (default **off**). When streaming (Go Live), models suspend; streaming and capture stay unblocked. Combines with the M10 gate's low-priority/cancellation behaviour.
 
 ### Persistence & localization
@@ -152,6 +168,7 @@ true across README / gate / spec:
 4. **Reactive wiring** — the overlay subscribes to a small host IPC bridge (`window.rivulet.on('follow'|'sub'|'raid'|'chat'|'command', …)`); events pushed from the M5 alert-ingest and chat pipelines.
 5. **Refine** — every subsequent message is a new turn over the same overlay: "change the color to #0D1B2A", "make it pulse at 30s", "show subscriber names only". Restore point per turn if the change regresses.
 6. **Emote export** — T2I render → alpha extraction (`rembg`/`u2net`, ONNX local) → platform kit (28/56/112 PNG + 7TV-ready) → optional 7TV push via its public API.
+7. **Sound generation** — SFX/jingle/TTS request routed to the sound backend (chat model crafts the generation prompt), rendered by the local T2S worker, normalized to OGG, assigned per alert kind; TTS read-outs take the alert's message text directly.
 
 ### New engine pieces (all inside `rivulet-core`)
 
@@ -177,12 +194,21 @@ pub trait EmoteGeneratorProvider: Send + Sync {
     fn generate(&self, req: GenerateRequest) -> Result<GeneratedImage, GenerationError>;
 }
 
+// T2S/TTS backend for the sound/voice sub-feature (same shape as the T2I
+// trait — a local HTTP worker first, in-process port later).
+pub trait SoundGeneratorProvider: Send + Sync {
+    fn generate(&self, req: SoundRequest) -> Result<GeneratedSound, GenerationError>;
+    // `None` when the runtime cannot speak (SFX-only backend).
+    fn speak(&self, text: &str, voice: &str) -> Result<GeneratedSound, GenerationError>;
+}
+
 // Kill-switch state, serialized into the Settings struct.
 pub struct AiSwitches {
     pub master_enabled: bool,           // default false: turns all AI off
     pub assistant_enabled: bool,        // default false
     pub creative_studio_enabled: bool,  // default false
     pub emote_enabled: bool,            // default false
+    pub sound_enabled: bool,            // default false: SFX/jingle/TTS generator
     pub pause_while_live: bool,         // default false
 }
 ```
@@ -203,6 +229,7 @@ pub struct AiSwitches {
 - Conversational refinement + restore points per turn.
 - Gallery/seed pack, test-event firing, reference-image color pickup.
 - **Emote/asset generator** as an additional T2I pipeline with platform export kit (7TV push optional).
+- **Sound/voice generator** as an additional T2S/TTS pipeline: alert SFX, jingles and spoken read-outs, assigned per alert kind (research §6).
 - **Kill-switch design**: master + per-feature toggles + pause-while-live, default off, persisted, localized.
 
 ### Out of scope (phase 1)
@@ -210,6 +237,8 @@ pub struct AiSwitches {
 - Cloud AI providers — contradicts local-first M10 positioning.
 - Animated emotes (GIF/webp loop) — later on top of the same pipeline.
 - Native Twitch/Kick auto-upload — blocked by platform APIs (documented above).
+- Full music generation (songs, long background loops) — Stable Audio 3.0 sizes out for the target hardware; revisit when open weights shrink.
+- Live voice cloning of a specific person — consent/ethics minefield with no streaming upside; only the model's stock voices ship.
 
 ## Resource budget (M10 quality gate)
 
@@ -218,6 +247,7 @@ The M10 gate (`milestone-quality-gates.md` §M10) already requires local-model C
 - LLM generation runs in the M10 worker (one job at a time, low priority while streaming).
 - Browser-source overlay rendering must never block the capture pipeline (already a core S5b requirement: bounded input queue, RGBA frame hand-off).
 - T2I (if enabled) runs as a separate process/queue, cancelled when VRAM pressure is detected; studio degrades to "overlay-only" gracefully when the generator is unavailable.
+- T2S/TTS (if enabled) shares the separate-process/queue shape; Kokoro-82M is small enough for CPU fallback when VRAM is tight, and the studio degrades to "no generated sound" (user-supplied files keep working) when the worker is unavailable. Audio is rendered **before** Go Live or during low-priority windows — sound generation never blocks the audio mux.
 - **Off by default** is a hard resource rule: with the master switch off, no model is loaded, no worker spawned, no queue scheduled — measured by the M10 gate's resource report.
 
 ## Open questions
@@ -246,4 +276,5 @@ The M10 gate (`milestone-quality-gates.md` §M10) already requires local-model C
 | **Spike** | Code-gen quality spike (qwen2.5-coder:7b vs devstral) + overlay-in-scene prototype | ✅ Spike done (2026-09-12): `qwen2.5-coder:7b` wins on 8 GB (4/5 valid @ 8–15 s; devstral 2/5 + 3 timeouts). Artifacts + review index in `scripts/codegen-spike/`. Overlay-in-scene prototype still open. |
 | **Feature** | Overlay pipeline + reactive wiring + GUI panel | |
 | **Emote sub-feature** | T2I backend + platform export kit (7TV push optional) | |
+| **Sound sub-feature** | T2S/TTS research (§6: Stable Audio Open Small default, Kokoro TTS) + alert-sound assignment | Research done (2026-09-14); pipeline implementation open |
 | **Kill-switch** | `AiSwitches` persistence + Settings UI + default-off tests + pause-while-live hook | |

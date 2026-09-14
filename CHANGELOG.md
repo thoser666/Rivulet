@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- feat(m10): **AI Creative Studio — sound/voice generation research** — the
+  spec gains a sound-generation track (`docs/m10-ai-creative-studio.md` §6):
+  alert SFX, jingles and spoken read-outs generated fully locally —
+  **Stable Audio Open Small** (341M, free commercial license, on-device) as
+  the SFX/stinger default, **Stable Audio Open 1.0** for longer jingles,
+  **Kokoro-82M (Apache-2.0, CPU-capable)** for donation/sub voice read-outs;
+  AudioLDM 2 excluded for license reasons. Chat model crafts the generation
+  prompt, sounds are normalized and **assigned per alert kind** in the alert
+  settings, user-supplied files stay replaceable at any time. Kill-switches
+  extend with a dedicated "Sound/voice generator" toggle (off by default,
+  same master/pause-while-live contract), the gate reviews CPU fallback and
+  audio-mux non-blocking rules, and the ci_pinning guard pins all markers.
 - feat(chat): **combined multi-platform chat dock** — the dock no longer
   selects a single platform: it manages a list of accounts (one per
   platform) and connects one worker per account via the new
