@@ -255,11 +255,13 @@ blocks:
   routed to record never reaches the stream and vice versa; zero record-routed
   sources starts recording with a warning and no audio tracks; per-app capture
   degrades gracefully where the platform lacks it (macOS loopback hint).
-  - **Status note:** the remaining engineering item — design complete
-    (types, engine API, pipeline diagram, persistence schema, i18n keys);
-    implementation not started. The three per-platform capture backends
-    (WASAPI per-app, PipeWire, macOS loopback fallback) are marked
-    "research needed" in the design doc and are the main risk area.
+  - **Status note:** shipped (PRs merged, #154 in review) — Phases 1–4
+    implemented (engine routing matrix + persistence, mixer UI in all three
+    placements, WASAPI per-app capture on Windows, PipeWire node capture on
+    Linux); the macOS system-loopback fallback is marked "research needed"
+    in the design doc and is the main risk area. The resource report is
+    done: [`docs/m6-audio-resource-report.md`](m6-audio-resource-report.md)
+    (6 sources, full filter chains, PASS).
 - Mixer parity: the same per-source controls (volume, mute, filters) are
   reachable in the Record view, the Stream view, and the Mixer view — macOS
   ships the same mixer controls as Windows/Linux (closes the M5 mixer follow-up).
@@ -269,10 +271,12 @@ blocks:
     mixer follow-up as part of it.
 - Clip writes, restream fan-out, and remote sessions stay within the
   documented CPU/memory/frame-time budgets (see the resource table above).
-  - **Status note:** partially evidenced — clip/restream/remote shipped and
-    tested; the formal resource report for active creator sessions (incl.
-    5+ audio sources with full filter chains) is due with the routing
-    implementation.
+  - **Status note:** evidenced — clip/restream/remote shipped and tested;
+    the creator-session resource report is done
+    ([`docs/m6-audio-resource-report.md`](m6-audio-resource-report.md)):
+    6 routed audio sources with full filter chains in a live recording
+    session stay at push p99 ≤ 60 µs, CPU delta ≈ 0 and memory growth
+    ≤ 3.2 MiB; video-path frame time remains G5's capture-side gate.
 
 Exit evidence: clip trigger/save tests, per-target restream failure tests,
 remote-auth tests, audio-routing round-trip/routing-separation tests, and a

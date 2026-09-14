@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+- test(resources): **M6 resource report — 6 routed audio sources with full
+  filter chains stay within the resource budget (final gate evidence for
+  issue [#154](https://github.com/thoser666/Rivulet/issues/154))** —
+  new Windows-gated harness `rivulet-core/tests/m6_resource_report.rs`
+  measures a real, running recording session with 6 routed `Application`
+  sources, each carrying the full filter chain (noise gate, expander,
+  compressor, limiter, makeup gain, 10-band EQ): per-source appsrc push
+  latency p50/p95/p99 = 12/14/60 µs (budget 5,000 µs), session CPU delta
+  ≈ 0 vs. the identical 0-source baseline (budget 2%), working-set growth
+  ≤ 3.2 MiB over the sustained window (budget 64 MiB), running-pipeline
+  element histograms prove constant 16-element-per-source audio overhead
+  (linear; video/mux path constant), and the produced MP4 carries exactly
+  6 audio tracks + 1 video track. Engine gains
+  `RivuletEngine::pipeline_factory_histogram` (element introspection for
+  reports) and winapi gains the `psapi`/`processthreadsapi` features for
+  `GetProcessMemoryInfo`/`GetProcessTimes` sampling. The report is written
+  as resource-efficiency JSON to `target/m6-audio-resource-report.json`
+  (validated PASS by `scripts/resource-efficiency-check.py`) and documented
+  in [`docs/m6-audio-resource-report.md`](docs/m6-audio-resource-report.md);
+  video-path frame time is honestly `N/A` (G5's capture-side gate).
+
 - feat(audio): **macOS system-loopback per-app fallback (Phase 5 of issue
   [#154](https://github.com/thoser666/Rivulet/issues/154), M6, macOS)** —
   Application-kind audio sources now capture on macOS via the honest

@@ -2468,6 +2468,29 @@ impl RivuletEngine {
             .unwrap_or_default()
     }
 
+    /// Factory-name histogram of every element in the running pipeline
+    /// (`"audiodynamic" -> 24` …). The M6 resource report (issue #154) uses
+    /// the deltas between source counts to prove the per-source audio graph
+    /// overhead is constant (linear scaling). `None` when no session is
+    /// running.
+    pub fn pipeline_factory_histogram(&self) -> Option<std::collections::BTreeMap<String, usize>> {
+        let pipeline = self.pipeline.as_ref()?;
+        let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
+        for element in pipeline.children() {
+            if let Some(factory) = element.factory() {
+                *counts.entry(factory.name().to_string()).or_insert(0) += 1;
+            }
+        }
+        Some(counts)
+    }
+
+    /// The raw running pipeline, for introspection in tests and reports.
+    /// `None` when no session is running.
+    #[cfg(test)]
+    pub fn pipeline_for_dbg(&self) -> Option<&gst::Pipeline> {
+        self.pipeline.as_ref()
+    }
+
     /// Enable the replay buffer with the given retention window. The encoded
     /// video/audio of the next recording (or stream) is kept in RAM for the
     /// last `duration`, so [`RivuletEngine::save_replay`] can write a clip

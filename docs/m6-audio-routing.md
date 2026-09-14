@@ -192,8 +192,14 @@ The following M6-specific checks must pass before this feature ships:
 - [ ] Platform fallback: on macOS where per-app capture is unavailable, the
   UI shows the loopback hint and the system source acts as the single
   "System" capture (behaviour test).
-- [ ] CPU/memory/frame-time stays within the M6 resource budget when
-  5+ sources with full filter chains are active simultaneously.
+- [x] CPU/memory/frame-time stays within the M6 resource budget when
+  5+ sources with full filter chains are active simultaneously —
+  measured, see [`docs/m6-audio-resource-report.md`](m6-audio-resource-report.md)
+  (6 sources, full chains: push p99 ≤ 60 µs, CPU delta ≈ 0, memory growth
+  ≤ 3.2 MiB, linear graph scaling, 6 AAC tracks in the output; harness
+  `rivulet-core/tests/m6_resource_report.rs`, JSON validated by
+  `scripts/resource-efficiency-check.py`). Video-path frame-time impact is
+  `N/A` here (G5's capture-side gate, synthetic video feed).
 - [ ] i18n parity: every new key exists in EN and DE locale files
   (`ci_pinning` guard).
 

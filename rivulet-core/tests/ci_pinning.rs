@@ -835,6 +835,62 @@ fn m6_audio_routing_phase1_is_documented() {
         changelog.contains("feat(audio): **macOS system-loopback per-app fallback"),
         "CHANGELOG must record the Phase-5 delivery"
     );
+    // The resource-report gate evidence must stay attached to the feature:
+    // the report doc exists, the spec checklist links it as met, and the
+    // CHANGELOG records the harness delivery.
+    let report = read("docs/m6-audio-resource-report.md");
+    for required in [
+        "# M6 Resource Report",
+        "Result: **PASS**",
+        "p50 | 11.6",
+        "6 routed audio sources, each carrying the full filter chain",
+        "resource-efficiency-check.py",
+        // The honest N/A reporting the gates doc requires.
+        "`N/A`",
+        "G5's gate",
+    ] {
+        assert!(
+            report.contains(required),
+            "resource report must contain {required}"
+        );
+    }
+    assert!(
+        spec.contains("m6-audio-resource-report.md"),
+        "spec must link the resource report for the budget criterion"
+    );
+    assert!(
+        changelog.contains("test(resources): **M6 resource report"),
+        "CHANGELOG must record the resource-report harness"
+    );
+}
+
+#[test]
+fn m6_resource_report_harness_is_pinned() {
+    // The harness must keep measuring the full gate surface: 5+ sources with
+    // complete filter chains, real latency percentiles, CPU/memory sampling,
+    // linear graph-scaling proof, output-integrity check, and the honest
+    // frame-time N/A. Regressions here silently empty the M6 evidence.
+    let harness = read("rivulet-core/tests/m6_resource_report.rs");
+    for required in [
+        "const SOURCES: usize = 6",
+        "noise_gate: Some(NoiseGateConfig::default())",
+        "expander: Some(ExpanderConfig::default())",
+        "compressor: Some(CompressorConfig::default())",
+        "limiter: Some(LimiterConfig::default())",
+        "eq: Some(EqConfig",
+        "pipeline_factory_histogram",
+        "GetProcessTimes",
+        "GetProcessMemoryInfo",
+        "audio_streams().len()",
+        "MAX_MEMORY_GROWTH_MB: f64 = 64.0",
+        "p99 < 5_000.0",
+        "resource-efficiency schema",
+    ] {
+        assert!(
+            harness.contains(required),
+            "resource-report harness must pin {required}"
+        );
+    }
 }
 
 #[test]
