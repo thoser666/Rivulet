@@ -368,7 +368,9 @@ fn run_session(
     });
     ws.send(tungstenite::Message::Text(subscribe.to_string().into()))?;
 
-    tracing::info!(chatroom = chatroom_id, "Kick chat connected");
+    // Static message: no config-derived value in log sinks (the config
+    // carries the session token; rust/cleartext-logging).
+    tracing::info!("Kick chat connected");
 
     loop {
         while let Ok(msg) = rx.try_recv() {

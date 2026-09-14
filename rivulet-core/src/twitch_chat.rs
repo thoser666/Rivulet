@@ -309,7 +309,11 @@ fn run_session(
     writeln!(writer, "JOIN {channel}")?;
     writer.flush()?;
 
-    tracing::info!(channel = %channel, nick = %nick, "Twitch chat connected");
+    // Static message on purpose: the config struct carries the OAuth token,
+    // so CodeQL treats every value derived from it (channel, nick) as
+    // sensitive — no account-derived field may reach a log sink
+    // (rust/cleartext-logging).
+    tracing::info!("Twitch chat connected");
 
     let mut line = String::new();
     loop {

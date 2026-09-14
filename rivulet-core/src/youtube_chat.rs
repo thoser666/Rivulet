@@ -304,7 +304,10 @@ fn run_session(
         anyhow::anyhow!("no live-chat continuation found (stream may have ended)")
     })?;
 
-    tracing::info!(video = video_id, "YouTube chat connected");
+    // Static message: no config-derived value in log sinks (rust/
+    // cleartext-logging; the video id derives from the same struct as
+    // the token).
+    tracing::info!("YouTube chat connected");
 
     loop {
         if let Ok(Msg::Disconnect) = rx.try_recv() {
