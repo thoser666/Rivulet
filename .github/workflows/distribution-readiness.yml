@@ -1,16 +1,25 @@
 name: Distribution Readiness
 
 # This workflow prepares the distribution channels without changing external
-# stores. It is intentionally manual and dry-run-first: store credentials,
-# package manifests, and publisher approvals must be configured before a
-# publishing job is added.
+# stores. It is intentionally dry-run-first: store credentials, package
+# manifests, and publisher approvals must be configured before a publishing
+# job is added.
+#
+# Triggered weekly (Mondays 07:25 UTC, right after the weekly release
+# promotion) and on demand via workflow_dispatch. The scheduled run inspects
+# the newest published release against the canonical GitHub channel; manual
+# runs pick the channel with the platform input.
 
 on:
+  schedule:
+    # Mondays at 07:25 UTC, after the weekly promotion, against the newest
+    # published release.
+    - cron: "25 7 * * 1"
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Existing GitHub Release tag to inspect (for example v0.64.0-alpha.1)"
-        required: true
+        description: "Existing GitHub Release tag to inspect (default: newest published release)"
+        required: false
         type: string
       platform:
         description: "Distribution channel to validate"
@@ -38,16 +47,38 @@ permissions:
 
 jobs:
   validate-release:
-    name: Validate ${{ inputs.platform }} distribution
+    name: Validate ${{ inputs.platform || 'github' }} distribution
     runs-on: ubuntu-latest
+    outputs:
+      resolved_tag: ${{ steps.resolve.outputs.release_tag }}
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.release_tag }}
-      PLATFORM: ${{ inputs.platform }}
-      DRY_RUN: ${{ inputs.dry_run }}
+      RELEASE_TAG: ${{ inputs.release_tag || '' }}
+      PLATFORM: ${{ inputs.platform || 'github' }}
+      DRY_RUN: ${{ inputs.dry_run || 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve release tag (scheduled runs default to the newest published release)
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_TAG" ]; then
+            # Newest published release first. isDraft=false only lists actually
+            # published releases; every release in this repo is a prerelease, so
+            # filtering those out would empty the list.
+            RELEASE_TAG="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 30 \
+              --json tagName,isDraft --jq '[.[] | select(.isDraft == false)][0].tagName')"
+          fi
+          if [ -z "$RELEASE_TAG" ] || [ "$RELEASE_TAG" = "null" ]; then
+            echo "::error::No published release found to inspect"
+            exit 1
+          fi
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+          echo "Distribution readiness for: $RELEASE_TAG (channel: $PLATFORM, dry run: $DRY_RUN)"
 
       - name: Inspect release assets
         shell: bash
@@ -151,8 +182,8 @@ jobs:
     needs: validate-release
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.release_tag }}
-      DRY_RUN: ${{ inputs.dry_run }}
+      RELEASE_TAG: ${{ needs.validate-release.outputs.resolved_tag }}
+      DRY_RUN: ${{ inputs.dry_run || 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -222,8 +253,8 @@ jobs:
     runs-on: windows-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.release_tag }}
-      DRY_RUN: ${{ inputs.dry_run }}
+      RELEASE_TAG: ${{ needs.validate-release.outputs.resolved_tag }}
+      DRY_RUN: ${{ inputs.dry_run || 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -296,8 +327,8 @@ jobs:
     runs-on: windows-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.release_tag }}
-      DRY_RUN: ${{ inputs.dry_run }}
+      RELEASE_TAG: ${{ needs.validate-release.outputs.resolved_tag }}
+      DRY_RUN: ${{ inputs.dry_run || 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -366,8 +397,8 @@ jobs:
     runs-on: windows-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.release_tag }}
-      DRY_RUN: ${{ inputs.dry_run }}
+      RELEASE_TAG: ${{ needs.validate-release.outputs.resolved_tag }}
+      DRY_RUN: ${{ inputs.dry_run || 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -437,8 +468,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: ${{ inputs.release_tag }}
-      DRY_RUN: ${{ inputs.dry_run }}
+      RELEASE_TAG: ${{ needs.validate-release.outputs.resolved_tag }}
+      DRY_RUN: ${{ inputs.dry_run || 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
