@@ -1,6 +1,6 @@
 # M6 — Multi-Track Audio Routing (Record / Stream)
 
-**Status:** In progress — **Phases 1–4 implemented, macOS fallback in review** (issue [#154](https://github.com/thoser666/Rivulet/issues/154)).
+**Status:** Done — **Phases 1–5 implemented and merged** (issue [#154](https://github.com/thoser666/Rivulet/issues/154) closed; completion report in [`docs/m6-creator-toolkit-completion-report.md`](m6-creator-toolkit-completion-report.md)).
 
 **Phase 1 (engine core, 2026-09-13):** the `AudioSource`/`AudioRouting`/`AudioFilterConfig` types, the per-source engine API (`add_audio_source`, `set_audio_source_volume/muted/routing/filters`, `push_audio_source`), the versioned `AudioRoutingConfig` persistence (v1, unknown versions rejected, legacy System/Microphone defaults), and the routing-aware pipeline composition for recording (one branch per record-routed source), streaming (stream-routed sources mixed into the single FLV track), and dual output (both legs). Per-source `volume` elements are named (`<appsrc>_vol`) so volume/mute changes apply live to a running session.
 
@@ -12,7 +12,9 @@
 
 **Phase 5 (macOS system-loopback fallback for Application sources, 2026-09-14):** macOS has no per-application capture API, so the fallback is the honest one: the system loopback — the first input device matching a known loopback driver (BlackHole, Soundflower, VB-Cable; the same keyword list as the legacy System capture) — is captured **once** and delivered to *every* routed Application source, with per-source volume/filters/mute still applied independently by the engine. `rivulet-audio` gains a macos-gated `app_audio_macos` module with the same `AppAudioCapture`/`AppAudioProcess`/`list_audio_processes` surface as the other backends (48 kHz stereo f32 matching the routed appsrc caps; cpal typed streams with the mandatory explicit `play()`; convert + resample on the worker thread so the realtime callback only copies bytes; atomic-flag stop with clean joins). The picker lists the loopback device first (capturable) followed by regular inputs; a Mixer hint states the sharing semantics (`audio_app_fallback_hint`, EN/DE). Without a loopback driver installed, capture fails with the descriptive install hint instead of recording silence. GUI wiring is now `cfg(any(windows, linux, macos))` everywhere, pinned by the new `per_app_capture_gating_covers_all_backends` GUI test and the `m6_audio_routing_phase5_macos_fallback_is_pinned` ci_pinning guard.
 
-**Not implemented yet:** the 5+ source resource report.
+**Not implemented yet:** none — all five phases plus the resource report are
+merged (see the [completion report](m6-creator-toolkit-completion-report.md)
+for the honest platform-evidence follow-ups).
 **Tracked in:** Milestone M6 — Creator Toolkit & Interactivity
 
 ## Problem
@@ -181,15 +183,15 @@ Windows/Linux (closing the M5 mixer follow-up from `docs/macos-recording.md`).
 
 The following M6-specific checks must pass before this feature ships:
 
-- [ ] Per-source volume, mute, and filter settings survive a serialize →
+- [x] Per-source volume, mute, and filter settings survive a serialize →
   deserialize round-trip (unit test).
-- [ ] Routing matrix: a source routed to record only does NOT appear in the
+- [x] Routing matrix: a source routed to record only does NOT appear in the
   stream output, and vice versa (integration test with mock pipeline).
-- [ ] At least one source routed to record: recording starts without error.
+- [x] At least one source routed to record: recording starts without error.
   Zero sources routed: recording starts with a warning and no audio tracks.
-- [ ] Stream mix contains exactly the sources with `stream = true` (FLV
+- [x] Stream mix contains exactly the sources with `stream = true` (FLV
   single-track verification).
-- [ ] Platform fallback: on macOS where per-app capture is unavailable, the
+- [x] Platform fallback: on macOS where per-app capture is unavailable, the
   UI shows the loopback hint and the system source acts as the single
   "System" capture (behaviour test).
 - [x] CPU/memory/frame-time stays within the M6 resource budget when
@@ -200,7 +202,7 @@ The following M6-specific checks must pass before this feature ships:
   `rivulet-core/tests/m6_resource_report.rs`, JSON validated by
   `scripts/resource-efficiency-check.py`). Video-path frame-time impact is
   `N/A` here (G5's capture-side gate, synthetic video feed).
-- [ ] i18n parity: every new key exists in EN and DE locale files
+- [x] i18n parity: every new key exists in EN and DE locale files
   (`ci_pinning` guard).
 
 ## Out of scope (this feature)

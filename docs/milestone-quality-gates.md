@@ -220,12 +220,11 @@ trust/permission review.
 
 ### M6: Creator Toolkit and Interactivity
 
-**Status: In progress** — 3 of 4 features are shipped and their issues closed
-(#97 auto-clips, #98 restream, #99 remote companion); multi-track audio
-routing remains (designed in
-[`docs/m6-audio-routing.md`](m6-audio-routing.md)). Per-criterion status
-below; the milestone closes when the routing criteria and the resource
-report pass.
+**Status: Done** — all 4 features are shipped and their issues are closed
+(#97 auto-clips, #98 restream, #99 remote companion, #154 multi-track audio
+routing); the completion report records the honest follow-ups:
+[`docs/m6-creator-toolkit-completion-report.md`](m6-creator-toolkit-completion-report.md).
+Per-criterion status below.
 
 Review creator workflows that build on shipped chat/replay/remote building
 blocks:
@@ -255,20 +254,24 @@ blocks:
   routed to record never reaches the stream and vice versa; zero record-routed
   sources starts recording with a warning and no audio tracks; per-app capture
   degrades gracefully where the platform lacks it (macOS loopback hint).
-  - **Status note:** shipped (PRs merged, #154 in review) — Phases 1–4
-    implemented (engine routing matrix + persistence, mixer UI in all three
+  - **Status note:** shipped (PRs merged, #154 closed) — Phases 1–5
+    implemented: engine routing matrix + persistence, mixer UI in all three
     placements, WASAPI per-app capture on Windows, PipeWire node capture on
-    Linux); the macOS system-loopback fallback is marked "research needed"
-    in the design doc and is the main risk area. The resource report is
-    done: [`docs/m6-audio-resource-report.md`](m6-audio-resource-report.md)
+    Linux, and the macOS system-loopback fallback (captured once, delivered to
+    every routed Application source; Mixer hint about the sharing semantics).
+    All quality-gate criteria in
+    [`docs/m6-audio-routing.md`](m6-audio-routing.md) are checked. The resource
+    report is done:
+    [`docs/m6-audio-resource-report.md`](m6-audio-resource-report.md)
     (6 sources, full filter chains, PASS).
 - Mixer parity: the same per-source controls (volume, mute, filters) are
   reachable in the Record view, the Stream view, and the Mixer view — macOS
   ships the same mixer controls as Windows/Linux (closes the M5 mixer follow-up).
-  - **Status note:** pending with the audio-routing feature — the current
-    mixer shows System/Microphone only; the design doc requires one shared
-    implementation across all three placements and closes the M5 macOS
-    mixer follow-up as part of it.
+  - **Status note:** shipped (Phase 2) — the shared per-source strip renders
+    in all three placements (full routing matrix in the Mixer view, inline
+    mixers with badges in the Record and Stream views), implemented in the
+    same code path on Windows, Linux, and macOS; the M5 mixer follow-up is
+    closed as part of it.
 - Clip writes, restream fan-out, and remote sessions stay within the
   documented CPU/memory/frame-time budgets (see the resource table above).
   - **Status note:** evidenced — clip/restream/remote shipped and tested;
