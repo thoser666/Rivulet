@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- fix(ci): **weekly promotion sets a git identity before tagging** — the
+  annotated `weekly-latest` tag needs a committer, checkout configures
+  none, and the scheduled run died with "empty ident name". The tag step
+  now configures the `github-actions[bot]` identity (same as release.yml),
+  and the ci_pinning guard pins the identity so the pointer cannot go
+  stale silently again.
 - feat(m10): **AI Creative Studio — sound/voice generation research** — the
   spec gains a sound-generation track (`docs/m10-ai-creative-studio.md` §6):
   alert SFX, jingles and spoken read-outs generated fully locally —
