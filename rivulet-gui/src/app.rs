@@ -207,12 +207,19 @@ pub const DEFAULT_NO_FRAME_TIMEOUT: std::time::Duration = std::time::Duration::f
 
 /// Bounded size of the in-memory Twitch chat message list (oldest dropped).
 const MAX_CHAT_MESSAGES: usize = 500;
+/// Alerts dock: the live alert list is bounded separately from the chat list
+/// so a raid/donation burst can never evict chat history (and vice versa).
+const MAX_ALERT_EVENTS: usize = 200;
 
 /// Minimum workspace width (px) at which the Stream page keeps its
 /// side-by-side layout. Below this the action bar, the chat dock and the
 /// audio section switch to wrapped/stacked layouts so no control (start/
 /// stop, connect, send, mixer) is clipped off-screen.
 const STREAM_WORKSPACE_NARROW_WIDTH: f32 = 720.0;
+/// Below this width the Stream workspace stacks the chat / alerts / info
+/// columns vertically instead of a 3-column row (same responsive contract
+/// as the chat dock's narrow threshold).
+const STREAM_WORKSPACE_ALERTS_WIDTH: f32 = 1080.0;
 
 // --- Auto-update state machine ---
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -863,6 +870,14 @@ pub struct RivuletApp {
     /// Not persisted.
     #[serde(skip)]
     alert_preview_dirty: bool,
+    /// Alerts dock: bounded live list of drained alert events, newest last
+    /// (rendered bottom-anchored like the chat dock). Every ingestion source
+    /// (loopback webhook receiver, outbound EventSub, preview) lands here in
+    /// the same localized rendering as the chat-dock action lines, so all
+    /// platforms appear merged in one list. Not persisted — `#[serde(skip)]`
+    /// so a session restore can never replay or log alert entries.
+    #[serde(skip)]
+    alert_events: Vec<rivulet_core::ChatMessage>,
     /// Alerts: local webhook receiver enabled (`127.0.0.1` only). Persisted,
     /// off by default — the loopback receiver is the optional delivery half of
     /// the honest ingestion story and stays off unless the streamer enables it.
@@ -1571,6 +1586,7 @@ impl Default for RivuletApp {
             chat_state: rivulet_core::ChatConnState::Off,
             alert_ingest: rivulet_core::AlertIngest::default(),
             alert_preview_dirty: false,
+            alert_events: Vec::new(),
             alerts_receiver_enabled: false,
             alerts_receiver_port: rivulet_core::DEFAULT_ALERTS_RECEIVER_PORT,
             alerts_twitch_secret: String::new(),
@@ -5953,6 +5969,7 @@ impl RivuletApp {
                     multi.disconnect_all();
                 }
                 self.chat_messages.clear();
+                self.alert_events.clear();
                 self.chat_reply_target = None;
                 self.chat_last_send_outcomes.clear();
                 // Tokens live only in the OS credential vault — the roster
@@ -5976,6 +5993,7 @@ impl RivuletApp {
                     worker.disconnect_all();
                 }
                 self.chat_messages.clear();
+                self.alert_events.clear();
                 self.chat_reply_target = None;
                 self.chat_last_send_outcomes.clear();
                 self.apply_chat_state(rivulet_core::ChatConnState::Off);
@@ -6037,12 +6055,21 @@ impl RivuletApp {
             self.queue_alert_preview();
             self.alert_preview_dirty = false;
         }
+        // Drain once, surface twice: the combined chat dock keeps showing
+        // alerts as action lines, and the dedicated alerts dock accumulates
+        // the same events in its own bounded live list (both lists newest
+        // last, bottom-anchored).
         for event in self.alert_ingest.drain() {
-            self.chat_messages
-                .push(self.alert_event_to_chat_message(&event));
+            let message = self.alert_event_to_chat_message(&event);
+            self.chat_messages.push(message.clone());
             if self.chat_messages.len() > MAX_CHAT_MESSAGES {
                 let overflow = self.chat_messages.len() - MAX_CHAT_MESSAGES;
                 self.chat_messages.drain(..overflow);
+            }
+            self.alert_events.push(message);
+            if self.alert_events.len() > MAX_ALERT_EVENTS {
+                let overflow = self.alert_events.len() - MAX_ALERT_EVENTS;
+                self.alert_events.drain(..overflow);
             }
         }
     }
@@ -7933,6 +7960,55 @@ impl RivuletApp {
         }
     }
 
+    /// Empty the alerts dock list and the pending ingestion queue (the
+    /// dock's Clear button; a standalone helper so tests can exercise it).
+    fn clear_alert_events(&mut self) {
+        self.alert_events.clear();
+        self.alert_ingest.drain();
+    }
+
+    /// Render the dedicated alerts dock: every drained alert event from all
+    /// ingestion sources (loopback webhook receiver, outbound EventSub,
+    /// preview) in one live, bottom-anchored list. Each line carries the
+    /// localized, provider-neutral alert text and the platform badge from
+    /// the event's origin tag, so multi-platform traffic stays attributable.
+    fn draw_alerts_dock(&mut self, ui: &mut egui::Ui, max_list_height: f32) {
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(egui::RichText::new(self.tr("alerts_dock_title")).strong());
+            if ui.small_button(self.tr("alerts_dock_clear")).clicked() {
+                self.clear_alert_events();
+            }
+        });
+        ui.small(self.tr("alerts_dock_hint"));
+        ui.separator();
+
+        let events = std::mem::take(&mut self.alert_events);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .stick_to_bottom(true)
+            .max_height(max_list_height)
+            .show(ui, |ui| {
+                for message in &events {
+                    let mut text = egui::RichText::new(message.user.as_str()).strong();
+                    if let Some(rgb) = message.color.as_deref().and_then(color_to_egui) {
+                        text = text.color(rgb);
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        if let Some(platform) = message.platform {
+                            ui.small(egui::RichText::new(format!("[{}]", platform.label())));
+                        }
+                        ui.label(text);
+                        ui.label(egui::RichText::new(&message.text).italics());
+                    });
+                }
+            });
+        self.alert_events = events;
+        if self.alert_events.is_empty() {
+            ui.small(self.tr("alerts_dock_empty"));
+        }
+    }
+
     fn handle_stream_key_actions(&mut self) {
         let account = self.stream_platform.label();
         let store = rivulet_core::StreamKeyStore::default();
@@ -8152,19 +8228,23 @@ impl RivuletApp {
         // ── Auto-clip (M6): chat-driven replay saves on spike / !clip. ──
         self.draw_auto_clip_section(ui);
 
-        // ── Workspace: chat dock (left) | stream information (right). The
-        //    chat is bounded in height so it behaves like a docked panel on
-        //    this page rather than growing the scroll area without end. On
-        //    narrow windows the two columns stack vertically so the chat
-        //    connect/send controls never clip off-screen. ──
+        // ── Workspace: chat dock (left) | alerts dock (middle) | stream
+        //    information (right). Both lists are bounded in height so they
+        //    behave like docked panels on this page rather than growing the
+        //    scroll area without end. On narrow windows the columns stack
+        //    vertically so the chat connect/send controls never clip
+        //    off-screen. ──
         ui.separator();
-        if ui.available_width() >= STREAM_WORKSPACE_NARROW_WIDTH {
-            ui.columns(2, |cols| {
+        if ui.available_width() >= STREAM_WORKSPACE_ALERTS_WIDTH {
+            ui.columns(3, |cols| {
                 self.draw_chat_dock(&mut cols[0], chat_list_height);
-                self.draw_stream_information_panel(&mut cols[1], colors);
+                self.draw_alerts_dock(&mut cols[1], chat_list_height);
+                self.draw_stream_information_panel(&mut cols[2], colors);
             });
         } else {
             self.draw_chat_dock(ui, chat_list_height);
+            ui.separator();
+            self.draw_alerts_dock(ui, chat_list_height);
             ui.separator();
             self.draw_stream_information_panel(ui, colors);
         }
@@ -12053,6 +12133,131 @@ mod tests {
             source.contains("alert_preview_button"),
             "settings/chat-dock must expose the preview action"
         );
+    }
+
+    #[test]
+    fn alerts_dock_accumulates_events_from_all_sources() {
+        let mut app = RivuletApp::default();
+        app.queue_alert_preview();
+        app.reconcile_chat();
+
+        assert_eq!(
+            app.alert_events.len(),
+            5,
+            "every preview kind must land in the dedicated alerts dock"
+        );
+        let texts: Vec<&str> = app.alert_events.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            vec![
+                "PreviewViewer followed the channel",
+                "SubFan subscribed (Tier 3)",
+                "Gifter gifted 5 subs",
+                "Donor donated 20.00 EUR",
+                "RaidLeader raided with 42 viewers",
+            ],
+            "dock lines use the same localized rendering as the chat entries"
+        );
+        // The dock renders each line with the accent color and the platform
+        // badge from the event origin (sample events are Twitch-tagged).
+        assert!(app
+            .alert_events
+            .iter()
+            .all(|m| m.color.as_deref() == Some("#e0a458")));
+        assert!(app
+            .alert_events
+            .iter()
+            .all(|m| m.platform == Some(rivulet_core::ChatPlatform::Twitch)));
+        // Surfacing in the dock must not remove the chat-dock mirror.
+        assert_eq!(app.chat_messages.len(), 5);
+    }
+
+    #[test]
+    fn alerts_dock_clear_empties_list_and_pending_queue() {
+        let mut app = RivuletApp::default();
+        app.queue_alert_preview();
+        app.reconcile_chat();
+        assert!(!app.alert_events.is_empty());
+
+        // A pending (not yet drained) event must also be discarded by the
+        // Clear action, so it cannot resurface on the next frame.
+        app.alert_ingest
+            .push(rivulet_core::AlertEvent::sample_follow());
+        assert_eq!(app.alert_ingest.len(), 1);
+
+        app.clear_alert_events();
+        assert!(
+            app.alert_events.is_empty(),
+            "the visible dock list must be emptied"
+        );
+        assert!(
+            app.alert_ingest.is_empty(),
+            "pending undrained events must not resurface after Clear"
+        );
+    }
+
+    #[test]
+    fn alerts_dock_is_bounded_independently_of_the_chat_list() {
+        let mut app = RivuletApp::default();
+        // A burst far beyond the dock bound (and beyond the ingest default
+        // capacity): the dock keeps the newest MAX_ALERT_EVENTS entries.
+        app.alert_ingest.set_capacity(MAX_ALERT_EVENTS + 10);
+        for _ in 0..MAX_ALERT_EVENTS + 10 {
+            app.alert_ingest
+                .push(rivulet_core::AlertEvent::sample_follow());
+        }
+        app.reconcile_chat();
+
+        assert_eq!(
+            app.alert_events.len(),
+            MAX_ALERT_EVENTS,
+            "the dock must evict its oldest entries, not grow unbounded"
+        );
+        assert_eq!(
+            app.alert_events[0].user, "PreviewViewer",
+            "entries render user names; oldest evicted keeps order intact"
+        );
+    }
+
+    #[test]
+    fn alerts_dock_source_contract_is_pinned() {
+        // Source contract for the dedicated dock: it lives in the Stream
+        // workspace as the middle column (stacking on narrow windows), is
+        // bounded by its own constant, badges platforms and exposes a Clear
+        // affordance through the testable helper.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        for marker in [
+            "fn draw_alerts_dock",
+            "fn clear_alert_events",
+            "self.clear_alert_events()",
+            "alerts_dock_title",
+            "alerts_dock_hint",
+            "alerts_dock_clear",
+            "alerts_dock_empty",
+            "self.draw_alerts_dock(&mut cols[1], chat_list_height)",
+            "self.draw_alerts_dock(ui, chat_list_height)",
+            "const MAX_ALERT_EVENTS: usize = 200;",
+            "const STREAM_WORKSPACE_ALERTS_WIDTH: f32 = 1080.0;",
+            "self.alert_events.push(message)",
+        ] {
+            assert!(
+                source.contains(marker),
+                "the alerts dock contract must be present: {marker}"
+            );
+        }
+        let i18n = std::fs::read_to_string("../rivulet-core/src/i18n.rs").expect("i18n readable");
+        for key in [
+            "alerts_dock_title",
+            "alerts_dock_hint",
+            "alerts_dock_clear",
+            "alerts_dock_empty",
+        ] {
+            let k = format!("\"{key}\"");
+            assert!(
+                i18n.matches(&k).count() >= 2,
+                "{key} must exist in EN and DE"
+            );
+        }
     }
 
     /// Send a raw HTTP POST to a loopback listener and return the response head.
