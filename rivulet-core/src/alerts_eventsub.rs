@@ -879,9 +879,21 @@ mod tests {
         let event = event.expect("event queued within 10 s");
         assert_eq!(event.kind, AlertKind::Follow);
         assert_eq!(event.user, "Ada");
-        // Give the worker a moment to update stats after delivery.
-        std::thread::sleep(StdDuration::from_millis(50));
-        let (delivered, rejected, created, error, _, _) = receiver.stats();
+        // Give the worker a moment to update stats after delivery. The
+        // subscription POSTs are sequential HTTP calls that can lag the event
+        // on a loaded runner (parallel suite), so poll — the assertion still
+        // requires exactly the four creations and no rejections/errors.
+        let stats_deadline = std::time::Instant::now() + StdDuration::from_secs(10);
+        let (delivered, rejected, created, error) = loop {
+            let (delivered, rejected, created, error, _, _) = receiver.stats();
+            if delivered == 1 && created == EVENTSUB_ALERT_SUBSCRIPTIONS.len() as u64 {
+                break (delivered, rejected, created, error);
+            }
+            if std::time::Instant::now() >= stats_deadline {
+                break (delivered, rejected, created, error);
+            }
+            std::thread::sleep(StdDuration::from_millis(50));
+        };
         assert_eq!(delivered, 1);
         assert_eq!(rejected, 0);
         assert_eq!(created, EVENTSUB_ALERT_SUBSCRIPTIONS.len() as u64);
