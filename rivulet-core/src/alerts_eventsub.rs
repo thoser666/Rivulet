@@ -807,7 +807,7 @@ mod tests {
                 let mut deadline: Option<std::time::Instant> = None;
                 let mut handled = 0;
                 loop {
-                    if deadline.map_or(false, |d| std::time::Instant::now() >= d) {
+                    if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
                         break;
                     }
                     match listener.accept() {
