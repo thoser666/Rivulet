@@ -3715,6 +3715,12 @@ fn weekly_release_promotion_is_scheduled_and_safe() {
         "promotion must move the weekly-latest tag (never create a release — the in-app updater reads /releases and must keep following the fast lane)"
     );
     assert!(
+        promo.contains("git config user.name \"github-actions[bot]\"")
+            && promo.contains("git config user.email \"41898282+github-actions[bot]@users.noreply.github.com\""),
+        "the annotated weekly-latest tag needs a committer identity — checkout configures none, so the tag step must set the bot identity (empty ident name failure)"
+    );
+
+    assert!(
         !promo.contains("gh release create"),
         "promotion must never create a release of its own"
     );
