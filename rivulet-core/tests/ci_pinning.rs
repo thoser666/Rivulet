@@ -159,6 +159,29 @@ fn m3_completion_report_is_linked_and_records_follow_ups() {
 }
 
 #[test]
+fn m6_completion_report_is_linked_and_records_follow_ups() {
+    let readme = read("README.md");
+    let gates = read("docs/milestone-quality-gates.md");
+    let report = read("docs/m6-creator-toolkit-completion-report.md");
+    assert!(readme.contains("docs/m6-creator-toolkit-completion-report.md"));
+    assert!(gates.contains("docs/m6-creator-toolkit-completion-report.md"));
+    for required in [
+        "## Summary",
+        "## Findings and explicit follow-ups",
+        "## Decision",
+        "CONDITIONAL PASS",
+        "F-M6-001",
+        "F-M6-002",
+        "#154",
+    ] {
+        assert!(
+            report.contains(required),
+            "M6 completion report must contain {required}"
+        );
+    }
+}
+
+#[test]
 fn m5_platform_parity_evidence_is_linked_and_pinned() {
     // M5 gate (docs/milestone-quality-gates.md): platform parity requires a
     // platform feature matrix as exit evidence, and the OBS compatibility mode
