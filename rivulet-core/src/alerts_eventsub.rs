@@ -804,11 +804,21 @@ mod tests {
                 let port = listener.local_addr().expect("addr").port();
                 let _ = api_port_tx.try_send(port);
                 listener.set_nonblocking(true).expect("nonblocking");
-                let deadline = std::time::Instant::now() + StdDuration::from_secs(5);
+                let mut deadline: Option<std::time::Instant> = None;
                 let mut handled = 0;
-                while std::time::Instant::now() < deadline {
+                loop {
+                    if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+                        break;
+                    }
                     match listener.accept() {
                         Ok((mut stream, _)) => {
+                            // Arm the deadline on the first incoming
+                            // connection so the timer covers subscription
+                            // creation, not the receiver's WS handshake.
+                            if deadline.is_none() {
+                                deadline =
+                                    Some(std::time::Instant::now() + StdDuration::from_secs(5));
+                            }
                             let _ = drain_http_request(&mut stream);
                             let _ = stream
                                 .write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 2\r\n\r\n{}");
