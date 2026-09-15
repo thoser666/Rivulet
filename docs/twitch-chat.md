@@ -21,12 +21,14 @@ and **YouTube** (Innertube polling) from one unified UI.
 - **Account management**: the "Add" row (platform, channel, optional token)
   appends an account; duplicates per platform are refused with a hint, and
   removing an account re-arms the worker rebuild and deletes its vault
-  entry. Only platform and channel persist with the app state; the token
-  lives in the OS credential vault (Windows Credential Manager / kernel
-  keyutils / macOS Keychain) and is hydrated into memory on Connect. A
-  failed vault write is reported via a status hint. Configs saved before
-  the combined dock migrate their single platform/channel/token triple
-  into the list on restore and move the legacy token into the vault.
+  entry. Accounts persist **only platform and channel**: the account struct
+  carries no token field at all — the entered token goes straight into the
+  OS credential vault (Windows Credential Manager / kernel keyutils / macOS
+  Keychain) and is resolved per-connect via a callback, never stored on the
+  roster or in the config file. A failed vault write is reported via a
+  status hint. Configs saved before the combined dock migrate their single
+  platform/channel/token triple into the list on restore and move the
+  legacy token into the vault.
 - **Native Twitch IRC client** (`rivulet-core::twitch_chat`): connects to
   `irc.chat.twitch.tv`, handles the CAP/PASS/NICK/JOIN handshake, answers
   PING/PONG keepalives and parses IRCv3 tags (display name, color, badges,

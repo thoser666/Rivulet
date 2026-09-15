@@ -16,16 +16,19 @@
   audio-mux non-blocking rules, and the ci_pinning guard pins all markers.
 - fix(chat): **chat tokens live in the OS credential vault** — the combined
   dock's OAuth/session tokens are no longer serialized with the app config
-  (`serde(skip)` on `ChatAccount::token`, root fix for the CodeQL
-  rust/cleartext-logging alert): a new keyring-backed `ChatTokenStore`
-  stores them per platform+channel in Windows Credential Manager / the
-  Linux kernel keyutils / the macOS Keychain, hydrates them on Connect and
-  deletes the entry when an account is removed. The legacy migration moves
-  pre-dock tokens into the vault, and the platform backends that the
-  `keyring` crate needs are now actually enabled per target (they were
-  compiled out before, so even stream keys failed with
-  `NoStorageConfigured`). Tests: JSON-absence proof, vault round-trip,
-  post-migration token-freedom; static log messages in `MultiChat`.
+  (final root fix for the CodeQL rust/cleartext-logging alert): the
+  keyring-backed `ChatTokenStore` stores them per platform+channel in
+  Windows Credential Manager / the Linux kernel keyutils / the macOS
+  Keychain, and `ChatAccount` now carries **no token field at all** — the
+  token is resolved per-connect via a callback straight into the worker
+  config, so no struct derived from the roster can taint a logging sink.
+  Tokens are deleted from the vault when an account is removed. The legacy
+  migration moves pre-dock tokens into the vault, and the platform backends
+  that the `keyring` crate needs are now actually enabled per target (they
+  were compiled out before, so even stream keys failed with
+  `NoStorageConfigured`). Tests: exact serialized-roster proof, vault
+  round-trip, resolver-callback proof, post-migration token-freedom; static
+  log messages in `MultiChat`.
 - feat(chat): **combined multi-platform chat dock** — the dock no longer
   selects a single platform: it manages a list of accounts (one per
   platform) and connects one worker per account via the new

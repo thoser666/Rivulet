@@ -5955,24 +5955,19 @@ impl RivuletApp {
                 self.chat_messages.clear();
                 self.chat_reply_target = None;
                 self.chat_last_send_outcomes.clear();
-                // Tokens live in the OS credential vault (the config file
-                // keeps only platform + channel); hydrate the in-memory
-                // accounts before spawning the workers. A missing entry
-                // leaves the token empty — the platform worker treats it
-                // like a read-only/anonymous connect, and the user can
-                // re-enter the token via the add-account row.
+                // Tokens live only in the OS credential vault — the roster
+                // (and every struct derived from it) stays token-free, which
+                // is the CodeQL rust/cleartext-logging root fix. The
+                // resolver reads the vault at spawn time; a missing entry
+                // yields "" and the worker connects read-only/anonymous.
                 let store = rivulet_core::ChatTokenStore::default();
-                for account in &mut self.chat_accounts {
-                    if account.platform == rivulet_core::ChatPlatform::YouTube
-                        || !account.token.trim().is_empty()
-                    {
-                        continue;
-                    }
-                    if let Ok(Some(token)) = store.load(account.platform, &account.channel) {
-                        account.token = token;
-                    }
-                }
-                let multi = rivulet_core::MultiChat::new(&self.chat_accounts);
+                let multi =
+                    rivulet_core::MultiChat::new(&self.chat_accounts, |platform, channel| {
+                        store
+                            .load(platform, channel)
+                            .unwrap_or(None)
+                            .unwrap_or_default()
+                    });
                 self.apply_chat_state(multi.connection_state());
                 self.chat_worker_multi = Some(multi);
             }
@@ -7565,10 +7560,13 @@ impl RivuletApp {
             });
             return;
         }
+        // The token stays in the add-row draft; `store_chat_account_token`
+        // moves it into the OS credential vault right after this call. The
+        // roster itself never holds a secret (CodeQL
+        // rust/cleartext-logging root fix).
         self.chat_accounts.push(rivulet_core::ChatAccount::new(
             self.chat_add_platform,
             channel,
-            std::mem::take(&mut self.chat_add_token),
         ));
         self.chat_add_channel.clear();
         self.chat_add_error = None;
@@ -7577,20 +7575,20 @@ impl RivuletApp {
         self.chat_action_pending = Some(ChatAction::Disconnect);
     }
 
-    /// Persist the newly added account's token in the OS credential vault
-    /// and clear it from memory drafts. Empty tokens (YouTube, or a Kick
-    /// read-only setup) skip the vault. Failure keeps a status hint but the
-    /// account stays configured — the token can be re-entered later.
+    /// Persist the token entered in the add-account row into the OS
+    /// credential vault and clear the draft. Empty tokens (YouTube, or a
+    /// Kick read-only setup) skip the vault. Failure keeps a status hint but
+    /// the account stays configured — the token can be re-entered later.
     fn store_chat_account_token(&mut self) {
+        let token = std::mem::take(&mut self.chat_add_token);
+        if token.trim().is_empty() {
+            return;
+        }
         let Some(account) = self.chat_accounts.last() else {
             return;
         };
-        if account.token.trim().is_empty() {
-            return;
-        }
         let platform = account.platform;
         let channel = account.channel.clone();
-        let token = account.token.clone();
         if let Err(error) = rivulet_core::ChatTokenStore::default().save(platform, &channel, &token)
         {
             self.chat_add_error = Some(self.tr_fmt("chat_token_store_failed", &[error]).to_owned());
@@ -8509,7 +8507,7 @@ impl RivuletApp {
             }
             restored
                 .chat_accounts
-                .push(rivulet_core::ChatAccount::new(platform, channel, token));
+                .push(rivulet_core::ChatAccount::new(platform, channel));
         }
         // Push the restored audio sources into the engine so the first
         // session starts with the persisted routing (issue #154 Phase 2).
@@ -15142,6 +15140,9 @@ mod tests {
         app.chat_add_channel = " rivulet ".to_owned();
         app.chat_add_token = "oauth:abc".to_owned();
         app.apply_chat_add_account();
+        if app.chat_add_error.is_none() {
+            app.store_chat_account_token();
+        }
         assert!(app.chat_add_error.is_none());
         assert_eq!(app.chat_accounts.len(), 1);
         assert_eq!(
@@ -15149,12 +15150,23 @@ mod tests {
             rivulet_core::ChatPlatform::Twitch
         );
         assert_eq!(app.chat_accounts[0].channel, "rivulet");
-        assert_eq!(app.chat_accounts[0].token, "oauth:abc");
-        assert!(app.chat_add_channel.is_empty(), "draft channel must clear");
+        // The roster is token-free (CodeQL rust/cleartext-logging root fix):
+        // the entered token went straight into the OS credential vault.
         assert!(
             app.chat_add_token.is_empty(),
-            "draft token must clear (never linger)"
+            "draft token must be consumed into the vault (never linger)"
         );
+        let stored = rivulet_core::ChatTokenStore::default()
+            .load(rivulet_core::ChatPlatform::Twitch, "rivulet")
+            .ok()
+            .flatten();
+        assert_eq!(
+            stored.as_deref(),
+            Some("oauth:abc"),
+            "the add flow must persist the token in the vault"
+        );
+        let _ = rivulet_core::ChatTokenStore::default()
+            .delete(rivulet_core::ChatPlatform::Twitch, "rivulet");
         assert_eq!(
             app.chat_action_pending,
             Some(ChatAction::Disconnect),
@@ -15227,12 +15239,10 @@ mod tests {
                 rivulet_core::ChatAccount::new(
                     rivulet_core::ChatPlatform::Twitch,
                     "rivulet".to_owned(),
-                    "oauth:round-trip-secret".to_owned(),
                 ),
                 rivulet_core::ChatAccount::new(
                     rivulet_core::ChatPlatform::Kick,
                     "rivulet".to_owned(),
-                    String::new(),
                 ),
             ],
             ..Default::default()
@@ -15244,9 +15254,25 @@ mod tests {
             .get(eframe::APP_KEY)
             .cloned()
             .unwrap_or_default();
+        eprintln!("DEBUG chat_accounts fragment: {:?}", {
+            let start = stored_json.find("chat_accounts").unwrap_or(0);
+            let end = (start + 300).min(stored_json.len());
+            &stored_json[start..end]
+        });
+        // The whole-app storage string legitimately mentions other token
+        // fields (the legacy chat field, the EventSub credential), so a
+        // blanket substring check would be meaningless. Instead assert the
+        // exact serialized roster fragment: `ChatAccount` has exactly two
+        // fields, so a token-bearing entry could not produce this string.
+        assert!(
+            stored_json.contains(
+                "chat_accounts:[(platform:Twitch,channel:\"rivulet\"),(platform:Kick,channel:\"rivulet\")]"
+            ),
+            "roster entries must persist as exactly platform + channel"
+        );
         assert!(
             !stored_json.contains("round-trip-secret"),
-            "the OAuth token must never be written to persisted state"
+            "the fixture secret must never be written to persisted state"
         );
 
         let restored = RivuletApp::restore_from_storage(Some(&storage))
@@ -15257,9 +15283,6 @@ mod tests {
             rivulet_core::ChatPlatform::Twitch
         );
         assert_eq!(restored.chat_accounts[0].channel, "rivulet");
-        // The in-memory token of a fresh restore is empty (hydrated from
-        // the vault only when Connect runs).
-        assert_eq!(restored.chat_accounts[0].token, "");
         assert_eq!(
             restored.chat_accounts[1].platform,
             rivulet_core::ChatPlatform::Kick

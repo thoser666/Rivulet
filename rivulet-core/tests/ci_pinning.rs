@@ -4264,10 +4264,28 @@ fn chat_dock_supports_kick_and_youtube() {
         "the GUI must manage a chat account list (combined dock)"
     );
     assert!(
-        app.contains("rivulet_core::MultiChat::new(&self.chat_accounts)")
+        app.contains("rivulet_core::MultiChat::new(&self.chat_accounts")
             && app.contains("send_chat_message")
             && app.contains("send_chat_reply"),
         "the GUI reconcile must spawn the multi-platform worker and route sends through it"
+    );
+    // Token hygiene (CodeQL rust/cleartext-logging root fix): the roster
+    // must stay token-free — tokens flow from the OS credential vault via a
+    // resolver closure straight into the worker configs at spawn time.
+    let core_chat = chat;
+    assert!(
+        !core_chat.contains("#[serde(skip)]\n    pub token")
+            && !core_chat.contains("#[serde(skip)]\r\n    pub token"),
+        "ChatAccount must not carry a token field at all"
+    );
+    assert!(
+        core_chat.contains("token_of: impl Fn(ChatPlatform, &str) -> String"),
+        "MultiChat::new must take a token-resolver callback"
+    );
+    assert!(
+        app.contains("ChatTokenStore::default().save")
+            && app.contains(".delete(account.platform, &account.channel)"),
+        "the GUI must persist and clean chat tokens only via the OS vault"
     );
     assert!(
         app.contains("chat_last_send_outcomes"),
