@@ -140,11 +140,33 @@ Rivulet kann gleichzeitig zu mehreren Plattformen streamen. Im Stream-Tab findes
 
 ### Chat
 
-Im Stream-Tab ist der Chat-Dock integriert. Er verbindet sich mit Twitch, Kick und YouTube:
+Im Stream-Tab ist das **kombinierte Chat-Dock** integriert (linke Spalte). Es
+verwaltet eine Liste von Konten — je eines für Twitch, Kick und YouTube — und
+zeigt die Nachrichten **aller verbundenen Plattformen in derselben Liste** an:
 
-- Anonymes Lesen ist ohne Login möglich; mit OAuth-Token (Berechtigung `chat:send`) kannst du auch selbst schreiben.
-- Die Eingabezeile unten im Dock sendet in den verbundenen Kanal; über **Antworten** beantwortest du eine bestimmte Nachricht.
-- Über der Eingabezeile zeigt Rivulet das verbleibende Sendekontingent (z. B. „20 Nachrichten pro 30 s“) und die Plattform, für die das Limit gilt – Plattform-Limits werden pro Kanal separat durchgesetzt.
+- Jede Zeile trägt einen Plattform-Badge (`[Twitch]`, `[Kick]`, `[YouTube]`);
+  Alerts aus der Erfassung erscheinen mit eigener Farbe in derselben Liste.
+- **Konten verwalten**: Über die **Hinzufügen**-Zeile legst du ein Konto an
+  (Plattform, Kanal, optionaler Token). Duplikate pro Plattform werden mit
+  einem Hinweis abgelehnt; das Entfernen trennt die Verbindung und löscht den
+  Tresor-Eintrag des Kontos.
+- **Tokens liegen sicher**: Der Token wandert beim Anlegen direkt in den
+  Betriebssystem-Tresor (Windows-Anmeldeinformationsverwaltung, Kernel-
+  keyutils unter Linux, macOS-Schlüsselbund). Weder die Kontenliste noch die
+  Konfigurationsdatei enthalten ihn — pro Verbindung wird er erst beim
+  Verbinden aus dem Tresor gelesen. Schlägt der Tresor-Schreibzugriff fehl,
+  zeigt Rivulet einen Statushinweis.
+- **Synchroner Versand**: Die Eingabezeile sendet an **jedes sendefähige
+  Konto gleichzeitig**; abgelehnte Ziele werden namentlich gemeldet (z. B.
+  read-only-YouTube oder ein rate-limitiertes Konto scheitern nie still).
+- Über **Antworten** beantwortest du eine bestimmte Nachricht — die Antwort
+  wird automatisch an die Plattform der Nachricht geroutet (Twitch als
+  Thread-Antwort über die Message-ID).
+- Anonymes Lesen ist ohne Login möglich; mit OAuth-Token (Berechtigung
+  `chat:send`) kannst du auch selbst schreiben. YouTube ist read-only.
+- Über der Eingabezeile zeigt Rivulet das verbleibende Sendekontingent (z. B.
+  „20 Nachrichten pro 30 s“) und die Plattform, für die das Limit gilt –
+  Plattform-Limits werden pro Kanal separat durchgesetzt.
 
 ### Alerts
 
