@@ -152,6 +152,7 @@ Rivulet kann Engagement-Events (Follows, Abos, Geschenk-Abos, Spenden, Raids) **
 
 - **Settings → Alerts** aktiviert die lokale Erfassung (standardmäßig an). Eingänge werden nur lokal verarbeitet — es wird **nichts übertragen**, und Alert-Ereignisse enthalten nie Tokens oder Secrets (ein EventSub-Geheimnis bleibt in den Einstellungen und dient nur der Signaturprüfung).
 - Im Chat-Dock erscheinen erfasste Events als Chat-Einträge mit eigener Farbe, z. B. „Kira hat 20.00 EUR gespendet“ oder „Boosted ist mit 42 Zuschauern geraidet“.
+- Im **Alerts-Dock** auf der Stream-Seite (mittlere Spalte bei breitem Fenster, unter dem Chat bei schmalen) laufen alle erfassten Events **aller verbundenen Plattformen** in einer gemeinsamen Live-Liste zusammen — jede Zeile zeigt den Plattform-Badge ([Twitch]/[Kick]/[YouTube]) und den lokalisierten Text. Die Liste ist unabhängig vom Chat begrenzt (neueste 200 Events) und lässt sich über **Leeren** zurücksetzen.
 - Über **Alerts-Vorschau** kannst du die Darstellung ohne laufenden Stream prüfen (ein Beispiel pro Event-Typ).
 - **Settings → Webhook-Empfänger** (standardmäßig aus) startet einen lokalen Empfänger auf **`127.0.0.1`** für Streamlabs-Spenden-Webhooks (`/webhook/streamlabs`) und Twitch-EventSub-Notifications (`/eventsub/twitch`) inkl. HMAC-SHA-256-Signaturprüfung gegen ein maskiert hinterlegtes Secret. Echte Lieferungen der Dienste kommen über öffentliches HTTPS — setze dafür einen lokalen HTTPS-Terminator oder Tunnel davor, der an diesen Port weiterleitet (Details in [`alerts-ingest.md`](alerts-ingest.md)).
 

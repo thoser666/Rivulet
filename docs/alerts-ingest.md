@@ -1,6 +1,7 @@
 # Native Alert Ingestion (follows / subs / donations / raids)
 
-Native, provider-neutral alert event ingestion surfaced in the chat dock.
+Native, provider-neutral alert event ingestion surfaced in the chat dock and
+in the dedicated combined **alerts dock**.
 Implements the M5 roadmap row **Alerts (follows/subs/donations)** — event
 ingestion (Twitch EventSub or provider webhooks) mapped to localized alert
 entries, with redaction of tokens and privacy tests.
@@ -55,10 +56,13 @@ entries, with redaction of tokens and privacy tests.
   (on by default, purely local), an opt-in **webhook receiver** section
   (enabled toggle, port, masked Twitch EventSub secret) and an opt-in
   **EventSub (WebSocket)** section (masked client ID, masked access token,
-  broadcaster user ID, live connection indicator), plus chat-dock surfacing:
-  ingested entries become chat entries with a distinct accent color; a
-  **Preview** button queues one deterministic sample per kind for layout
-  checks and GUI tests. Missing EventSub credentials never dial out.
+  broadcaster user ID, live connection indicator), plus surfacing in two
+  places: ingested entries become chat entries with a distinct accent color
+  **and** land in the dedicated combined alerts dock (Stream page, middle
+  column) — one live list for follows, subs, donations and raids from all
+  connected platforms, each line carrying the localized text and the platform
+  badge. A **Preview** button queues one deterministic sample per kind for
+  layout checks and GUI tests. Missing EventSub credentials never dial out.
 - **i18n** — `alert_kind_follow/subscribe/giftsub/donation/raid` plus panel,
   receiver and EventSub keys, EN + DE (parity-enforced; 512 keys total).
 - **Privacy tests** — no `Serialize` on events, `Debug` never leaks entry
@@ -94,8 +98,10 @@ parse → verify → `AlertIngest::push`.
   `alerts_eventsub_enabled`/`alerts_eventsub_client_id`/`alerts_eventsub_token`/
   `alerts_eventsub_broadcaster_id` fields, `apply_alerts_policy` /
   `apply_alerts_receiver` / `apply_alerts_eventsub`, per-frame drain into the
-  bounded chat list, `queue_alert_preview` / `alert_event_to_chat_message`,
-  Settings panels, chat-dock preview button (+12 GUI tests incl. loopback
+  bounded chat list **and** the bounded alerts dock (`alert_events`,
+  `MAX_ALERT_EVENTS`), `queue_alert_preview` / `alert_event_to_chat_message`,
+  `draw_alerts_dock` / `clear_alert_events`, Settings panels, chat-dock
+  preview button (+16 GUI tests incl. loopback
   Receiver/Streamlabs-end-to-end and EventSub-puppet-end-to-end)
 - `rivulet-core/tests/ci_pinning.rs` — guard
   `m5_alerts_ingest_is_native_localized_and_pinned` (the ci_pinning guard

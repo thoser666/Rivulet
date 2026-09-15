@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- feat(alerts): **combined alerts dock** — the Stream workspace gains a
+  dedicated alerts dock beside the chat (middle column on wide windows,
+  stacked below the chat on narrow ones): all drained alert events from
+  every ingestion source (loopback webhook receiver, outbound EventSub,
+  preview) merge into one live, bottom-anchored list regardless of
+  platform, each line with the localized alert text and the origin
+  platform badge. The list is bounded independently of the chat history
+  (`MAX_ALERT_EVENTS = 200`, so a raid burst can never evict chat) and
+  clearable via the header button (also discards pending undrained
+  events). The chat-dock alert mirror stays. Pinned by a source-contract
+  GUI test and the extended ci_pinning M5 guard; docs updated
+  (alerts-ingest.md, twitch-chat.md, user-guide.md, README).
 - fix(ci): **weekly promotion sets a git identity before tagging** — the
   annotated `weekly-latest` tag needs a committer, checkout configures
   none, and the scheduled run died with "empty ident name". The tag step

@@ -43,10 +43,11 @@ and **YouTube** (Innertube polling) from one unified UI.
   effort: YouTube's endpoints are not a stable public API, so a failure
   surfaces as a connection error instead of pretending chat works.
 - **Chat dock on the Stream page**: the chat is embedded in the **Stream**
-  workspace (Meld-style single broadcast page) — left column next to the
-  stream status/health, above the compact audio section. Channel input,
-  connect/disconnect, optional token, and a bounded, auto-scrolling message
-  list render in the dock; the chat no longer has its own sidebar entry.
+  workspace (Meld-style single broadcast page) — left column, with the
+  combined alerts dock beside it and the stream status/health to the right.
+  Channel input, connect/disconnect, optional token, and a bounded,
+  auto-scrolling message list render in the dock; the chat no longer has its
+  own sidebar entry.
 - **Anonymous by default**: read-only chat works without any token on
   Twitch and Kick. With a token you get colors and badges for your own
   messages.

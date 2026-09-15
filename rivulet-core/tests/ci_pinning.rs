@@ -421,6 +421,10 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
         "fn alert_event_to_chat_message",
         "fn apply_alerts_receiver",
         "fn apply_alerts_eventsub",
+        // Dedicated combined alerts dock (same ingestion, own bounded list).
+        "fn draw_alerts_dock",
+        "fn clear_alert_events",
+        "const MAX_ALERT_EVENTS: usize = 200;",
     ] {
         assert!(gui.contains(required), "GUI must wire {required}");
     }
