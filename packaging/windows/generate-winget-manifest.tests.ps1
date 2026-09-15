@@ -150,6 +150,20 @@ Describe "generate-winget-manifest.ps1" {
             $result.Output | Should -Match "not a valid GUID"
         }
 
+        It "accepts a ProductCode with the COM record's leading whitespace" {
+            # The WindowsInstaller COM property record observed on real
+            # release MSIs carries the braced GUID with leading whitespace;
+            # the generator must trim it instead of failing validation.
+            $result = Invoke-Generator -Arguments @(
+                "-Version", $fixedVersion,
+                "-ReleaseTag", $fixedTag,
+                "-InstallerSha256", $fixedSha,
+                "-ProductCode", " {$fixedProduct}"
+            )
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match "ProductCode\s+: \{$fixedProduct\}"
+        }
+
         It "rejects a malformed InstallerSha256" {
             $result = Invoke-Generator -Arguments @(
                 "-Version", $fixedVersion,
