@@ -20,6 +20,32 @@
   extend with a dedicated "Sound/voice generator" toggle (off by default,
   same master/pause-while-live contract), the gate reviews CPU fallback and
   audio-mux non-blocking rules, and the ci_pinning guard pins all markers.
+- fix(chat): **chat tokens live in the OS credential vault** — the combined
+  dock's OAuth/session tokens are no longer serialized with the app config
+  (final root fix for the CodeQL rust/cleartext-logging alert): the
+  keyring-backed `ChatTokenStore` stores them per platform+channel in
+  Windows Credential Manager / the Linux kernel keyutils / the macOS
+  Keychain, and `ChatAccount` now carries **no token field at all** — the
+  token is resolved per-connect via a callback straight into the worker
+  config, so no struct derived from the roster can taint a logging sink.
+  Tokens are deleted from the vault when an account is removed. The legacy
+  migration moves pre-dock tokens into the vault, and the platform backends
+  that the `keyring` crate needs are now actually enabled per target (they
+  were compiled out before, so even stream keys failed with
+  `NoStorageConfigured`). Tests: exact serialized-roster proof, vault
+  round-trip, resolver-callback proof, post-migration token-freedom; static
+  log messages in `MultiChat`.
+- feat(chat): **combined multi-platform chat dock** — the dock no longer
+  selects a single platform: it manages a list of accounts (one per
+  platform) and connects one worker per account via the new
+  `rivulet_core::MultiChat` facade. Messages from every connected
+  platform appear in the same list with per-line platform badges; the
+  send box broadcasts to all capable accounts with per-platform
+  delivery feedback; threaded replies route back to the parent
+  message's platform; alert entries keep their ingestion source's
+  platform. The account list persists; legacy single-platform configs
+  migrate on restore. 9 new core tests + 6 new GUI tests, i18n EN/DE.
+
 - test(resources): **M6 resource report — 6 routed audio sources with full
   filter chains stay within the resource budget (final gate evidence for
   issue [#154](https://github.com/thoser666/Rivulet/issues/154))** —

@@ -56,7 +56,10 @@ $UpgradeCode = $UpgradeCode.ToUpperInvariant()
 
 function Assert-ValidGuid {
   param([string]$Guid, [string]$What)
-  $bare = $Guid.Trim('{', '}').ToUpperInvariant()
+  # The WindowsInstaller COM property record can carry leading whitespace
+  # around the braced GUID (observed on real release MSIs), so trim spaces
+  # before the brace strip — the canonical bare form must still match.
+  $bare = $Guid.Trim().Trim('{', '}').ToUpperInvariant()
   if ($bare -notmatch '^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$') {
     throw "$What is not a valid GUID: '$Guid'"
   }
@@ -111,7 +114,7 @@ function Read-MsiProductCode {
       $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null)
       $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
       if ($record) {
-        $productCode = $record.GetType().InvokeMember("StringData", "GetProperty", $null, $record, 1).ToString()
+        $productCode = $record.GetType().InvokeMember("StringData", "GetProperty", $null, $record, 1).ToString().Trim()
       }
     } finally {
       $view.GetType().InvokeMember("Close", "InvokeMethod", $null, $view, $null) | Out-Null

@@ -42,6 +42,10 @@ pub struct ChatMessage {
     pub id: Option<String>,
     /// Unix timestamp (seconds) of the message.
     pub timestamp: u64,
+    /// Platform the message came from, set by the platform parsers so the
+    /// combined dock can badge each line (`None` only for host-local
+    /// synthetic entries such as alert previews).
+    pub platform: Option<crate::chat::ChatPlatform>,
 }
 
 impl ChatMessage {
@@ -305,7 +309,11 @@ fn run_session(
     writeln!(writer, "JOIN {channel}")?;
     writer.flush()?;
 
-    tracing::info!(channel = %channel, nick = %nick, "Twitch chat connected");
+    // Static message on purpose: the config struct carries the OAuth token,
+    // so CodeQL treats every value derived from it (channel, nick) as
+    // sensitive — no account-derived field may reach a log sink
+    // (rust/cleartext-logging).
+    tracing::info!("Twitch chat connected");
 
     let mut line = String::new();
     loop {
@@ -518,6 +526,7 @@ pub fn parse_irc_line(line: &str) -> Option<ChatMessage> {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
+            platform: Some(crate::chat::ChatPlatform::Twitch),
         })
     } else {
         None
@@ -543,6 +552,11 @@ mod tests {
         assert!(msg.broadcaster);
         assert_eq!(msg.id.as_deref(), Some("1"), "id= tag must be kept");
         assert!(msg.timestamp > 0);
+        assert_eq!(
+            msg.platform,
+            Some(crate::chat::ChatPlatform::Twitch),
+            "the twitch parser must tag its messages"
+        );
     }
 
     #[test]

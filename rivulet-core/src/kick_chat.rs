@@ -132,6 +132,7 @@ pub fn parse_kick_event(payload: &str) -> Option<ChatMessage> {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0),
+        platform: Some(crate::chat::ChatPlatform::Kick),
     })
 }
 
@@ -367,7 +368,9 @@ fn run_session(
     });
     ws.send(tungstenite::Message::Text(subscribe.to_string().into()))?;
 
-    tracing::info!(chatroom = chatroom_id, "Kick chat connected");
+    // Static message: no config-derived value in log sinks (the config
+    // carries the session token; rust/cleartext-logging).
+    tracing::info!("Kick chat connected");
 
     loop {
         while let Ok(msg) = rx.try_recv() {
@@ -478,6 +481,11 @@ mod tests {
         assert_eq!(msg.color.as_deref(), Some("#00FF00"));
         assert!(msg.badges.contains(&"broadcaster".to_owned()));
         assert!(msg.broadcaster);
+        assert_eq!(
+            msg.platform,
+            Some(crate::chat::ChatPlatform::Kick),
+            "the kick parser must tag its messages"
+        );
     }
 
     #[test]

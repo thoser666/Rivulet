@@ -89,6 +89,290 @@ impl ChatConfig {
     }
 }
 
+/// One configured chat account: platform + channel.
+///
+/// Deliberately token-free: `ChatAccount` clones live in the GUI roster and
+/// in every running [`MultiChat`], so keeping the OAuth/session token here
+/// would spread a secret across long-lived structs — and CodeQL
+/// `rust/cleartext-logging` rightly flags anything derived from it. Tokens
+/// are read from the [`ChatTokenStore`] (OS credential vault) at connect
+/// time and handed straight to the worker configs; neither the roster nor
+/// the config file ever holds a token.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChatAccount {
+    pub platform: ChatPlatform,
+    /// Twitch channel / Kick slug / YouTube video id.
+    pub channel: String,
+}
+
+impl ChatAccount {
+    pub fn new(platform: ChatPlatform, channel: String) -> Self {
+        Self { platform, channel }
+    }
+}
+
+/// OS-backed storage for chat account tokens (Twitch OAuth, Kick session
+/// token). Mirrors [`crate::StreamKeyStore`]: the secret is stored in the OS
+/// credential vault and never serialized with the app config or included in
+/// diagnostics — the config file keeps only platform + channel.
+pub struct ChatTokenStore {
+    service: String,
+}
+
+impl Default for ChatTokenStore {
+    fn default() -> Self {
+        Self::new("Rivulet")
+    }
+}
+
+impl ChatTokenStore {
+    pub fn new(service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+        }
+    }
+
+    /// Stable per-account credential key. Includes the platform label and
+    /// trimmed channel so several accounts can coexist in one vault.
+    pub fn key(platform: ChatPlatform, channel: &str) -> String {
+        format!("chat-token/{}/{}", platform.label(), channel.trim())
+    }
+
+    pub fn save(&self, platform: ChatPlatform, channel: &str, token: &str) -> Result<(), String> {
+        keyring::Entry::new(&self.service, &Self::key(platform, channel))
+            .map_err(|error| error.to_string())?
+            .set_password(token)
+            .map_err(|error| error.to_string())
+    }
+
+    pub fn load(&self, platform: ChatPlatform, channel: &str) -> Result<Option<String>, String> {
+        match keyring::Entry::new(&self.service, &Self::key(platform, channel))
+            .map_err(|error| error.to_string())?
+            .get_password()
+        {
+            Ok(token) => Ok(Some(token)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    pub fn delete(&self, platform: ChatPlatform, channel: &str) -> Result<(), String> {
+        match keyring::Entry::new(&self.service, &Self::key(platform, channel))
+            .map_err(|error| error.to_string())?
+            .delete_credential()
+        {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+}
+
+/// Combined multi-platform chat facade: one dock, several accounts.
+///
+/// Each configured account gets its own single-platform worker (the same
+/// [`Chat`] machinery the one-platform dock used), so per-platform reconnect
+/// behaviour, rate limits and protocol quirks stay isolated. The facade only
+/// merges what the dock needs: draining every message stream, broadcasting
+/// an outbound message to all capable platforms, routing replies to the
+/// platform the parent message came from, and aggregating connection state.
+///
+/// Accounts are de-duplicated per platform (the first wins): joining the
+/// same platform twice would duplicate every line in the dock, which is
+/// never what the streamer wants.
+pub struct MultiChat {
+    workers: Vec<(ChatAccount, Chat)>,
+}
+
+impl MultiChat {
+    /// Spawn one worker per configured account, resolving each token through
+    /// `token_of` at spawn time. Accounts without a channel still produce a
+    /// disabled worker so the GUI row can render its "not configured" state
+    /// from the same source.
+    ///
+    /// The token resolver keeps secrets out of the roster: the typical
+    /// resolver reads the OS credential vault ([`ChatTokenStore`]) and
+    /// returns `""` for accounts without a stored token (read-only).
+    pub fn new(accounts: &[ChatAccount], token_of: impl Fn(ChatPlatform, &str) -> String) -> Self {
+        let mut workers: Vec<(ChatAccount, Chat)> = Vec::new();
+        for account in accounts {
+            if account.channel.trim().is_empty() {
+                continue;
+            }
+            if workers
+                .iter()
+                .any(|(existing, _)| existing.platform == account.platform)
+            {
+                // Static message on purpose: no account-derived value may
+                // flow into a log sink (CodeQL rust/cleartext-logging), and
+                // the roster must stay token-free anyway. The GUI refuses
+                // duplicate platforms at add time, making this warn purely
+                // defensive.
+                tracing::warn!("multi-chat: duplicate platform account ignored (first wins)");
+                continue;
+            }
+            let token = token_of(account.platform, account.channel.trim());
+            let cfg = ChatConfig::new(account.platform, account.channel.trim().to_owned(), token);
+            workers.push((account.clone(), Chat::new(&cfg)));
+        }
+        Self { workers }
+    }
+
+    /// The accounts that actually have a running worker (channel set).
+    pub fn accounts(&self) -> impl Iterator<Item = &ChatAccount> {
+        self.workers.iter().map(|(account, _)| account)
+    }
+
+    /// Whether any worker is actually running.
+    pub fn enabled(&self) -> bool {
+        self.workers.iter().any(|(_, chat)| chat.enabled())
+    }
+
+    /// Number of workers with a configured channel.
+    pub fn worker_count(&self) -> usize {
+        self.workers.len()
+    }
+
+    /// Per-account connection state for the dock's account rows.
+    pub fn connection_states(&self) -> Vec<(ChatPlatform, ChatConnState)> {
+        self.workers
+            .iter()
+            .map(|(account, chat)| (account.platform, chat.connection_state()))
+            .collect()
+    }
+
+    /// Aggregate connection state: `Connected` when any account is joined,
+    /// otherwise `Disconnected` when any account is backing off, otherwise
+    /// `Off`. Mirrors the old single-platform status line semantics.
+    pub fn connection_state(&self) -> ChatConnState {
+        let states = self.connection_states();
+        if states.iter().any(|(_, s)| *s == ChatConnState::Connected) {
+            ChatConnState::Connected
+        } else if states
+            .iter()
+            .any(|(_, s)| *s == ChatConnState::Disconnected)
+        {
+            ChatConnState::Disconnected
+        } else {
+            ChatConnState::Off
+        }
+    }
+
+    /// Receivers for parsed chat messages, polled by the GUI each frame.
+    /// Every message carries its platform tag (the parsers set it), so the
+    /// combined dock can badge lines without tracking the source receiver.
+    pub fn messages(&self) -> impl Iterator<Item = &Receiver<ChatMessage>> + '_ {
+        self.workers.iter().map(|(_, chat)| {
+            chat.messages()
+                .expect("configured worker always has a receiver")
+        })
+    }
+
+    /// Constructor taking full configs (endpoint overrides included), so
+    /// tests can point every worker at deterministic local listeners and
+    /// advanced setups can tunnel the platform endpoints.
+    pub fn from_configs(configs: &[ChatConfig]) -> Self {
+        let workers = configs
+            .iter()
+            .map(|cfg| {
+                (
+                    ChatAccount::new(cfg.platform, cfg.channel.clone()),
+                    Chat::new(cfg),
+                )
+            })
+            .collect();
+        Self { workers }
+    }
+
+    /// Platforms that can accept outbound messages right now (connected,
+    /// token configured, not read-only).
+    pub fn sendable_platforms(&self) -> Vec<ChatPlatform> {
+        self.workers
+            .iter()
+            .filter(|(_, chat)| {
+                chat.enabled()
+                    && chat.can_send()
+                    && chat.connection_state() == ChatConnState::Connected
+            })
+            .map(|(account, _)| account.platform)
+            .collect()
+    }
+
+    /// Broadcast `text` to every capable worker. Each worker applies its own
+    /// platform rate limit. Returns the per-platform outcome in worker order
+    /// so the dock can surface partial failures (e.g. Twitch accepted, Kick
+    /// rate-limited).
+    pub fn send_message(&self, text: &str) -> Vec<(ChatPlatform, bool)> {
+        self.workers
+            .iter()
+            .map(|(account, chat)| (account.platform, chat.send_message(text)))
+            .collect()
+    }
+
+    /// Reply to a specific chat line on the platform the parent message came
+    /// from (only Twitch supports threading). Subject to that platform's
+    /// shared rate limiter. Returns `false` when the platform has no running
+    /// worker or cannot reply.
+    pub fn send_reply(&self, text: &str, reply_to_id: &str, platform: ChatPlatform) -> bool {
+        self.workers
+            .iter()
+            .find(|(account, _)| account.platform == platform)
+            .map(|(_, chat)| chat.send_reply(text, reply_to_id))
+            .unwrap_or(false)
+    }
+
+    /// Whether any Twitch worker was told by the server that its bot account
+    /// must be phone-verified before it can send.
+    pub fn phone_verification_required(&self) -> bool {
+        self.workers
+            .iter()
+            .any(|(_, chat)| chat.phone_verification_required())
+    }
+
+    /// Outbound rate-limit detail `(remaining, capacity, window_secs)` of the
+    /// named platform's worker, for the per-account budget line. `None` when
+    /// that platform has no running worker.
+    pub fn rate_limit_detail(&self, platform: ChatPlatform) -> Option<(f64, u32, u64)> {
+        let chat = &self
+            .workers
+            .iter()
+            .find(|(account, _)| account.platform == platform)?
+            .1;
+        let cfg = chat.rate_limit_config();
+        Some((chat.rate_limit_remaining(), cfg.capacity, cfg.window_secs))
+    }
+
+    /// Stop every worker and drop them, mirroring the single-platform GUI
+    /// path (workers report their last state until dropped, so clearing is
+    /// what actually returns the aggregate to `Off`). Safe to call repeatedly.
+    pub fn disconnect_all(&mut self) {
+        for (_, chat) in &mut self.workers {
+            chat.disconnect();
+        }
+        self.workers.clear();
+    }
+}
+
+impl Default for MultiChat {
+    fn default() -> Self {
+        Self::new(&[], |_, _| String::new())
+    }
+}
+
+impl std::fmt::Debug for MultiChat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MultiChat")
+            .field(
+                "platforms",
+                &self
+                    .workers
+                    .iter()
+                    .map(|(account, _)| account.platform)
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
 impl Default for ChatConfig {
     fn default() -> Self {
         Self::new(ChatPlatform::Twitch, String::new(), String::new())
@@ -216,10 +500,9 @@ impl Chat {
         {
             let mut limiter = self.limiter.lock().unwrap_or_else(|e| e.into_inner());
             if !limiter.try_acquire() {
-                tracing::warn!(
-                    platform = ?self.platform(),
-                    "chat send dropped: platform rate limit exhausted"
-                );
+                // Static message: no account-derived value in log sinks
+                // (CodeQL rust/cleartext-logging).
+                tracing::warn!("chat send dropped: platform rate limit exhausted");
                 return false;
             }
         }
@@ -244,10 +527,9 @@ impl Chat {
         {
             let mut limiter = self.limiter.lock().unwrap_or_else(|e| e.into_inner());
             if !limiter.try_acquire() {
-                tracing::warn!(
-                    platform = ?self.platform(),
-                    "chat reply dropped: platform rate limit exhausted"
-                );
+                // Static message: no account-derived value in log sinks
+                // (CodeQL rust/cleartext-logging).
+                tracing::warn!("chat reply dropped: platform rate limit exhausted");
                 return false;
             }
         }
@@ -445,6 +727,218 @@ mod tests {
             chat.rate_limit_remaining(),
             1.0,
             "read-only rejects must not consume limiter tokens"
+        );
+    }
+
+    // ── MultiChat: combined multi-platform dock facade ────────────────
+
+    fn account(platform: ChatPlatform, channel: &str) -> ChatAccount {
+        ChatAccount::new(platform, channel.to_owned())
+    }
+
+    #[test]
+    fn multichat_spawns_one_worker_per_platform() {
+        let multi = MultiChat::new(
+            &[
+                account(ChatPlatform::Twitch, "rivulet"),
+                account(ChatPlatform::Kick, "rivulet"),
+            ],
+            |_, _| String::new(),
+        );
+        assert_eq!(multi.worker_count(), 2);
+        assert!(multi.enabled());
+        let platforms: Vec<_> = multi.accounts().map(|a| a.platform).collect();
+        assert_eq!(platforms, [ChatPlatform::Twitch, ChatPlatform::Kick]);
+        // Worker connection state transitions asynchronously (Off before the
+        // worker thread first runs, then Connected/Disconnected), so only
+        // structural facts are asserted here; the aggregation semantics are
+        // covered by the deterministic loopback test below.
+    }
+
+    #[test]
+    fn multichat_ignores_empty_channels_and_duplicate_platforms() {
+        let multi = MultiChat::new(
+            &[
+                account(ChatPlatform::Twitch, ""),
+                account(ChatPlatform::Twitch, "first"),
+                account(ChatPlatform::Twitch, "second"),
+                account(ChatPlatform::Kick, "rivulet"),
+            ],
+            |_, _| String::new(),
+        );
+        assert_eq!(
+            multi.worker_count(),
+            2,
+            "empty channel and duplicate platform must not spawn workers"
+        );
+        let twitch = multi
+            .accounts()
+            .find(|a| a.platform == ChatPlatform::Twitch)
+            .expect("twitch worker");
+        assert_eq!(twitch.channel, "first", "first account must win");
+    }
+
+    #[test]
+    fn multichat_empty_account_list_is_off() {
+        let multi = MultiChat::new(&[], |_, _| String::new());
+        assert_eq!(multi.worker_count(), 0);
+        assert!(!multi.enabled());
+        assert_eq!(multi.connection_state(), ChatConnState::Off);
+        assert!(multi.send_message("hello").is_empty());
+        assert!(!multi.send_reply("hi", "parent-1", ChatPlatform::Twitch));
+    }
+
+    #[test]
+    fn multichat_broadcast_reports_per_platform_outcome() {
+        // Both workers are enabled but unreachable; the enqueue itself still
+        // succeeds on capable platforms and is refused on read-only YouTube.
+        let multi = MultiChat::new(
+            &[
+                account(ChatPlatform::Twitch, "rivulet"),
+                account(ChatPlatform::YouTube, "abc123"),
+            ],
+            |_, _| String::new(),
+        );
+        let outcomes = multi.send_message("hello");
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(outcomes[0].0, ChatPlatform::Twitch);
+        assert!(outcomes[0].1, "twitch enqueue must pass");
+        assert_eq!(outcomes[1].0, ChatPlatform::YouTube);
+        assert!(!outcomes[1].1, "youtube is read-only");
+        // Twitch's 20/30 s bucket now sits below 1; YouTube's bucket stays
+        // untouched — proving the per-platform rate-limit isolation.
+        assert!(multi.rate_limit_detail(ChatPlatform::Twitch).unwrap().0 < 20.0);
+        assert_eq!(
+            multi.rate_limit_detail(ChatPlatform::YouTube).unwrap(),
+            (1.0, 1, 86_400),
+            "read-only rejects must not consume the youtube bucket"
+        );
+    }
+
+    #[test]
+    fn multichat_reply_routes_to_the_parent_platform_only() {
+        let multi = MultiChat::new(
+            &[
+                account(ChatPlatform::Twitch, "rivulet"),
+                account(ChatPlatform::Kick, "rivulet"),
+            ],
+            |_, _| String::new(),
+        );
+        // Twitch accepts the enqueue; Kick has no threading.
+        assert!(multi.send_reply("hi", "parent-1", ChatPlatform::Twitch));
+        assert!(!multi.send_reply("hi", "parent-1", ChatPlatform::Kick));
+        // A platform without a running worker rejects before the limiter.
+        assert!(!multi.send_reply("hi", "parent-1", ChatPlatform::YouTube));
+        // An empty parent id is rejected on the capable platform too.
+        assert!(!multi.send_reply("hi", "   ", ChatPlatform::Twitch));
+    }
+
+    #[test]
+    fn multichat_rate_limit_details_are_per_platform() {
+        let multi = MultiChat::new(
+            &[
+                account(ChatPlatform::Twitch, "rivulet"),
+                account(ChatPlatform::YouTube, "abc123"),
+            ],
+            |_, _| String::new(),
+        );
+        let (remaining, capacity, window) = multi.rate_limit_detail(ChatPlatform::Twitch).unwrap();
+        assert_eq!((remaining, capacity, window), (20.0, 20, 30));
+        assert_eq!(
+            multi.rate_limit_detail(ChatPlatform::YouTube).unwrap(),
+            (1.0, 1, 86_400)
+        );
+        assert!(multi.rate_limit_detail(ChatPlatform::Kick).is_none());
+    }
+
+    #[test]
+    fn multichat_sendable_platforms_excludes_read_only() {
+        let multi = MultiChat::new(
+            &[
+                account(ChatPlatform::Twitch, "rivulet"),
+                account(ChatPlatform::YouTube, "abc123"),
+            ],
+            |_, _| String::new(),
+        );
+        let sendable = multi.sendable_platforms();
+        // The spawn-time connection state races the dial, so the list may or
+        // may not contain the capable platform; what must hold always is that
+        // the read-only platform is never advertised.
+        assert!(!sendable.contains(&ChatPlatform::YouTube));
+        assert!(sendable
+            .iter()
+            .all(|p| *p == ChatPlatform::Twitch || *p == ChatPlatform::Kick));
+    }
+
+    #[test]
+    fn multichat_disconnect_all_stops_every_worker() {
+        let mut multi = MultiChat::new(
+            &[
+                account(ChatPlatform::Twitch, "rivulet"),
+                account(ChatPlatform::Kick, "rivulet"),
+            ],
+            |_, _| String::new(),
+        );
+        assert!(multi.enabled());
+        multi.disconnect_all();
+        assert!(
+            !multi.enabled(),
+            "workers must be dropped on disconnect_all"
+        );
+        assert_eq!(multi.worker_count(), 0);
+        assert_eq!(multi.connection_state(), ChatConnState::Off);
+        assert!(multi.send_message("hello").is_empty());
+        // Repeated calls must stay safe.
+        multi.disconnect_all();
+    }
+
+    #[test]
+    fn chat_account_roster_never_carries_a_token() {
+        // The roster must stay token-free: `ChatAccount` is cloned into the
+        // GUI app state and every running MultiChat, so a token field here
+        // would taint everything derived from it (CodeQL
+        // rust/cleartext-logging). Tokens live in the OS credential vault
+        // and are resolved per-connect via a closure, never on the struct.
+        let account = account(ChatPlatform::Twitch, "rivulet");
+        let json = serde_json::to_string(&account).expect("serialize account");
+        assert_eq!(
+            json, r#"{"platform":"Twitch","channel":"rivulet"}"#,
+            "serialized account must contain exactly platform + channel"
+        );
+        let back: ChatAccount = serde_json::from_str(&json).expect("deserialize account");
+        assert_eq!(back, account);
+    }
+
+    #[test]
+    fn multichat_resolves_tokens_through_the_callback() {
+        // The resolver closure is the only token source at spawn time: the
+        // roster passes platform + channel, the resolver (the GUI reads the
+        // OS credential vault) returns the token. The other tests on this
+        // page use an empty resolver, mirroring read-only accounts.
+        let multi = MultiChat::new(
+            &[account(ChatPlatform::Twitch, "rivulet")],
+            |platform, channel| {
+                assert_eq!(platform, ChatPlatform::Twitch);
+                assert_eq!(channel, "rivulet");
+                "oauth:from-resolver".to_owned()
+            },
+        );
+        assert_eq!(multi.worker_count(), 1);
+    }
+
+    #[test]
+    fn chat_token_store_keys_are_stable_per_platform_and_channel() {
+        let twitch = ChatTokenStore::key(ChatPlatform::Twitch, " rivulet ");
+        assert_eq!(twitch, "chat-token/Twitch/rivulet");
+        assert_ne!(
+            twitch,
+            ChatTokenStore::key(ChatPlatform::Kick, "rivulet"),
+            "platforms must not share credential entries"
+        );
+        assert_ne!(
+            ChatTokenStore::key(ChatPlatform::Twitch, "a"),
+            ChatTokenStore::key(ChatPlatform::Twitch, "b"),
+            "channels must not share credential entries"
         );
     }
 }

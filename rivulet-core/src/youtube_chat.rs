@@ -160,6 +160,7 @@ pub fn parse_youtube_payload(payload: &str) -> (Vec<ChatMessage>, Option<String>
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
+            platform: Some(crate::chat::ChatPlatform::YouTube),
         });
     }
     (messages, continuation)
@@ -303,7 +304,10 @@ fn run_session(
         anyhow::anyhow!("no live-chat continuation found (stream may have ended)")
     })?;
 
-    tracing::info!(video = video_id, "YouTube chat connected");
+    // Static message: no config-derived value in log sinks (rust/
+    // cleartext-logging; the video id derives from the same struct as
+    // the token).
+    tracing::info!("YouTube chat connected");
 
     loop {
         if let Ok(Msg::Disconnect) = rx.try_recv() {
@@ -439,6 +443,12 @@ mod tests {
         assert_eq!(messages[1].text, "second message");
         assert!(!messages[1].broadcaster);
         assert_eq!(next.as_deref(), Some("TOKEN_2"));
+        assert!(
+            messages
+                .iter()
+                .all(|m| m.platform == Some(crate::chat::ChatPlatform::YouTube)),
+            "the youtube parser must tag its messages"
+        );
     }
 
     #[test]

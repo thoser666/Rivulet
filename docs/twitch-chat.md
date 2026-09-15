@@ -7,9 +7,28 @@ and **YouTube** (Innertube polling) from one unified UI.
 
 ## Features
 
-- **Platform selector**: the dock header picks the platform — Twitch, Kick
-  or YouTube. Switching disconnects the running worker; the channel/token
-  fields and hints adapt to the selected platform.
+- **Combined multi-platform dock**: the dock holds a list of **accounts**
+  (one per platform — Twitch, Kick, YouTube) instead of a single selector.
+  Connecting spawns one worker per account (`rivulet_core::MultiChat`), and
+  **every platform's messages appear in the same combined list**, each line
+  badged with its platform (`[Twitch]`, `[Kick]`, `[YouTube]`). Alerts from
+  the ingestion pipeline carry their source platform too (EventSub events
+  are Twitch; Streamlabs aggregates several providers and stays unbadged).
+  A broadcast send goes to **every capable account at once**, with
+  per-platform delivery feedback (rejected legs are named — read-only
+  YouTube or a rate-limited account never fail silently). Threaded replies
+  are routed back to the platform the parent message came from.
+- **Account management**: the "Add" row (platform, channel, optional token)
+  appends an account; duplicates per platform are refused with a hint, and
+  removing an account re-arms the worker rebuild and deletes its vault
+  entry. Accounts persist **only platform and channel**: the account struct
+  carries no token field at all — the entered token goes straight into the
+  OS credential vault (Windows Credential Manager / kernel keyutils / macOS
+  Keychain) and is resolved per-connect via a callback, never stored on the
+  roster or in the config file. A failed vault write is reported via a
+  status hint. Configs saved before the combined dock migrate their single
+  platform/channel/token triple into the list on restore and move the
+  legacy token into the vault.
 - **Native Twitch IRC client** (`rivulet-core::twitch_chat`): connects to
   `irc.chat.twitch.tv`, handles the CAP/PASS/NICK/JOIN handshake, answers
   PING/PONG keepalives and parses IRCv3 tags (display name, color, badges,
@@ -54,8 +73,9 @@ and **YouTube** (Innertube polling) from one unified UI.
   with `msg_id=msg_requires_verified_phone_number`, the worker sets a flag
   and the dock shows a warning that the bot account must be phone-verified
   before it can chat (cleared on reconnect).
-- **Privacy-safe**: tokens are never written to logs or the message model;
-  the message serialization is covered by a dedicated test.
+- **Privacy-safe**: tokens are never written to logs or the message model
+  (dedicated test) and never persisted to the config file (serde skip +
+  JSON-absence test) — they live in the OS credential vault.
 
 ## Setup
 
