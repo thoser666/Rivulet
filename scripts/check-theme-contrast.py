@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
-"""Verify that the GUI status colors meet WCAG AA in both color schemes.
+"""Verify that the GUI colors meet WCAG AA in both color schemes.
+<arg_value><b88a6f17>The palettes are parsed directly from ``rivulet-gui/src/theme.rs`` (the single
+source of truth):
 
-The palettes are parsed directly from ``rivulet-gui/src/theme.rs`` (the single
-source of truth) and every status color is checked against the egui
-panel/window fill of its scheme (dark #1b1b1b, light #f8f8f8). The script
-fails (non-zero exit) when any color drops below the 4.5:1 AA threshold, so a
-future palette change that breaks readability is caught in CI.
+- every status color is checked against the egui panel/window fill of its
+  scheme (dark #1b1b1b, light #f8f8f8), and
+- the accent widget fills (``widgets.active``/``widgets.hovered`` button
+  fills, audit finding ui-006) are checked against their button text — egui
+  paints button text from the widget-state ``fg_stroke``, so that is the
+  color that sits on the fill.
+
+The script fails (non-zero exit) when any pairing drops below the 4.5:1 AA
+threshold, so a future palette change that breaks readability is caught in
+CI.
 
 Usage:
-    scripts/check-theme-contrast.py [--json]
+    scripts/check-theme-contrast.py [--json] [--self-test]
 """
 
 import argparse
@@ -31,6 +38,43 @@ NAMED = {
 }
 
 AA_THRESHOLD = 4.5
+
+# `linear_multiply` brightens in linear space (ecolor 0.36); this factor must
+# mirror theme.rs.
+HOVERED_FACTOR = 1.15
+
+
+def _ecolor_linear_from_gamma(g: float) -> float:
+    """ecolor lib.rs `linear_from_gamma` (gamma [0,1] -> linear [0,1])."""
+    if g <= 0.04045:
+        return g / 12.92
+    return ((g + 0.055) / 1.055) ** 2.4
+
+
+def _ecolor_gamma_u8_from_linear(l: float) -> int:
+    """ecolor lib.rs `gamma_u8_from_linear_f32` (linear [0,1] -> gamma u8)."""
+    if l <= 0.0:
+        return 0
+    if l <= 0.0031308:
+        return round(3294.6 * l)
+    if l <= 1.0:
+        return round(269.025 * l ** (1.0 / 2.4) - 14.025)
+    return 255
+
+
+def linear_multiply(rgb: tuple, factor: float) -> tuple:
+    """Mirror ecolor 0.36 `Color32::linear_multiply` for an opaque color.
+
+    The conversion chain is premultiplied-alpha: gamma -> linear, multiply,
+    then back through the premultiplied `From<Rgba> for Color32` conversion,
+    which un-multiplies in linear space and re-multiplies in gamma space.
+    """
+    out = []
+    for c in rgb:
+        lin = _ecolor_linear_from_gamma(c / 255.0)
+        v = round(_ecolor_gamma_u8_from_linear(lin / factor) * factor)
+        out.append(max(0, min(255, v)))
+    return tuple(out)
 
 
 def linear(channel: float) -> float:
@@ -93,10 +137,46 @@ def parse_background(src: str, const_name: str) -> tuple:
     return (g, g, g)
 
 
+def parse_const_color(src: str, const_name: str) -> tuple:
+    """Parse an opaque `const {name}: egui::Color32 = ...` (from_rgb/from_gray/named)."""
+    m = re.search(rf"const {const_name}:\s*egui::Color32\s*=\s*([^;]+);", src)
+    if not m:
+        raise ValueError(f"missing const {const_name} in {THEME_RS}")
+    expr = m.group(1).strip()
+    rgb = re.search(r"from_rgb\((\d+),\s*(\d+),\s*(\d+)\)", expr)
+    if rgb:
+        return (int(rgb.group(1)), int(rgb.group(2)), int(rgb.group(3)))
+    gray = re.search(r"from_gray\((\d+)\)", expr)
+    if gray:
+        g = int(gray.group(1))
+        return (g, g, g)
+    named = re.search(r"Color32::(\w+)\s*$", expr)
+    if named and named.group(1) in NAMED:
+        return NAMED[named.group(1)]
+    raise ValueError(f"cannot parse const {const_name} expression {expr!r}")
+
+
+def self_test() -> int:
+    """Guard the ecolor mirror math and the WCAG helpers against drift."""
+    # The mirror must reproduce ecolor 0.36.1 exactly (premultiplied chain).
+    assert linear_multiply((0, 105, 92), 1.15) == (0, 113, 99), "hover mirror"
+    assert linear_multiply((255, 255, 255), 1.15) == (255, 255, 255), "clamp"
+    assert linear_multiply((0, 0, 0), 1.15) == (0, 0, 0), "black stays black"
+    # WCAG sanity on known pairings.
+    assert abs(contrast((255, 255, 255), (0, 0, 0)) - 21.0) < 0.01, "white on black"
+    assert contrast((250, 250, 250), (0, 105, 92)) >= AA_THRESHOLD, "active fill"
+    assert contrast((250, 250, 250), linear_multiply((0, 105, 92), 1.15)) >= AA_THRESHOLD, "hovered fill"
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--json", action="store_true", help="emit one JSON document on stdout")
+    ap.add_argument("--self-test", action="store_true", help="verify the ecolor mirror math and exit")
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     if not THEME_RS.is_file():
         print(f"error: {THEME_RS} not found", file=sys.stderr)
@@ -137,6 +217,32 @@ def main() -> int:
             )
             ok = ok and ratio >= AA_THRESHOLD
 
+    # ── Widget-state accent fills (audit finding ui-006) ────────────────
+    # egui paints button text from the widget-state `fg_stroke`, so that is
+    # the color sitting on the active/hovered fills. The fill and text are
+    # pinned consts in theme.rs; the hovered fill is derived at runtime via
+    # `linear_multiply`, which the checker mirrors exactly.
+    try:
+        widget_fill = parse_const_color(src, "WIDGET_ACCENT_FILL")
+        widget_text = parse_const_color(src, "WIDGET_TEXT")
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    hovered_fill = linear_multiply(widget_fill, HOVERED_FACTOR)
+    for name, fill in (("active", widget_fill), ("hovered", hovered_fill)):
+        ratio = contrast(widget_text, fill)
+        results.append(
+            {
+                "scheme": "both",
+                "field": f"widgets.{name}",
+                "rgb": list(widget_text),
+                "background": list(fill),
+                "contrast": round(ratio, 2),
+                "pass": ratio >= AA_THRESHOLD,
+            }
+        )
+        ok = ok and ratio >= AA_THRESHOLD
+
     if args.json:
         print(
             json.dumps(
@@ -148,24 +254,28 @@ def main() -> int:
             )
         )
     else:
-        for scheme in ("dark", "light"):
+        for scheme in ("dark", "light", "both"):
+            rows = [r for r in results if r["scheme"] == scheme]
+            if not rows:
+                continue
             print(f"== {scheme} scheme ==")
-            for r in (r for r in results if r["scheme"] == scheme):
+            for r in rows:
                 status = "ok" if r["pass"] else "FAIL"
                 rgb = "#{:02X}{:02X}{:02X}".format(*r["rgb"])
+                bg = "#{:02X}{:02X}{:02X}".format(*r["background"])
                 print(
-                    f"  {r['field']:<8} {r['contrast']:5.2f}:1  {rgb:<8} {status}"
+                    f"  {r['field']:<12} {r['contrast']:5.2f}:1  {rgb:<8} on {bg:<8} {status}"
                 )
         print(f"\nThreshold: WCAG AA ({AA_THRESHOLD}:1) in both schemes")
 
     if not ok:
         print(
-            "FAIL: at least one status color is below the WCAG AA threshold",
+            "FAIL: at least one color pairing is below the WCAG AA threshold",
             file=sys.stderr,
         )
         return 1
     if not args.json:
-        print("OK: all status colors meet WCAG AA in both schemes")
+        print("OK: all status colors and widget states meet WCAG AA in both schemes")
     return 0
 
 
