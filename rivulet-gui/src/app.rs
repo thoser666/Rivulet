@@ -651,6 +651,79 @@ enum SourcePreviewTarget {
     Window(String),
 }
 
+/// A destructive action that is staged until the user confirms it in the
+/// modal lives in `draw_confirmation_modal`. The payload carries everything
+/// needed to execute the action (and to render the confirmation message), so
+/// the modal can be drawn without mutating app state, and tests drive the
+/// same request → confirm → execute path used by the GUI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PendingConfirmation {
+    DeleteCompositionSource {
+        scene_id: uuid::Uuid,
+        source_id: uuid::Uuid,
+        name: String,
+    },
+    RemoveAudioSource {
+        id: uuid::Uuid,
+        name: String,
+    },
+    RemoveChatAccount {
+        index: usize,
+        platform: rivulet_core::ChatPlatform,
+        channel: String,
+    },
+}
+
+impl PendingConfirmation {
+    fn title_key(&self) -> &'static str {
+        match self {
+            PendingConfirmation::DeleteCompositionSource { .. } => {
+                "confirm_dialog_delete_source_title"
+            }
+            PendingConfirmation::RemoveAudioSource { .. } => "confirm_dialog_remove_audio_title",
+            PendingConfirmation::RemoveChatAccount { .. } => "confirm_dialog_remove_chat_title",
+        }
+    }
+
+    fn message_key(&self) -> &'static str {
+        match self {
+            PendingConfirmation::DeleteCompositionSource { .. } => {
+                "confirm_dialog_delete_source_message"
+            }
+            PendingConfirmation::RemoveAudioSource { .. } => "confirm_dialog_remove_audio_message",
+            PendingConfirmation::RemoveChatAccount { .. } => "confirm_dialog_remove_chat_message",
+        }
+    }
+
+    fn confirm_key(&self) -> &'static str {
+        match self {
+            PendingConfirmation::DeleteCompositionSource { .. } => {
+                "confirm_dialog_delete_source_confirm"
+            }
+            PendingConfirmation::RemoveAudioSource { .. } => "confirm_dialog_remove_audio_confirm",
+            PendingConfirmation::RemoveChatAccount { .. } => "confirm_dialog_remove_chat_confirm",
+        }
+    }
+
+    fn subject(&self) -> String {
+        match self {
+            PendingConfirmation::DeleteCompositionSource { name, .. }
+            | PendingConfirmation::RemoveAudioSource { name, .. } => name.clone(),
+            PendingConfirmation::RemoveChatAccount {
+                platform, channel, ..
+            } => format!("{} · {}", platform.label(), channel),
+        }
+    }
+}
+
+/// Result of the confirmation dialog, returned by its content closure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfirmationChoice {
+    Pending,
+    Confirm,
+    Cancel,
+}
+
 #[cfg(target_os = "linux")]
 enum BackendMessage {
     Stream(Stream, Fd),
@@ -1270,6 +1343,11 @@ pub struct RivuletApp {
     recording_preview: RecordingPreview,
     #[serde(skip)]
     pending_preview_frame: Option<RawFrame>,
+    /// A destructive action that awaits explicit user confirmation before it
+    /// runs (see [`PendingConfirmation`] and `draw_confirmation_modal`).
+    /// Runtime-only, never persisted.
+    #[serde(skip)]
+    pending_confirmation: Option<PendingConfirmation>,
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[serde(skip)]
     source_preview_rx: Option<Receiver<RawFrame>>,
@@ -1757,6 +1835,7 @@ impl Default for RivuletApp {
             last_frame_at: None,
             recording_preview: RecordingPreview::default(),
             pending_preview_frame: None,
+            pending_confirmation: None,
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             source_preview_rx: None,
             #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -2286,12 +2365,7 @@ impl RivuletApp {
                 }
             });
         if let Some(id) = remove_id {
-            let _ = self.engine.remove_audio_source(id);
-            self.audio_sources.retain(|s| s.id != id);
-            self.audio_mixer_needs_sync = true;
-            if self.audio_mixer_filter_source == Some(id) {
-                self.audio_mixer_filter_source = None;
-            }
+            self.remove_audio_source(id);
         }
         self.draw_audio_source_filter_panel(ui);
     }
@@ -6975,10 +7049,11 @@ impl RivuletApp {
         }
     }
 
-    /// Delete the selected composition source and all its scene bindings.
+    /// Stage the deletion of the selected composition source behind the
+    /// confirmation dialog instead of removing it immediately.
     ///
-    /// Respects the scene-local lock (locked sources are never removed) and
-    /// clears the selection so draw code never references a removed source.
+    /// Respects the scene-local lock (locked sources are never staged) and
+    /// leaves the selection untouched until the user confirms.
     fn delete_selected_composition_source(&mut self) {
         let Some(scene_id) = self.active_composition_scene() else {
             return;
@@ -7000,10 +7075,139 @@ impl RivuletApp {
             .get_source(source_id)
             .map(|source| source.name.clone())
             .unwrap_or_default();
-        if self.source_manager.remove_source(source_id).is_some() {
-            self.selected_composition_source = None;
-            self.scene_status = Some(self.tr_fmt("composition_source_deleted", &[name]));
+        self.pending_confirmation = Some(PendingConfirmation::DeleteCompositionSource {
+            scene_id,
+            source_id,
+            name,
+        });
+    }
+
+    /// Execute the staged destructive action after the user confirmed it in
+    /// the dialog rendered by [`Self::draw_confirmation_modal`]. Resolves the
+    /// lock/missing-source guards again so the confirmation path never bypasses
+    /// them (the selection may have changed while the dialog was open).
+    fn confirm_pending_confirmation(&mut self) {
+        let Some(pending) = self.pending_confirmation.take() else {
+            return;
+        };
+        match pending {
+            PendingConfirmation::DeleteCompositionSource {
+                scene_id,
+                source_id,
+                name,
+            } => {
+                let locked = self
+                    .source_manager
+                    .scene_sources(scene_id)
+                    .into_iter()
+                    .any(|binding| binding.source_id == source_id && binding.locked);
+                if locked {
+                    self.scene_status = Some(self.tr("composition_source_locked").to_owned());
+                    return;
+                }
+                if self.source_manager.remove_source(source_id).is_some() {
+                    self.selected_composition_source = None;
+                    self.scene_status = Some(self.tr_fmt("composition_source_deleted", &[name]));
+                }
+            }
+            PendingConfirmation::RemoveAudioSource { id, name } => {
+                if self.audio_sources.iter().any(|source| source.id == id) {
+                    let _ = self.engine.remove_audio_source(id);
+                    self.audio_sources.retain(|source| source.id != id);
+                    self.audio_mixer_needs_sync = true;
+                    if self.audio_mixer_filter_source == Some(id) {
+                        self.audio_mixer_filter_source = None;
+                    }
+                    self.scene_status = Some(self.tr_fmt("audio_source_removed", &[name]));
+                }
+            }
+            PendingConfirmation::RemoveChatAccount { index, .. } => {
+                if self.chat_accounts.get(index).is_some() {
+                    let account = self.chat_accounts[index].clone();
+                    // Best-effort vault cleanup; a stale entry for a removed
+                    // account is harmless but we try not to leave one.
+                    let _ = rivulet_core::ChatTokenStore::default()
+                        .delete(account.platform, &account.channel);
+                    self.chat_accounts.remove(index);
+                    self.chat_action_pending = Some(ChatAction::Disconnect);
+                }
+            }
         }
+    }
+
+    /// Discard a staged destructive action without running it.
+    fn cancel_pending_confirmation(&mut self) {
+        self.pending_confirmation = None;
+    }
+
+    /// Render the confirmation dialog for a staged destructive action. Drawn
+    /// as a modal on top of everything else; backdrop click, `Esc`, or the
+    /// Cancel button discards the action, while the destructive Confirm button
+    /// runs it.
+    fn draw_confirmation_modal(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.pending_confirmation.clone() else {
+            return;
+        };
+        let title = self.tr(pending.title_key()).to_owned();
+        let message = self.tr_fmt(pending.message_key(), &[pending.subject()]);
+        let confirm_label = self.tr(pending.confirm_key()).to_owned();
+        let cancel_label = self.tr("confirm_dialog_cancel").to_owned();
+
+        let mut choice = ConfirmationChoice::Pending;
+        let response =
+            egui::Modal::new(egui::Id::new("rivulet_confirm_destructive")).show(ctx, |ui| {
+                ui.set_min_width(360.0);
+                ui.set_max_width(420.0);
+                ui.heading(title);
+                ui.add_space(6.0);
+                ui.label(message);
+                ui.add_space(14.0);
+                ui.horizontal(|ui| {
+                    if ui.button(cancel_label).clicked() {
+                        choice = ConfirmationChoice::Cancel;
+                    }
+                    let confirm = theme::accent_button(
+                        ui,
+                        egui::RichText::new(confirm_label)
+                            .color(theme::StatusColors::for_ui(ui).error),
+                    );
+                    if confirm.clicked() {
+                        choice = ConfirmationChoice::Confirm;
+                    }
+                });
+            });
+        match choice {
+            ConfirmationChoice::Confirm => self.confirm_pending_confirmation(),
+            ConfirmationChoice::Cancel => self.cancel_pending_confirmation(),
+            ConfirmationChoice::Pending => {
+                if response.should_close() || response.backdrop_response.clicked() {
+                    self.cancel_pending_confirmation();
+                }
+            }
+        }
+    }
+
+    /// Stage an audio source removal behind the confirmation dialog.
+    fn remove_audio_source(&mut self, id: uuid::Uuid) {
+        let name = self
+            .audio_sources
+            .iter()
+            .find(|source| source.id == id)
+            .map(|source| source.name.clone())
+            .unwrap_or_default();
+        self.pending_confirmation = Some(PendingConfirmation::RemoveAudioSource { id, name });
+    }
+
+    /// Stage a chat account removal behind the confirmation dialog.
+    fn remove_chat_account(&mut self, index: usize) {
+        let Some(account) = self.chat_accounts.get(index) else {
+            return;
+        };
+        self.pending_confirmation = Some(PendingConfirmation::RemoveChatAccount {
+            index,
+            platform: account.platform,
+            channel: account.channel.clone(),
+        });
     }
 
     fn any_recording_active(&self) -> bool {
@@ -7665,16 +7869,11 @@ impl RivuletApp {
                 ui.label(platform_text);
                 ui.label(&channel_text);
                 ui.colored_label(state_color, state_text);
-                // Removal is immediate (a reconnect re-reads the list); a
-                // disconnected worker means the change takes effect on the
-                // next Connect.
+                // Removal is staged behind the confirmation dialog (a
+                // reconnect re-reads the list); a disconnected worker means
+                // the change takes effect on the next Connect.
                 if ui.small_button(self.tr("chat_account_remove")).clicked() {
-                    // Best-effort vault cleanup; a stale entry for a removed
-                    // account is harmless but we try not to leave one.
-                    let _ = rivulet_core::ChatTokenStore::default()
-                        .delete(account.platform, &account.channel);
-                    self.chat_accounts.remove(index);
-                    self.chat_action_pending = Some(ChatAction::Disconnect);
+                    self.remove_chat_account(index);
                 }
             });
         }
@@ -11044,6 +11243,10 @@ impl eframe::App for RivuletApp {
         // Region capture editor (floating window, rendered after the panels
         // so it appears on top of the main UI).
         self.draw_region_editor(ui.ctx());
+
+        // Destructive confirmation modal: rendered last so it always sits on
+        // top of every dock and drawer.
+        self.draw_confirmation_modal(ui.ctx());
     }
 }
 
@@ -12736,17 +12939,26 @@ mod tests {
         assert!(source.contains("discord_payload_error_asset_key"));
         assert!(source.contains("StatusColors::for_ui(ui).error"));
         // The Apply flow must call the payload validator after the client id
-        // validator, so both warnings appear together.
+        // validator, so both warnings appear together. The Settings view is
+        // rendered inline in `ui()` (no `draw_settings` function), so the
+        // invariant is checked on the Apply handler pair instead.
         let apply = source
             .split_once("fn apply_discord_client_id")
             .map(|(_, rest)| rest)
             .expect("apply_discord_client_id must exist");
         assert!(apply.contains("fn apply_discord_payload_validation"));
-        let settings = source
-            .split_once("fn draw_settings")
-            .map(|(_, rest)| rest)
-            .expect("draw_settings must exist");
-        assert!(settings.contains("apply_discord_payload_validation()"));
+        assert!(source.contains("self.apply_discord_client_id();"));
+        assert!(source.contains("self.apply_discord_payload_validation();"));
+        let client_id_call = source
+            .find("self.apply_discord_client_id();")
+            .unwrap_or(usize::MAX);
+        let payload_call = source
+            .find("self.apply_discord_payload_validation();")
+            .unwrap_or(0);
+        assert!(
+            client_id_call < payload_call,
+            "settings Apply must run the payload validator after the client id validator"
+        );
     }
 
     #[test]
@@ -14264,7 +14476,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_source_dispatch_removes_the_selected_composition_source() {
+    fn delete_source_dispatch_stages_confirmation_before_deletion() {
         let mut app = RivuletApp::default();
         let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
         app.scenes.switch_to(scene_id);
@@ -14277,10 +14489,74 @@ mod tests {
 
         app.dispatch_hotkey_action("delete_source");
 
+        // The delete hotkey must only stage the action behind the confirmation
+        // dialog; the source survives until the user confirms.
+        assert!(
+            app.source_manager.get_source(source_id).is_some(),
+            "source must survive the hotkey until confirmed"
+        );
+        assert!(matches!(
+            app.pending_confirmation,
+            Some(PendingConfirmation::DeleteCompositionSource { .. })
+        ));
+        assert_eq!(app.selected_composition_source, Some(source_id));
+
+        app.confirm_pending_confirmation();
+
         assert!(app.source_manager.get_source(source_id).is_none());
         assert!(app.source_manager.sources().is_empty());
         assert_eq!(app.selected_composition_source, None);
         assert_eq!(app.scene_status.as_deref(), Some("Source \"Cam\" deleted."));
+        assert_eq!(app.pending_confirmation, None);
+    }
+
+    #[test]
+    fn delete_source_confirmation_cancel_discards_the_staged_action() {
+        let mut app = RivuletApp::default();
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+        let source_id = app.source_manager.add_source(rivulet_core::Source::new(
+            "Cam".to_owned(),
+            rivulet_core::SourceKind::Webcam,
+        ));
+        app.source_manager.bind_source(source_id, scene_id, None);
+        app.selected_composition_source = Some(source_id);
+
+        app.dispatch_hotkey_action("delete_source");
+        assert!(app.pending_confirmation.is_some());
+
+        app.cancel_pending_confirmation();
+
+        assert!(app.source_manager.get_source(source_id).is_some());
+        assert_eq!(app.pending_confirmation, None);
+        assert_eq!(app.selected_composition_source, Some(source_id));
+        assert_eq!(app.scene_status, None);
+    }
+
+    #[test]
+    fn delete_source_confirmation_guard_reruns_on_confirm() {
+        // If the source becomes locked (or gone) between staging and confirm,
+        // the confirmation path must re-run the guards instead of deleting.
+        let mut app = RivuletApp::default();
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+        let source_id = app.source_manager.add_source(rivulet_core::Source::new(
+            "Banner".to_owned(),
+            rivulet_core::SourceKind::Image,
+        ));
+        app.source_manager.bind_source(source_id, scene_id, None);
+        app.selected_composition_source = Some(source_id);
+
+        app.dispatch_hotkey_action("delete_source");
+        // Lock moves in while the dialog is open — the confirm path repects it.
+        app.source_manager.set_locked(source_id, scene_id, true);
+        app.confirm_pending_confirmation();
+
+        assert!(
+            app.source_manager.get_source(source_id).is_some(),
+            "the confirm path must re-check the scene lock"
+        );
+        assert_eq!(app.scene_status.as_deref(), Some("Source is locked."));
     }
 
     #[test]
@@ -14300,10 +14576,11 @@ mod tests {
 
         assert!(
             app.source_manager.get_source(source_id).is_some(),
-            "locked sources must survive the delete hotkey"
+            "locked sources must not even be staged, let alone deleted"
         );
         assert_eq!(app.selected_composition_source, Some(source_id));
         assert_eq!(app.scene_status.as_deref(), Some("Source is locked."));
+        assert_eq!(app.pending_confirmation, None);
     }
 
     #[test]
@@ -14348,6 +14625,60 @@ mod tests {
             "in-app delete dispatch must live inside the text-input guard"
         );
         assert!(source.contains("self.delete_selected_composition_source()"));
+    }
+
+    #[test]
+    fn chat_account_removal_is_staged_behind_confirmation() {
+        let mut app = RivuletApp::default();
+        app.chat_accounts.push(rivulet_core::ChatAccount::new(
+            rivulet_core::ChatPlatform::Twitch,
+            "rivulet_test".to_owned(),
+        ));
+        assert_eq!(app.chat_accounts.len(), 1);
+
+        app.remove_chat_account(0);
+
+        assert_eq!(
+            app.chat_accounts.len(),
+            1,
+            "staging must not remove the account yet"
+        );
+        assert!(matches!(
+            app.pending_confirmation,
+            Some(PendingConfirmation::RemoveChatAccount { .. })
+        ));
+        assert_eq!(app.chat_action_pending, None);
+
+        app.confirm_pending_confirmation();
+
+        assert!(app.chat_accounts.is_empty());
+        assert_eq!(app.pending_confirmation, None);
+    }
+
+    #[test]
+    fn chat_account_removal_cancel_keeps_the_account() {
+        let mut app = RivuletApp::default();
+        app.chat_accounts.push(rivulet_core::ChatAccount::new(
+            rivulet_core::ChatPlatform::Kick,
+            "anchovies_channel".to_owned(),
+        ));
+        app.remove_chat_account(0);
+        assert!(app.pending_confirmation.is_some());
+
+        app.cancel_pending_confirmation();
+
+        assert_eq!(app.chat_accounts.len(), 1);
+        assert_eq!(app.chat_accounts[0].channel, "anchovies_channel");
+        assert_eq!(app.pending_confirmation, None);
+        assert_eq!(app.chat_action_pending, None);
+    }
+
+    #[test]
+    fn chat_account_removal_out_of_bounds_is_a_no_op() {
+        let mut app = RivuletApp::default();
+        app.remove_chat_account(0);
+        assert_eq!(app.pending_confirmation, None);
+        assert!(app.chat_accounts.is_empty());
     }
 
     // ── Source (monitor) dropdown label ───────────────────────────
@@ -16179,11 +16510,38 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         assert_eq!(app.engine.audio_sources().len(), 1);
         assert!(!app.audio_mixer_needs_sync, "sync must clear the flag");
 
-        assert!(app.engine.remove_audio_source(id));
-        app.audio_sources.retain(|s| s.id != id);
-        app.audio_mixer_needs_sync = true;
+        // Removal is staged behind the confirmation dialog first.
+        app.remove_audio_source(id);
+        assert!(!app.engine.audio_sources().is_empty());
+        assert!(matches!(
+            app.pending_confirmation,
+            Some(PendingConfirmation::RemoveAudioSource { .. })
+        ));
+
+        app.confirm_pending_confirmation();
         app.sync_audio_routing();
         assert!(app.engine.audio_sources().is_empty());
+        assert!(app.audio_sources.is_empty());
+        assert_eq!(app.pending_confirmation, None);
+    }
+
+    #[test]
+    fn audio_source_removal_cancel_keeps_the_engine_source() {
+        let mut app = RivuletApp::default();
+        let source = AudioSource::application("Discord", "pending_app");
+        let id = app.engine.add_audio_source(source.clone());
+        app.audio_sources.push(source);
+
+        app.remove_audio_source(id);
+        assert!(app.pending_confirmation.is_some());
+        app.cancel_pending_confirmation();
+
+        assert!(
+            app.engine.audio_sources().iter().any(|s| s.id == id),
+            "cancelled removal must leave the engine source intact"
+        );
+        assert!(app.audio_sources.iter().any(|s| s.id == id));
+        assert_eq!(app.pending_confirmation, None);
     }
 
     #[test]

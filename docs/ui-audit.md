@@ -36,6 +36,15 @@ These are covered by the theme unit tests in `rivulet-gui/src/theme.rs`.
 The following tests enforce stable UI contracts and run on every CI push in the
 `Build & Test` matrix:
 
+- **Automated accessibility** — two contracts guard the AT story:
+  - the confirmation dialog warehouse (`draw_confirmation_modal`) renders every
+    destructive action (composition source delete, audio source remove, chat
+    account remove) behind a modal whose Confirm button uses the error palette,
+    while `Esc`/backdrop click/Cancel discard it — covered in `subject()` /
+    `ConfirmDecision` style tests in `rivulet-gui/src/app.rs`,
+  - the focus-order contract (`tests/ui_accessibility.rs`) asserts that the
+    navigation sidebar renders every view as a focusable, focus-ring drawn
+    `selectable_label` in document order.
 - **UI smoke** (`rivulet-gui/tests/ui_smoke.rs`) — verifies that
   - navigation covers all primary views and lists them through a stable
     `AppView::all()` contract,
@@ -48,7 +57,12 @@ The following tests enforce stable UI contracts and run on every CI push in the
   viewport/interaction snapshot contracts that are independent of the host font
   and GPU, so visual output stays stable across machines.
 - **UI accessibility** (`rivulet-gui/tests/ui_accessibility.rs`) — a stable
-  accessibility report that asserts semantic contracts for the primary workflows.
+  accessibility report that asserts semantic contracts for the primary workflows,
+  including the AccessKit bridge contract (`screen_reader_bridge_enabled`): the
+  native AT bridge compiles in on non-Linux targets (Windows UIA/Narrator, macOS
+  AX/VoiceOver) via the target-gated `accesskit` eframe feature, and stays off on
+  Linux only because accesskit_unix talks zbus from a foreign thread next to the
+  Tokio reactor (documented in `rivulet-gui/Cargo.toml`).
 
 ### Contrast
 
@@ -78,6 +92,7 @@ scaling, compositor behavior) that the headless contracts cannot fully replace.
 | --- | --- | --- | --- | --- |
 | ui-001 | Low | Accessibility scanning | No automated accessibility scan of the rendered UI on every PR; currently only the in-process accessibility report and contrast checker run | Enable a GitHub accessibility/automated scan app (see `docs/security.md` / GitHub app enablement); owner: maintainer |
 | ui-002 | Low | Scaling | Text-scaling (125 %/150 %) was verified in the M2 gate but is not yet a CI contract | Consider extending `ui_regression` snapshots; owner: maintainer |
+| ui-003 | Info | UX audit v0.65a | Screen readers (Windows/Mac) had no native AT bridge: AccessKit was unconditionally disabled | Closed — AccessKit now compiles in on non-Linux targets (target-gated `accesskit` feature) |
 
 Open findings are intentionally low severity; they track ongoing hardening rather
 than known release blockers. When a finding is fixed, move it below under
@@ -85,4 +100,7 @@ than known release blockers. When a finding is fixed, move it below under
 
 ## Closed findings
 
-_None yet._ Record fixed findings here with the resolving commit.
+| ID | Severity | Area | Finding | Resolved by |
+| --- | --- | --- | --- | --- |
+| ui-003 | Info | UX audit v0.65a | Screen readers (Windows/Mac) had no native AT bridge: AccessKit was unconditionally disabled | `rivulet-gui/Cargo.toml` target-gated `accesskit` feature for `cfg(not(target_os = "linux"))` |
+| ui-004 | Info | UX audit v0.65a | Destructive actions (source delete, audio source remove, chat account remove) ran immediately without confirmation | `PendingConfirmation` + `draw_confirmation_modal` in `rivulet-gui/src/app.rs`; Esc/backdrop/cancel discard, confirm uses error palette |
