@@ -195,6 +195,11 @@ const GAME_WINDOWS_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::
 /// remains at its configured frame rate; only texture uploads are throttled.
 const RECORDING_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// How long the aggregated global issue (sidebar footer, ui-007) stays
+/// visible after it first appeared (renewed when a different issue takes
+/// over). Long enough to be noticed, short enough to not become wallpaper.
+const GLOBAL_ISSUE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 const SOURCE_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
 
@@ -287,6 +292,27 @@ impl AppView {
         match self {
             AppView::Assistant => Some("M9"),
             _ => None,
+        }
+    }
+}
+
+/// Severity of an aggregated view-local status shown in the sidebar footer
+/// (audit finding ui-007). Ordering drives the pick: `Error` beats `Warning`
+/// beats `Info`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum GlobalIssueKind {
+    Info,
+    Warning,
+    Error,
+}
+
+impl GlobalIssueKind {
+    /// i18n key of the severity prefix shown before the message.
+    fn label_key(self) -> &'static str {
+        match self {
+            GlobalIssueKind::Info => "global_issue_info",
+            GlobalIssueKind::Warning => "global_issue_warning",
+            GlobalIssueKind::Error => "global_issue_error",
         }
     }
 }
@@ -1333,6 +1359,15 @@ pub struct RivuletApp {
     #[serde(skip)]
     last_error: Option<String>,
     #[serde(skip)]
+    /// Timestamp of the last non-global status change (drives the expiry of
+    /// the aggregated sidebar issue — ui-007).
+    global_issue_stamp: Option<Instant>,
+    #[serde(skip)]
+    /// View whose issue is currently surfaced in the sidebar footer (set
+    /// alongside [`Self::global_issue_stamp`], used by the click-to-navigate
+    /// handler).
+    global_issue_view: Option<AppView>,
+    #[serde(skip)]
     record_started: Instant,
     #[serde(skip)]
     last_frame_at: Option<Instant>,
@@ -1831,6 +1866,8 @@ impl Default for RivuletApp {
             error_receiver: None,
             stop_signal: None,
             last_error: None,
+            global_issue_stamp: None,
+            global_issue_view: None,
             record_started: Instant::now(),
             last_frame_at: None,
             recording_preview: RecordingPreview::default(),
@@ -3907,6 +3944,184 @@ impl RivuletApp {
             self.stop_finalizing = None;
             self.record_status = Some(self.tr("recording_saved").to_string());
         }
+    }
+
+    /// Draw the aggregated global issue at the sidebar footer (ui-007): the
+    /// most severe current view-local status, with a severity prefix and the
+    /// origin view. Clicking it navigates to that view. The entry expires
+    /// [`GLOBAL_ISSUE_TTL`] after the issue first appeared (renewed on change)
+    /// so stale one-shot confirmations do not linger forever.
+    fn draw_global_issue_footer(&mut self, ui: &mut egui::Ui) {
+        let issue = self.collect_global_issue();
+        let now = Instant::now();
+        match (&issue, &self.global_issue_view, self.global_issue_stamp) {
+            (Some((_, view, _)), Some(active), _) if view == active => {}
+            (Some((_, view, _)), _, _) => {
+                self.global_issue_view = Some(*view);
+                self.global_issue_stamp = Some(now);
+            }
+            (None, _, _) => {
+                self.global_issue_view = None;
+                self.global_issue_stamp = None;
+            }
+        }
+        let Some((kind, view, text)) = issue else {
+            return;
+        };
+        if let Some(stamp) = self.global_issue_stamp {
+            if now.duration_since(stamp) > GLOBAL_ISSUE_TTL {
+                return;
+            }
+        }
+
+        let colors = theme::StatusColors::for_ui(ui);
+        let color = match kind {
+            GlobalIssueKind::Error => colors.error,
+            GlobalIssueKind::Warning => colors.warning,
+            GlobalIssueKind::Info => colors.info,
+        };
+        ui.separator();
+        let label = format!(
+            "{}: {} — {}",
+            self.tr(kind.label_key()),
+            text,
+            self.tr(view.nav_key())
+        );
+        let response = ui
+            .add(
+                egui::Label::new(egui::RichText::new(label).color(color).small())
+                    .wrap()
+                    .sense(egui::Sense::click()),
+            )
+            .on_hover_text(self.tr("global_issue_jump_hint"));
+        theme::paint_interaction_stroke(ui, &response);
+        if response.clicked() {
+            self.view = view;
+        }
+    }
+
+    /// Aggregate the most relevant view-local status into one global issue
+    /// for the sidebar footer (audit finding ui-007).
+    ///
+    /// A failure raised in a background tab used to stay invisible until the
+    /// user navigated there. This picks the highest-severity issue across all
+    /// views (`Error` beats `Warning` beats `Info`; ties resolve to the
+    /// earliest view in sidebar order) so it can be surfaced globally. The
+    /// inline view displays stay untouched — this is an additional mirror,
+    /// not a replacement.
+    fn collect_global_issue(&self) -> Option<(GlobalIssueKind, AppView, String)> {
+        // (kind, view, text) candidates in sidebar order; the fold prefers
+        // higher severity and, on ties, keeps the earlier view.
+        let mut candidates: Vec<(GlobalIssueKind, AppView, String)> = Vec::new();
+        // Record view — capture/preview failures block recording.
+        if let Some(t) = self.last_error.as_ref() {
+            candidates.push((GlobalIssueKind::Error, AppView::Record, t.clone()));
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(t) = self.audio_status.as_ref() {
+            candidates.push((GlobalIssueKind::Error, AppView::Record, t.clone()));
+        }
+        if let Some(t) = self.record_status.as_ref() {
+            candidates.push((GlobalIssueKind::Error, AppView::Record, t.clone()));
+        }
+        if let Some(t) = self.region_preview_error.as_ref() {
+            candidates.push((GlobalIssueKind::Error, AppView::Record, t.clone()));
+        }
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        if let Some(t) = self.game_preview_error.as_ref() {
+            candidates.push((GlobalIssueKind::Error, AppView::Record, t.clone()));
+        }
+        // Scenes view — export/validation failures.
+        if let Some(t) = self
+            .scene_status
+            .as_ref()
+            .filter(|t| Self::scene_status_is_problem(t))
+        {
+            candidates.push((GlobalIssueKind::Error, AppView::Scenes, t.clone()));
+        }
+        // Stream view — keyring/config problems need attention.
+        if let Some(t) = self
+            .stream_key_store_status
+            .as_ref()
+            .filter(|t| *t == &Self::static_tr("stream_key_store_unavailable"))
+        {
+            candidates.push((GlobalIssueKind::Warning, AppView::Stream, t.clone()));
+        }
+        // Settings view — chat account and plugin errors.
+        if let Some(t) = self.chat_add_error.as_ref() {
+            candidates.push((GlobalIssueKind::Error, AppView::Settings, t.clone()));
+        }
+        if let Some(t) = self.alerts_receiver_error.as_ref() {
+            candidates.push((GlobalIssueKind::Error, AppView::Settings, t.clone()));
+        }
+        if let Some(t) = self.alerts_eventsub_error.as_ref() {
+            candidates.push((GlobalIssueKind::Error, AppView::Settings, t.clone()));
+        }
+        if let Some(t) = self.plugin_load_error.as_ref() {
+            candidates.push((GlobalIssueKind::Error, AppView::Settings, t.clone()));
+        }
+        // Service statuses (obs websocket, remote companion, MIDI) live in
+        // Settings too; only their failure texts are surfaced here.
+        if let Some(t) = self
+            .obs_ws_status
+            .as_ref()
+            .filter(|t| Self::service_status_is_problem(t))
+        {
+            candidates.push((GlobalIssueKind::Warning, AppView::Settings, t.clone()));
+        }
+        if let Some(t) = self
+            .remote_companion_status
+            .as_ref()
+            .filter(|t| Self::service_status_is_problem(t))
+        {
+            candidates.push((GlobalIssueKind::Warning, AppView::Settings, t.clone()));
+        }
+        if let Some(t) = self.midi_status.as_ref() {
+            // MIDI failures are raw error strings from the listener (no i18n
+            // key), while the idle state is always `None` — so any text here
+            // is a failure worth surfacing.
+            candidates.push((GlobalIssueKind::Warning, AppView::Settings, t.clone()));
+        }
+        candidates
+            .into_iter()
+            .max_by_key(|(kind, view, _)| (*kind as u8, std::cmp::Reverse(*view as usize)))
+    }
+
+    /// `scene_status` carries both confirmations ("Scene added") and failures
+    /// ("…failed"); only failures belong in the global surface.
+    fn scene_status_is_problem(text: &str) -> bool {
+        let mut problem = false;
+        for key in ["scenes_export_failed", "scenes_import_failed"] {
+            let localized = Self::static_tr(key);
+            let prefix = localized
+                .split_once("{0}")
+                .map_or(localized.as_str(), |(head, _)| head);
+            problem = problem || text.starts_with(prefix);
+        }
+        problem
+            || text == Self::static_tr("invalid_source")
+            || text == Self::static_tr("no_source_selected")
+            || text == Self::static_tr("scenes_snapshot_no_scene")
+    }
+
+    /// Service status fields also carry idle states ("Server stopped"); only
+    /// error-flavored texts are surfaced globally.
+    fn service_status_is_problem(text: &str) -> bool {
+        // "Could not start server: {0}" — match the fixed prefix.
+        let obs_error = Self::static_tr("obs_ws_error");
+        let obs_prefix = obs_error
+            .split_once("{0}")
+            .map_or(obs_error.as_str(), |(head, _)| head);
+        text == Self::static_tr("remote_companion_lan_requires_password")
+            || text.starts_with(obs_prefix)
+    }
+
+    /// Locale-independent translation for classification helpers (the
+    /// aggregation must classify the same way regardless of the active UI
+    /// language, because the stored texts are localized with the locale at
+    /// set time).
+    fn static_tr(key: &str) -> String {
+        Locale::En.tr(key).to_owned()
     }
 }
 
@@ -9219,6 +9434,10 @@ impl eframe::App for RivuletApp {
                             }
                         }
                     });
+                // Global status/error surface (audit finding ui-007): a
+                // failure raised in a background tab must be visible without
+                // navigating there. Clicking it jumps to the owning view.
+                self.draw_global_issue_footer(ui);
             });
 
         egui::CentralPanel::default().show(ui, |ui| {
@@ -15514,6 +15733,124 @@ mod tests {
         assert_eq!(
             app.chat_action_pending,
             Some(ChatAction::Send("hello chat".to_owned()))
+        );
+    }
+
+    // ── Global status surface (sidebar footer, ui-007) ──────────────
+
+    #[test]
+    fn global_issue_aggregates_view_local_errors() {
+        // A failure raised in a background tab (Settings) must surface
+        // globally even while the user is on a different view.
+        let app = RivuletApp {
+            chat_add_error: Some("vault refused".to_owned()),
+            ..Default::default()
+        };
+        let issue = app.collect_global_issue();
+        assert_eq!(
+            issue.as_ref().map(|(_, view, _)| *view),
+            Some(AppView::Settings)
+        );
+        assert_eq!(
+            issue.as_ref().map(|(kind, _, _)| *kind),
+            Some(GlobalIssueKind::Error)
+        );
+        assert_eq!(
+            issue.as_ref().map(|(_, _, text)| text.as_str()),
+            Some("vault refused")
+        );
+    }
+
+    #[test]
+    fn global_issue_prefers_the_highest_severity_then_earliest_view() {
+        let app = RivuletApp {
+            scene_status: Some("Could not export scene collection: disk full".to_owned()), // Error, Scenes
+            stream_key_store_status: Some(RivuletApp::static_tr("stream_key_store_unavailable")), // Warning, Stream
+            ..Default::default()
+        };
+        assert_eq!(
+            app.collect_global_issue()
+                .as_ref()
+                .map(|(_, view, text)| (*view, text.as_str())),
+            Some((
+                AppView::Scenes,
+                "Could not export scene collection: disk full"
+            )),
+            "error must beat warning"
+        );
+
+        // Two errors on different views: the earliest sidebar view wins.
+        let app = RivuletApp {
+            chat_add_error: Some("settings-fail".to_owned()), // Settings
+            last_error: Some("record-fail".to_owned()),       // Record
+            ..Default::default()
+        };
+        assert_eq!(
+            app.collect_global_issue()
+                .as_ref()
+                .map(|(_, view, text)| (*view, text.as_str())),
+            Some((AppView::Record, "record-fail")),
+            "ties must resolve to the earliest view in sidebar order"
+        );
+    }
+
+    #[test]
+    fn global_issue_ignores_positive_and_idle_statuses() {
+        // Confirmations and idle service states must not be surfaced.
+        let app = RivuletApp {
+            scene_status: Some(RivuletApp::static_tr("scenes_switched").replace("{0}", "Game")),
+            stream_key_store_status: Some(RivuletApp::static_tr("stream_key_saved")),
+            obs_ws_status: Some(RivuletApp::static_tr("obs_ws_stopped")),
+            remote_companion_status: Some(RivuletApp::static_tr("remote_companion_stopped")),
+            ..Default::default()
+        };
+        assert!(
+            app.collect_global_issue().is_none(),
+            "confirmations/idle states must stay view-local"
+        );
+    }
+
+    #[test]
+    fn global_issue_surfaces_service_failures_as_warnings() {
+        let app = RivuletApp {
+            obs_ws_status: Some(RivuletApp::static_tr("obs_ws_error").replace("{0}", "port busy")),
+            ..Default::default()
+        };
+        assert_eq!(
+            app.collect_global_issue()
+                .as_ref()
+                .map(|(kind, view, _)| (*kind, *view)),
+            Some((GlobalIssueKind::Warning, AppView::Settings)),
+            "the obs-websocket start failure must be mirrored globally"
+        );
+    }
+
+    #[test]
+    fn global_issue_footers_issue_stamp_renews_on_issue_change() {
+        let mut app = RivuletApp::default();
+        assert!(app.global_issue_stamp.is_none());
+
+        // First issue arms the stamp + view.
+        app.chat_add_error = Some("first".to_owned());
+        let first_view = app.collect_global_issue().map(|(_, view, _)| view);
+        assert_eq!(first_view, Some(AppView::Settings));
+        app.global_issue_view = first_view;
+        app.global_issue_stamp = Some(Instant::now());
+
+        // A *different* issue (different view) renews the stamp.
+        app.chat_add_error = None;
+        app.last_error = Some("record fail".to_owned());
+        let second = app.collect_global_issue();
+        assert_eq!(
+            second.as_ref().map(|(_, view, _)| *view),
+            Some(AppView::Record)
+        );
+        let prev_stamp = app.global_issue_stamp.unwrap();
+        app.global_issue_view = second.as_ref().map(|(_, view, _)| *view);
+        app.global_issue_stamp = Some(Instant::now());
+        assert!(
+            app.global_issue_stamp.unwrap() >= prev_stamp,
+            "switching issues must renew the stamp (fresh TTL window)"
         );
     }
 
