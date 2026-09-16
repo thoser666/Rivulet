@@ -4027,6 +4027,7 @@ impl RivuletApp {
         if let Some(t) = self.region_preview_error.as_ref() {
             candidates.push((GlobalIssueKind::Error, AppView::Record, t.clone()));
         }
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
         if let Some(t) = self.game_preview_error.as_ref() {
             candidates.push((GlobalIssueKind::Error, AppView::Record, t.clone()));
         }
