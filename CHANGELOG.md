@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- a11y(ui): **global status surface in the sidebar footer** — a failure
+  raised in a background tab (chat account, plugin load, alerts ingestion,
+  OBS WebSocket, export …) used to stay invisible until the user navigated
+  to the owning view. The app now aggregates all view-local status fields
+  into one global issue (`collect_global_issue`, typed by severity
+  Error > Warning > Info, ties resolved to the earliest view in sidebar
+  order) and shows it in the sidebar footer with a localized severity
+  prefix and the origin view; clicking it jumps straight there. The entry
+  expires 30 s after the issue first appeared (renewed when a different
+  issue takes over) so one-shot confirmations don't linger. Positive and
+  idle statuses are classified out (`scene_status` confirmations, service
+  "stopped" idle states, keyring saves) via locale-independent matching;
+  the inline view displays stay untouched. Pinned by five GUI tests
+  (aggregation, severity order, idle filtering, service warnings, stamp
+  renewal). Audit finding ui-007, now closed in `docs/ui-audit.md`.
 - fix(ci): **nightly is green again** — three independent rot causes:
   (1) the nightly's Linux jobs never installed `libasound2-dev`, so the
   `alsa-sys` build script (pulled in via cpal/midir) panicked and failed
