@@ -49,7 +49,7 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v6.1.0",
     ),
     (
-        "dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c",
+        "dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87",
         "stable",
     ),
     (
@@ -57,20 +57,20 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v3.0.3",
     ),
     (
-        "github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938",
-        "v4.37.9",
+        "github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63",
+        "v4.38.0",
     ),
     (
-        "github/codeql-action/autobuild@cdf488f595d80d6e07e03d4674febd5ab45fa938",
-        "v4.37.9",
+        "github/codeql-action/autobuild@b96794f015dfd88f77b49b1c93e0fa7110f94c63",
+        "v4.38.0",
     ),
     (
-        "github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938",
-        "v4.37.9",
+        "github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63",
+        "v4.38.0",
     ),
     (
-        "github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938",
-        "v4.37.9",
+        "github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63",
+        "v4.38.0",
     ),
     (
         "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
@@ -1853,6 +1853,15 @@ fn stale_pin_checker_is_wired_up() {
         checker.contains("--json") && checker.contains("json.dumps"),
         "check-action-pins.py must offer a --json machine-readable mode"
     );
+    // Two-segment release tags (SignPath's `v2.3`/`v3.0`) must be treated as
+    // valid semver with an implicit .0 patch — a 3-segment-only regex
+    // reported "no stable semver tags found" and failed the nightly stale-pin
+    // job even though the pin was exactly the latest tag (regression pinned
+    // via semver_key).
+    assert!(
+        checker.contains("def semver_key"),
+        "check-action-pins.py must parse two-segment semver tags via semver_key"
+    );
     assert!(
         checker.contains("--comment") && checker.contains("render_comment"),
         "check-action-pins.py must offer a --comment Markdown notification mode"
@@ -1996,7 +2005,7 @@ fn code_signing_automation_is_wired_up() {
         );
     }
     assert!(
-        build.contains("signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627"),
+        build.contains("signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092"),
         "build-package.yml must pin the SignPath action to the reviewed SHA"
     );
     assert!(
@@ -2032,7 +2041,7 @@ fn code_signing_automation_is_wired_up() {
 
     let signpath_check = read("scripts/test-signpath-config.py");
     assert!(
-        signpath_check.contains("c92b958760219087e01f8d67a1669ed57afe2627")
+        signpath_check.contains("f6d04783b4569d051e0c80105fe66e82819d0092")
             && signpath_check.contains("signpath_enabled")
             && signpath_check.contains("--self-test"),
         "test-signpath-config.py must pin the action SHA and offer --self-test"

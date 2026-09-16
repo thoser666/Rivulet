@@ -25,13 +25,13 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | `actions/dependency-review-action` | `v5.0.0` | `a1d282b36b6f3519aa1f3fc636f609c47dddb294` | security.yml |
 | `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | ci.yml, release.yml |
 | `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | build-package.yml, ci.yml, fuzz-deep.yml, obs-upstream.yml, scorecard.yml, weekly-promotion.yml |
-| `dtolnay/rust-toolchain` | `stable` | `4360b52568e2003a75bf9bc1d59f33a8e3fc893c` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, security.yml |
-| `github/codeql-action/analyze` | `v4.37.9` | `cdf488f595d80d6e07e03d4674febd5ab45fa938` | security.yml |
-| `github/codeql-action/autobuild` | `v4.37.9` | `cdf488f595d80d6e07e03d4674febd5ab45fa938` | security.yml |
-| `github/codeql-action/init` | `v4.37.9` | `cdf488f595d80d6e07e03d4674febd5ab45fa938` | security.yml |
-| `github/codeql-action/upload-sarif` | `v4.37.9` | `cdf488f595d80d6e07e03d4674febd5ab45fa938` | scorecard.yml |
+| `dtolnay/rust-toolchain` | `stable` | `6bed0761d98439e5a578e2877258200ad565ba87` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, security.yml |
+| `github/codeql-action/analyze` | `v4.38.0` | `b96794f015dfd88f77b49b1c93e0fa7110f94c63` | security.yml |
+| `github/codeql-action/autobuild` | `v4.38.0` | `b96794f015dfd88f77b49b1c93e0fa7110f94c63` | security.yml |
+| `github/codeql-action/init` | `v4.38.0` | `b96794f015dfd88f77b49b1c93e0fa7110f94c63` | security.yml |
+| `github/codeql-action/upload-sarif` | `v4.38.0` | `b96794f015dfd88f77b49b1c93e0fa7110f94c63` | scorecard.yml |
 | `ossf/scorecard-action` | `v2.4.4` | `2d1146689b8cda280b9bc96326124645441f03bc` | scorecard.yml |
-| `signpath/github-action-submit-signing-request` | `v2.3` | `c92b958760219087e01f8d67a1669ed57afe2627` | build-package.yml |
+| `signpath/github-action-submit-signing-request` | `v3.0` | `f6d04783b4569d051e0c80105fe66e82819d0092` | build-package.yml |
 | `softprops/action-gh-release` | `v3.0.3` | `efb35369e0ad2afab669f228072c1b0d510eae64` | ci.yml, release.yml |
 <!-- action-pins-table:end -->
 
