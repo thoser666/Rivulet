@@ -391,6 +391,7 @@ impl Locale {
                 ("filter_limiter", "Limiter"),
                 ("audio_source_add", "Add Source"),
                 ("audio_source_remove", "Remove"),
+                ("audio_source_removed", "Audio source \"{0}\" removed."),
                 ("audio_source_name", "Source name"),
                 ("audio_source_default_name", "New source"),
                 ("audio_source_mute", "Mute"),
@@ -760,6 +761,36 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("composition_delete_hint", "Delete the selected source (locked sources are kept)."),
                 ("composition_source_locked", "Source is locked."),
                 ("composition_source_deleted", "Source \"{0}\" deleted."),
+                // Confirmation dialogs for destructive actions
+                ("confirm_dialog_cancel", "Cancel"),
+                ("confirm_dialog_delete", "Delete"),
+                ("confirm_dialog_delete_source_title", "Delete source?"),
+                (
+                    "confirm_dialog_delete_source_message",
+                    "Delete \"{0}\" and all of its scene bindings? This cannot be undone.",
+                ),
+                (
+                    "confirm_dialog_delete_source_confirm",
+                    "Delete source",
+                ),
+                ("confirm_dialog_remove_audio_title", "Remove audio source?"),
+                (
+                    "confirm_dialog_remove_audio_message",
+                    "Remove \"{0}\" from the audio mixer? This cannot be undone.",
+                ),
+                (
+                    "confirm_dialog_remove_audio_confirm",
+                    "Remove audio source",
+                ),
+                ("confirm_dialog_remove_chat_title", "Remove chat account?"),
+                (
+                    "confirm_dialog_remove_chat_message",
+                    "Remove the chat account \"{0}\"? Its saved token will be deleted from the OS credential vault.",
+                ),
+                (
+                    "confirm_dialog_remove_chat_confirm",
+                    "Remove account",
+                ),
                 ("composition_hidden", "hidden"),
                 ("composition_locked_state", "locked"),
                 ("section_planned", "This section is planned for milestone {0}."),
@@ -1081,6 +1112,7 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("filter_limiter", "Limiter"),
                 ("audio_source_add", "Quelle hinzufügen"),
                 ("audio_source_remove", "Entfernen"),
+                ("audio_source_removed", "Audioquelle \"{0}\" entfernt."),
                 ("audio_source_name", "Quellenname"),
                 ("audio_source_default_name", "Neue Quelle"),
                 ("audio_source_mute", "Stumm"),
@@ -1453,6 +1485,36 @@ Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."
                 ("composition_delete_hint", "Die ausgewählte Quelle löschen (gesperrte Quellen bleiben erhalten)."),
                 ("composition_source_locked", "Quelle ist gesperrt."),
                 ("composition_source_deleted", "Quelle \"{0}\" gelöscht."),
+                // Confirmation dialogs for destructive actions
+                ("confirm_dialog_cancel", "Abbrechen"),
+                ("confirm_dialog_delete", "Löschen"),
+                ("confirm_dialog_delete_source_title", "Quelle löschen?"),
+                (
+                    "confirm_dialog_delete_source_message",
+                    "\"{0}\" und alle zugehörigen Szenen-Bindungen löschen? Dies kann nicht rückgängig gemacht werden.",
+                ),
+                (
+                    "confirm_dialog_delete_source_confirm",
+                    "Quelle löschen",
+                ),
+                ("confirm_dialog_remove_audio_title", "Audioquelle entfernen?"),
+                (
+                    "confirm_dialog_remove_audio_message",
+                    "\"{0}\" aus dem Audio-Mixer entfernen? Dies kann nicht rückgängig gemacht werden.",
+                ),
+                (
+                    "confirm_dialog_remove_audio_confirm",
+                    "Audioquelle entfernen",
+                ),
+                ("confirm_dialog_remove_chat_title", "Chat-Konto entfernen?"),
+                (
+                    "confirm_dialog_remove_chat_message",
+                    "Chat-Konto \"{0}\" entfernen? Das gespeicherte Token wird aus dem OS-Anmeldedatenspeicher gelöscht.",
+                ),
+                (
+                    "confirm_dialog_remove_chat_confirm",
+                    "Konto entfernen",
+                ),
                 ("composition_hidden", "ausgeblendet"),
                 ("composition_locked_state", "gesperrt"),
                 ("section_planned", "Dieser Bereich ist für Meilenstein {0} geplant."),

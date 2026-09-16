@@ -6,8 +6,15 @@ rust-version = "1.70"
 license.workspace = true
 
 [dependencies]
-# GUI framework (accesskit disabled: zbus/Tokio conflict on Linux,
-# accesskit_unix connects to DBus from a foreign thread)
+# GUI framework. AccessKit (native AT bridges: Windows UIA, macOS AX,
+# Linux AT-SPI) is enabled per-target below: it stays OFF on Linux because
+# accesskit_unix connects to DBus (zbus) from a foreign OS thread, which
+# conflicts with the app's Tokio runtime — see the comment in
+# `src/main.rs::configure_bundled_gstreamer` history. The base declaration
+# keeps the Linux-sane feature set; the extra `accesskit` feature is added
+# only for non-Linux targets via the target-specific section (Cargo
+# resolver "2" unifies the two declarations, activating the feature only on
+# the matched targets).
 eframe = { version = "0.36.1", default-features = false, features = [
     "default_fonts",
     "glow",
@@ -93,3 +100,21 @@ egui_kittest = { version = "0.36", features = ["eframe"] }
 # (the client transport itself runs in rivulet-core; this reuses the already
 # locked tungstenite 0.26 from the workspace without new versions or licenses).
 tungstenite = "0.26"
+
+# Screen-reader / assistive-technology support on Windows (UIA/Narrator) and
+# macOS (AX/VoiceOver). Excluded on Linux only: accesskit_unix talks zbus from
+# a foreign thread there, which races the Tokio reactor. The base eframe
+# declaration above keeps the Linux-sane feature set; this target-specific
+# section re-declares eframe with the extra `accesskit` feature (Cargo
+# resolver "2" unifies the two declarations, activating the feature only on
+# the matched targets).
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+eframe = { version = "0.36.1", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "glow",
+    "links",
+    "persistence",
+    "wayland",
+    "x11",
+] }

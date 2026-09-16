@@ -13,6 +13,7 @@ struct AccessibilityReport {
     secrets_are_redacted: bool,
     stream_queue_diagnostics_labeled: bool,
     per_target_diagnostics_labeled: bool,
+    screen_reader_bridge_enabled: bool,
 }
 
 #[test]
@@ -26,6 +27,7 @@ fn primary_workflows_have_accessible_semantic_contract() {
     assert!(report.secrets_are_redacted);
     assert!(report.stream_queue_diagnostics_labeled);
     assert!(report.per_target_diagnostics_labeled);
+    assert!(report.screen_reader_bridge_enabled);
 }
 
 #[test]
@@ -76,7 +78,7 @@ fn accessibility_report() -> AccessibilityReport {
             "Refresh",
             "Settings",
         ]),
-        navigation_has_focus_order: true,
+        navigation_has_focus_order: navigation_has_focus_order(),
         errors_are_visible: true,
         status_is_not_color_only: true,
         narrow_layout_is_responsive: narrow_layout_is_responsive(),
@@ -94,7 +96,43 @@ fn accessibility_report() -> AccessibilityReport {
             "Queue underflows",
             "Queue overflows",
         ]),
+        screen_reader_bridge_enabled: screen_reader_bridge_enabled(),
     }
+}
+
+/// The native navigation sidebar must give every view a focusable, focus-ring
+/// drawn entry (egui's `selectable_label` participates in the Tab focus order
+/// and `paint_interaction_stroke` draws the visible focus ring on `has_focus`),
+/// so keyboard users can reach all views in document order.
+fn navigation_has_focus_order() -> bool {
+    let source = std::fs::read_to_string("src/app.rs").expect("GUI source must be readable");
+    let nav = source
+        .split_once("fn ui(&mut self, ui: &mut egui::Ui")
+        .map(|(_, rest)| rest)
+        .unwrap_or("");
+    let nav = nav
+        .split_once("fn draw_region_editor")
+        .map(|(head, _)| head)
+        .unwrap_or(nav);
+    nav.contains("for view in AppView::all()")
+        && nav.contains("ui.selectable_label(self.view == *view, self.tr(view.nav_key()))")
+        && nav.contains("theme::paint_interaction_stroke(ui, &response)")
+        && nav.contains("if response.clicked()")
+}
+
+/// AccessKit (native AT bridge: Windows UIA/Narrator, macOS AX/VoiceOver) must
+/// be compiled in for non-Linux desktop targets so screen readers can traverse
+/// the UI. It stays disabled on Linux only (accesskit_unix talks zbus from a
+/// foreign thread, which conflicts with the app's Tokio reactor — documented in
+/// `rivulet-gui/Cargo.toml`), so the contract asserts the target-gated feature
+/// declaration exists and that no unconditional `default-features` opt-out
+/// would silently drop it.
+fn screen_reader_bridge_enabled() -> bool {
+    let manifest =
+        std::fs::read_to_string("Cargo.toml").expect("rivulet-gui Cargo.toml must be readable");
+    manifest.contains("[target.'cfg(not(target_os = \"linux\"))'.dependencies]")
+        && manifest.contains("\"accesskit\"")
+        && manifest.contains("eframe = { version = \"0.36.1\", default-features = false")
 }
 
 fn has_all_labels(labels: &[&str]) -> bool {
