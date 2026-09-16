@@ -93,10 +93,14 @@ scaling, compositor behavior) that the headless contracts cannot fully replace.
 | ui-001 | Low | Accessibility scanning | No automated accessibility scan of the rendered UI on every PR; currently only the in-process accessibility report and contrast checker run | Enable a GitHub accessibility/automated scan app (see `docs/security.md` / GitHub app enablement); owner: maintainer |
 | ui-002 | Low | Scaling | Text-scaling (125 %/150 %) was verified in the M2 gate but is not yet a CI contract | Consider extending `ui_regression` snapshots; owner: maintainer |
 | ui-003 | Info | UX audit v0.65a | Screen readers (Windows/Mac) had no native AT bridge: AccessKit was unconditionally disabled | Closed — AccessKit now compiles in on non-Linux targets (target-gated `accesskit` feature) |
+| ui-005 | Medium | Motion | No `prefers-reduced-motion` handling: `theme::preview_fade_alpha` (`animate_bool`) and the scene-transition `request_repaint_after(16 ms)` loop animate regardless of the OS motion setting | Honor egui `ctx.options_mut().reduced_motion` from the OS preference (WCAG 2.3.3); owner: maintainer |
+| ui-007 | Low | Feedback | Errors surface only inline in the owning view (e.g. `scene_status`, `last_error`); a failure raised in a background tab stays invisible until the user navigates there | Add a global status/error line (e.g. sidebar footer) or a notification surface that aggregates view-local errors; owner: maintainer |
+| ui-008 | Low | Target size | Icon-only buttons (`⚙`, `🗑`) use egui's default `interact_size.y = 18`, which can undershoot the WCAG 2.2 minimum target size of 24×24 CSS px | Raise `spacing.interact_size` or use `min_rect_height()` on small icon controls; owner: maintainer |
+| ui-009 | Low | Accessibility platform | Linux has no native AT bridge: `accesskit` stays disabled on Linux because `accesskit_unix` talks zbus from a foreign thread next to the Tokio reactor (documented in `rivulet-gui/Cargo.toml`); screen-reader users on Linux get no native semantics | Revisit once upstream accesskit addresses the zbus/foreign-thread constraint; owner: maintainer |
 
-Open findings are intentionally low severity; they track ongoing hardening rather
-than known release blockers. When a finding is fixed, move it below under
-"Closed findings" with the commit/branch that resolved it.
+Open findings are intentionally low to medium severity; they track ongoing
+hardening rather than known release blockers. When a finding is fixed, move it
+below under "Closed findings" with the commit/branch that resolved it.
 
 ## Closed findings
 
@@ -104,3 +108,4 @@ than known release blockers. When a finding is fixed, move it below under
 | --- | --- | --- | --- | --- |
 | ui-003 | Info | UX audit v0.65a | Screen readers (Windows/Mac) had no native AT bridge: AccessKit was unconditionally disabled | `rivulet-gui/Cargo.toml` target-gated `accesskit` feature for `cfg(not(target_os = "linux"))` |
 | ui-004 | Info | UX audit v0.65a | Destructive actions (source delete, audio source remove, chat account remove) ran immediately without confirmation | `PendingConfirmation` + `draw_confirmation_modal` in `rivulet-gui/src/app.rs`; Esc/backdrop/cancel discard, confirm uses error palette |
+| ui-006 | Medium | Contrast (widget states) | Accent-background text contrast in the active button state fell below WCAG AA: light-gray text on the teal active fill measured ~2.68:1 (dark) / ~3.49:1 (light), and `check-theme-contrast.py` only checked the status palette against the panel fill | Deepened the `widgets.active`/`widgets.hovered` fills to teal 800 with a pinned light widget text (6.34:1 / 5.68:1, both schemes) in `rivulet-gui/src/theme.rs`; `check-theme-contrast.py` now parses the fill/text consts, mirrors `linear_multiply` exactly, and enforces the pairings (`--self-test` guards the mirror math) |

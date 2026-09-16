@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- a11y(ui): **WCAG-AA button states + widget-contrast CI gate** — the
+  active/hovered button fills use a deeper accent (teal 800) with a pinned
+  light widget text so pressed/hovered buttons meet WCAG AA in both schemes
+  (previously ~2.68:1 dark / ~3.49:1 light on the flat teal fill). egui
+  paints button text from the widget-state `fg_stroke`, so both fills and
+  their text are pinned in `theme.rs`; a new WCAG regression test mirrors
+  the hovered-fill derivation exactly. `check-theme-contrast.py` now also
+  checks the widget-state pairings — it parses the fill/text consts from
+  theme.rs, reproduces ecolor's `linear_multiply` byte-exactly (guarded by
+  a `--self-test`), and fails CI on any sub-AA pairing (audit finding
+  ui-006, now closed in `docs/ui-audit.md`).
 - feat(alerts): **combined alerts dock** — the Stream workspace gains a
   dedicated alerts dock beside the chat (middle column on wide windows,
   stacked below the chat on narrow ones): all drained alert events from

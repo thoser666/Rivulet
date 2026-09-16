@@ -4,8 +4,11 @@
 //! (system / dark / light), persisted in the app settings and applied to the
 //! egui context. The semantic status colors live in [`StatusColors`], which
 //! resolves a separate palette per active scheme so the colors stay legible
-//! on both dark and light backgrounds (verified by a WCAG regression test at
-//! the bottom of this file).
+//! on both dark and light backgrounds. Both the status palettes and the
+//! accent widget fills (active/hovered) meet WCAG AA (>= 4.5:1) against the
+//! fills their text sits on — enforced in CI by
+//! `scripts/check-theme-contrast.py` and the tests at the bottom of this
+//! file.
 
 use eframe::egui;
 
@@ -54,7 +57,9 @@ impl ThemePreference {
 // Two palettes (dark/light) resolve the same six status colors so every view
 // reads them from one place and a future branded palette only touches this
 // file. Both palettes meet WCAG AA (>= 4.5:1) against the egui panel/window
-// fill of their scheme — enforced by `status_colors_meet_wcag_aa` below.
+// fill of their scheme, and the accent widget fills (active/hovered) meet
+// WCAG AA against their button text — enforced in CI by
+// `status_colors_meet_wcag_aa` and `scripts/check-theme-contrast.py`.
 
 /// The resolved status colors for one color scheme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +150,11 @@ impl ThemePalette {
     }
 
     /// The palette for a scheme, `dark = true` selects the dark palette.
+    ///
+    /// `accent` is the *flat* highlight color for progress bars, strokes and
+    /// badges. The widget-state button fills (active/hovered) use the deeper
+    /// [`WIDGET_ACCENT_FILL`] so their text stays above WCAG AA — audit
+    /// finding ui-006 (no text color passes on the flat teal A400 fill).
     pub fn for_scheme(dark: bool) -> Self {
         if dark {
             Self {
@@ -165,6 +175,21 @@ impl ThemePalette {
         }
     }
 }
+
+/// The deeper accent used for the `widgets.active`/`widgets.hovered` button
+/// fills so the button text meets WCAG AA on both schemes (ui-006).
+///
+/// Material teal 800, paired with [`WIDGET_TEXT`]: white-ish text reaches
+/// ~6.6:1 on the pressed fill and ~6.1:1 on the brightened hovered fill
+/// (both schemes). White on the flat teal A400 tops out at ~2.7:1 — no text
+/// color can pass, so the fill itself must deepen. Parsed and enforced by
+/// `scripts/check-theme-contrast.py`.
+const WIDGET_ACCENT_FILL: egui::Color32 = egui::Color32::from_rgb(0, 105, 92);
+
+/// Button text color on [`WIDGET_ACCENT_FILL`] fills (both schemes — the
+/// deep teal fill needs light text regardless of the scheme's body text
+/// color). Parsed and enforced by `scripts/check-theme-contrast.py`.
+const WIDGET_TEXT: egui::Color32 = egui::Color32::from_gray(250);
 
 /// Build the font definitions that register the bundled Inter font
 /// (`assets/fonts/Inter-Regular.ttf`) as the primary proportional and
@@ -217,8 +242,13 @@ pub fn init(ctx: &egui::Context, pref: ThemePreference) {
         } else {
             egui::Visuals::light()
         };
-        visuals.widgets.active.bg_fill = palette.accent;
-        visuals.widgets.hovered.bg_fill = palette.accent.linear_multiply(1.15);
+        // The accent fills must keep button text above WCAG AA
+        // (scripts/check-theme-contrast.py enforces it). Button text comes
+        // from the widget-state `fg_stroke`, so pin it here explicitly.
+        visuals.widgets.active.bg_fill = WIDGET_ACCENT_FILL;
+        visuals.widgets.hovered.bg_fill = WIDGET_ACCENT_FILL.linear_multiply(1.15);
+        visuals.widgets.active.fg_stroke = egui::Stroke::new(2.0, WIDGET_TEXT);
+        visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, WIDGET_TEXT);
         visuals.widgets.inactive.bg_fill = palette.panel_fill;
         visuals.widgets.noninteractive.bg_fill = palette.background;
         visuals.window_fill = palette.panel_fill;
@@ -373,6 +403,60 @@ mod tests {
         assert_meets_aa(StatusColors::light(), LIGHT_BG, "light");
     }
 
+    /// Mirror of ecolor 0.36.1 `Color32::linear_multiply` (premultiplied
+    /// chain), used to derive the hovered fill exactly like the runtime.
+    fn linear_multiply(color: egui::Color32, factor: f32) -> egui::Color32 {
+        let gamma_to_linear = |g: f32| {
+            if g <= 0.04045 {
+                g / 12.92
+            } else {
+                ((g + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let linear_to_gamma_u8 = |l: f32| {
+            if l <= 0.0 {
+                0
+            } else if l <= 0.003_130_8 {
+                (3294.6 * l).round() as u8
+            } else if l <= 1.0 {
+                (269.025 * l.powf(1.0 / 2.4) - 14.025).round() as u8
+            } else {
+                255
+            }
+        };
+        let channel = |c: u8| -> u8 {
+            let lin = gamma_to_linear(f32::from(c) / 255.0);
+            ((linear_to_gamma_u8(lin / factor) as f32) * factor).round() as u8
+        };
+        egui::Color32::from_rgb(channel(color.r()), channel(color.g()), channel(color.b()))
+    }
+
+    /// The button text on the accent active/hovered fills must meet WCAG AA
+    /// in both schemes — audit finding ui-006. The hovered fill is derived
+    /// via `linear_multiply(1.15)` exactly like `theme::init` does.
+    #[test]
+    fn widget_accent_fills_meet_wcag_aa_with_their_text() {
+        let hovered = linear_multiply(WIDGET_ACCENT_FILL, 1.15);
+        for (name, fill) in [("active", WIDGET_ACCENT_FILL), ("hovered", hovered)] {
+            let ratio = contrast(WIDGET_TEXT, fill);
+            assert!(
+                ratio >= 4.5,
+                "widgets.{name} fill: text contrast {ratio:.2}:1 < 4.5:1 (WCAG AA)"
+            );
+        }
+    }
+
+    /// The palette accent (progress bars, strokes, badges) is distinct from
+    /// the deeper widget fill, so accents stay visible on accent-filled
+    /// widgets.
+    #[test]
+    fn widget_fill_is_deeper_than_the_flat_accent() {
+        for dark in [true, false] {
+            let accent = ThemePalette::for_scheme(dark).accent;
+            assert_ne!(accent, WIDGET_ACCENT_FILL);
+        }
+    }
+
     #[test]
     fn status_colors_select_the_palette_by_scheme() {
         assert_eq!(StatusColors::for_scheme(true), StatusColors::dark());
@@ -412,10 +496,8 @@ mod tests {
             light_visuals.window_fill,
             ThemePalette::for_scheme(false).panel_fill
         );
-        assert_eq!(
-            dark_visuals.widgets.active.bg_fill,
-            ThemePalette::for_scheme(true).accent
-        );
+        assert_eq!(dark_visuals.widgets.active.bg_fill, WIDGET_ACCENT_FILL);
+        assert_eq!(light_visuals.widgets.hovered.fg_stroke.color, WIDGET_TEXT);
         // The Inter font is registered as the primary proportional family.
         let definitions = inter_font_definitions();
         assert!(
