@@ -24,20 +24,6 @@ eframe = { version = "0.36.1", default-features = false, features = [
     "x11",
 ] }
 
-# Screen-reader / assistive-technology support on Windows (UIA/Narrator) and
-# macOS (AX/VoiceOver). Excluded on Linux only: accesskit_unix talks zbus from
-# a foreign thread there, which races the Tokio reactor.
-[target.'cfg(not(target_os = "linux"))'.dependencies]
-eframe = { version = "0.36.1", default-features = false, features = [
-    "accesskit",
-    "default_fonts",
-    "glow",
-    "links",
-    "persistence",
-    "wayland",
-    "x11",
-] }
-
 # Dependencies for the Rivulet app logic
 log = "0.4.21"
 serde = { version = "1.0", features = ["derive"] }
@@ -114,3 +100,21 @@ egui_kittest = { version = "0.36", features = ["eframe"] }
 # (the client transport itself runs in rivulet-core; this reuses the already
 # locked tungstenite 0.26 from the workspace without new versions or licenses).
 tungstenite = "0.26"
+
+# Screen-reader / assistive-technology support on Windows (UIA/Narrator) and
+# macOS (AX/VoiceOver). Excluded on Linux only: accesskit_unix talks zbus from
+# a foreign thread there, which races the Tokio reactor. The base eframe
+# declaration above keeps the Linux-sane feature set; this target-specific
+# section re-declares eframe with the extra `accesskit` feature (Cargo
+# resolver "2" unifies the two declarations, activating the feature only on
+# the matched targets).
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+eframe = { version = "0.36.1", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "glow",
+    "links",
+    "persistence",
+    "wayland",
+    "x11",
+] }
