@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- fix(ci): **nightly is green again** — three independent rot causes:
+  (1) the nightly's Linux jobs never installed `libasound2-dev`, so the
+  `alsa-sys` build script (pulled in via cpal/midir) panicked and failed
+  Lints + ubuntu since the audio crates landed; (2) the dtolnay
+  rust-toolchain branch pin and the four CodeQL v4.37.9 pins had drifted,
+  failing the stale-pin job (all bumped to current: stable tip
+  6bed0761, codeql-action v4.38.0); (3) SignPath's two-segment tags
+  (`v2.3`) were rejected by the pin checker's 3-segment-only semver
+  regex, reporting a false "no stable semver tags found" error — the
+  checker now parses `X.Y` as `X.Y.0`, and the dormant SignPath path was
+  moved to the reviewed v3.0 tag (input-identical surface, verified
+  against the upstream action.yml diff).
 - a11y(ui): **WCAG-AA button states + widget-contrast CI gate** — the
   active/hovered button fills use a deeper accent (teal 800) with a pinned
   light widget text so pressed/hovered buttons meet WCAG AA in both schemes

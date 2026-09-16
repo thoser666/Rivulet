@@ -44,7 +44,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from action_pins import parse_workflows  # noqa: E402
 
-SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+SEMVER_RE = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?$")
+
+
+def semver_key(version):
+    """Parse ``v?X.Y.Z`` or ``v?X.Y`` into a comparable 3-tuple.
+
+    Some actions tag two-segment releases (e.g. SignPath's ``v2.3``); treating
+    the missing patch as 0 keeps such pins comparable instead of erroring.
+    """
+    match = SEMVER_RE.match(version.removeprefix("v"))
+    if not match:
+        return None
+    major, minor = int(match.group(1)), int(match.group(2))
+    patch = int(match.group(3)) if match.group(3) else 0
+    return (major, minor, patch)
 
 
 def ls_remote(repo, *refs, tags=False):
@@ -97,9 +111,8 @@ def stable_tags(repo):
 
     result = []
     for name, sha in tags.items():
-        match = SEMVER_RE.match(name)
-        if match:
-            key = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        key = semver_key(name)
+        if key is not None:
             result.append((key, name, sha))
     return result
 
@@ -167,15 +180,14 @@ def check_action(action, sha, version):
     if not tags:
         result.update(kind="tag", statuses=["error"], message=f"{action}: no stable semver tags found")
         return result
-    pinned = SEMVER_RE.match(version)
-    if not pinned:
+    pinned_key = semver_key(version)
+    if pinned_key is None:
         result.update(
             kind="tag",
             statuses=["error"],
             message=f"{action}: pinned version {version!r} is not semver",
         )
         return result
-    pinned_key = (int(pinned.group(1)), int(pinned.group(2)), int(pinned.group(3)))
 
     in_major = [tag for tag in tags if tag[0][0] == pinned_key[0]]
     if not in_major:
