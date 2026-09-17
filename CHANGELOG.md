@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- ci(guard): **apt package parity is now checked repo-wide** — the guard
+  added with the libasound2-dev nightly fix compared only ci.yml against
+  nightly.yml. It now covers every workflow that installs apt packages via
+  equivalence groups: the Linux build dependency steps of ci.yml,
+  nightly.yml, build-package.yml and security.yml (CodeQL), the fuzz build
+  dependency steps of ci.yml and fuzz-deep.yml, and the flatpak tooling
+  steps of flatpak-build.yml and distribution-readiness.yml. The first run
+  on the extended guard immediately found real drift — security.yml's
+  CodeQL build was missing `libasound2-dev` — and the parser now also
+  handles the inline (`install -y a b`) and two-packages-per-line forms
+  used by those workflows.
+
 - a11y(ui): **WCAG 2.5.8 minimum target size enforced (ui-008)** —
   icon-only buttons (⚙ filter, 🗑 remove, ↩ reply, ✕ cancel) and compact
   controls could undershoot the 24×24 CSS-px minimum because egui's stock

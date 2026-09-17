@@ -1900,6 +1900,14 @@ fn apt_parity_checker_is_wired_up() {
         "Install Linux dependencies (if applicable)",
         "--self-test",
         "--json",
+        // Repo-wide coverage: the guard must keep checking every workflow
+        // that installs apt packages, not only ci.yml vs nightly.yml.
+        "EXTRA_WORKFLOWS",
+        "build-package",
+        "security",
+        "fuzz-deep",
+        "flatpak-build",
+        "distribution-readiness",
     ] {
         assert!(
             checker.contains(marker),
