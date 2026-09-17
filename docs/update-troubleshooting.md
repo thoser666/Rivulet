@@ -54,6 +54,8 @@ If clicking **Install** appears to do nothing:
    GitHub Release and run it manually.
 
 The updater never logs or displays stream keys, tokens, or download credentials.
+Chat account tokens are stored exclusively in the OS credential vault (`ChatTokenStore`)
+and are therefore never serialized with the app config and never appear in logs.
 The installer path is validated for existence prior to launching process commands across all platforms.
 The downloaded installer is cleaned up after a successful launch where the
 platform permits it (e.g., when the application remains open after opening a DMG on macOS).

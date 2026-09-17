@@ -15,6 +15,9 @@ Plattform leicht abweichen.
 - [ ] Spiel im Fenstermodus ohne Rahmen oder exklusivem Vollbild testen.
 - [ ] Benachrichtigungen, private Fenster und sensible Desktop-Inhalte schließen.
 - [ ] Einen lokalen Testmitschnitt von 30–60 Sekunden erstellen.
+      Liefert das Capture überhaupt keine Frames, beendet Rivulet die Aufnahme nach
+      dem konfigurierten Timeout und zeigt eine Fehlermeldung in der GUI an
+      (siehe auch die globale Statusmeldung in der Sidebar-Fußzeile).
 
 ## 2. Plattformdaten eintragen
 
