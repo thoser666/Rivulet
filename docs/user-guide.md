@@ -36,6 +36,14 @@ Die linke Sidebar ist in folgende Bereiche aufgeteilt:
 - **Assistant** – derzeit vorbereitet
 - **Settings** – Sprache, Theme, Codec, Presets, Hotkeys und Updates
 
+Am unteren Rand der Sidebar zeigt Rivulet eine **globale Statusmeldung**: Treten in einem Hintergrund-Tab
+Probleme auf (z. B. fehlgeschlagener Chat-/Plugin-Ladevorgang, OBS-WebSocket-Verbindung, Szenen-Export oder
+Keyring-Zugriff), erscheint die schwerwiegendste Meldung dort als Spiegel des zuständigen Bereichs — gekennzeichnet
+mit Schweregrad (**Fehler**, **Warnung** oder **Info**) und dem Namen des Ursprungs-Views. Ein Klick auf die Meldung
+springt direkt zum verantwortlichen Bereich. Positive oder Leerlauf-Status werden ausgeblendet, und die Meldung
+verschwindet von selbst, sobald sie 30 Sekunden alt oder das Problem behoben ist. Die Meldungen in den einzelnen
+Views bleiben davon unberührt — die Statusleiste ist eine zusätzliche, nicht ersetzende Anzeige.
+
 Bei schmalen Fenstern kann die Sidebar eingeklappt werden. Alle wichtigen Aktionen müssen zusätzlich über sichtbare Beschriftungen und Tastaturfokus erreichbar sein.
 
 ## 3. Eine Aufnahme erstellen
@@ -250,6 +258,9 @@ Bei einem verfügbaren Update lädt Rivulet das passende Plattformpaket herunter
 Der Windows-Installer-Code **3010** bedeutet: Installation erfolgreich, Neustart erforderlich. Das ist kein Fehler. Siehe auch [`update-troubleshooting.md`](update-troubleshooting.md).
 
 ## 10. Logs und Fehler melden
+
+Die globale Statusmeldung in der Sidebar-Fußzeile führt dich direkt zum betroffenen Bereich; die Details
+stehen in den Logs unterhalb.
 
 Rivulet schreibt tägliche strukturierte Logs in den Benutzer-Datenordner:
 
