@@ -616,6 +616,23 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("stream_status", "Status"),
                 ("stream_m3_note", "Streaming controls and diagnostics are available."),
                 ("stream_config", "Stream settings"),
+                ("stream_vod_section", "VOD track (copyright-safe recording audio)"),
+                (
+                    "stream_vod_enabled",
+                    "Enable VOD track (third audio branch in the local recording)",
+                ),
+                (
+                    "stream_vod_recorded",
+                    "Record VOD track into the recording file",
+                ),
+                (
+                    "stream_vod_hint",
+                    "The VOD track is kept out of the live stream: your recording carries a separate, license-safe audio track while the live feed stays clean.",
+                ),
+                (
+                    "stream_vod_inactive",
+                    "Inactive: the recording branch only exists when both options are enabled.",
+                ),
                 ("stream_information", "Stream information"),
                 ("stream_open_mixer", "Open audio mixer"),
                 ("stream_output_monitoring", "Output & monitoring"),
@@ -1353,6 +1370,23 @@ Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."
                 ("stream_status", "Status"),
                 ("stream_m3_note", "Streaming-Steuerung und Diagnose sind verfügbar."),
                 ("stream_config", "Stream-Einstellungen"),
+                ("stream_vod_section", "VOD-Track (urheberrechts-sichere Aufnahme-Spur)"),
+                (
+                    "stream_vod_enabled",
+                    "VOD-Track aktivieren (dritte Audiospur in der lokalen Aufnahme)",
+                ),
+                (
+                    "stream_vod_recorded",
+                    "VOD-Track in die Aufzeichnungsdatei aufnehmen",
+                ),
+                (
+                    "stream_vod_hint",
+                    "Der VOD-Track bleibt bewusst aus dem Live-Stream heraus: Die Aufnahme enthält eine separate, lizenz-sichere Audiospur, während der Live-Stream sauber bleibt.",
+                ),
+                (
+                    "stream_vod_inactive",
+                    "Inaktiv: Der Aufnahme-Zweig existiert nur, wenn beide Optionen aktiviert sind.",
+                ),
                 ("stream_information", "Stream-Informationen"),
                 ("stream_open_mixer", "Audio-Mixer öffnen"),
                 ("stream_output_monitoring", "Ausgabe & Monitoring"),
