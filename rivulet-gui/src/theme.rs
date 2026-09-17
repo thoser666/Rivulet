@@ -12,6 +12,133 @@
 
 use eframe::egui;
 
+/// The user's motion preference (WCAG 2.3.3 Animation from Interactions,
+/// ui-005). `System` follows the OS "reduce motion" setting, `Full` forces
+/// all animations on, `Reduced` disables non-essential motion regardless of
+/// the OS setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum MotionPreference {
+    /// Follow the operating system's reduce-motion setting.
+    #[default]
+    System,
+    /// Always animate (overrides an OS reduce-motion setting).
+    Full,
+    /// Never animate: transitions apply instantly (WCAG reduce-motion).
+    Reduced,
+}
+
+impl MotionPreference {
+    /// All preferences in display order (for the settings UI).
+    pub fn all() -> &'static [MotionPreference] {
+        &[
+            MotionPreference::System,
+            MotionPreference::Full,
+            MotionPreference::Reduced,
+        ]
+    }
+
+    /// i18n key for the preference label.
+    pub fn key(self) -> &'static str {
+        match self {
+            MotionPreference::System => "motion_system",
+            MotionPreference::Full => "motion_full",
+            MotionPreference::Reduced => "motion_reduced",
+        }
+    }
+
+    /// Resolve the preference against the OS reduce-motion setting.
+    ///
+    /// `Reduced` wins over everything (explicit user request); `Full`
+    /// overrides the OS; `System` mirrors [`os_prefers_reduced_motion`].
+    pub fn resolves_to_reduced(self, os_reduced: bool) -> bool {
+        match self {
+            MotionPreference::Reduced => true,
+            MotionPreference::Full => false,
+            MotionPreference::System => os_reduced,
+        }
+    }
+}
+
+/// Whether the OS asks applications to reduce non-essential motion
+/// (Windows: "Animation effects" off, macOS: "Reduce motion" on, Linux
+/// GNOME: "Reduce animation" on / `gtk-enable-animations=false`).
+///
+/// Reads the OS setting once per call; treat the result as a sticky hint
+/// (cache it in the caller) rather than polling it every frame. Returns
+/// `false` when the OS cannot be queried — motion stays enabled, matching
+/// the pre-ui-005 behavior.
+pub fn os_prefers_reduced_motion() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        windows_reduced_motion()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos_reduced_motion()
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        linux_reduced_motion()
+    }
+    #[cfg(not(any(
+        target_os = "windows",
+        target_os = "macos",
+        all(unix, not(target_os = "macos"))
+    )))]
+    {
+        false
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn windows_reduced_motion() -> bool {
+    // `SPI_GETCLIENTAREAANIMATION` reports whether the user allows window
+    // animations (Settings > Accessibility > Visual effects > Animation
+    // effects). `ANIMATIONINFO.iMinAnimate == 0` means animations are off.
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SystemParametersInfoW, ANIMATIONINFO, SPI_GETCLIENTAREAANIMATION,
+    };
+    let mut info = ANIMATIONINFO {
+        cbSize: std::mem::size_of::<ANIMATIONINFO>() as u32,
+        iMinAnimate: 1,
+    };
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some(&mut info as *mut ANIMATIONINFO as *mut core::ffi::c_void),
+            windows::Win32::UI::WindowsAndMessaging::SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    ok.is_ok() && info.iMinAnimate == 0
+}
+
+#[cfg(target_os = "macos")]
+fn macos_reduced_motion() -> bool {
+    // `defaults read -g reduceMotion` prints "1" when Accessibility >
+    // Display > Reduce motion is enabled (and errors when unset).
+    std::process::Command::new("defaults")
+        .args(["read", "-g", "reduceMotion"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim() == "1")
+        .unwrap_or(false)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn linux_reduced_motion() -> bool {
+    // GNOME stores the setting as a boolean; gsettings fails on non-GNOME
+    // desktops, where motion stays enabled.
+    std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "enable-animations"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim() == "false")
+        .unwrap_or(false)
+}
+
 /// The user's color-scheme preference. `System` follows the OS theme.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ThemePreference {
@@ -256,6 +383,25 @@ pub fn init(ctx: &egui::Context, pref: ThemePreference) {
         ctx.set_visuals_of(theme, visuals);
     }
 }
+
+/// Apply the motion preference to the egui context (ui-005, WCAG 2.3.3).
+///
+/// With reduced motion, egui's global `animation_time` drops to 0 so every
+/// `animate_bool`/`animate_value_with_time` (including the preview fades in
+/// `theme::preview_fade_alpha`) snaps to its target in one frame instead of
+/// interpolating. Non-zero durations would re-enable motion, so this must
+/// reapply on every scheme/palette change — callers pair it with
+/// [`init`], which they already re-run on changes.
+pub fn apply_motion(ctx: &egui::Context, reduced: bool) {
+    ctx.all_styles_mut(|style| {
+        style.animation_time = if reduced { 0.0 } else { DEFAULT_ANIMATION_TIME };
+    });
+}
+
+/// egui's built-in default `animation_time` (seconds). Reduced motion is a
+/// toggle between 0 and this value, so "motion on" always restores stock
+/// behavior instead of a Rivulet-specific duration.
+const DEFAULT_ANIMATION_TIME: f32 = 0.2;
 
 /// Semi-transparent panel frame for the glassmorphism effect.
 ///
@@ -626,6 +772,61 @@ mod tests {
         assert!(
             alpha > 0.0,
             "visible preview should animate toward 1.0, got {alpha}"
+        );
+    }
+
+    #[test]
+    fn motion_preference_resolution_matches_os_flag() {
+        // Reduced wins, Full overrides the OS, System mirrors it.
+        assert!(super::MotionPreference::Reduced.resolves_to_reduced(false));
+        assert!(super::MotionPreference::Reduced.resolves_to_reduced(true));
+        assert!(!super::MotionPreference::Full.resolves_to_reduced(true));
+        assert!(
+            super::MotionPreference::System.resolves_to_reduced(true),
+            "System must mirror an enabled OS reduce-motion setting"
+        );
+        assert!(
+            !super::MotionPreference::System.resolves_to_reduced(false),
+            "System must mirror a disabled OS reduce-motion setting"
+        );
+    }
+
+    #[test]
+    fn motion_preference_serde_round_trip() {
+        for pref in super::MotionPreference::all() {
+            let json = serde_json::to_string(pref).expect("serialize");
+            let back: super::MotionPreference = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(back, *pref, "round trip must preserve {pref:?}");
+        }
+        assert_eq!(
+            serde_json::from_str::<super::MotionPreference>("\"Full\"").expect("parse"),
+            super::MotionPreference::Full
+        );
+    }
+
+    #[test]
+    fn apply_motion_snaps_previews_to_their_target() {
+        // Reduced motion must collapse preview fades: `preview_fade_alpha`
+        // (egui animate_bool) returns the target immediately when the global
+        // animation_time is 0.
+        let ctx = egui::Context::default();
+        super::apply_motion(&ctx, true);
+        let id = egui::Id::new("test_motion_reduced");
+        let alpha = super::preview_fade_alpha(&ctx, id, true);
+        assert_eq!(alpha, 1.0, "reduced motion must snap visible fades to 1.0");
+        let hidden = super::preview_fade_alpha(&ctx, id, false);
+        assert_eq!(hidden, 0.0, "reduced motion must snap hidden fades to 0.0");
+    }
+
+    #[test]
+    fn apply_motion_false_restores_stock_animation_time() {
+        let ctx = egui::Context::default();
+        super::apply_motion(&ctx, true);
+        super::apply_motion(&ctx, false);
+        assert_eq!(
+            ctx.global_style().animation_time,
+            super::DEFAULT_ANIMATION_TIME,
+            "motion on must restore egui's stock animation time"
         );
     }
 

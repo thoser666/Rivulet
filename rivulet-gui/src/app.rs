@@ -818,6 +818,23 @@ pub struct RivuletApp {
     #[serde(skip)]
     theme_applied: Option<theme::ThemePreference>,
 
+    /// User motion preference (WCAG 2.3.3 Animation from Interactions,
+    /// ui-005). Persisted across sessions; `System` follows the OS
+    /// reduce-motion setting. Persisted across sessions.
+    motion_preference: theme::MotionPreference,
+    /// Reduce-motion state currently applied to the egui context (`None`
+    /// until first applied). Not persisted.
+    #[serde(skip)]
+    motion_applied: Option<bool>,
+    /// Cached result of the OS reduce-motion probe (refreshed at most every
+    /// [`OS_MOTION_PROBE_INTERVAL`]; the platform queries spawn a subprocess
+    /// on macOS/Linux and must never run per frame). Not persisted.
+    #[serde(skip)]
+    os_reduced_motion: Option<bool>,
+    /// When the OS reduce-motion probe last ran. Not persisted.
+    #[serde(skip)]
+    os_reduced_motion_probed_at: Option<Instant>,
+
     /// Discord Rich Presence opt-out. Persisted across sessions. Defaults to
     /// on (matching the roadmap's explicit opt-out requirement).
     discord_presence_enabled: bool,
@@ -1659,6 +1676,10 @@ impl Default for RivuletApp {
             locale: Locale::default(),
             theme: theme::ThemePreference::default(),
             theme_applied: None,
+            motion_preference: theme::MotionPreference::default(),
+            motion_applied: None,
+            os_reduced_motion: None,
+            os_reduced_motion_probed_at: None,
             discord_presence_enabled: true,
             // Official Rivulet application id + artwork: zero-config Rich
             // Presence for end users (both fields remain overridable in
@@ -3929,6 +3950,61 @@ impl RivuletApp {
         self.stream_status_message = Some(self.tr("stopped").to_owned());
     }
 
+    /// How often the OS reduce-motion setting is re-probed. The platform
+    /// queries spawn a subprocess on macOS/Linux, so this must stay coarse;
+    /// the setting changes at most when the user visits their OS settings.
+    const OS_MOTION_PROBE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
+
+    /// Refresh the cached OS reduce-motion hint at most every
+    /// [`Self::OS_MOTION_PROBE_INTERVAL`] and apply the resolved motion
+    /// state to the egui context (ui-005, WCAG 2.3.3): with reduced motion
+    /// egui's global `animation_time` is 0, so all `animate_bool`-based
+    /// fades (preview fades, egui-internal animations) snap to their target
+    /// instead of interpolating. Reapplies whenever the preference or the
+    /// cached OS hint changes.
+    fn update_motion_preference(&mut self, ctx: &egui::Context) {
+        let now = Instant::now();
+        let needs_probe = self.os_reduced_motion.is_none()
+            || match self.os_reduced_motion_probed_at {
+                Some(at) => now.saturating_duration_since(at) >= Self::OS_MOTION_PROBE_INTERVAL,
+                None => true,
+            };
+        if needs_probe {
+            self.os_reduced_motion = Some(theme::os_prefers_reduced_motion());
+            self.os_reduced_motion_probed_at = Some(now);
+        }
+        let os_reduced = self.os_reduced_motion.unwrap_or(false);
+        let reduced = self.motion_preference.resolves_to_reduced(os_reduced);
+        if self.motion_applied != Some(reduced) {
+            theme::apply_motion(ctx, reduced);
+            self.motion_applied = Some(reduced);
+        }
+    }
+
+    /// The scene transition to use for an upcoming switch: the user's
+    /// configured transition, except that a Fade collapses to a Cut when
+    /// reduced motion is active (WCAG 2.3.3; a fade is pure decoration and
+    /// loses meaning when it cannot animate).
+    fn scene_transition_for_switch(
+        &self,
+        from: Option<uuid::Uuid>,
+        to: Option<uuid::Uuid>,
+        now: Instant,
+    ) -> rivulet_core::SceneTransition {
+        let reduced = self.motion_applied.unwrap_or(false);
+        let kind = if reduced {
+            rivulet_core::TransitionKind::Cut
+        } else {
+            self.transition_kind
+        };
+        let mut transition = rivulet_core::SceneTransition::new(
+            kind,
+            std::time::Duration::from_millis(self.transition_duration_ms),
+        );
+        transition.start(from, to, now);
+        transition
+    }
+
     /// Called once per frame while a stop finalization may be in flight: when
     /// the background teardown completes, drop the handle and flip the status
     /// from "finalizing…" to "Recording saved.".
@@ -4276,8 +4352,15 @@ impl RivuletApp {
                     .on_hover_text(self.tr("studio_take_hint"));
                 if take.clicked() {
                     let now = Instant::now();
+                    // Reduced motion collapses a Fade take to a Cut (ui-005):
+                    // reuse the same resolution as a direct scene switch.
+                    let take_kind = if self.motion_applied.unwrap_or(false) {
+                        rivulet_core::TransitionKind::Cut
+                    } else {
+                        self.transition_kind
+                    };
                     if let Some(transition) = self.studio_mode.take(
-                        self.transition_kind,
+                        take_kind,
                         std::time::Duration::from_millis(self.transition_duration_ms),
                         now,
                     ) {
@@ -4538,11 +4621,7 @@ impl RivuletApp {
                     self.scene_status = Some(self.tr_fmt("studio_preview_selected", &[name]));
                 } else if self.switch_active_scene(id) {
                     let now = Instant::now();
-                    self.scene_transition = rivulet_core::SceneTransition::new(
-                        self.transition_kind,
-                        std::time::Duration::from_millis(self.transition_duration_ms),
-                    );
-                    self.scene_transition.start(active, Some(id), now);
+                    self.scene_transition = self.scene_transition_for_switch(active, Some(id), now);
                     self.scene_status = Some(self.tr_fmt("scenes_switched", &[name]));
                 }
             }
@@ -9048,6 +9127,16 @@ impl RivuletApp {
         // immediately, so the first frame already renders with the right theme.
         theme::init(&cc.egui_ctx, app.theme);
         app.theme_applied = Some(app.theme);
+        // Apply the motion preference before the first frame (ui-005): the
+        // cached OS probe starts empty, so the first ui() call would otherwise
+        // render one animated frame before reducing.
+        app.os_reduced_motion = Some(theme::os_prefers_reduced_motion());
+        app.os_reduced_motion_probed_at = Some(Instant::now());
+        let reduced = app
+            .motion_preference
+            .resolves_to_reduced(app.os_reduced_motion.unwrap_or(false));
+        theme::apply_motion(&cc.egui_ctx, reduced);
+        app.motion_applied = Some(reduced);
         #[cfg(target_os = "windows")]
         {
             app.refresh_capture_sources();
@@ -9131,6 +9220,12 @@ impl eframe::App for RivuletApp {
             theme::init(ctx, self.theme);
             self.theme_applied = Some(self.theme);
         }
+
+        // Apply the motion preference (ui-005, WCAG 2.3.3): egui animation
+        // time snaps to zero under reduced motion, so every animate_bool
+        // fade honors the OS/preference setting. Cheap after the first probe
+        // (the OS query itself runs at most every 10 s).
+        self.update_motion_preference(ctx);
 
         // Read this before entering `ctx.input`. That closure holds egui's
         // context write lock; calling `egui_wants_keyboard_input()` inside it
@@ -10676,6 +10771,23 @@ impl eframe::App for RivuletApp {
                                 }
                             }
                         });
+
+                        // Settings: motion (ui-005, WCAG 2.3.3)
+                        ui.label(egui::RichText::new(self.tr("motion")).strong());
+                        ui.horizontal(|ui| {
+                            for preference in theme::MotionPreference::all() {
+                                if ui
+                                    .selectable_label(
+                                        self.motion_preference == *preference,
+                                        self.tr(preference.key()),
+                                    )
+                                    .clicked()
+                                {
+                                    self.motion_preference = *preference;
+                                }
+                            }
+                        });
+                        ui.label(egui::RichText::new(self.tr("motion_hint")).small().weak());
 
                         // Settings: Discord Rich Presence (client id + opt-out)
                         let discord_section = self.tr("discord_section");
@@ -15040,6 +15152,62 @@ mod tests {
     #[test]
     fn pending_frame_keeps_periodic_repaints_alive() {
         assert!(should_repaint_recording_preview(false, true));
+    }
+
+    // ── Motion preference (ui-005, WCAG 2.3.3) ─────────────────
+
+    #[test]
+    fn motion_preference_survives_serde_round_trip() {
+        // The motion preference must persist across restarts like the theme
+        // preference does.
+        let app = RivuletApp {
+            motion_preference: theme::MotionPreference::Reduced,
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&app).expect("serialize app");
+        assert_eq!(json["motion_preference"], "Reduced");
+        let restored: RivuletApp = serde_json::from_value(json).expect("deserialize app");
+        assert_eq!(restored.motion_preference, theme::MotionPreference::Reduced);
+    }
+
+    #[test]
+    fn motion_preference_defaults_to_system() {
+        // Fresh installs follow the OS reduce-motion setting.
+        let app = RivuletApp::default();
+        assert_eq!(
+            app.motion_preference,
+            theme::MotionPreference::System,
+            "default must be System (follow the OS)"
+        );
+        // Runtime-only fields stay out of the persisted JSON.
+        let json = serde_json::to_value(RivuletApp::default()).expect("serialize");
+        assert!(json.get("motion_applied").is_none());
+        assert!(json.get("os_reduced_motion").is_none());
+        assert!(json.get("os_reduced_motion_probed_at").is_none());
+    }
+
+    #[test]
+    fn scene_transition_collapses_fade_to_cut_when_reduced() {
+        // Under applied reduced motion, a configured Fade must degrade to a
+        // Cut (progress_at() == 1.0 immediately) so scene switches are
+        // instant (WCAG 2.3.3).
+        let mut app = RivuletApp {
+            transition_kind: rivulet_core::TransitionKind::Fade,
+            transition_duration_ms: 1000,
+            ..Default::default()
+        };
+        let from = uuid::Uuid::new_v4();
+        let to = uuid::Uuid::new_v4();
+
+        app.motion_applied = Some(false);
+        let animated = app.scene_transition_for_switch(Some(from), Some(to), Instant::now());
+        assert_eq!(animated.kind, rivulet_core::TransitionKind::Fade);
+        assert!(animated.progress_at(Instant::now()) < 1.0);
+
+        app.motion_applied = Some(true);
+        let reduced = app.scene_transition_for_switch(Some(from), Some(to), Instant::now());
+        assert_eq!(reduced.kind, rivulet_core::TransitionKind::Cut);
+        assert!(reduced.progress_at(Instant::now()) >= 1.0);
     }
 
     // ── Game-window live preview refresh ─────────────────────────
