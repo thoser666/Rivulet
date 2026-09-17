@@ -173,6 +173,8 @@ fn m6_completion_report_is_linked_and_records_follow_ups() {
         "F-M6-001",
         "F-M6-002",
         "#154",
+        "#182",
+        "#183",
     ] {
         assert!(
             report.contains(required),
