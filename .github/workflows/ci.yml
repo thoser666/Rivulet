@@ -133,6 +133,11 @@ jobs:
       - name: Check status color contrast (WCAG AA)
         run: python3 scripts/check-theme-contrast.py
 
+      - name: Check apt package parity (ci.yml vs nightly.yml)
+        run: |
+          python3 scripts/check-apt-parity.py --self-test
+          python3 scripts/check-apt-parity.py
+
       - name: Check OBS feature-parity checklist
         run: |
           python3 scripts/check-parity-checklist.py

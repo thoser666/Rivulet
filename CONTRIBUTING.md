@@ -178,7 +178,8 @@ An optional **fast-guard stage** (default on) then runs the repo-internal
 guards that CI would check later: the CI pinning tests
 (`cargo test -p rivulet-core --test ci_pinning`) plus the Lints-job script
 self-tests (`generate-action-pins.py --check`, parity-checklist/release-
-notes/theme-contrast checks, `generate-release-notes.sh --self-test`).
+notes/theme-contrast/apt-parity checks, `generate-release-notes.sh
+--self-test`).
 Disable just that stage with `RIVULET_PRE_PUSH_FAST_TESTS=0 git push`; skip
 the whole hook for a single push with `RIVULET_SKIP_PRE_PUSH=1 git push`
 (or `git push --no-verify`).

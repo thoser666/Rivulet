@@ -60,6 +60,9 @@ if [[ "${RIVULET_PRE_PUSH_FAST_TESTS:-}" != "0" ]]; then
 
     echo "pre-push: python3 scripts/check-theme-contrast.py"
     python3 scripts/check-theme-contrast.py
+
+    echo "pre-push: python3 scripts/check-apt-parity.py --self-test"
+    python3 scripts/check-apt-parity.py --self-test
   else
     echo "pre-push: python3 not found — skipping script self-tests"
   fi
