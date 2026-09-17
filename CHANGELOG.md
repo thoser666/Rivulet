@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- core(stream): **VOD track recording branch (issue #78, Z78-1–Z78-4)** — in a
+  dual-output session an active `VodTrack` now emits a third, independent
+  audio branch (`audio_src_vod`) into the recording muxer alongside the
+  System/Microphone tracks, using the same named-request-pad mux-leg pattern;
+  the live FLV stream path is never touched. PCM frames reach the branch via
+  the new `push_audio_vod`, and enabling VOD without `recorded == true` still
+  emits nothing (leakage safety preserved). Covered by pipeline-string
+  contract tests (branch present when active, absent when inactive or
+  streaming-only, redacted surfaces stay clean, dual-output pipeline parses)
+  and documented in the M3 completion report.
+
 - ci(guard): **apt package parity is now checked repo-wide** — the guard
   added with the libasound2-dev nightly fix compared only ci.yml against
   nightly.yml. It now covers every workflow that installs apt packages via

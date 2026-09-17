@@ -218,6 +218,7 @@ pub struct RivuletEngine {
     audio_appsrc: Option<gst_app::AppSrc>,
     audio_appsrc_sys: Option<gst_app::AppSrc>,
     audio_appsrc_mic: Option<gst_app::AppSrc>,
+    audio_appsrc_vod: Option<gst_app::AppSrc>,
     audio_enabled: bool,
     separate_audio_tracks: bool,
     audio_sys_enabled: bool,
@@ -308,6 +309,7 @@ struct StoppedParts {
     audio_appsrc: Option<gst_app::AppSrc>,
     audio_appsrc_sys: Option<gst_app::AppSrc>,
     audio_appsrc_mic: Option<gst_app::AppSrc>,
+    audio_appsrc_vod: Option<gst_app::AppSrc>,
     audio_source_appsrcs: Vec<(Uuid, gst_app::AppSrc)>,
     finished_path: Option<PathBuf>,
     finished_container: RecordingContainer,
@@ -323,6 +325,7 @@ impl Default for RivuletEngine {
             audio_appsrc: None,
             audio_appsrc_sys: None,
             audio_appsrc_mic: None,
+            audio_appsrc_vod: None,
             audio_enabled: false,
             separate_audio_tracks: false,
             audio_sys_enabled: true,
@@ -1186,6 +1189,30 @@ impl RivuletEngine {
         s
     }
 
+    /// The optional VOD audio branch (issue #78, subtask Z78-1).
+    ///
+    /// When a [`VodTrack`](crate::VodTrack) is active, the dual-output
+    /// recording side gets a third, independent audio branch into the
+    /// recording muxer while the FLV stream path stays untouched: the
+    /// license-safe VOD mix lives only in the local recording file. The branch
+    /// follows the existing per-track mux-leg pattern (named request pad on
+    /// `mux_rec`, the same leg the System/Microphone tracks use) and is
+    /// gated on the stream settings' `vod_track.active()` — enabled VOD
+    /// without `recorded == true` emits nothing (leakage safety).
+    fn vod_branch_str(&self, mux_name: &str) -> String {
+        let Some(settings) = self.stream_settings.as_ref() else {
+            return String::new();
+        };
+        if !self.audio_enabled || !settings.vod_track.active() {
+            return String::new();
+        }
+        let leg = self.audio_mux_leg(mux_name, false);
+        format!(
+            "appsrc name=audio_src_vod format=time is-live=true do-timestamp=true \
+             ! audioconvert ! audioresample ! avenc_aac{leg} "
+        )
+    }
+
     /// The GStreamer branch for one routed source: its appsrc, volume, format
     /// converters, and per-source filter chain (availability-checked against
     /// the installed element factories, mirroring the legacy capture path).
@@ -1541,6 +1568,12 @@ impl RivuletEngine {
                 if self.replay.is_some() {
                     s.push_str("audio_tee. ! queue ! appsink name=replay_audio_sink_0 ");
                 }
+                // VOD track (issue #78): a third, independent branch into the
+                // recording muxer only — the FLV leg above is untouched.
+                let vod = self.vod_branch_str("mux_rec");
+                if !vod.is_empty() {
+                    s.push_str(&vod);
+                }
             }
         }
         s.push_str(&format!(
@@ -1686,6 +1719,20 @@ impl RivuletEngine {
                 audio_appsrc.set_property("do-timestamp", true);
                 self.audio_appsrc = Some(audio_appsrc);
             }
+        }
+
+        // VOD branch (issue #78): grab its appsrc so PCM frames can be
+        // pushed via [`RivuletEngine::push_audio_vod`]. Present only in the
+        // dual-output pipeline when the VodTrack is active.
+        if let Some(app) = pipeline.by_name("audio_src_vod") {
+            let app = app
+                .downcast::<gst_app::AppSrc>()
+                .expect("audio_src_vod must be an appsrc");
+            app.set_caps(Some(&audio_caps()));
+            app.set_property("format", gst::Format::Time);
+            app.set_property("is-live", true);
+            app.set_property("do-timestamp", true);
+            self.audio_appsrc_vod = Some(app);
         }
 
         self.install_replay_capture(&pipeline);
@@ -2115,6 +2162,26 @@ impl RivuletEngine {
         push_pcm_buffer(appsrc, frame)
     }
 
+    /// Push a PCM frame into the VOD audio branch (issue #78).
+    ///
+    /// Only meaningful in a dual-output session with an active VodTrack: the
+    /// frame lands in the third recording-mux branch and is deliberately kept
+    /// out of the live FLV stream. Silently ignored when the branch does not
+    /// exist (no VOD track configured, streaming-only, or audio disabled).
+    pub fn push_audio_vod(&mut self, frame: &AudioFrame) -> anyhow::Result<()> {
+        if !self.audio_enabled || frame.data.is_empty() {
+            return Ok(());
+        }
+        if self.pipeline.is_none() {
+            anyhow::bail!("Pipeline is not running");
+        }
+        let Some(appsrc) = self.audio_appsrc_vod.as_ref() else {
+            return Ok(());
+        };
+
+        push_pcm_buffer(appsrc, frame)
+    }
+
     /// Start streaming to the configured ingest without a local recording.
     ///
     /// Equivalent to [`RivuletEngine::start_local_recording`] with no output
@@ -2226,6 +2293,7 @@ impl RivuletEngine {
             audio_appsrc_sys: self.audio_appsrc_sys.take(),
             audio_appsrc_mic: self.audio_appsrc_mic.take(),
             audio_source_appsrcs: std::mem::take(&mut self.audio_source_appsrcs),
+            audio_appsrc_vod: self.audio_appsrc_vod.take(),
             replay: self.replay.clone(),
         };
 
@@ -2255,6 +2323,7 @@ impl RivuletEngine {
             parts.audio_appsrc,
             parts.audio_appsrc_sys,
             parts.audio_appsrc_mic,
+            parts.audio_appsrc_vod,
         ]
         .into_iter()
         .flatten()
@@ -3196,6 +3265,106 @@ mod tests {
         let pipeline_str = engine.build_dual_output_pipeline_str();
         assert!(!pipeline_str.contains("audio_src"), "{}", pipeline_str);
         gst::parse::launch(&pipeline_str).expect("video-only dual-output pipeline should parse");
+    }
+
+    // ── VOD track: extra recording-mux audio branch (issue #78) ─────────
+
+    /// Z78-2: an active VodTrack in dual output adds a third audio branch
+    /// feeding the recording muxer via a named request pad, and the branch
+    /// parses.
+    #[test]
+    fn dual_output_vod_track_active_adds_third_audio_branch() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_stream_settings(Some(
+            StreamSettings::twitch("vodkey").with_vod_track(VodTrack::new(true)),
+        ));
+
+        let path = std::env::temp_dir().join("rivulet_dual_vod_active.mp4");
+        engine.start_local_recording(path);
+
+        let pipeline_str = engine.build_dual_output_pipeline_str();
+        assert!(
+            pipeline_str.contains("appsrc name=audio_src_vod "),
+            "{}",
+            pipeline_str
+        );
+        // Named mux leg on the recording muxer, never an any-pad link.
+        assert!(
+            pipeline_str.contains("! queue ! mux_rec."),
+            "{}",
+            pipeline_str
+        );
+        assert!(
+            !pipeline_str.contains("mux_stream.audio_vod"),
+            "VOD branch must not touch the FLV path: {}",
+            pipeline_str
+        );
+        // The FLV stream still gets exactly one mixed audio leg.
+        assert!(
+            pipeline_str.contains("mux_stream.audio "),
+            "{}",
+            pipeline_str
+        );
+        let pipeline = gst::parse::launch(&pipeline_str)
+            .expect("VOD dual-output pipeline should parse")
+            .downcast::<gst::Pipeline>()
+            .unwrap();
+        assert!(pipeline.by_name("audio_src_vod").is_some());
+    }
+
+    /// Z78-2: leakage safety — `enabled` without `recorded == true` (or a
+    /// fully disabled VodTrack) emits no branch.
+    #[test]
+    fn dual_output_vod_track_inactive_emits_no_branch() {
+        let _ = gst::init();
+        for vod in [
+            VodTrack::new(true).with_recorded(false),
+            VodTrack::new(false),
+        ] {
+            let mut engine = RivuletEngine::default();
+            engine.set_audio_enabled(true);
+            engine.set_stream_settings(Some(StreamSettings::twitch("k").with_vod_track(vod)));
+
+            let path = std::env::temp_dir().join("rivulet_dual_vod_leak.mp4");
+            engine.start_local_recording(path);
+
+            let pipeline_str = engine.build_dual_output_pipeline_str();
+            assert!(
+                !pipeline_str.contains("audio_src_vod"),
+                "inactive VodTrack must not leak a branch: {}",
+                pipeline_str
+            );
+        }
+    }
+
+    /// Z78-2: a streaming-only pipeline never contains the VOD branch (FLV
+    /// single-audio-track invariant) and redacted surfaces carry no VOD
+    /// material.
+    #[test]
+    fn vod_branch_absent_streaming_only_and_redacted_surfaces() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_stream_settings(Some(
+            StreamSettings::twitch("secretkey123").with_vod_track(VodTrack::new(true)),
+        ));
+
+        let pipeline_str = engine.build_streaming_pipeline_str();
+        assert!(
+            !pipeline_str.contains("audio_src_vod"),
+            "streaming-only must not contain the VOD branch: {}",
+            pipeline_str
+        );
+
+        let settings = StreamSettings::twitch("secretkey123").with_vod_track(VodTrack::new(true));
+        let masked = settings.masked_key();
+        assert!(!masked.contains("secretkey123"));
+        assert!(!masked.contains("vod"), "{}", masked);
+        let loc = settings.location();
+        assert!(loc.contains("secretkey123")); // unredacted by design
+        assert_eq!(settings.vod_track.twitch_ivod_flag(), Some("ivod"));
     }
 
     /// In dual output mode mixed audio frames are routed into the pipeline even

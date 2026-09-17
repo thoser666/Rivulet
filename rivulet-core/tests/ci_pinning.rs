@@ -559,6 +559,33 @@ fn m6_audio_routing_phase1_engine_surface_is_pinned() {
 }
 
 #[test]
+fn m3_vod_track_recording_branch_is_pinned() {
+    // Issue #78 (Z78-1/2): an active VodTrack in a dual-output session adds a
+    // third, independent audio branch into the recording muxer via the
+    // standard named mux-leg pattern, the engine can push PCM into it, and
+    // the branch is drained on stop. Leakage safety lives in VodTrack::active.
+    let lib = read("rivulet-core/src/lib.rs");
+    assert!(lib.contains("fn vod_branch_str"), "VOD branch builder");
+    assert!(
+        lib.contains("appsrc name=audio_src_vod"),
+        "VOD branch appsrc element name"
+    );
+    assert!(
+        lib.contains("pub fn push_audio_vod"),
+        "VOD PCM push entry point"
+    );
+    assert!(
+        lib.contains("audio_appsrc_vod"),
+        "VOD appsrc must be grabbed, drained (EOS) and torn down"
+    );
+    // The branch must be gated on the VodTrack activation contract.
+    assert!(
+        lib.contains("settings.vod_track.active()"),
+        "VOD branch gated on vod_track.active()"
+    );
+}
+
+#[test]
 fn m6_audio_routing_phase2_gui_surface_is_pinned() {
     // Issue #154 Phase 2: the mixer GUI ships the routing matrix, the shared
     // per-source strip (single implementation, three placements), the inline
