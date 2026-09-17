@@ -2170,7 +2170,10 @@ impl RivuletApp {
                     );
                 }
                 let filter_label = self.tr("audio_filter_per_source");
-                if ui.button("⚙").on_hover_text(filter_label).clicked() {
+                if theme::icon_button(ui, "⚙")
+                    .on_hover_text(filter_label)
+                    .clicked()
+                {
                     open_filters = true;
                 }
             });
@@ -2416,7 +2419,10 @@ impl RivuletApp {
                     ui.label(format!("{} {}", source.kind.icon(), source.name));
                     self.draw_audio_source_strip(ui, &source, true);
                     let remove_label = self.tr("audio_source_remove");
-                    if ui.button("🗑").on_hover_text(remove_label).clicked() {
+                    if theme::icon_button(ui, "🗑")
+                        .on_hover_text(remove_label)
+                        .clicked()
+                    {
                         remove_id = Some(source.id);
                     }
                     ui.end_row();
@@ -8309,8 +8315,7 @@ impl RivuletApp {
                         // Twitch messages carry an `id=...` tag; offer a
                         // threaded reply so the bot answers that exact line.
                         if let Some(msg_id) = &message.id {
-                            if ui
-                                .small_button(reply_arrow)
+                            if theme::icon_button(ui, reply_arrow)
                                 .on_hover_text(&reply_tooltip)
                                 .clicked()
                             {
@@ -8360,8 +8365,7 @@ impl RivuletApp {
                 let reply_cancel = self.tr("chat_reply_cancel").to_owned();
                 ui.horizontal_wrapped(|ui| {
                     ui.small(egui::RichText::new(format!("\u{21a9} {reply_label}")).italics());
-                    if ui
-                        .small_button("\u{2715}")
+                    if theme::icon_button(ui, "\u{2715}")
                         .on_hover_text(reply_cancel)
                         .clicked()
                     {

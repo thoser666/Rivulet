@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- a11y(ui): **WCAG 2.5.8 minimum target size enforced (ui-008)** —
+  icon-only buttons (⚙ filter, 🗑 remove, ↩ reply, ✕ cancel) and compact
+  controls could undershoot the 24×24 CSS-px minimum because egui's stock
+  `interact_size.y` is 18 px and its `.small()` button variant skips the
+  floor entirely. `theme::init` now raises the global
+  `spacing.interact_size.y` floor to `theme::MIN_TARGET_SIZE` (24 px) in
+  both schemes — which sizes every `Button`, `DragValue`, `Slider`,
+  `Checkbox`, `ComboBox` and collapsing header correctly — and the new
+  `theme::icon_button` pins an explicit 24×24 target for glyph-only
+  controls. Tests allocate real widgets via `ctx.run_ui` and assert the
+  allocated rects.
+
 - a11y(ui): **prefers-reduced-motion is honored (WCAG 2.3.3, ui-005)** —
   preview fades (`animate_bool`) and scene-transition fades animated
   regardless of the OS motion setting. A new persisted motion preference

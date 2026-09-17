@@ -358,6 +358,17 @@ pub fn init(ctx: &egui::Context, pref: ThemePreference) {
     // Load custom fonts.
     load_inter_font(ctx);
 
+    // Enforce the WCAG 2.5.8 minimum target size on ALL interactive
+    // controls (ui-008): egui's stock `interact_size.y` is 18 px, which
+    // lets `small()` buttons and compact controls undershoot the 24 px
+    // minimum. Raising the floor styles nothing — it only grows the
+    // clickable rect — and applies to both schemes.
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        ctx.style_mut_of(theme, |style| {
+            style.spacing.interact_size.y = MIN_TARGET_SIZE;
+        });
+    }
+
     // Apply the palette to BOTH schemes so a runtime switch (or the "System"
     // preference following the OS) keeps the branded visuals. `set_visuals_of`
     // stores the palette per theme; `set_visuals` alone would only touch the
@@ -402,6 +413,26 @@ pub fn apply_motion(ctx: &egui::Context, reduced: bool) {
 /// toggle between 0 and this value, so "motion on" always restores stock
 /// behavior instead of a Rivulet-specific duration.
 const DEFAULT_ANIMATION_TIME: f32 = 0.2;
+
+/// The WCAG 2.5.8 minimum target size in logical points (ui-008): every
+/// interactive control must offer at least a 24×24 target. Applied as the
+/// global `spacing.interact_size.y` floor in [`init`] and as the explicit
+/// size of icon-only buttons via [`icon_button`] (their glyph is smaller
+/// than any floor).
+pub const MIN_TARGET_SIZE: f32 = 24.0;
+
+/// An icon-only button (single glyph such as `⚙` or `🗑`) with a WCAG
+/// 2.5.8-compliant 24×24 target (ui-008).
+///
+/// Plain `ui.button("⚙")` sizes the clickable rect to the glyph plus frame
+/// margin — well below 24 px — and egui's own `.small()` variant skips the
+/// `interact_size` floor entirely, so the global floor alone cannot fix
+/// these. This helper pins the explicit `min_size` on the button.
+pub fn icon_button(ui: &mut egui::Ui, glyph: &str) -> egui::Response {
+    use egui::Widget as _;
+    let min = egui::Vec2::splat(MIN_TARGET_SIZE);
+    egui::Button::new(glyph).min_size(min).ui(ui)
+}
 
 /// Semi-transparent panel frame for the glassmorphism effect.
 ///
@@ -673,6 +704,84 @@ mod tests {
             egui::UiBuilder::new(),
         );
         f(&mut ui);
+    }
+
+    /// Helper: run one egui pass so allocations get real rects (needed by
+    /// tests that assert on widget sizes). `run_ui` consumes the pass
+    /// output (including texture deltas) so nothing is dropped unhandled.
+    fn with_pass(ctx: &egui::Context, mut f: impl FnMut(&mut egui::Ui)) {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| f(ui));
+        // The test backend never paints, so consume the texture deltas
+        // (font atlas upload) instead of dropping them — dropping panics in
+        // debug builds.
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn interact_size_meets_the_minimum_target_in_both_schemes() {
+        // ui-008: `init` must raise egui's 18 px interact_size.y floor to
+        // the WCAG 2.5.8 minimum of 24 px in BOTH stored schemes.
+        for pref in [ThemePreference::Dark, ThemePreference::Light] {
+            let ctx = egui::Context::default();
+            super::init(&ctx, pref);
+            for theme in [egui::Theme::Dark, egui::Theme::Light] {
+                assert_eq!(
+                    ctx.style_of(theme).spacing.interact_size.y,
+                    super::MIN_TARGET_SIZE,
+                    "{pref:?}/{theme:?}: interact_size.y must equal MIN_TARGET_SIZE"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn plain_button_allocates_at_least_the_minimum_target() {
+        // The floor is only a guarantee if egui actually honors it: after
+        // `init`, a regular button's allocated (interacted) rect must be at
+        // least 24 px high even though its text is smaller.
+        let ctx = egui::Context::default();
+        super::init(&ctx, ThemePreference::Dark);
+        let mut height = 0.0;
+        with_pass(&ctx, |ui| {
+            let response = ui.button("Ok");
+            height = response.rect.height();
+        });
+        assert!(
+            height >= super::MIN_TARGET_SIZE,
+            "button rect {height}px must be at least MIN_TARGET_SIZE"
+        );
+    }
+
+    #[test]
+    fn icon_button_allocates_the_full_minimum_target() {
+        // Icon-only glyphs bypass the interact_size floor (the glyph is
+        // smaller than any floor), so `icon_button` must pin the 24×24
+        // target explicitly.
+        let ctx = egui::Context::default();
+        super::init(&ctx, ThemePreference::Dark);
+        let mut rect = egui::Rect::NOTHING;
+        with_pass(&ctx, |ui| {
+            rect = super::icon_button(ui, "⚙").rect;
+        });
+        assert!(
+            rect.width() >= super::MIN_TARGET_SIZE && rect.height() >= super::MIN_TARGET_SIZE,
+            "icon rect {rect:?} must be at least {}×{}",
+            super::MIN_TARGET_SIZE,
+            super::MIN_TARGET_SIZE
+        );
+    }
+
+    #[test]
+    fn min_target_size_is_not_below_the_wcag_minimum() {
+        // Guard against someone "optimizing" the constant below the WCAG
+        // 2.5.8 minimum. Reads the byte pattern so the assertion is not a
+        // tautology to clippy (assertions_on_constants).
+        let size = super::MIN_TARGET_SIZE.to_bits();
+        let minimum = 24.0_f32.to_bits();
+        assert!(
+            size >= minimum,
+            "MIN_TARGET_SIZE must stay at or above the WCAG 2.5.8 minimum of 24 px"
+        );
     }
 
     #[test]
