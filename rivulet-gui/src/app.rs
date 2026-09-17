@@ -7,7 +7,7 @@ use rivulet_core::{
     AudioFilterConfig, AudioRouting, AudioSource, CaptureRegion, DiscordPresence,
     DiscordPresenceConfig, GlobalBinding, GlobalHotkey, KeyCode, Locale, ModMask, PresenceActivity,
     PresenceStatus, RivuletEngine, SkippedFilter, StreamConnectionResult, StreamHealthStatus,
-    StreamPlatform, StreamPreset, StreamProbeResult, StreamSettings, StreamStats,
+    StreamPlatform, StreamPreset, StreamProbeResult, StreamSettings, StreamStats, VodTrack,
 };
 use std::collections::BTreeMap;
 use std::sync::mpsc::Receiver;
@@ -1512,6 +1512,13 @@ pub struct RivuletApp {
     stream_key_store_status: Option<String>,
     #[serde(skip)]
     stream_preset: StreamPreset,
+    /// VOD track selection (issue #78): `enabled` adds the copyright-safe
+    /// third audio branch to the dual-output recording, `recorded` keeps the
+    /// leakage-safety contract visible and editable.
+    #[serde(skip)]
+    stream_vod_enabled: bool,
+    #[serde(skip)]
+    stream_vod_recorded: bool,
     #[serde(skip)]
     stream_status_message: Option<String>,
     #[serde(skip)]
@@ -1951,6 +1958,8 @@ impl Default for RivuletApp {
             stream_key_delete_requested: false,
             stream_key_store_status: None,
             stream_preset: StreamPreset::Standard,
+            stream_vod_enabled: false,
+            stream_vod_recorded: false,
             stream_status_message: None,
             stream_probe_running: false,
             stream_probe_result: None,
@@ -7254,7 +7263,8 @@ impl RivuletApp {
                         self.stream_ingest_url.clone(),
                         self.stream_key.clone(),
                     )
-                    .with_preset(self.stream_preset);
+                    .with_preset(self.stream_preset)
+                    .with_vod_track(self.stream_vod_track());
                     self.engine.set_stream_settings(Some(settings));
                     // Clear a stale error so a new stream starts from the
                     // Ready/Streaming label (mirrors the recording starts).
@@ -8506,6 +8516,14 @@ impl RivuletApp {
         }
     }
 
+    /// The VodTrack derived from the Stream view's selectors (issue #78).
+    /// `enabled` without `recorded` is normalized to inactive by
+    /// `VodTrack::active()`, but the UI keeps both flags explicit so the
+    /// leakage-safety rule stays visible instead of silently flipping bits.
+    fn stream_vod_track(&self) -> VodTrack {
+        VodTrack::new(self.stream_vod_enabled).with_recorded(self.stream_vod_recorded)
+    }
+
     fn handle_stream_key_actions(&mut self) {
         let account = self.stream_platform.label();
         let store = rivulet_core::StreamKeyStore::default();
@@ -8582,7 +8600,8 @@ impl RivuletApp {
                     self.stream_ingest_url.clone(),
                     self.stream_key.clone(),
                 )
-                .with_preset(self.stream_preset);
+                .with_preset(self.stream_preset)
+                .with_vod_track(self.stream_vod_track());
                 self.engine.set_stream_settings(Some(settings));
                 // Clear a stale error so a new stream starts from the
                 // Ready/Streaming label (mirrors the recording starts).
@@ -8717,6 +8736,29 @@ impl RivuletApp {
                 });
             });
         ui.small(self.tr("stream_m3_note"));
+
+        // ── VOD track (issue #78): the copyright-safe third audio branch of
+        //    the dual-output recording. Two explicit checkboxes keep the
+        //    leakage-safety contract visible: `enabled` without `recorded`
+        //    never reaches the live ingest, and the active() gate means the
+        //    recording branch only appears when both are set. ──
+        egui::CollapsingHeader::new(self.tr("stream_vod_section"))
+            .id_salt("stream_vod_track")
+            .default_open(false)
+            .show(ui, |ui| {
+                let mut vod_enabled = self.stream_vod_enabled;
+                let mut vod_recorded = self.stream_vod_recorded;
+                ui.checkbox(&mut vod_enabled, self.tr("stream_vod_enabled"));
+                ui.add_enabled_ui(vod_enabled, |ui| {
+                    ui.checkbox(&mut vod_recorded, self.tr("stream_vod_recorded"));
+                });
+                self.stream_vod_enabled = vod_enabled;
+                self.stream_vod_recorded = vod_recorded;
+                ui.small(self.tr("stream_vod_hint"));
+                if !self.stream_vod_track().active() {
+                    ui.small(self.tr("stream_vod_inactive"));
+                }
+            });
 
         // ── Restream targets (M6): additional platforms streamed
         //    simultaneously via the multi-target fan-out. ──
@@ -13306,6 +13348,87 @@ mod tests {
         assert!(source.contains("discord_client_id_error_not_numeric"));
         assert!(source.contains("discord_client_id_error_length"));
         assert!(source.contains("StatusColors::for_ui(ui).error"));
+    }
+
+    // ── VOD track settings UI (issue #78) ───────────────────────────────
+
+    #[test]
+    fn stream_vod_track_derivation_matches_vodtrack_contract() {
+        // The GUI helper must map the two selectors onto the core model so
+        // the leakage-safety contract (active() = enabled && recorded) holds.
+        let app = RivuletApp::default();
+        assert!(!app.stream_vod_track().active(), "default must be inactive");
+    }
+
+    #[test]
+    fn stream_start_wires_vod_track_into_engine_settings() {
+        // Source contract: both stream-start paths (button and OBS command)
+        // attach the VodTrack derived from the selectors, so an active VOD
+        // track actually reaches the dual-output recording branch.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        // Built at runtime so this test's own source text does not count as a
+        // match site (self-reference would inflate the count by one).
+        let needle = format!(".{}", "with_vod_track(self.stream_vod_track())");
+        assert_eq!(
+            source.matches(&needle).count(),
+            2,
+            "both stream-start construction sites must attach the VodTrack"
+        );
+        assert!(source.contains("fn stream_vod_track(&self) -> VodTrack"));
+        assert!(source.contains("stream_vod_section"));
+        assert!(source.contains("stream_vod_enabled"));
+        assert!(source.contains("stream_vod_recorded"));
+        assert!(source.contains("stream_vod_hint"));
+        assert!(source.contains("stream_vod_inactive"));
+    }
+
+    #[test]
+    fn stream_vod_fields_are_runtime_only() {
+        // Runtime-only convention: the selectors are not persisted (like the
+        // other stream fields); serde skip keeps old configs loadable.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let field_pos = source
+            .find("stream_vod_enabled: bool,")
+            .expect("field declaration exists");
+        let skip_pos = source[..field_pos]
+            .rfind("#[serde(skip)]")
+            .expect("field is serde-skipped");
+        let between = &source[skip_pos + "#[serde(skip)]".len()..field_pos];
+        assert_eq!(
+            between.matches("#[serde(skip)]").count(),
+            0,
+            "the skip attribute directly precedes the field"
+        );
+        // Defaults must be off; asserted on the live app rather than by
+        // scanning source text (which would see this test's own literals).
+        let app = RivuletApp::default();
+        assert!(!app.stream_vod_enabled);
+        assert!(!app.stream_vod_recorded);
+    }
+
+    #[test]
+    fn stream_vod_i18n_keys_exist_in_both_locales() {
+        let de = rivulet_core::Locale::De.tr("stream_vod_section");
+        let en = rivulet_core::Locale::En.tr("stream_vod_section");
+        assert_ne!(de, "stream_vod_section", "DE key must be translated");
+        assert_ne!(en, "stream_vod_section", "EN key must be translated");
+        for key in [
+            "stream_vod_enabled",
+            "stream_vod_recorded",
+            "stream_vod_hint",
+            "stream_vod_inactive",
+        ] {
+            assert_ne!(
+                rivulet_core::Locale::En.tr(key),
+                key,
+                "EN key {key} must be translated"
+            );
+            assert_ne!(
+                rivulet_core::Locale::De.tr(key),
+                key,
+                "DE key {key} must be translated"
+            );
+        }
     }
 
     #[test]

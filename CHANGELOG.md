@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- gui(stream): **VOD-Track-Settings-UI (Issue #78)** — der Stream-View erhält
+  einen aufklappbaren Abschnitt „VOD-Track“ mit zwei expliziten Schaltern
+  (aktivieren + in die Aufnahme aufnehmen) und dem Leakage-Safety-Hinweis;
+  beide Stream-Start-Pfade (Button und OBS-WebSocket-Befehl) hängen den
+  daraus abgeleiteten `VodTrack` an die Engine-Settings an, sodass die neue
+  `audio_src_vod`-Aufnahme-Branch ohne Konfigurationsdatei nutzbar ist.
+  i18n EN/DE, vier neue GUI-Tests (Ableitung, beide Startstellen,
+  Runtime-only-Konvention, i18n-Beidseitigkeit).
+
 - core(stream): **VOD track recording branch (issue #78, Z78-1–Z78-4)** — in a
   dual-output session an active `VodTrack` now emits a third, independent
   audio branch (`audio_src_vod`) into the recording muxer alongside the
