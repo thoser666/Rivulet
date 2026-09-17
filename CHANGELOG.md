@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- ci(guard): **apt package parity between ci.yml and nightly.yml is now
+  enforced** — the nightly build broke for over a week because
+  `libasound2-dev` was added to ci.yml's Linux dependency steps but never
+  mirrored into nightly.yml, and nothing compared the two lists. The new
+  `scripts/check-apt-parity.py` parses both workflows' `apt-get install`
+  steps and asserts lockstep: the Lints clippy dependency lists must be
+  exactly equal, and the `build_and_test` Linux lists may differ only by the
+  pinned CI-only test tools (Xvfb/xdotool set). Wired into the CI Lints job
+  and the pre-push fast-guard stage with a `--self-test`; a pinning test
+  keeps the checker itself wired up.
+
 - a11y(ui): **global status surface in the sidebar footer** — a failure
   raised in a background tab (chat account, plugin load, alerts ingestion,
   OBS WebSocket, export …) used to stay invisible until the user navigated

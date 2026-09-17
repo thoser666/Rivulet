@@ -1886,6 +1886,39 @@ fn stale_pin_checker_is_wired_up() {
 }
 
 #[test]
+fn apt_parity_checker_is_wired_up() {
+    // The nightly build broke for over a week because `libasound2-dev` was
+    // added to ci.yml's Linux dependency steps but never mirrored into
+    // nightly.yml — nothing compared the two lists. The apt-parity checker
+    // must exist, cover both the clippy (exact set) and build_and_test
+    // (set-with-CI-only-exceptions) steps, and be wired into both the CI
+    // Lints job and the pre-push fast-guard stage.
+    let checker = read("scripts/check-apt-parity.py");
+    for marker in [
+        "CI_ONLY_BUILD_PACKAGES",
+        "Install GStreamer dependencies for clippy",
+        "Install Linux dependencies (if applicable)",
+        "--self-test",
+        "--json",
+    ] {
+        assert!(
+            checker.contains(marker),
+            "check-apt-parity.py must contain {marker}"
+        );
+    }
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("scripts/check-apt-parity.py --self-test"),
+        "ci.yml must run the apt-parity self-test"
+    );
+    let hook = read(".githooks/pre-push");
+    assert!(
+        hook.contains("check-apt-parity.py --self-test"),
+        ".githooks/pre-push must run the apt-parity self-test"
+    );
+}
+
+#[test]
 fn beta_gate_checker_is_wired_up() {
     // The Beta-Gate (README → Roadmap) is the criteria list that gates leaving
     // alpha. The checker must evaluate all six criteria and CI must publish the
