@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- a11y(ui): **prefers-reduced-motion is honored (WCAG 2.3.3, ui-005)** —
+  preview fades (`animate_bool`) and scene-transition fades animated
+  regardless of the OS motion setting. A new persisted motion preference
+  (System/Full/Reduced, Settings → Motion) resolves against the OS
+  reduce-motion state (Windows "Animation effects", macOS "Reduce motion",
+  GNOME "Reduce animation"; probed at most every 10 s because the macOS/
+  Linux queries spawn a subprocess). Under reduced motion egui's global
+  `animation_time` drops to 0 so every `animate_bool`-based fade snaps to
+  its target, and scene-transition Fades collapse to Cuts (Studio "Take"
+  included). egui 0.36 has no built-in reduced-motion option, so the
+  preference is applied manually via `theme::apply_motion`.
+
 - ci(guard): **apt package parity between ci.yml and nightly.yml is now
   enforced** — the nightly build broke for over a week because
   `libasound2-dev` was added to ci.yml's Linux dependency steps but never

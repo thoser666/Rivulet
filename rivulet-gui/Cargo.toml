@@ -83,6 +83,12 @@ rivulet-audio = { path = "../rivulet-audio" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-capture = { version = "2.0.0" }
+# Reduce-motion detection reads the "Animation effects" user setting via
+# SystemParametersInfoW (ui-005, WCAG 2.3.3).
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+] }
 # Capture backend status (G2): reports whether DXGI Desktop Duplication is
 # the active backend or whether the GUI fell back to Windows Graphics
 # Capture, plus the fallback reason.

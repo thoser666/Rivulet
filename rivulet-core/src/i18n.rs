@@ -807,6 +807,12 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("theme_system", "System"),
                 ("theme_dark", "Dark"),
                 ("theme_light", "Light"),
+                // Motion (ui-005, WCAG 2.3.3 Animation from Interactions)
+                ("motion", "Motion"),
+                ("motion_system", "System"),
+                ("motion_full", "Full"),
+                ("motion_reduced", "Reduced"),
+                ("motion_hint", "\"Reduced\" disables non-essential animations (preview fades, scene-transition fades) per WCAG 2.3.3; \"System\" follows the OS reduce-motion setting."),
                 // Plugins (Phase 3 install/permission flow)
                 ("plugins_section", "Plugins"),
                 ("plugins_scan", "Rescan"),
@@ -1538,6 +1544,12 @@ Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."
                 ("theme_system", "System"),
                 ("theme_dark", "Dunkel"),
                 ("theme_light", "Hell"),
+                // Bewegung (ui-005, WCAG 2.3.3 Animation from Interactions)
+                ("motion", "Animationen"),
+                ("motion_system", "System"),
+                ("motion_full", "Voll"),
+                ("motion_reduced", "Reduziert"),
+                ("motion_hint", "\"Reduziert\" deaktiviert nicht notwendige Animationen (Vorschau-Blenden, Szenen-Übergangs-Blenden) gemäß WCAG 2.3.3; \"System\" folgt der Systemeinstellung für reduzierte Bewegung."),
                 // Plugins (Phase-3-Installations-/Freigabe-Ablauf)
                 ("plugins_section", "Plugins"),
                 ("plugins_scan", "Neu einlesen"),

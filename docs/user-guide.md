@@ -225,6 +225,8 @@ SRT/RIST und WHIP/WebRTC befinden sich in der Integrationsphase. Ein vorhandener
 
 Unter **Settings** kannst du zwischen **System**, **Dark** und **Light** wählen. Die Auswahl wird beim Beenden gespeichert und beim nächsten Start wiederhergestellt. Wenn sich ein Theme nicht ändert, öffne die Settings erneut und prüfe, ob der Speicherort der Anwendung beschreibbar ist.
 
+Direkt darunter stellst du unter **Animationen** das Bewegungsverhalten ein (WCAG 2.3.3): **System** folgt der Betriebssystem-Einstellung für reduzierte Bewegung (Windows: "Animationseffekte", macOS: "Bewegung reduzieren", GNOME: "Animationen reduzieren"), **Voll** animiert immer und **Reduziert** deaktiviert nicht notwendige Animationen unabhängig vom Betriebssystem — Vorschaubilder blenden dann sofort ein, und Szenen-Übergänge mit Fade werden zu harten Schnitten. Die Einstellung wird wie das Farbschema gespeichert.
+
 Dort findest du außerdem Sprache, Codec, Aufnahme-Preset, Ausgabeordner, Hotkeys, Replay Buffer und Update-Prüfung.
 
 ### Sprache
