@@ -201,6 +201,7 @@ Im Stream-Tab liegt der aufklappbare Abschnitt **VOD-Track**. Er steuert die dri
 1. **VOD-Track aktivieren** legt die dritte Audiospur an — eine eigene `audio_src_vod`-Branch, die über einen eigenen AAC-Encoder in die Aufnahmedatei gemuxt wird.
 2. **VOD-Track in die Aufzeichnungsdatei aufnehmen** ist die zweite Schalte: Erst wenn beide aktiv sind, existiert der Aufnahme-Zweig (`VodTrack::active()`). Damit bleibt die Leak-Safety-Regel sichtbar statt stillschweigend umgedeutet zu werden.
 3. Der **Live-Stream wird nie berührt**: FLV trägt weiterhin genau einen gemischten Audio-Track; die VOD-Spur erscheint ausschließlich in der lokalen Aufzeichnung. Bei aktivem VOD-Track ohne `recorded` zeigt die UI einen Inaktiv-Hinweis.
+4. **Stream-Markierung**: Bei aktivem VOD-Track trägt die Streaming-Mux-Stufe den Marker `Rivulet-ivod` in den FLV-Metadaten (onMetaData). Damit ist eine VOD-Session am Stream-Output erkennbar; ein natives `ivod`-Track-Flag folgt, sobald Twitch dieses Protokolldetail veröffentlicht.
 
 Hinweis: Der VOD-Zweig entsteht beim Session-Start; Änderungen an den Schaltern wirken ab dem nächsten Stream-Start.
 
@@ -283,7 +284,7 @@ Wenn die GUI startet, aber nicht reagiert:
 - Native Browser-Webview-Adapter sind noch plattformabhängig.
 - Vollständige Vulkan-/OpenGL-/DXGI-Performance muss auf echter Hardware gemessen werden.
 - WHIP benötigt noch den vollständigen ICE/DTLS/SRTP- und SFU-End-to-End-Nachweis.
-- Der VOD-Track (Twitch-Workflow) ist mit Settings-UI und Dual-Output-Aufnahme-Zweig (`audio_src_vod`, Issue #78) umgesetzt; die Streaming-seitige ivod-Mux-Verdrahtung und die Plattform-Restriktionen (nur Twitch-Markierung) folgen noch.
+- Der VOD-Track (Twitch-Workflow) ist mit Settings-UI, Dual-Output-Aufnahme-Zweig (`audio_src_vod`, Issue #78) und der Streaming-Mux-Markierung (`metadatacreator=Rivulet-ivod`) umgesetzt; ein natives `ivod`-AMF-Flag ist mit Stock-GStreamer nicht emittierbar und wartet auf eine Twitch-Protokollspezifikation.
 - NDI-Output ist als Konfigurationsvertrag vorhanden; eine echte LAN-Interoperabilität über den NewTek-NDI-Runtime ist noch nicht verifiziert.
 - VST 3.x: Konfiguration, Entdeckung und der Host-Vertrag (inkl. Windows-Skelett) sind vorhanden; das tatsächliche Audio-Routing durch geladene Plugins (Z96-4) folgt noch.
 - Cloud-Recordings: Der S3-`PUT`-Upload (AWS SigV4) nach `stop_recording` ist implementiert; Multipart für sehr große Dateien und GUI-Einstellungen folgen noch.

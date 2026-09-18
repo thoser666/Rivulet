@@ -586,6 +586,40 @@ fn m3_vod_track_recording_branch_is_pinned() {
 }
 
 #[test]
+fn m3_vod_track_streaming_mux_marker_is_pinned() {
+    // Issue #78 (streaming-side wiring): an active VodTrack marks the
+    // streaming FLV mux stage in BOTH builder tails via
+    // `flvmux metadatacreator=Rivulet-ivod` — the only onMetaData-visible,
+    // parse-launch-expressible marker with stock GStreamer (stock flvmux
+    // skips unknown tag names; see the quality-gate VOD track section).
+    let lib = read("rivulet-core/src/lib.rs");
+    let stream = read("rivulet-core/src/stream.rs");
+    assert!(
+        stream.contains("pub const FLV_STREAMING_MARKER: &'static str = \"Rivulet-ivod\";"),
+        "marker constant must exist with its value"
+    );
+    assert!(
+        stream.contains("pub fn flv_streaming_marker_fragment"),
+        "marker fragment helper must exist"
+    );
+    // Both FLV tails must consult the fragment.
+    assert!(
+        lib.contains("flvmux name=mux_stream streamable=true{} ! rtmp2sink"),
+        "dual-output FLV tail carries the marker fragment"
+    );
+    assert!(
+        lib.contains("fanout.push_str(&settings.vod_track.flv_streaming_marker_fragment());"),
+        "streaming-only fanout mux carries the marker fragment"
+    );
+    // The honest documentation anchor for the design decision.
+    let gate = read("docs/m3-streaming-quality-gate.md");
+    assert!(
+        gate.contains("FLV_STREAMING_MARKER"),
+        "quality gate must document the marker design"
+    );
+}
+
+#[test]
 fn m6_audio_routing_phase2_gui_surface_is_pinned() {
     // Issue #154 Phase 2: the mixer GUI ships the routing matrix, the shared
     // per-source strip (single implementation, three placements), the inline

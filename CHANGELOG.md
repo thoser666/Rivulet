@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+- core(stream): **VOD-Track-Streaming-Marker (Issue #78, letzter offener Punkt)** —
+  bei aktivem VodTrack tragen beide Streaming-FLV-Tails den Marker
+  `metadatacreator=Rivulet-ivod` in ihrem `flvmux` (`mux` im Streaming-only-
+  und `mux_stream` im Dual-Output-Graph), sodass das FLV-onMetaData die
+  VOD-Session sichtbar macht. Design-Entscheidung, im Quality-Gate
+  dokumentiert und per ci_pinning gepinnt: Stock-GStreamer-flvmux serialisiert
+  nur die Properties `metadatacreator`/`encoder` plus die Tags
+  duration/filesize/creator/title — ein literal `ivod`-AMF-Key ist mit
+  Stock-Elementen nicht emittierbar und in keinem öffentlichen Protokoll
+  (OBS/FFmpeg/GStreamer) beschrieben; der Marker trägt daher das
+  `twitch_ivod_flag()`-Signal drahtsichtbar, ohne ein unbelegtes
+  Wire-Element zu erfinden. Inaktive Sessions bleiben byte-identisch zum
+  VodTrack-freien Graph. Drei neue Pipeline-Vertragstests (Marker in beiden
+  Buildern inkl. Property-Nachweis am geparsten Element, inaktiv = keine
+  Marker-Fragmente).
+
 - gui(stream): **VOD-Track-Settings-UI (Issue #78)** — der Stream-View erhält
   einen aufklappbaren Abschnitt „VOD-Track“ mit zwei expliziten Schaltern
   (aktivieren + in die Aufnahme aufnehmen) und dem Leakage-Safety-Hinweis;
