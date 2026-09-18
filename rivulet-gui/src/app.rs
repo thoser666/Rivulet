@@ -12860,9 +12860,29 @@ mod tests {
             .set_read_timeout(Some(std::time::Duration::from_secs(5)))
             .expect("timeout");
         stream.write_all(&request).expect("write request");
-        let mut response = String::new();
-        stream.read_to_string(&mut response).expect("read response");
-        response
+        // The listener closes right after answering; on macOS that close can
+        // surface as ConnectionReset instead of a clean EOF, so collect what
+        // arrived and tolerate reset/timeout instead of panicking.
+        let mut response = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            match stream.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => response.extend_from_slice(&chunk[..n]),
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::ConnectionReset
+                            | std::io::ErrorKind::WouldBlock
+                            | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
+                    break
+                }
+                Err(e) => panic!("read response: {e}"),
+            }
+        }
+        String::from_utf8_lossy(&response).into_owned()
     }
 
     #[test]
