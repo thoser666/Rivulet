@@ -1471,6 +1471,7 @@ impl RivuletEngine {
             })
             .unwrap_or_else(|| vec![StreamTarget::new("primary", settings.clone())]);
         let mut fanout = String::from("flvmux name=mux streamable=true");
+        fanout.push_str(&settings.vod_track.flv_streaming_marker_fragment());
         for (index, target) in targets.iter().enumerate() {
             let sink_fragment = target
                 .contribution
@@ -1582,7 +1583,12 @@ impl RivuletEngine {
             Self::escape_location(location)
         ));
         s.push_str(&format!(
-            "flvmux name=mux_stream streamable=true ! rtmp2sink location=\"{}\"",
+            "flvmux name=mux_stream streamable=true{} ! rtmp2sink location=\"{}\"",
+            self.stream_settings
+                .as_ref()
+                .expect("Stream settings must be set")
+                .vod_track
+                .flv_streaming_marker_fragment(),
             stream_location
         ));
         s
@@ -3365,6 +3371,101 @@ mod tests {
         let loc = settings.location();
         assert!(loc.contains("secretkey123")); // unredacted by design
         assert_eq!(settings.vod_track.twitch_ivod_flag(), Some("ivod"));
+    }
+
+    /// Streaming-side VOD wiring (issue #78): an active VodTrack marks the
+    /// streaming FLV mux stage in dual-output builds. The marker rides in
+    /// `flvmux metadatacreator=` because stock GStreamer serializes exactly
+    /// that property into the onMetaData script tag; a literal `ivod` AMF key
+    /// is not writable by stock elements.
+    #[test]
+    fn dual_output_streaming_mux_stage_carries_vod_marker_when_active() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_stream_settings(Some(
+            StreamSettings::twitch("vodkey").with_vod_track(VodTrack::new(true)),
+        ));
+        let path = std::env::temp_dir().join("rivulet_vod_marker_dual.mp4");
+        engine.start_local_recording(path);
+
+        let pipeline_str = engine.build_dual_output_pipeline_str();
+        assert!(
+            pipeline_str
+                .contains("flvmux name=mux_stream streamable=true metadatacreator=Rivulet-ivod"),
+            "{}",
+            pipeline_str
+        );
+        assert_eq!(
+            VodTrack::new(true).flv_streaming_marker_fragment(),
+            " metadatacreator=Rivulet-ivod"
+        );
+        let pipeline = gst::parse::launch(&pipeline_str)
+            .expect("dual-output VOD-marker pipeline should parse")
+            .downcast::<gst::Pipeline>()
+            .unwrap();
+        let mux_stream = pipeline.by_name("mux_stream").expect("mux_stream missing");
+        assert_eq!(
+            mux_stream.property::<String>("metadatacreator"),
+            "Rivulet-ivod",
+            "{}",
+            pipeline_str
+        );
+    }
+
+    /// Streaming-only: same marker contract on the fanout mux.
+    #[test]
+    fn streaming_only_mux_stage_carries_vod_marker_when_active() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_stream_settings(Some(
+            StreamSettings::twitch("vodkey").with_vod_track(VodTrack::new(true)),
+        ));
+
+        let pipeline_str = engine.build_streaming_pipeline_str();
+        assert!(
+            pipeline_str.contains("flvmux name=mux streamable=true metadatacreator=Rivulet-ivod"),
+            "{}",
+            pipeline_str
+        );
+        let pipeline = gst::parse::launch(&pipeline_str)
+            .expect("streaming-only VOD-marker pipeline should parse")
+            .downcast::<gst::Pipeline>()
+            .unwrap();
+        let mux = pipeline.by_name("mux").expect("mux missing");
+        assert_eq!(mux.property::<String>("metadatacreator"), "Rivulet-ivod");
+    }
+
+    /// Inactive or fully disabled tracks keep every FLV tail byte-identical to
+    /// pre-VodTrack graphs (no marker fragment anywhere).
+    #[test]
+    fn vod_streaming_marker_absent_when_track_inactive() {
+        let _ = gst::init();
+        for vod in [
+            VodTrack::new(true).with_recorded(false),
+            VodTrack::new(false),
+        ] {
+            let mut engine = RivuletEngine::default();
+            engine.set_audio_enabled(true);
+            engine.set_stream_settings(Some(StreamSettings::twitch("k").with_vod_track(vod)));
+
+            let path = std::env::temp_dir().join("rivulet_vod_marker_off.mp4");
+            engine.start_local_recording(path);
+            for s in [
+                engine.build_dual_output_pipeline_str(),
+                engine.build_streaming_pipeline_str(),
+            ] {
+                assert!(!s.contains("metadatacreator=Rivulet-ivod"), "{}", s);
+            }
+        }
+        assert_eq!(
+            VodTrack::new(true)
+                .with_recorded(false)
+                .flv_streaming_marker_fragment(),
+            ""
+        );
+        assert_eq!(VodTrack::new(false).flv_streaming_marker_fragment(), "");
     }
 
     /// In dual output mode mixed audio frames are routed into the pipeline even

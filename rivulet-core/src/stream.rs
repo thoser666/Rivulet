@@ -887,10 +887,29 @@ impl VodTrack {
         self.enabled && self.recorded
     }
 
-    /// Twitch marks the VOD track with the `ivod` track flag. Returning whether
-    /// the config is active gives the mux stage a deterministic signal.
+    /// The streaming mux stage marks an active VOD track with the `ivod` track
+    /// flag on the wire. Returning whether the config is active gives the mux
+    /// stage a deterministic signal.
     pub fn twitch_ivod_flag(&self) -> Option<&'static str> {
         self.active().then_some("ivod")
+    }
+    /// Marker value the streaming FLV mux stage carries when this track is
+    /// active (see the `VOD track` section in docs/m3-streaming-quality-gate.md).
+    /// The flag string itself stays `ivod` (the signal `twitch_ivod_flag()`
+    /// yields); the wire marker carries it in `flvmux metadatacreator=` because
+    /// stock GStreamer `flvmux` serializes exactly that property into the
+    /// onMetaData script tag — an `ivod` AMF key cannot be emitted by stock
+    /// elements, and `location()` stays flag-free for leakage safety.
+    pub const FLV_STREAMING_MARKER: &'static str = "Rivulet-ivod";
+
+    /// The `flvmux` fragment the streaming stage appends to mark an active VOD
+    /// track in the FLV onMetaData. Empty when the track is inactive — inactive
+    /// sessions keep the wire byte-identical to pre-VodTrack graphs.
+    pub fn flv_streaming_marker_fragment(&self) -> String {
+        match self.twitch_ivod_flag() {
+            Some(_) => format!(" metadatacreator={}", Self::FLV_STREAMING_MARKER),
+            None => String::new(),
+        }
     }
 }
 

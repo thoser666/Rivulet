@@ -1,8 +1,13 @@
 ## Offen (Follow-up)
 
+- **Streaming-Marker**: umgesetzt — die Streaming-FLV-Mux-Stufe trägt bei
+  aktivem Track `metadatacreator=Rivulet-ivod` im onMetaData (Design-Note im
+  M3-Quality-Gate; ein literal `ivod`-AMF-Key ist mit Stock-GStreamer nicht
+  emittierbar und wartet auf eine Twitch-Protokollspezifikation).
 - **Routing**: Das `VodTrack`-Modell ist fertig (leakage-sicher, `ivod`-Flag,
-  off-by-default, getestet). Verbleibende Arbeit ist das **pro-Track-GStreamer-Routing
-  in den gemuxten Output** und die **Routing-UI** — das ist M8 (Issue [#78](https://github.com/thoser666/Rivulet/issues/78)).
+  off-by-default, getestet). Die Routing-UI ist ausgeliefert; das
+  pro-Track-GStreamer-Routing in den gemuxten **Streaming**-Output bleibt
+  ein M8/M9-Thema (Issue [#78](https://github.com/thoser666/Rivulet/issues/78)).
 
 ## Subtasks
 

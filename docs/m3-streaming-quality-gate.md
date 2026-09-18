@@ -115,9 +115,7 @@ storage before stable releases. Until then, keys must be supplied through the
 existing protected runtime configuration and must never be committed, logged, or
 included in screenshots.
 
-## VOD track
-
-The Twitch VOD workflow is modelled as `VodTrack` on `StreamSettings` with a
+## VOD trackThe Twitch VOD workflow is modelled as `VodTrack` on `StreamSettings` with a
  deterministic `enabled`/`recorded` pair. A track is only ever considered active
  when both flags are set, which guarantees it can never silently leak into the
  live ingest: enabling the feature forces the local VOD recording flag on unless
@@ -127,8 +125,26 @@ The Twitch VOD workflow is modelled as `VodTrack` on `StreamSettings` with a
  `StreamSettings`, and no leakage into masked/redacted output or the ingest
  `location()`).
 
-Actual per-track GStreamer routing into the muxed output remains an integration
- item; the deterministic config and leakage guarantees are the tested contract.
+Recording-side routing is wired (issue #78, Z78-1/2): an active track adds the
+third `audio_src_vod` branch into the recording muxer and is fed via
+`push_audio_vod`, while the live FLV audio path stays untouched.
+
+Streaming-side marking is wired as the mux-stage signal
+`VodTrack::FLV_STREAMING_MARKER` ("Rivulet-ivod"): when a track is active, both
+streaming builder tails append `metadatacreator=Rivulet-ivod` to their `flvmux`
+element (`flvmux name=mux …` for streaming-only, `flvmux name=mux_stream …` for
+dual output), so the FLV onMetaData script tag carries the marker. Design note,
+pinned by a ci_pinning test: stock GStreamer `flvmux` skips all unknown tag
+names — it serializes only `duration`, `filesize`, `creator` (from GST_TAG_ARTIST)
+and `title` (from GST_TAG_TITLE) out of the tag list, plus the unconditional
+`metadatacreator`/`encoder` properties — so a literal `ivod` AMF key cannot be
+emitted by stock elements. No public protocol document (OBS, FFmpeg, GStreamer)
+describes an `ivod` onMetaData key either, so the marker keeps the configured
+`ivod` signal on the wire without inventing an unverifiable AMF element; if a
+Twitch-published contract for the `ivod` key emerges, the marker can move to
+the native key by extending flvmux or swapping the mux tail for a custom
+element. Inactive sessions keep the wire byte-identical to pre-VodTrack graphs
+— the marker fragment is empty and `location()` stays flag-free.
 
 ## NDI output
 
