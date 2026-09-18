@@ -87,10 +87,10 @@ All criteria in the M6 quality gate (`docs/m6-audio-routing.md`) are checked:
 The following are **not** silently accepted as parity; each is assigned to a
 follow-up and remains visible in the roadmap/documentation.
 
-| ID | Severity | Area | Description | Assignee / issue | Retest condition |
+| ID | Severity | Area | Description | Tracking issue | Retest condition |
 | --- | --- | --- | --- | --- | --- |
-| F-M6-001 | Medium | macOS audio capture | The system-loopback fallback (Phase 5) is implemented and pinned in source, but no real Mac hardware has verified a live loopback capture end-to-end (the M5 platform parity note records macOS live verification as hardware-blocked). | Live-integration owner; platform parity review | Loopback capture and per-source routing verified on reference macOS hardware |
-| F-M6-002 | Medium | Windows/Linux audio capture | WASAPI process-loopback and PipeWire sink-input capture are implemented and pinned, but long-duration multi-app sessions on reference hardware have not been measured for the M6 resource gate (the harness feeds synthetic frames). | Resource-budget owner; `resource-efficiency-goal.md` | Real-hardware per-app capture baseline recorded against the M6 budget |
+| F-M6-001 | Medium | macOS audio capture | The system-loopback fallback (Phase 5) is implemented and pinned in source, but no real Mac hardware has verified a live loopback capture end-to-end (the M5 platform parity note records macOS live verification as hardware-blocked). | [#182](https://github.com/thoser666/Rivulet/issues/182) | Loopback capture and per-source routing verified on reference macOS hardware |
+| F-M6-002 | Medium | Windows/Linux audio capture | WASAPI process-loopback and PipeWire sink-input capture are implemented and pinned, but long-duration multi-app sessions on reference hardware have not been measured for the M6 resource gate (the harness feeds synthetic frames). | [#183](https://github.com/thoser666/Rivulet/issues/183) | Real-hardware per-app capture baseline recorded against the M6 budget |
 
 There are no Blocker, Critical, or open High findings.
 
@@ -103,7 +103,10 @@ There are no Blocker, Critical, or open High findings.
 
 M6 is complete for its functional scope. The milestone must not be used to
 claim beta feature parity for real-hardware macOS loopback capture or
-long-duration per-app capture baselines; each remains an explicit follow-up.
+long-duration per-app capture baselines; each remains an explicit follow-up,
+tracked as [#182](https://github.com/thoser666/Rivulet/issues/182)
+(F-M6-001) and [#183](https://github.com/thoser666/Rivulet/issues/183)
+(F-M6-002).
 The report is linked from the M6 roadmap gate in `README.md` and the M6
 quality gate in `docs/milestone-quality-gates.md`; release notes should
 reference it.
