@@ -62,28 +62,38 @@ The smallest complete slice of "automation": a `rivulet-cli` crate with a
 
 **DoD**
 
-- New `rivulet-cli` crate; `record` subcommand wrapping the engine (binary and
-  library paths share one implementation).
-- Config file (TOML) + CLI flags: source selection (test sources/loopback),
-  audio routing, encoder, output path, duration limit.
-- Stable JSON status events on stdout (documented schema), human-readable
+- [x] New `rivulet-cli` crate; `record` subcommand wrapping the engine (binary and
+  library paths share one implementation: `rivulet_cli::RecordJob`).
+- [x] Config file (TOML) + CLI flags: source selection (test sources/loopback),
+  audio routing, encoder, output path, duration limit — the MVP ships the
+  headless-capable subset: test source (pattern, size, fps), optional silent
+  audio track, container, output path, duration; encoder selection follows the
+  engine's `best_encoder()` default and becomes a flag with W3's render work.
+- [x] Stable JSON status events on stdout (documented schema), human-readable
   diagnostics on stderr — strictly separated streams.
-- Documented exit codes; graceful SIGINT/SIGTERM stop that finalizes the
+- [x] Documented exit codes; graceful SIGINT/SIGTERM stop that finalizes the
   container.
-- Library path: the same recording achievable in-process without spawning the
-  binary.
+- [x] Library path: the same recording achievable in-process without spawning the
+  binary (`rivulet_cli::record(config)` and `RecordJob` with custom event
+  sinks).
 
 **Acceptance criteria**
 
-- [ ] Headless recording of N seconds from a test source produces a valid
-  container on CI Linux with no capture hardware.
-- [ ] `--json` emits documented, stable status events; diagnostics never mix
-  into the JSON stream.
-- [ ] Invalid config exits non-zero with an actionable error naming the
-  offending key.
-- [ ] SIGINT/SIGTERM stops cleanly (finalized file, exit code 0).
-- [ ] CLI help, examples, and exit codes are documented in this spec (§ CLI
-  surface reference).
+- [x] Headless recording of N seconds from a test source produces a valid
+  container on CI Linux with no capture hardware
+  (`headless_recording_produces_a_valid_container` in `rivulet-cli`).
+- [x] `--json` emits documented, stable status events; diagnostics never mix
+  into the JSON stream (schema pinned by the ci_pinning guard; note: JSON
+  events are the default and only stdout format — there is no separate flag
+  to disable them, so `--json` is accepted as a no-op alias in future if a
+  non-JSON mode is ever added).
+- [x] Invalid config exits non-zero with an actionable error naming the
+  offending key (exit code 2; covered by config tests and the binary).
+- [x] SIGINT/SIGTERM stops cleanly (finalized file, exit code 0) — the
+  handler flips an atomic flag and `RecordJob::run` finalizes between
+  frames.
+- [x] CLI help, examples, and exit codes are documented in this spec (§ CLI
+  surface reference; pinned by the ci_pinning guard).
 
 ### W2a — Deterministic pipeline (clock + reproducible-run contract) — issue [#187](https://github.com/thoser666/Rivulet/issues/187)
 
@@ -212,27 +222,45 @@ The introspection half of the CLI story, analogous to `gst-inspect` /
 - [ ] Undo restores the pre-paste scene state exactly.
 - [ ] The operation is covered by the deterministic-test helpers from W2b.
 
-## CLI surface reference (grows with implementation)
+## CLI surface reference
 
 ```
-rivulet record --config recording.toml --output out.mp4 [--json] [--duration SECS]
-rivulet inspect --config recording.toml [--json]
+rivulet record --config recording.toml [--output FILE] [--duration SECS]
+               [--width PX] [--height PX] [--fps N] [--audio]
+               [--container mp4|mkv|mov|mpegts]             (shipped, W1)
+rivulet inspect --config recording.toml [--json]           (planned, W5)
 rivulet render --config scene.toml --frame N --png out.png    (planned, W3)
 rivulet render --config-dir scenes/ --out-dir renders/        (planned, W3 batch)
 ```
 
-Exit codes (planned, finalized in W1):
+Flags override the TOML config (`--output` wins over `output.path`, etc.).
+Without `--config`, flags alone define the run; `output.path` is always
+required (inline via `--output`). The library path
+(`rivulet_cli::RecordJob`) accepts the same validated `RecordConfig`, so the
+identical recording is achievable in-process without spawning the binary
+(W1 DoD).
+
+Exit codes (shipped in W1):
 
 | Code | Meaning |
 | --- | --- |
-| 0 | success (including graceful stop) |
-| 1 | generic runtime failure |
-| 2 | invalid configuration (error names the offending key) |
-| 3 | signal stop (SIGINT/SIGTERM) after finalizing the container |
+| 0 | success — including a graceful SIGINT/SIGTERM stop that finalized the container (per the W1 acceptance criterion) |
+| 1 | generic runtime failure (engine error, IO error, empty output) |
+| 2 | invalid usage or configuration (error names the offending key, e.g. `output.container: unknown container …`) |
 
-JSON status event schema (planned, finalized in W1): one JSON object per line
-on stdout with a stable `type` discriminator (`started`, `progress`,
-`stopped`, `error`); diagnostics never mix into the JSON stream.
+JSON status event schema (shipped in W1): one JSON object per line on stdout
+with a stable `event` discriminator —
+
+| Event | Fields |
+| --- | --- |
+| `started` | `width`, `height`, `fps`, `audio` |
+| `progress` | `seconds`, `frames`, `fps`, `file_size_bytes` |
+| `stopped` | `frames`, `seconds`, `file_size_bytes` |
+
+Failures are not JSON events: they are human-readable diagnostics on stderr
+plus a non-zero exit code, so a broken run never corrupts a JSON consumer's
+stream (AC: diagnostics never mix into the JSON stream). The schema is
+pinned by the `cli_mvp_schema_and_docs_are_pinned` ci_pinning test.
 
 ## Nondeterminism inventory
 

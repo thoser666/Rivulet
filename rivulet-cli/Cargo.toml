@@ -1,0 +1,27 @@
+[package]
+name = "rivulet-cli"
+version.workspace = true
+authors.workspace = true
+edition = "2021"
+rust-version = "1.70"
+license.workspace = true
+repository.workspace = true
+description = "Headless command-line companion for the Rivulet streaming engine (M7, issue #186)"
+
+[lib]
+name = "rivulet_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rivulet"
+path = "src/main.rs"
+
+[dependencies]
+rivulet-core = { path = "../rivulet-core" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json = "1.0"
+toml = "0.9"
+ctrlc = "3.4"
+tracing.workspace = true
+tracing-subscriber.workspace = true
