@@ -57,20 +57,20 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v3.0.3",
     ),
     (
-        "github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63",
-        "v4.38.0",
+        "github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd",
+        "v4.38.1",
     ),
     (
-        "github/codeql-action/autobuild@b96794f015dfd88f77b49b1c93e0fa7110f94c63",
-        "v4.38.0",
+        "github/codeql-action/autobuild@1c5b675653bb5c22dbe9b12b556ec555138e09fd",
+        "v4.38.1",
     ),
     (
-        "github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63",
-        "v4.38.0",
+        "github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd",
+        "v4.38.1",
     ),
     (
-        "github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63",
-        "v4.38.0",
+        "github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd",
+        "v4.38.1",
     ),
     (
         "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
