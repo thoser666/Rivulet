@@ -10,7 +10,8 @@ members = [
     "rivulet-vulkan-layer",
     "rivulet-opengl-hook-dll",
     "rivulet-launcher",
-    "rivulet-obs-websocket"
+    "rivulet-obs-websocket",
+    "rivulet-cli"
 ]
 # The fuzz crate builds with libFuzzer's sanitizer runtime and is driven by
 # cargo-fuzz (see fuzz/ + scripts/fuzz-smoke.sh); it must stay out of the

@@ -5826,3 +5826,61 @@ fn plugin_registry_phase3_is_implemented() {
         "CHANGELOG must record the plugin registry / approval UI implementation"
     );
 }
+
+#[test]
+fn cli_mvp_schema_and_docs_are_pinned() {
+    // ── M7 W1 (issue #186): the CLI's external contracts are pinned so a
+    // refactor cannot silently change them. ─────────────────────────────
+
+    // 1. The JSON status-event schema is locked (serde renames + tag).
+    let config = read("rivulet-cli/src/config.rs");
+    for fragment in [
+        "tag = \"event\"",
+        "rename_all = \"snake_case\"",
+        "\"started\"",
+        "\"progress\"",
+        "\"stopped\"",
+        "file_size_bytes",
+        "seconds",
+    ] {
+        assert!(
+            config.contains(fragment),
+            "config.rs must contain {fragment} (JSON event schema)"
+        );
+    }
+
+    // 2. Documented exit codes must stay exactly as specified.
+    let lib = read("rivulet-cli/src/lib.rs");
+    for (needle, why) in [
+        ("pub const USAGE: i32 = 2;", "invalid usage/config exits 2"),
+        ("pub const RUNTIME: i32 = 1;", "runtime failure exits 1"),
+        (
+            "pub const OK: i32 = 0;",
+            "success (incl. graceful stop) exits 0",
+        ),
+    ] {
+        assert!(lib.contains(needle), "exit codes pinned: {why}");
+    }
+
+    // 3. Streams stay separated: JSON on stdout, diagnostics on stderr.
+    let main = read("rivulet-cli/src/main.rs");
+    assert!(
+        main.contains("println!") && main.contains("eprintln!"),
+        "binary must keep JSON-on-stdout / diagnostics-on-stderr"
+    );
+
+    // 4. Spec § CLI surface reference must document usage, flags, and codes.
+    let spec = read("docs/m7-automation.md");
+    for fragment in [
+        "rivulet record",
+        "--config",
+        "--duration",
+        "exit code",
+        "SIGINT/SIGTERM",
+    ] {
+        assert!(
+            spec.contains(fragment),
+            "m7 spec CLI reference must document {fragment}"
+        );
+    }
+}

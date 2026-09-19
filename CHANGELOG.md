@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- feat(m7): **Headless CLI MVP (`rivulet-cli`, `rivulet record`)** — neue Crate
+  als dünnster Wrapper um die Engine (Push-Modell: RGBA-Frames via
+  `process_raw_frame`, optionale stille Test-Audiospur via `push_audio_frame`).
+  TOML-Config (`--config`) plus Flag-Overrides (`--output/--duration/--width/
+  --height/--fps/--audio/--container`), strenge Stream-Trennung (JSON-Status-
+  Events auf stdout: `started`/`progress`/`stopped`; Diagnostics auf stderr),
+  dokumentierte Exit-Codes (0 Erfolg inkl. graceful SIGINT/SIGTERM-Finalize,
+  1 Runtime-Fehler, 2 Config-Fehler mit benanntem Key), Library-Pfad
+  (`rivulet_cli::record` / `RecordJob` mit austauschbaren Sinks) und
+  test-seitige Verifikation (valides MP4 mit `ftyp/moov/mdat/avc1`). Schema
+  und Exit-Codes sind durch den neuen `cli_mvp_schema_and_docs_are_pinned`
+  ci_pinning-Guard gesichert; Spec W1 (CLI-Referenz + ACs) aktualisiert.
+  [#186](https://github.com/thoser666/Rivulet/issues/186)
+
 - docs(m7): **M7-Spec und Workstream-Issues („Render-First“-Meilenstein)** —
   neue Spec [`docs/m7-automation.md`](docs/m7-automation.md) mit den drei
   Säulen (Headless-CLI `rivulet record`, deterministische Pipeline mit
