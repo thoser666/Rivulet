@@ -404,17 +404,17 @@ must not be implied by beta parity.
 
 ### 🤖 M7 – Automation & Determinism ("Render-First")
 
-**Status: Planned**
+**Status: Planned** — spec: [`docs/m7-automation.md`](docs/m7-automation.md), 7 workstream issues on the [M7 milestone](https://github.com/thoser666/Rivulet/milestone/7) (#186–#192); recommended first step: the headless CLI (#186).
 
 *Differentiation pillar #1: OBS is interactive-first, Rivulet is deterministic.*
 
-- [ ] Deterministic pipeline (controllable engine clock, reproducible output from the same inputs)
-- [ ] Headless CLI: capture/rendering without a GUI (`rivulet record ...`), usable as binary and library
-- [ ] CI-friendly rendering: generate video from code (Remotion approach, native in Rust) — e.g. batch creation, tests, per-frame screenshots
-- [ ] Reproducible distribution inputs: deterministic packages, SHA-256 manifests, and post-publish verification for the M5 channel rollout (see [`docs/release-platforms.md`](docs/release-platforms.md))
-- [ ] Pipeline inspector/diagnostics tooling (analogous to `gst-inspect`, `gst-launch`), embedded in the engine
-- [ ] **Scene-item copy/paste API** — deterministic duplicate/paste of scene items within and across scenes, exposed scriptably (OBS 32.2 frontend-API parity), with undo integration and deterministic tests
-- [ ] Deterministic tests as first-class citizens (golden-frame tests, exact PTS/DTS verification)
+- [ ] Deterministic pipeline (controllable engine clock, reproducible output from the same inputs) — [#187](https://github.com/thoser666/Rivulet/issues/187)
+- [ ] Headless CLI: capture/rendering without a GUI (`rivulet record ...`), usable as binary and library — [#186](https://github.com/thoser666/Rivulet/issues/186)
+- [ ] CI-friendly rendering: generate video from code (Remotion approach, native in Rust) — e.g. batch creation, tests, per-frame screenshots — [#189](https://github.com/thoser666/Rivulet/issues/189)
+- [ ] Reproducible distribution inputs: deterministic packages, SHA-256 manifests, and post-publish verification for the M5 channel rollout (see [`docs/release-platforms.md`](docs/release-platforms.md)) — [#190](https://github.com/thoser666/Rivulet/issues/190)
+- [ ] Pipeline inspector/diagnostics tooling (analogous to `gst-inspect`, `gst-launch`), embedded in the engine — [#191](https://github.com/thoser666/Rivulet/issues/191)
+- [ ] **Scene-item copy/paste API** — deterministic duplicate/paste of scene items within and across scenes, exposed scriptably (OBS 32.2 frontend-API parity), with undo integration and deterministic tests — [#192](https://github.com/thoser666/Rivulet/issues/192)
+- [ ] Deterministic tests as first-class citizens (golden-frame tests, exact PTS/DTS verification) — [#188](https://github.com/thoser666/Rivulet/issues/188)
 
 **Goal:** "Video from code" and reproducible capture pipelines — the reason a developer/team *cannot* use OBS but can use Rivulet.
 

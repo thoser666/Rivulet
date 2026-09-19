@@ -287,6 +287,8 @@ resource report for active creator sessions.
 
 ### M7: Automation and Determinism
 
+**Status: Planned** — spec: [`docs/m7-automation.md`](m7-automation.md); workstream issues #186–#192 on the M7 milestone (headless CLI, deterministic clock, golden-frame tests, CI rendering, reproducible distribution, inspector, scene-item copy/paste). Per-criterion status notes are added as workstreams ship.
+
 This is a developer-experience gate as well as a UI gate:
 
 - CLI help, examples, configuration errors, and exit codes are actionable.

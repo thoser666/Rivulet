@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- docs(m7): **M7-Spec und Workstream-Issues („Render-First“-Meilenstein)** —
+  neue Spec [`docs/m7-automation.md`](docs/m7-automation.md) mit den drei
+  Säulen (Headless-CLI `rivulet record`, deterministische Pipeline mit
+  injizierbarer Clock + Reproducible-Run-Vertrag, CI-freundliches Rendering)
+  und vier Support-Workstreams (reproduzierbare Distributions-Inputs,
+  Pipeline-Inspector, deterministische Tests als Golden-Frame-/PTS-Helfer,
+  Scene-Item-Copy/Paste-API nach OBS-32.2-Parität). Sieben Issues (#186–#192)
+  auf dem M7-Meilenstein mit ACs aus der Spec; README-Checkliste verlinkt,
+  Quality-Gate-§ M7 mit Statuszeile versehen. Empfohlener Einstieg: #186
+  (Headless-CLI).
+
 - core(stream): **VOD-Track-Streaming-Marker (Issue #78, letzter offener Punkt)** —
   bei aktivem VodTrack tragen beide Streaming-FLV-Tails den Marker
   `metadatacreator=Rivulet-ivod` in ihrem `flvmux` (`mux` im Streaming-only-
