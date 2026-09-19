@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- ci(release): **Temporäre Release-Branches werden automatisch gelöscht** —
+  neuer `cleanup_release_branch`-Job in `release.yml` nach dem GitHub-Release;
+  Tag-Anchor-Safety-Rule (Löschung nur, wenn Branch-Tip exakt der getaggte
+  Commit ist, sonst Behaltung zur manuellen Prüfung), idempotent bei fehlendem
+  Branch/Tag. Verhindert die Akkumulation verwaister `release/v*`-Branches
+  (200 hatten sich angesammelt). Pinned durch den neuen
+  `alpha_release_cleans_up_its_temporary_branch` ci_pinning-Guard.
 - feat(m7): **Headless CLI MVP (`rivulet-cli`, `rivulet record`)** — neue Crate
   als dünnster Wrapper um die Engine (Push-Modell: RGBA-Frames via
   `process_raw_frame`, optionale stille Test-Audiospur via `push_audio_frame`).
