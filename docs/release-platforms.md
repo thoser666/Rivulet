@@ -9,7 +9,7 @@ support costs. The canonical source remains [GitHub Releases](https://github.com
 | Stage | Milestone | Channel | Platforms | Recommendation | Current state |
 | --- | --- | --- | --- | --- | --- |
 | 1 | M5, supported by M7 | GitHub Releases | Windows, macOS, Linux | Keep as the source of truth for release notes, checksums, and updater downloads. | Active: MSI/portable ZIP, DMG, and AppImage are built by CI. |
-| 2 | M5, supported by M7 | WinGet | Windows | Add after the MSI product identity and signing are stable. It provides native discovery and upgrades without another binary hosting system. | Manifest generation/validation are wired (packaging/windows/generate-winget-manifest.ps1 + dry-run job); submission to `microsoft/winget-pkgs` is still open (external review). |
+| 2 | M5, supported by M7 | WinGet | Windows | Add after the MSI product identity and signing are stable. It provides native discovery and upgrades without another binary hosting system. | Manifest generation/validation are wired (packaging/windows/generate-winget-manifest.ps1 + dry-run job); automated submission designed (`docs/winget-pkgs-submission.md`, gated on `WINGET_SUBMIT_TOKEN`); review/merge stays external. |
 | 2 | M5, supported by M7 | Scoop | Windows | Add now: Scoop requires no code signing, so this is the only native Windows package manager available before signing lands. The bucket repo hosts a generated, hash-pinned manifest. | Active: bucket `thoser666/scoop-bucket` (`scoop bucket add rivulet https://github.com/thoser666/scoop-bucket`); manifest generated + byte-verified by the **Distribution Readiness → scoop** dry-run job. |
 | 2 | M5 | AUR | Linux (Arch) | No signing required; the PKGBUILD downloads the AppImage from GitHub Releases and extracts it. AUR submissions are external and not moderated per-version. | PKGBUILD wired (`packaging/aur/PKGBUILD`); CI validates the PKGBUILD against the real release via the **Distribution Readiness → aur** dry-run job. AUR push is external. |
 | 2 | M5, supported by M7 | Flathub | Linux | Prefer this over maintaining distribution-specific packages. It gives Linux users a familiar, sandboxed, updateable installation. | Manifest wired (packaging/flatpak/org.rivulet.Rivulet.yml, pinned offline-cargo build + CI build/lint job); submission PR and permissions/appstream review are still open (external). |
@@ -69,11 +69,15 @@ release asset `rivulet-windows-x86_64.msi` with its SHA-256, the MSI
 6. **Weekly preparation (one release per week):** the **Weekly release
    promotion** workflow re-renders and byte-verifies the manifest from the
    real MSI of the promoted `weekly-latest` release and publishes the
-   validated payload as a `winget-manifest-<tag>` artifact. Opening the
-   winget-pkgs PR therefore stays a human, copy-paste step (external
-   review), but it is scoped to exactly one reviewed manifest per week —
-   never a per-alpha chore. Add an opt-in PR/dispatch workflow only after
-   external reviews are flowing; never upload unsigned binaries.
+   validated payload as a `winget-manifest-<tag>` artifact. The submission
+   itself is designed to be automated: after every real promotion a
+   `submit-winget` job opens the winget-pkgs PR from the exact prepared
+   artifact via `wingetcreate submit` (dedup against the catalog and open
+   PRs, disabled without `WINGET_SUBMIT_TOKEN`). Review, CLA and merge
+   stay external with Microsoft's moderators — see
+   [`docs/winget-pkgs-submission.md`](winget-pkgs-submission.md) for the
+   full flow. The preferred activation point is the first signed release;
+   unsigned submissions are accepted upstream with a SmartScreen warning.
 
 ### Scoop
 

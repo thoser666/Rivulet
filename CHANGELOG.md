@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- docs(winget): **winget-pkgs-Submission-Flow designed** — nach jeder echten
+  Promotion öffnet ein neuer `submit-winget`-Job automatisch den PR auf
+  `microsoft/winget-pkgs`: `wingetcreate submit` mit dem byte-verifizierten
+  `winget-manifest-<tag>`-Artefakt (keine Regeneration), Dedup gegen
+  Katalog-Ordner und offene PRs, abgeschaltet ohne `WINGET_SUBMIT_TOKEN`
+  (Phase-A-Rollout wie beim Scoop-Bucket). Spec in
+  `docs/winget-pkgs-submission.md`, verlinkt aus `docs/release-platforms.md`.
 - packaging(aur): **PKGBUILD auf 0.65.0.alpha.208 gebumpt** — erste
   vollständige AUR-Vorbereitung mit echten sha256sums (AppImage + Icon aus
   den Release-SHA256SUMS, rivulet.desktop aus dem Repo) statt `SKIP`, plus

@@ -4085,6 +4085,40 @@ fn obs_upstream_candidates_doc_keeps_both_generation_markers() {
 }
 
 #[test]
+fn winget_pkgs_submission_is_designed_and_gated() {
+    // The weekly promotion's WinGet hand-off is designed to be automated:
+    // docs/winget-pkgs-submission.md specifies a `submit-winget` job that
+    // opens the upstream PR from the byte-verified manifest artifact of the
+    // same run (wingetcreate submit — no regeneration), dedups against the
+    // catalog and its own open PRs, and stays disabled without the
+    // WINGET_SUBMIT_TOKEN secret (same opt-in rollout as the Scoop bucket).
+    // The spec must exist, be referenced from the platforms doc, and the
+    // future job must follow the gated + no-regenerate contract.
+    let spec = read("docs/winget-pkgs-submission.md");
+    assert!(
+        spec.contains("wingetcreate submit")
+            && spec.contains("WINGET_SUBMIT_TOKEN")
+            && spec.contains("up_to_date == 'false'")
+            && spec.contains("Dedup rules"),
+        "the winget submission spec must pin the mechanism (wingetcreate submit), the token gate, the up_to_date gate and the dedup rules"
+    );
+    assert!(
+        spec.contains("winget-manifest-<tag>"),
+        "the submission must consume the prepared winget-manifest-<tag> artifact, never regenerate the manifest"
+    );
+    let platforms = read("docs/release-platforms.md");
+    assert!(
+        platforms.contains("docs/winget-pkgs-submission.md"),
+        "release-platforms.md must link the winget submission design"
+    );
+    let promo = read(".github/workflows/weekly-promotion.yml");
+    assert!(
+        promo.contains("winget-manifest-") && promo.contains("byte-exact"),
+        "the weekly promotion must keep publishing the byte-verified winget-manifest-<tag> artifact the submission consumes"
+    );
+}
+
+#[test]
 fn obs_upstream_check_persists_checked_release_tag_across_runs() {
     // Delta tracking needs the last-checked release to survive between
     // weekly runs. The checker records it in a gitignored state file
