@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- ci(security): **Täglicher PAT-Expiry-Guard** — neuer Workflow
+  `pat-expiry-guard.yml` prüft `SCOOP_BUCKET_TOKEN` täglich live (Auth-Probe
+  gegen `/user` plus Scope-Probe gegen exakt den Bucket-Pfad, den die
+  Promotion touchiert — die 403-Fehlerklasse vom 20.09. surface so innerhalb
+  eines Tages statt erst bei der nächsten Promotion) und reconciliert eine
+  `pat-rotation`-Reminder-Issue gegen das Ablaufdatum in der Repo-Variable
+  `SCOOP_BUCKET_TOKEN_EXPIRES_AT` (14-Tage-Warnfenster, schließt sich nach
+  der Rotation selbst). Ohne Secret: Warnung statt Fehlschlag (wie in
+  `weekly-promotion.yml`). Gesichert durch den Pinning-Guard
+  `pat_expiry_guard_watches_the_scoop_bucket_token`.
 - docs(winget): **winget-pkgs-Submission-Flow designed** — nach jeder echten
   Promotion öffnet ein neuer `submit-winget`-Job automatisch den PR auf
   `microsoft/winget-pkgs`: `wingetcreate submit` mit dem byte-verifizierten
