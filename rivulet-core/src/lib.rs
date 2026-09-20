@@ -74,10 +74,15 @@ pub mod replay;
 pub use replay::{save_replay, ReplayBuffer, ReplaySegment, ReplaySnapshot};
 
 pub mod reconnect;
+pub mod stream_info;
 pub mod stream_runtime;
 pub use reconnect::{
     target_index_from_sink_name, ReconnectCommand, ReconnectWorker, RetryPolicy, SinkBusEvent,
     StreamingReconnectSupervisor, TargetReconnectState,
+};
+pub use stream_info::{
+    chat_info_platform, chat_info_platform_of_chat, update_all_stream_info, InfoCredentials,
+    InfoEndpoints, InfoPlatform, InfoUpdateOutcome, StreamInfoUpdate, UreqHttp,
 };
 pub use stream_runtime::{AdaptiveBitrateController, BitrateChange, DelaySupervisor};
 

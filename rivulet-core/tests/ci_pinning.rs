@@ -4501,6 +4501,38 @@ fn chat_dock_supports_kick_and_youtube() {
         docs.contains("Combined multi-platform dock"),
         "the chat dock documentation must describe the combined account model"
     );
+    // Stream-info editor: per-platform and apply-to-all title/game updates
+    // must stay wired through the shared core API with per-platform
+    // outcomes and vault-only token access.
+    let core_stream = read("rivulet-core/src/stream_info.rs");
+    assert!(
+        app.contains("fn apply_chat_stream_info")
+            && app.contains("update_all_stream_info")
+            && app.contains("chat_info_apply_all"),
+        "the dock must offer per-platform and apply-to-all stream-info updates"
+    );
+    assert!(
+        app.contains("fn chat_info_credentials_for"),
+        "stream-info credentials must be resolved through the dedicated resolver"
+    );
+    assert!(
+        core_stream.contains("fn update_platform_stream_info")
+            && core_stream.contains("fn twitch_game_id")
+            && core_stream.contains("fn kick_category_id"),
+        "the core stream-info API must keep the per-platform updaters and id lookups"
+    );
+    assert!(
+        app.contains("chat_info_outcomes"),
+        "stream-info outcomes must be reported per platform"
+    );
+    assert!(
+        i18n.contains("(\"chat_info_apply_all\", ") && i18n.contains("(\"chat_info_updated\", "),
+        "stream-info editor keys must exist in both locales"
+    );
+    assert!(
+        docs.contains("Stream info editor"),
+        "the chat dock documentation must describe the stream-info editor"
+    );
 }
 
 #[test]
