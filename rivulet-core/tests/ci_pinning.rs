@@ -3398,6 +3398,21 @@ fn distribution_readiness_workflow_is_opt_in_and_dry_run_first() {
             && pkgbuild.contains("extract"),
         "AUR PKGBUILD must declare pkgname, pkgver, download the AppImage, and extract it"
     );
+    // AUR forbids hyphens in pkgver (PKGBUILD(5)) — the promoted tag is
+    // written with dots there (0.65.0.alpha.208), while the source URLs must
+    // keep the upstream hyphenated tag via an explicit _tag variable.
+    let pkgver_line = pkgbuild
+        .lines()
+        .find(|line| line.starts_with("pkgver="))
+        .expect("PKGBUILD must declare a pkgver");
+    assert!(
+        !pkgver_line.contains('-'),
+        "AUR pkgver must not contain hyphens — write dots instead ({pkgver_line})"
+    );
+    assert!(
+        pkgbuild.contains("_tag=v0.65.0-") && pkgbuild.contains("download/${_tag}/"),
+        "the source URLs must download from the upstream release tag via an explicit _tag, not from pkgver"
+    );
     assert!(
         workflow.contains("prepare-aur") && workflow.contains("PKGBUILD"),
         "distribution workflow must run AUR PKGBUILD validation"
@@ -3940,8 +3955,9 @@ fn weekly_release_promotion_is_scheduled_and_safe() {
     assert!(
         promo.contains("prepare-aur:")
             && promo.contains("pkgver")
+            && promo.contains("${AUR_VERSION//-/.}")
             && promo.contains("https://aur.archlinux.org/rivulet.git"),
-        "the weekly run must validate the AUR PKGBUILD bump status and hand off the exact push"
+        "the weekly run must validate the AUR PKGBUILD bump status (pkgver compared with hyphens normalized to dots, per PKGBUILD(5)) and hand off the exact push"
     );
     assert!(
         promo.contains("SCOOP_BUCKET_TOKEN") && promo.contains("warning::"),

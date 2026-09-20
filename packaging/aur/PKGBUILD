@@ -2,7 +2,7 @@
 # Contributor: Rivulet maintainers
 
 pkgname=rivulet
-pkgver=0.65.0
+pkgver=0.65.0.alpha.208
 pkgrel=1
 pkgdesc='Modern screen recording & streaming software — a privacy-friendly alternative to OBS Studio'
 arch=('x86_64')
@@ -39,17 +39,21 @@ optdepends=(
 )
 install=rivulet.install
 
-# GitHub release asset URL — bump pkgver and sha256sums on each release.
-# The sha256sum is for the AppImage; verify against the release SHA256SUMS.
+# GitHub release asset URL — bump _tag, pkgver and sha256sums together on
+# each release. AUR forbids hyphens in pkgver (PKGBUILD(5)), so the promoted
+# tag is written with dots there: v0.65.0-alpha.208 -> pkgver=0.65.0.alpha.208.
+# The hashes match the release's SHA256SUMS; rivulet.desktop is committed
+# next to this file in the AUR repo and hashed from the same content.
+_tag=v0.65.0-alpha.208
 source=(
-    "https://github.com/thoser666/Rivulet/releases/download/v${pkgver}/rivulet-linux-x86_64.AppImage"
-    "https://github.com/thoser666/Rivulet/releases/download/v${pkgver}/rivulet-app-icon-512.png"
+    "https://github.com/thoser666/Rivulet/releases/download/${_tag}/rivulet-linux-x86_64.AppImage"
+    "https://github.com/thoser666/Rivulet/releases/download/${_tag}/rivulet-app-icon-512.png"
     "rivulet.desktop"
 )
 sha256sums=(
-    'SKIP'
-    'SKIP'
-    'SKIP'
+    '0e9953cbdc854e173b1b9621035279e34afb778b6c42d721b0bf2c6684d09994'
+    'f0097dc5196e015388b130c78d06fd3ec87630cb9881c4e604277e78024e0f4b'
+    '2ef64d55a976c3955a835ab863ebccc2f4c66b7b14efe1b8249a6652c9a17408'
 )
 
 # The AppImage is not relocatable; extract it and install the squashfs contents.

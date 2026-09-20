@@ -151,7 +151,13 @@ symlinks in `/usr/bin/`, a desktop file, and the 512×512 icon.
 1. Trigger the **Distribution Readiness → aur** workflow on a release tag:
    it validates the PKGBUILD version matches the release, the required
    assets (AppImage + icon) exist, and the `.install` file is referenced.
-2. Push the PKGBUILD to the AUR git repo
+2. Bump `pkgver`, `_tag` and `sha256sums` in `packaging/aur/PKGBUILD`
+   (hashes from the release's `SHA256SUMS`; `rivulet.desktop` is hashed
+   from this repo) and commit the matching `.SRCINFO`. AUR forbids
+   hyphens in `pkgver` (PKGBUILD(5)), so the promoted tag is written with
+   dots there (`v0.65.0-alpha.208` → `pkgver=0.65.0.alpha.208`) while the
+   `_tag` variable keeps the upstream hyphenated format for the download
+   URLs. Then push the PKGBUILD to the AUR git repo
    (`https://aur.archlinux.org/rivulet.git`) — external, not automated.
 3. **Weekly status (one release per week):** the **Weekly release
    promotion** workflow checks whether the committed PKGBUILD already pins

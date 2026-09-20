@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- packaging(aur): **PKGBUILD auf 0.65.0.alpha.208 gebumpt** — erste
+  vollständige AUR-Vorbereitung mit echten sha256sums (AppImage + Icon aus
+  den Release-SHA256SUMS, rivulet.desktop aus dem Repo) statt `SKIP`, plus
+  generierte `.SRCINFO`. AUR verbietet Bindestriche in `pkgver`
+  (PKGBUILD(5)): das promoted Tag steht als dots-Pkgver
+  (`0.65.0.alpha.208`), die Source-URLs nutzen einen expliziten `_tag` im
+  Upstream-Format (`v0.65.0-alpha.208`). Der Weekly-Check vergleicht
+  hyphen-normalisiert; der AUR-Push bleibt extern/manuell
+  (Hand-off in docs/release-platforms.md).
 - feat(chat): **Stream-Info-Editor im kombinierten Chat-Dock** — Titel und
   Spiel/Kategorie pro Plattform einzeln oder mit einem Klick für alle
   konfigurierten Plattformen ändern (Twitch Helix, Kick Public API,
