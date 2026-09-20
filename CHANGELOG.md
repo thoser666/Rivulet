@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- feat(chat): **Stream-Info-Editor im kombinierten Chat-Dock** — Titel und
+  Spiel/Kategorie pro Plattform einzeln oder mit einem Klick für alle
+  konfigurierten Plattformen ändern (Twitch Helix, Kick Public API,
+  YouTube Data API; Game-/Category-lookup vor dem Metadata-Call). Ehrliche
+  Per-Plattform-Outcomes (ein Fehler blockiert die anderen nie), Anwendung
+  auf einem Background-Thread, Tokens nur zur Laufzeit aus dem
+  OS-Credential-Vault. Gesichert durch erweiterte
+  `twitch_chat_dock_is_wired_and_covered`-Pins und 6 neue GUI-Tests.
 - ci(release): **Temporäre Release-Branches werden automatisch gelöscht** —
   neuer `cleanup_release_branch`-Job in `release.yml` nach dem GitHub-Release;
   Tag-Anchor-Safety-Rule (Löschung nur, wenn Branch-Tip exakt der getaggte

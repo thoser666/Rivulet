@@ -105,6 +105,23 @@ and **YouTube** (Innertube polling) from one unified UI.
 - The message list is bounded to a fixed maximum (`MAX_CHAT_MESSAGES`) so a
   long stream does not grow memory unboundedly.
 
+### Stream info editor
+
+The combined dock also carries a **stream info editor**: one shared title
+and game/category draft with an *apply* button per platform plus an
+**Apply to all** button. Each apply runs on a background thread and
+reports an honest per-platform outcome:
+
+| Platform | API | Notes |
+| --- | --- | --- |
+| Twitch | Helix `PATCH /channels` | game name resolved via `GET /games`; needs the EventSub client ID, broadcaster ID and the account token |
+| Kick | `PATCH /public/v1/channels` | category name resolved via `/public/v2/categories`; needs the account token |
+| YouTube | Data API `videos.update` | title only in practice; the chat account's channel field must hold the live video ID |
+
+A failure on one platform never blocks the others; the failed platform
+shows its error inline until the next apply. Tokens are read from the OS
+credential vault at apply time and never enter persisted state or logs.
+
 ### Outbound rate limiting
 
 Every outbound bot message passes through a shared token-bucket limiter

@@ -950,6 +950,35 @@ pub struct RivuletApp {
     #[serde(skip)]
     chat_action_pending: Option<ChatAction>,
 
+    /// Chat dock: stream-info editor — shared title draft. Not persisted
+    /// (pure input state, no reason to survive a restart).
+    #[serde(skip)]
+    chat_info_title: String,
+    /// Chat dock: stream-info editor — shared game/category draft. Not
+    /// persisted.
+    #[serde(skip)]
+    chat_info_game: String,
+    /// Chat dock: stream-info editor — in-flight update marker. Blocks a
+    /// second apply while the background thread is running. Not persisted.
+    #[serde(skip)]
+    chat_info_busy: bool,
+    /// Chat dock: stream-info editor — receiver for the finished batch of
+    /// per-platform outcomes. Drained in `reconcile_chat`. Not persisted.
+    #[serde(skip)]
+    chat_info_rx: Option<
+        std::sync::mpsc::Receiver<
+            Vec<(rivulet_core::InfoPlatform, rivulet_core::InfoUpdateOutcome)>,
+        >,
+    >,
+    /// Chat dock: stream-info editor — last per-platform outcomes (empty
+    /// until the first apply). Shown until the next apply. Not persisted.
+    #[serde(skip)]
+    chat_info_outcomes: Vec<(rivulet_core::InfoPlatform, rivulet_core::InfoUpdateOutcome)>,
+    /// Chat dock: stream-info editor — validation error (e.g. nothing to
+    /// apply). Cleared on the next apply attempt. Not persisted.
+    #[serde(skip)]
+    chat_info_error: Option<String>,
+
     /// Plugins: user approvals / enable decisions per plugin id (persisted
     /// inside the eframe storage with the rest of the app state). See
     /// [`rivulet_core::plugin_registry`] for the store semantics and the
@@ -1718,6 +1747,12 @@ impl Default for RivuletApp {
             chat_worker_multi: None,
             chat_messages: Vec::new(),
             chat_action_pending: None,
+            chat_info_title: String::new(),
+            chat_info_game: String::new(),
+            chat_info_busy: false,
+            chat_info_rx: None,
+            chat_info_outcomes: Vec::new(),
+            chat_info_error: None,
             plugin_approvals: rivulet_core::PluginApprovals::default(),
             plugins_discovered: Vec::new(),
             plugins_broken: Vec::new(),
@@ -6411,6 +6446,25 @@ impl RivuletApp {
         }
         self.apply_chat_state(worker_state);
 
+        // Drain the stream-info editor: collect the per-platform outcomes
+        // of a finished background apply (non-blocking poll).
+        if let Some(rx) = &self.chat_info_rx {
+            match rx.try_recv() {
+                Ok(outcomes) => {
+                    self.chat_info_outcomes = outcomes;
+                    self.chat_info_rx = None;
+                    self.chat_info_busy = false;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // The thread died without sending (panic) — unblock.
+                    self.chat_info_rx = None;
+                    self.chat_info_busy = false;
+                    self.chat_info_error = Some(self.tr("chat_info_thread_failed").to_owned());
+                }
+            }
+        }
+
         // Keep the loopback webhook receiver in sync with the persisted
         // settings (start/restart/stop), then drain its parsed alert events
         // into the local queue (respecting the queue's enabled state).
@@ -8136,6 +8190,106 @@ impl RivuletApp {
         }
     }
 
+    /// Per-platform credentials for the stream-info editor. Tokens are
+    /// read from the OS credential vault only at apply time (the roster
+    /// stays token-free); failures surface as honest per-platform
+    /// outcomes instead of leaking secrets into state or logs.
+    fn chat_info_credentials_for(
+        &self,
+        platform: rivulet_core::InfoPlatform,
+    ) -> rivulet_core::InfoCredentials {
+        let mut credentials = rivulet_core::InfoCredentials::default();
+        match platform {
+            rivulet_core::InfoPlatform::Twitch => {
+                credentials.client_id = self.alerts_eventsub_client_id.trim().to_owned();
+                credentials.broadcaster_id = self.alerts_eventsub_broadcaster_id.trim().to_owned();
+            }
+            rivulet_core::InfoPlatform::Kick => {}
+            rivulet_core::InfoPlatform::YouTube => {
+                // The YouTube chat account's channel field carries the live
+                // video id (documented in the chat setup notes).
+                if let Some(account) = self
+                    .chat_accounts
+                    .iter()
+                    .find(|a| a.platform == rivulet_core::ChatPlatform::YouTube)
+                {
+                    credentials.video_id = account.channel.trim().to_owned();
+                }
+            }
+        }
+        if let Some(account) = self
+            .chat_accounts
+            .iter()
+            .find(|a| a.platform == rivulet_core::chat_info_platform(platform))
+        {
+            if let Ok(Some(token)) =
+                rivulet_core::ChatTokenStore::default().load(account.platform, &account.channel)
+            {
+                credentials.token = token;
+            }
+        }
+        credentials
+    }
+
+    /// Apply the current title/game drafts. With `only` set, one platform
+    /// is updated; otherwise every configured platform gets the same
+    /// update (per-platform outcomes, one failure never aborts the rest).
+    /// The HTTP work runs on a background thread; the UI polls the result.
+    fn apply_chat_stream_info(&mut self, only: Option<rivulet_core::InfoPlatform>) {
+        if self.chat_info_busy {
+            return;
+        }
+        let update = rivulet_core::StreamInfoUpdate {
+            title: Some(self.chat_info_title.clone()),
+            game: Some(self.chat_info_game.clone()),
+        };
+        if !update.has_changes() {
+            self.chat_info_error = Some(self.tr("chat_info_nothing").to_owned());
+            return;
+        }
+        self.chat_info_error = None;
+
+        let accounts = self.chat_accounts.clone();
+        let mut platforms: Vec<rivulet_core::InfoPlatform> = accounts
+            .iter()
+            .filter_map(|a| rivulet_core::chat_info_platform_of_chat(a.platform))
+            .collect();
+        if let Some(only) = only {
+            platforms.retain(|p| *p == only);
+        }
+        if platforms.is_empty() {
+            self.chat_info_error = Some(self.tr("chat_info_nothing").to_owned());
+            return;
+        }
+        // Credentials are resolved *here*, on the UI thread, before any
+        // background thread exists — the vault is only touched from the
+        // main thread.
+        let targets: Vec<(rivulet_core::InfoPlatform, rivulet_core::InfoCredentials)> = platforms
+            .iter()
+            .map(|p| (*p, self.chat_info_credentials_for(*p)))
+            .collect();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.chat_info_rx = Some(rx);
+        self.chat_info_busy = true;
+        std::thread::spawn(move || {
+            let outcomes = rivulet_core::update_all_stream_info(
+                &targets.iter().map(|(p, _)| *p).collect::<Vec<_>>(),
+                &update,
+                |platform| {
+                    targets
+                        .iter()
+                        .find(|(p, _)| *p == platform)
+                        .map(|(_, c)| c.clone())
+                        .unwrap_or_default()
+                },
+                &rivulet_core::InfoEndpoints::default(),
+                &rivulet_core::UreqHttp,
+            );
+            let _ = tx.send(outcomes);
+        });
+    }
+
     fn draw_chat_dock(&mut self, ui: &mut egui::Ui, max_list_height: f32) {
         ui.add_space(8.0);
         ui.label(egui::RichText::new(self.tr("chat_title")).strong());
@@ -8235,6 +8389,83 @@ impl RivuletApp {
         if let Some(error) = &self.chat_add_error {
             let colors = theme::StatusColors::for_ui(ui);
             ui.colored_label(colors.warning, error);
+        }
+
+        // Stream-info editor: one shared title/game draft, applied per
+        // platform or to all configured platforms at once. Outcomes are
+        // per-platform (one failure never hides the others).
+        ui.add_space(4.0);
+        ui.separator();
+        ui.label(egui::RichText::new(self.tr("chat_info_title")).strong());
+        ui.horizontal_wrapped(|ui| {
+            ui.label(self.tr("chat_info_field_title"));
+            let title_hint = self.tr("chat_info_hint_title").to_owned();
+            ui.add(
+                egui::TextEdit::singleline(&mut self.chat_info_title)
+                    .hint_text(title_hint)
+                    .desired_width(220.0),
+            );
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label(self.tr("chat_info_field_game"));
+            let game_hint = self.tr("chat_info_hint_game").to_owned();
+            ui.add(
+                egui::TextEdit::singleline(&mut self.chat_info_game)
+                    .hint_text(game_hint)
+                    .desired_width(220.0),
+            );
+        });
+        ui.horizontal_wrapped(|ui| {
+            for platform in rivulet_core::InfoPlatform::ALL {
+                let configured = self.chat_accounts.iter().any(|a| {
+                    rivulet_core::chat_info_platform_of_chat(a.platform) == Some(platform)
+                });
+                let button = egui::Button::new(format!("{} ↗", platform.label()));
+                if ui
+                    .add_enabled(!self.chat_info_busy && configured, button)
+                    .clicked()
+                {
+                    self.apply_chat_stream_info(Some(platform));
+                }
+            }
+            if ui
+                .add_enabled(
+                    !self.chat_info_busy && !self.chat_accounts.is_empty(),
+                    egui::Button::new(self.tr("chat_info_apply_all")),
+                )
+                .clicked()
+            {
+                self.apply_chat_stream_info(None);
+            }
+            if self.chat_info_busy {
+                ui.spinner();
+                ui.label(self.tr("chat_info_busy"));
+            }
+        });
+        if let Some(error) = &self.chat_info_error {
+            let colors = theme::StatusColors::for_ui(ui);
+            ui.colored_label(colors.warning, error.clone());
+        }
+        if !self.chat_info_outcomes.is_empty() {
+            let colors = theme::StatusColors::for_ui(ui);
+            ui.horizontal_wrapped(|ui| {
+                for (platform, outcome) in &self.chat_info_outcomes {
+                    let (text, color) = if outcome.is_ok() {
+                        (self.tr("chat_info_updated").to_owned(), colors.success)
+                    } else {
+                        (
+                            match outcome {
+                                rivulet_core::InfoUpdateOutcome::Failed(message) => {
+                                    format!("{}: {}", platform.label(), message)
+                                }
+                                _ => platform.label().to_owned(),
+                            },
+                            colors.warning,
+                        )
+                    };
+                    ui.colored_label(color, text);
+                }
+            });
         }
 
         // Connect/disconnect applies to every configured account at once;
@@ -17367,6 +17598,180 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
             assert!(
                 gate.contains(triple),
                 "per-app wiring marker {marker:?} must be gated on all three platforms, found gate: {gate}"
+            );
+        }
+    }
+    // ── stream-info editor (title/game, per-platform + all) ──────────
+
+    #[test]
+    fn chat_info_apply_rejects_empty_drafts_without_thread() {
+        let mut app = RivuletApp::default();
+        app.apply_chat_stream_info(None);
+        assert_eq!(
+            app.chat_info_error.as_deref(),
+            Some("Enter a title or a game to apply."),
+            "empty drafts must be rejected up front"
+        );
+        assert!(app.chat_info_rx.is_none(), "no thread may be spawned");
+        assert!(!app.chat_info_busy);
+    }
+
+    #[test]
+    fn chat_info_apply_spawns_thread_and_clears_error() {
+        let mut app = RivuletApp::default();
+        app.chat_accounts.push(rivulet_core::ChatAccount::new(
+            rivulet_core::ChatPlatform::Kick,
+            "somechannel".to_owned(),
+        ));
+        app.chat_info_title = "New title".to_owned();
+        app.chat_info_error = Some("stale".to_owned());
+        app.apply_chat_stream_info(None);
+        assert!(app.chat_info_busy, "apply must mark the editor busy");
+        assert!(app.chat_info_rx.is_some(), "a result channel must exist");
+        assert!(
+            app.chat_info_error.is_none(),
+            "a successful apply clears the error"
+        );
+        // Drain via the reconcile path (thread finishes quickly; retry a
+        // few times to avoid flakiness).
+        for _ in 0..100 {
+            app.reconcile_chat();
+            if !app.chat_info_busy {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(!app.chat_info_busy, "reconcile must drain the outcome");
+        assert_eq!(app.chat_info_outcomes.len(), 1, "one configured platform");
+        assert_eq!(
+            app.chat_info_outcomes[0].0,
+            rivulet_core::InfoPlatform::Kick,
+            "Kick outcome must be reported"
+        );
+        assert!(
+            !app.chat_info_outcomes[0].1.is_ok(),
+            "no real network in tests: the Kick call must fail honestly"
+        );
+    }
+
+    #[test]
+    fn chat_info_apply_only_targets_the_selected_platform() {
+        let mut app = RivuletApp::default();
+        app.chat_accounts.push(rivulet_core::ChatAccount::new(
+            rivulet_core::ChatPlatform::Twitch,
+            "chan".to_owned(),
+        ));
+        app.chat_accounts.push(rivulet_core::ChatAccount::new(
+            rivulet_core::ChatPlatform::Kick,
+            "chan".to_owned(),
+        ));
+        app.chat_info_game = "Just Chatting".to_owned();
+        app.apply_chat_stream_info(Some(rivulet_core::InfoPlatform::Twitch));
+        assert!(app.chat_info_busy);
+        for _ in 0..100 {
+            app.reconcile_chat();
+            if !app.chat_info_busy {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            app.chat_info_outcomes.len(),
+            1,
+            "a per-platform apply must touch exactly that platform"
+        );
+        assert_eq!(
+            app.chat_info_outcomes[0].0,
+            rivulet_core::InfoPlatform::Twitch
+        );
+    }
+
+    #[test]
+    fn chat_info_apply_all_covers_every_configured_platform() {
+        let mut app = RivuletApp::default();
+        for (platform, channel) in [
+            (rivulet_core::ChatPlatform::Twitch, "chan"),
+            (rivulet_core::ChatPlatform::Kick, "chan"),
+            (rivulet_core::ChatPlatform::YouTube, "abcVideo"),
+        ] {
+            app.chat_accounts
+                .push(rivulet_core::ChatAccount::new(platform, channel.to_owned()));
+        }
+        app.chat_info_title = "Same title".to_owned();
+        app.chat_info_game = "Software".to_owned();
+        app.apply_chat_stream_info(None);
+        for _ in 0..100 {
+            app.reconcile_chat();
+            if !app.chat_info_busy {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            app.chat_info_outcomes.len(),
+            3,
+            "apply-to-all must reach every configured platform"
+        );
+        let platforms: Vec<_> = app.chat_info_outcomes.iter().map(|(p, _)| *p).collect();
+        assert_eq!(
+            platforms,
+            vec![
+                rivulet_core::InfoPlatform::Twitch,
+                rivulet_core::InfoPlatform::Kick,
+                rivulet_core::InfoPlatform::YouTube,
+            ]
+        );
+    }
+
+    #[test]
+    fn chat_info_busy_blocks_reapply_and_failed_thread_unblocks() {
+        let mut app = RivuletApp::default();
+        app.chat_accounts.push(rivulet_core::ChatAccount::new(
+            rivulet_core::ChatPlatform::Kick,
+            "chan".to_owned(),
+        ));
+        app.chat_info_title = "x".to_owned();
+        app.apply_chat_stream_info(None);
+        assert!(app.chat_info_busy);
+        app.apply_chat_stream_info(None);
+        assert!(
+            app.chat_info_rx.is_some() && app.chat_info_busy,
+            "a second apply while busy must be a no-op"
+        );
+        // Simulate a crashed worker: the receiver is still registered but
+        // its sender is gone (thread panicked without sending); the
+        // reconcile must unblock the editor and surface it.
+        let (tx, rx) = std::sync::mpsc::channel::<
+            Vec<(rivulet_core::InfoPlatform, rivulet_core::InfoUpdateOutcome)>,
+        >();
+        drop(tx);
+        app.chat_info_rx = Some(rx);
+        app.chat_info_busy = true;
+        app.reconcile_chat();
+        assert!(!app.chat_info_busy, "a disconnected channel must unblock");
+        assert_eq!(
+            app.chat_info_error.as_deref(),
+            Some("Update failed (worker thread died)"),
+        );
+    }
+
+    #[test]
+    fn chat_info_fields_are_not_persisted() {
+        let json = serde_json::json!({});
+        assert!(json.get("chat_info_title").is_none());
+        let app = RivuletApp::default();
+        let serialized = serde_json::to_value(&app).expect("app must serialize");
+        for key in [
+            "chat_info_title",
+            "chat_info_game",
+            "chat_info_busy",
+            "chat_info_rx",
+            "chat_info_outcomes",
+            "chat_info_error",
+        ] {
+            assert!(
+                serialized.get(key).is_none(),
+                "{key} must be #[serde(skip)] (pure draft state)"
             );
         }
     }
