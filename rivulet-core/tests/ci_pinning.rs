@@ -3967,6 +3967,73 @@ fn weekly_release_promotion_is_scheduled_and_safe() {
 }
 
 #[test]
+fn weekly_promotion_committing_steps_configure_a_git_identity() {
+    // Regression guard for the 2026-09-14 scheduled-run failure: the
+    // annotated-tag step ran before any git identity was configured and the
+    // cron died with "Committer identity unknown" (exit 128) — fixed for the
+    // two known sites in #165. The checkout action deliberately configures no
+    // identity, so the rule has to be structural: EVERY step that creates a
+    // commit or an annotated tag must configure user.name and user.email in
+    // that same step. A future committing step without the setup must fail
+    // this pinning test, not the Monday-morning cron.
+    let raw = read(".github/workflows/weekly-promotion.yml");
+    let promo = raw.replace("\r\n", "\n");
+    let steps: Vec<&str> = promo.split("\n      - name:").skip(1).collect();
+    assert!(
+        steps.len() >= 10,
+        "sanity: the workflow must expose scannable step blocks (found {}) — \
+         if the step indentation changed, update this splitter",
+        steps.len()
+    );
+
+    let mut committing = 0;
+    for block in &steps {
+        // `git commit` covers the plain form, `git -C … commit` the
+        // scoop-bucket clone, and `git tag` + `-m` the annotated weekly-latest
+        // tag (lightweight tags and read-only `git tag --list/--points-at`
+        // need no identity).
+        let creates_revision = block.contains("git commit")
+            || (block.contains("git -C") && block.contains(" commit"))
+            || (block.contains("git tag") && block.contains("-m"));
+        if !creates_revision {
+            continue;
+        }
+        committing += 1;
+        let label = block.lines().next().unwrap_or("?").trim();
+        assert!(
+            // `config user.name` (not `git config …`) — the `-C <path>` form
+            // used inside the scoop-bucket clone sits between the two words.
+            block.contains("config user.name") && block.contains("config user.email"),
+            "step '{label}' creates a commit or annotated tag without configuring a git identity \
+             in the same step — this is the Sept-14 'Committer identity unknown' failure class"
+        );
+    }
+    assert!(
+        committing >= 2,
+        "sanity: the annotated-tag step and the scoop-bucket commit step must both be \
+         covered by the structural scan (found {committing} committing steps)"
+    );
+
+    // Pin the exact identities so silently rewording them stays a reviewed
+    // change: the repo-side bot for the weekly-latest tag ...
+    assert!(
+        promo.contains("git config user.name \"github-actions[bot]\"")
+            && promo.contains(
+                "git config user.email \"41898282+github-actions[bot]@users.noreply.github.com\""
+            ),
+        "the weekly-latest tag step must keep the github-actions[bot] identity"
+    );
+    // ... and the promotion bot inside the cloned scoop-bucket.
+    assert!(
+        promo.contains("git -C \"$RUNNER_TEMP/scoop-bucket\" config user.name \"rivulet-promotion-bot\"")
+            && promo.contains(
+                "git -C \"$RUNNER_TEMP/scoop-bucket\" config user.email \"actions@users.noreply.github.com\""
+            ),
+        "the scoop-bucket commit step must keep the rivulet-promotion-bot identity"
+    );
+}
+
+#[test]
 fn obs_upstream_candidates_doc_keeps_both_generation_markers() {
     // The OBS upstream workflow rewrites the candidates doc between its
     // START/END markers on every run. An earlier version dropped the END
