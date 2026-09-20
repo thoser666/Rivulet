@@ -463,7 +463,10 @@ jobs:
 
           AUR_VERSION="${RELEASE_TAG#v}"
           PKGVER=$(grep '^pkgver=' "$PKGBUILD" | cut -d= -f2)
-          if [[ "$PKGVER" == "$AUR_VERSION" ]]; then
+          # AUR forbids hyphens in pkgver (PKGBUILD(5)), so the PKGBUILD pins
+          # the promoted version with dots (0.65.0-alpha.208 ->
+          # 0.65.0.alpha.208). Compare on the normalized form.
+          if [[ "$PKGVER" == "${AUR_VERSION//-/.}" ]]; then
             echo "bumped=true" >> "$GITHUB_ENV"
             echo "PKGBUILD already pins the promoted version ($AUR_VERSION)."
           else
