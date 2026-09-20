@@ -77,7 +77,11 @@ passes rule 2, so the next promotion re-submits automatically.
    scope** (wingetcreate needs to fork upstream, push a branch to the fork,
    and open the PR — it never touches private repos). Store it as the
    repository secret `WINGET_SUBMIT_TOKEN` on `thoser666/Rivulet`. Rotate
-   at 90 days like `SCOOP_BUCKET_TOKEN`.
+   at 90 days like `SCOOP_BUCKET_TOKEN`, which the daily
+   `pat-expiry-guard` workflow watches (live auth/scope probe plus a
+   `pat-rotation` reminder issue driven by the
+   `SCOOP_BUCKET_TOKEN_EXPIRES_AT` repo variable) — record this token's
+   expiry the same way when it is introduced.
 2. **CLA:** the first PR triggers the Microsoft CLA check; `thoser666`
    signs once via the PR comment flow. One-time, then automated.
 3. **First submission note:** the first PR ever for this package goes

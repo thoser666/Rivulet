@@ -4119,6 +4119,49 @@ fn winget_pkgs_submission_is_designed_and_gated() {
 }
 
 #[test]
+fn pat_expiry_guard_watches_the_scoop_bucket_token() {
+    // The Scoop-bucket auto-push depends on a 90-day PAT, and an expired or
+    // under-scoped token fails the promotion at the very end (the
+    // 2026-09-20 run died with a 403 on the bucket push after the tag had
+    // already moved). The daily pat-expiry-guard workflow shortens that
+    // feedback loop to one day: it probes the token live (auth + the exact
+    // bucket path the promotion touches) and reconciles a `pat-rotation`
+    // reminder issue against the recorded expiry in the
+    // SCOOP_BUCKET_TOKEN_EXPIRES_AT repo variable.
+    let guard = read(".github/workflows/pat-expiry-guard.yml");
+    assert!(
+        guard.contains("23 4 * * *") && guard.contains("workflow_dispatch:"),
+        "the PAT expiry guard must run daily and stay manually triggerable"
+    );
+    assert!(
+        guard.contains("secrets.SCOOP_BUCKET_TOKEN")
+            && guard.contains("::warning::SCOOP_BUCKET_TOKEN is not set"),
+        "without the secret the guard must warn (artifact-fallback mode), mirroring weekly-promotion.yml"
+    );
+    assert!(
+        guard.contains("/user")
+            && guard.contains("repos/thoser666/scoop-bucket/contents/bucket/rivulet.json"),
+        "the guard must probe both the token lifetime (auth) and the exact bucket path the promotion touches (scope)"
+    );
+    assert!(
+        guard.contains("vars.SCOOP_BUCKET_TOKEN_EXPIRES_AT") && guard.contains("WARN_DAYS"),
+        "the countdown must read the expiry from the repo variable and keep the warning window configurable"
+    );
+    assert!(
+        guard.contains("--label pat-rotation")
+            && guard.contains("SCOOP_BUCKET_TOKEN expires in")
+            && guard.contains("issue close"),
+        "the reminder issue must be labeled, versioned in the title and closed again after rotation (two-way reconcile)"
+    );
+    // The rotation duty must stay documented where the token was introduced.
+    let spec = read("docs/winget-pkgs-submission.md");
+    assert!(
+        spec.contains("90 days like `SCOOP_BUCKET_TOKEN`"),
+        "the winget submission spec must keep referencing the shared 90-day rotation duty"
+    );
+}
+
+#[test]
 fn obs_upstream_check_persists_checked_release_tag_across_runs() {
     // Delta tracking needs the last-checked release to survive between
     // weekly runs. The checker records it in a gitignored state file

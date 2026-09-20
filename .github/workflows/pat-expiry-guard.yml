@@ -1,0 +1,134 @@
+# PAT expiry guard — daily probe + countdown reminder for SCOOP_BUCKET_TOKEN.
+#
+# Why this exists: the Scoop-bucket auto-push (weekly-promotion.yml) depends
+# on a fine-grained PAT that expires after 90 days, and an under-scoped or
+# expired token fails the promotion at the very end (the 2026-09-20 run died
+# with a 403 on the bucket push after the tag had already moved). This guard
+# shortens that feedback loop to one day:
+#
+#   1. Probe the token live: auth (401 = expired/revoked) and read access to
+#      the exact bucket path the promotion touches (403/404 = scope or
+#      repository-selection problem — the 2026-09-20 failure class).
+#   2. Countdown reminder: the repo variable SCOOP_BUCKET_TOKEN_EXPIRES_AT
+#      (YYYY-MM-DD) is compared daily; inside the 14-day window the guard
+#      opens one `pat-rotation` reminder issue, and it closes it again once
+#      the token is rotated (variable moved into the future). Create the
+#      label once: `gh label create pat-rotation --color E99695`.
+#   3. Without the secret the guard warns (artifact-fallback mode) instead
+#      of failing, mirroring weekly-promotion.yml.
+#
+# The PAT itself is never echoed; GitHub masks secret values in logs.
+
+name: PAT expiry guard
+
+on:
+  schedule:
+    # Daily, deliberately off the hour. Countdown math runs on the runner
+    # clock in UTC.
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pat-expiry-guard
+  cancel-in-progress: false
+
+env:
+  OWNER_REPO: ${{ github.repository }}
+
+jobs:
+  probe-scoop-bucket-token:
+    name: Probe SCOOP_BUCKET_TOKEN
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe the token (auth + scope) and manage the reminder issue
+        env:
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          EXPIRES_AT: ${{ vars.SCOOP_BUCKET_TOKEN_EXPIRES_AT }}
+          GH_TOKEN: ${{ github.token }}
+          WARN_DAYS: 14
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$SCOOP_BUCKET_TOKEN" ]]; then
+            echo "::warning::SCOOP_BUCKET_TOKEN is not set — the Scoop bucket auto-push in weekly-promotion.yml runs in artifact-fallback mode."
+            {
+              echo "## PAT expiry guard — SCOOP_BUCKET_TOKEN"
+              echo
+              echo "- Secret missing: the Scoop bucket auto-push runs in artifact-fallback mode."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # 1) Authentication probe — catches expiry/revocation. A
+          #    fine-grained PAT without any repo selection still resolves
+          #    /user, so this check is about the token's lifetime only.
+          if ! gh api -H "Authorization: Bearer $SCOOP_BUCKET_TOKEN" /user >/dev/null 2>&1; then
+            echo "::error::SCOOP_BUCKET_TOKEN is expired or revoked (auth probe failed) — the next weekly promotion will fail at the bucket push. Create a fresh PAT (fine-grained, Contents: Read and write on thoser666/scoop-bucket) and update the secret."
+            {
+              echo "## PAT expiry guard — SCOOP_BUCKET_TOKEN"
+              echo
+              echo "- ❌ Token expired or revoked — update the SCOOP_BUCKET_TOKEN secret."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # 2) Scope probe — exactly what the promotion needs: read access to
+          #    the bucket path it clones. A missing write scope or a wrong
+          #    repository selection surfaces here as 403/404 within a day
+          #    instead of at the next promotion (the 2026-09-20 failure).
+          if ! gh api -H "Authorization: Bearer $SCOOP_BUCKET_TOKEN" \
+               /repos/thoser666/scoop-bucket/contents/bucket/rivulet.json \
+               --jq .sha >/dev/null 2>&1; then
+            echo "::error::SCOOP_BUCKET_TOKEN cannot read thoser666/scoop-bucket (403/404 — scope or repository-selection problem). This is the 2026-09-20 failure class: on the PAT, set Repository access to thoser666/scoop-bucket and Contents to Read and write."
+            {
+              echo "## PAT expiry guard — SCOOP_BUCKET_TOKEN"
+              echo
+              echo "- ❌ Token cannot read the bucket repo — fix the PAT's repository access and Contents permission."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # 3) Countdown reminder (advisory — never fails the run).
+          status="valid; bucket readable"
+          remind=false
+          days=""
+          if [[ -n "$EXPIRES_AT" ]]; then
+            if exp_epoch="$(date -u -d "$EXPIRES_AT" +%s 2>/dev/null)"; then
+              days=$(( (exp_epoch - $(date -u +%s)) / 86400 ))
+              status="$status; expires $EXPIRES_AT ($days days left)"
+              if (( days <= WARN_DAYS )); then
+                remind=true
+              fi
+            else
+              status="$status; SCOOP_BUCKET_TOKEN_EXPIRES_AT='$EXPIRES_AT' is not a parseable date (use YYYY-MM-DD)"
+            fi
+          else
+            status="$status; no expiry recorded — set the repo variable SCOOP_BUCKET_TOKEN_EXPIRES_AT (YYYY-MM-DD) to enable the countdown reminder"
+          fi
+
+          # Reminder issue lifecycle: open one while the countdown is inside
+          # the warning window, close it again once the token is rotated (the
+          # variable moves into the future). Reconciles in both directions on
+          # every run — no duplicate issues, no stale reminders.
+          existing="$(gh search issues --repo "$OWNER_REPO" --label pat-rotation \
+            --state open --json number,title \
+            --jq '[.[] | select(.title | contains("SCOOP_BUCKET_TOKEN"))][0].number // empty' || true)"
+          if [[ "$remind" == "true" && -z "$existing" ]]; then
+            gh issue create --repo "$OWNER_REPO" \
+              --title "SCOOP_BUCKET_TOKEN expires in $days days — rotate the PAT" \
+              --label pat-rotation \
+              --body "The daily PAT expiry guard measured $days days until the recorded expiry. Rotate: create a fresh fine-grained PAT (Contents: Read and write on thoser666/scoop-bucket), run \`gh secret set SCOOP_BUCKET_TOKEN --repo thoser666/Rivulet\`, then update the repo variable \`SCOOP_BUCKET_TOKEN_EXPIRES_AT\` to the new expiry date. The live token probes are still green — this is the advance warning."
+          elif [[ "$remind" == "false" && -n "$existing" ]]; then
+            gh issue close "$existing" --repo "$OWNER_REPO" \
+              --comment 'Token rotated or outside the warning window — closing automatically. The guard re-opens a reminder if the countdown enters the window again.'
+          fi
+
+          {
+            echo "## PAT expiry guard — SCOOP_BUCKET_TOKEN"
+            echo
+            echo "- Probe: $status"
+            echo "- Reminder issue: $([[ "$remind" == "true" ]] && echo open || echo not needed)"
+          } >> "$GITHUB_STEP_SUMMARY"
