@@ -175,6 +175,14 @@ zeigt die Nachrichten **aller verbundenen Plattformen in derselben Liste** an:
 - Über der Eingabezeile zeigt Rivulet das verbleibende Sendekontingent (z. B.
   „20 Nachrichten pro 30 s“) und die Plattform, für die das Limit gilt –
   Plattform-Limits werden pro Kanal separat durchgesetzt.
+- **Stream-Info-Editor**: Im Dock legst du **Titel** und **Spiel/Kategorie**
+  in einem gemeinsamen Entwurf fest und übernimmst sie pro Plattform
+  einzeln oder mit einem Klick **auf alle**. Jede Anwendung läuft im
+  Hintergrund und meldet ein ehrliches Ergebnis pro Plattform (Twitch über
+  die Helix-Kanalaktualisierung inkl. Game-Lookup, Kick über den
+  Public-Channels-Endpunkt inkl. Category-Lookup, YouTube-Titel über die
+  Data API) – ein Fehler auf einer Plattform blockiert die anderen nie.
+  Tokens werden nur beim Übernehmen aus dem Betriebssystem-Tresor gelesen.
 
 ### Alerts
 
