@@ -494,15 +494,14 @@ impl Chat {
         }
     }
 
-    /// Receiver for engagement events (Kick subs/gifts), when the worker
-    /// feeds one. Only the Kick worker currently produces alerts; Twitch
-    /// uses the dedicated EventSub worker and YouTube has no event feed
-    /// wired yet.
+    /// Receiver for engagement events (Kick subs/gifts, YouTube Super
+    /// Chats/Stickers/memberships), when the worker feeds one. Twitch is
+    /// `None` — its alerts come from the dedicated EventSub worker.
     pub fn alerts(&self) -> Option<&Receiver<crate::alerts_ingest::AlertEvent>> {
         match &self.inner {
             ChatInner::Twitch(_) => None,
             ChatInner::Kick(c) => c.alerts(),
-            ChatInner::YouTube(_) => None,
+            ChatInner::YouTube(c) => c.alerts(),
         }
     }
 
@@ -630,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    fn kick_worker_exposes_an_alert_receiver_twitch_and_youtube_do_not() {
+    fn kick_and_youtube_workers_expose_alert_receivers_twitch_does_not() {
         // The Kick worker always carries the engagement channel (it produces
         // events only when a live subscription/gift arrives).
         let kick = Chat::new(&ChatConfig::new(
@@ -643,33 +642,40 @@ mod tests {
             kick.alerts().is_some(),
             "the kick worker must expose its engagement receiver"
         );
-        // Twitch alerts come from the dedicated EventSub worker, YouTube has
-        // no engagement feed wired yet — neither chat worker emits alerts.
+        // The YouTube worker feeds Super Chats/Stickers/memberships from the
+        // same poll feed as its chat messages.
+        let youtube = Chat::new(&ChatConfig::new(
+            ChatPlatform::YouTube,
+            "abc123".to_owned(),
+            String::new(),
+        ));
+        assert!(youtube.enabled(), "video id is set");
+        assert!(
+            youtube.alerts().is_some(),
+            "the youtube worker must expose its engagement receiver"
+        );
+        // Twitch alerts come from the dedicated EventSub worker — the chat
+        // worker emits none.
         let twitch = Chat::new(&ChatConfig::new(
             ChatPlatform::Twitch,
             "rivulet".to_owned(),
             String::new(),
         ));
         assert!(twitch.alerts().is_none());
-        let youtube = Chat::new(&ChatConfig::new(
-            ChatPlatform::YouTube,
-            "abc123".to_owned(),
-            String::new(),
-        ));
-        assert!(youtube.alerts().is_none());
     }
 
     #[test]
-    fn multichat_collects_kick_alert_receivers_only() {
+    fn multichat_collects_kick_and_youtube_alert_receivers() {
         let multi = MultiChat::from_configs(&[
             ChatConfig::new(ChatPlatform::Kick, "kickchannel".to_owned(), String::new()),
             ChatConfig::new(ChatPlatform::YouTube, "abc123".to_owned(), String::new()),
+            ChatConfig::new(ChatPlatform::Twitch, "rivulet".to_owned(), String::new()),
         ]);
         let receivers: Vec<_> = multi.alert_receivers().collect();
         assert_eq!(
             receivers.len(),
-            1,
-            "only the kick worker feeds the alert drain"
+            2,
+            "kick and youtube feed the alert drain, twitch does not"
         );
     }
 

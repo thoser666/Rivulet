@@ -4811,16 +4811,34 @@ fn kick_engagement_alerts_feed_the_alerts_dock() {
         chat.contains("pub fn alerts(&self)") && chat.contains("pub fn alert_receivers("),
         "the chat facades must expose the engagement receivers"
     );
+    // YouTube engagement: Super Chats, Super Stickers and new members are
+    // parsed from the same Innertube poll feed as the chat messages.
+    let youtube = read("rivulet-core/src/youtube_chat.rs");
+    assert!(
+        youtube.contains("pub fn parse_youtube_alert_events")
+            && youtube.contains("fn parses_super_chat_into_a_donation_event")
+            && youtube.contains("fn parses_super_sticker_ticker_into_a_donation_event")
+            && youtube.contains("fn parses_new_member_ticker_but_skips_milestones")
+            && youtube.contains("fn worker_delivers_super_chats_to_the_alert_receiver"),
+        "the YouTube worker must parse engagement events and pin them with parser + worker tests"
+    );
+    assert!(
+        youtube.contains("liveChatPaidMessageRenderer")
+            && youtube.contains("liveChatPaidStickerRenderer")
+            && youtube.contains("liveChatMembershipItemRenderer"),
+        "the YouTube parser must keep covering the three Innertube renderers"
+    );
     let app = read("rivulet-gui/src/app.rs");
     assert!(
         app.contains("multi.alert_receivers()")
-            && app.contains("fn kick_engagement_events_drain_into_both_docks_with_badge"),
+            && app.contains("fn kick_engagement_events_drain_into_both_docks_with_badge")
+            && app.contains("fn youtube_super_chat_renders_as_a_donation_line_with_badge"),
         "the GUI reconcile must drain chat-worker alerts and pin the rendering"
     );
     let docs = read("docs/alerts-ingest.md");
     assert!(
-        docs.contains("Kick"),
-        "the alerts docs must cover the Kick engagement source"
+        docs.contains("Kick") && docs.contains("Super Chat"),
+        "the alerts docs must cover the Kick and YouTube engagement sources"
     );
 }
 

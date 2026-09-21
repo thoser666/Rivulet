@@ -167,10 +167,280 @@ pub fn parse_youtube_payload(payload: &str) -> (Vec<ChatMessage>, Option<String>
     (messages, continuation)
 }
 
+/// `purchaseAmountText.simpleText` like `"$5.00"`, `"5,00 €"`,
+/// `"US$ 3.50"`, `"₹1,000.00"` → (5.0, "USD"), (5.0, "EUR"),
+/// (3.5, "USD"), (1000.0, "INR"). Returns `None` when no amount can be
+/// recovered — the caller then renders the raw display text.
+fn parse_amount(raw: &str) -> Option<(f64, String)> {
+    let currency_symbols: &[(&str, &str)] = &[
+        ("$", "USD"),
+        ("€", "EUR"),
+        ("£", "GBP"),
+        ("¥", "JPY"),
+        ("₹", "INR"),
+        ("₩", "KRW"),
+    ];
+    let prefix_codes = [
+        "US$", "CA$", "AU$", "NT$", "HK$", "MX$", "AR$", "CLP$", "COP$",
+    ];
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut currency: Option<String> = None;
+    let mut rest = trimmed.to_owned();
+    // `US$`-style display prefixes all map to USD in the locales where
+    // YouTube uses them (CA$/AU$/NT$… are locale displays of USD);
+    // a ISO-style `EUR 5,00` prefix is taken literally.
+    for prefix in prefix_codes {
+        if let Some(stripped) = rest.strip_prefix(prefix) {
+            currency = Some("USD".to_owned());
+            rest = stripped.trim().to_owned();
+            break;
+        }
+    }
+    if currency.is_none() {
+        if let Some(first) = trimmed.split_whitespace().next() {
+            if first.len() == 3 && first.chars().all(|c| c.is_ascii_uppercase()) {
+                if let Some(stripped) = trimmed.strip_prefix(first) {
+                    currency = Some(first.to_owned());
+                    rest = stripped.trim().to_owned();
+                }
+            }
+        }
+    }
+    if currency.is_none() {
+        for (symbol, code) in currency_symbols {
+            if rest.contains(symbol) {
+                currency = Some((*code).to_owned());
+                rest = rest.replace(symbol, "");
+                break;
+            }
+        }
+    }
+    // Recover the digits: drop currency letters and separators, keep
+    // the last separator as the decimal point.
+    let mut digits = String::new();
+    let mut last_separator: Option<char> = None;
+    for ch in rest.chars() {
+        if ch.is_ascii_digit() {
+            digits.push(ch);
+        } else if ch == ',' || ch == '.' {
+            last_separator = Some(ch);
+        }
+    }
+    if digits.is_empty() {
+        return None;
+    }
+    let decimals = last_separator
+        .map(|sep| {
+            // Exactly three trailing digits after a separator that also has
+            // digits in front of it is the thousands-group pattern
+            // (`1,000`, `1.000.000`) — not a decimal point. Two or fewer
+            // trailing digits (`19.99`, `5,00`) are fractional.
+            let after = rest
+                .rfind(sep)
+                .map(|pos| {
+                    rest[pos + 1..]
+                        .chars()
+                        .filter(|c| c.is_ascii_digit())
+                        .count()
+                })
+                .unwrap_or(0);
+            let before = rest
+                .find(sep)
+                .map(|pos| rest[..pos].chars().any(|c| c.is_ascii_digit()))
+                .unwrap_or(false);
+            if after == 3 && before {
+                0
+            } else {
+                after
+            }
+        })
+        .unwrap_or(0)
+        .min(2) as i32;
+    let value = digits.parse::<f64>().ok()? / 10f64.powi(decimals);
+    Some((value, currency.unwrap_or_else(|| "".to_owned())))
+}
+
+/// Parse one `get_live_chat` response into engagement events.
+///
+/// Handled actions (renderer → kind):
+///
+/// - `liveChatPaidMessageRenderer` → [`AlertKind::Donation`] (Super Chat;
+///   amount/currency parsed from `purchaseAmountText.simpleText`, message
+///   joined from `message.runs`)
+/// - `addLiveChatTickerItemAction.item.liveChatPaidStickerRenderer` →
+///   [`AlertKind::Donation`] (Super Sticker; same amount source, label from
+///   `moneyChipBackgroundColor` as the sticker tier hint)
+/// - `addLiveChatTickerItemAction.item.liveChatMembershipItemRenderer` →
+///   [`AlertKind::Follow`] (new member; header text like "Welcome to the
+///   member's chat"). Ticker duplicates of member milestones are skipped
+///   (their `headerSubtext`/header text names the milestone age, not the
+///   welcome).
+///
+/// Everything else yields nothing. Pure and deterministic — no I/O. User
+/// names are validated by the ingest queue at push time and the events
+/// carry no tokens.
+pub fn parse_youtube_alert_events(payload: &str) -> Vec<crate::alerts_ingest::AlertEvent> {
+    use crate::alerts_ingest::{AlertEvent, AlertKind};
+
+    fn alert(
+        kind: AlertKind,
+        user: String,
+        tier: Option<String>,
+        amount: Option<f64>,
+        currency: Option<String>,
+        message: Option<String>,
+    ) -> AlertEvent {
+        AlertEvent {
+            kind,
+            user,
+            recipient: None,
+            count: 0,
+            tier,
+            amount,
+            currency,
+            message: message
+                .and_then(|m| AlertEvent::sanitize_message(&m))
+                .and_then(|m| (!m.is_empty()).then_some(m)),
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            platform: Some(crate::chat::ChatPlatform::YouTube),
+        }
+    }
+
+    fn runs_text(value: &serde_json::Value) -> Option<String> {
+        let text = value
+            .get("message")
+            .or_else(|| value.get("headerPrimaryText"))
+            .and_then(|m| m.get("runs"))
+            .and_then(|runs| runs.as_array())
+            .map(|runs| {
+                runs.iter()
+                    .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
+                    .collect::<String>()
+            })
+            .unwrap_or_default();
+        let text = text.trim();
+        (!text.is_empty()).then(|| text.to_owned())
+    }
+
+    let value: serde_json::Value = match serde_json::from_str(payload) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let Some(actions) = value
+        .pointer("/continuationContents/liveChatContinuation/actions")
+        .and_then(|a| a.as_array())
+    else {
+        return Vec::new();
+    };
+    let mut events = Vec::new();
+    for action in actions {
+        // 1. Super Chat: a paid chat message action.
+        if let Some(renderer) =
+            action.pointer("/addChatItemAction/item/liveChatPaidMessageRenderer")
+        {
+            let Some(user) = renderer
+                .pointer("/authorName/simpleText")
+                .and_then(|u| u.as_str())
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+            else {
+                continue;
+            };
+            let raw_amount = renderer
+                .pointer("/purchaseAmountText/simpleText")
+                .and_then(|t| t.as_str())
+                .unwrap_or("");
+            let (amount, currency) = match parse_amount(raw_amount) {
+                Some(pair) => pair,
+                None => continue,
+            };
+            events.push(alert(
+                AlertKind::Donation,
+                user.to_owned(),
+                None,
+                Some(amount),
+                (!currency.is_empty()).then_some(currency),
+                runs_text(renderer),
+            ));
+            continue;
+        }
+        // 2. Ticker items: Super Stickers and memberships surface as
+        //    ticker actions alongside the chat actions.
+        if let Some(item) = action.pointer("/addLiveChatTickerItemAction/item") {
+            // 2a. Super Sticker → Donation with the sticker label as tier.
+            if let Some(renderer) = item.get("liveChatPaidStickerRenderer") {
+                let Some(user) = renderer
+                    .pointer("/authorName/simpleText")
+                    .and_then(|u| u.as_str())
+                    .map(str::trim)
+                    .filter(|u| !u.is_empty())
+                else {
+                    continue;
+                };
+                let raw_amount = renderer
+                    .pointer("/purchaseAmountText/simpleText")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("");
+                let (amount, currency) = match parse_amount(raw_amount) {
+                    Some(pair) => pair,
+                    None => continue,
+                };
+                let tier = renderer
+                    .get("moneyChipBackgroundColor")
+                    .and_then(|t| t.as_str())
+                    .map(str::to_owned);
+                events.push(alert(
+                    AlertKind::Donation,
+                    user.to_owned(),
+                    tier,
+                    Some(amount),
+                    (!currency.is_empty()).then_some(currency),
+                    None,
+                ));
+                continue;
+            }
+            // 2b. Membership → Follow (new member welcome). Milestone
+            //     tickers carry a different header shape and are skipped.
+            if let Some(renderer) = item.get("liveChatMembershipItemRenderer") {
+                let Some(user) = renderer
+                    .pointer("/authorName/simpleText")
+                    .and_then(|u| u.as_str())
+                    .map(str::trim)
+                    .filter(|u| !u.is_empty())
+                else {
+                    continue;
+                };
+                let header = runs_text(renderer).unwrap_or_default();
+                let is_welcome = header.to_lowercase().contains("member")
+                    && !header.to_lowercase().contains("month");
+                if !is_welcome {
+                    continue;
+                }
+                events.push(alert(
+                    AlertKind::Follow,
+                    user.to_owned(),
+                    None,
+                    None,
+                    None,
+                    Some(header),
+                ));
+            }
+        }
+    }
+    events
+}
+
 /// Handle to a running YouTube chat worker. Non-blocking by construction.
 pub struct YouTubeChat {
     tx: Option<Sender<Msg>>,
     messages: Option<Receiver<ChatMessage>>,
+    alerts: Option<Receiver<crate::alerts_ingest::AlertEvent>>,
     stop: Arc<AtomicBool>,
     conn: Arc<std::sync::atomic::AtomicU8>,
 }
@@ -187,6 +457,7 @@ impl YouTubeChat {
         }
         let (tx, rx) = unbounded();
         let (msg_tx, msg_rx) = unbounded();
+        let (alert_tx, alert_rx) = unbounded();
         let stop = Arc::new(AtomicBool::new(false));
         let conn = Arc::new(std::sync::atomic::AtomicU8::new(0));
         let worker_conn = Arc::clone(&conn);
@@ -194,7 +465,7 @@ impl YouTubeChat {
         let cfg = config.clone();
         let spawned = std::thread::Builder::new()
             .name("rivulet-youtube-chat".to_owned())
-            .spawn(move || worker_loop(rx, cfg, worker_stop, worker_conn, msg_tx))
+            .spawn(move || worker_loop(rx, cfg, worker_stop, worker_conn, msg_tx, alert_tx))
             .is_ok();
         if !spawned {
             return Self::disabled();
@@ -202,6 +473,7 @@ impl YouTubeChat {
         Self {
             tx: Some(tx),
             messages: Some(msg_rx),
+            alerts: Some(alert_rx),
             stop,
             conn,
         }
@@ -211,6 +483,7 @@ impl YouTubeChat {
         Self {
             tx: None,
             messages: None,
+            alerts: None,
             stop: Arc::new(AtomicBool::new(true)),
             conn: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         }
@@ -233,6 +506,12 @@ impl YouTubeChat {
     /// Receiver for parsed chat messages, polled by the GUI each frame.
     pub fn messages(&self) -> Option<&Receiver<ChatMessage>> {
         self.messages.as_ref()
+    }
+
+    /// Receiver for engagement events (Super Chats, Super Stickers, new
+    /// members) parsed from the same poll feed as the chat messages.
+    pub fn alerts(&self) -> Option<&Receiver<crate::alerts_ingest::AlertEvent>> {
+        self.alerts.as_ref()
     }
 
     /// YouTube chat is read-only without an authenticated browser session;
@@ -266,11 +545,12 @@ fn worker_loop(
     stop: Arc<AtomicBool>,
     conn: Arc<std::sync::atomic::AtomicU8>,
     msg_tx: Sender<ChatMessage>,
+    alert_tx: Sender<crate::alerts_ingest::AlertEvent>,
 ) {
     let mut backoff = 1u64;
     while !stop.load(Ordering::SeqCst) {
         conn.store(1, Ordering::SeqCst);
-        match run_session(&cfg, &msg_tx, &rx) {
+        match run_session(&cfg, &msg_tx, &alert_tx, &rx) {
             Ok(()) => {
                 if stop.load(Ordering::SeqCst) {
                     break;
@@ -291,6 +571,7 @@ fn worker_loop(
 fn run_session(
     cfg: &YouTubeChatConfig,
     msg_tx: &Sender<ChatMessage>,
+    alert_tx: &Sender<crate::alerts_ingest::AlertEvent>,
     rx: &Receiver<Msg>,
 ) -> anyhow::Result<()> {
     let video_id = cfg.channel.trim();
@@ -328,6 +609,9 @@ fn run_session(
             if !message.is_empty_artifact() {
                 let _ = msg_tx.send(message);
             }
+        }
+        for event in parse_youtube_alert_events(&payload) {
+            let _ = alert_tx.send(event);
         }
         continuation = match next {
             Some(token) => token,
@@ -556,6 +840,208 @@ mod tests {
         let msg = delivered.expect("message delivered");
         assert_eq!(msg.user, "YTViewer");
         assert_eq!(msg.text, "hello youtube");
+        chat.disconnect();
+    }
+
+    #[test]
+    fn parses_super_chat_into_a_donation_event() {
+        let payload = r#"{
+            "continuationContents": { "liveChatContinuation": { "actions": [
+                { "addChatItemAction": { "item": { "liveChatPaidMessageRenderer": {
+                    "authorName": { "simpleText": "BigSpender" },
+                    "purchaseAmountText": { "simpleText": "$19.99" },
+                    "message": { "runs": [ { "text": "love the " }, { "text": "stream" } ] }
+                } } } }
+            ] } }
+        }"#;
+        let events = parse_youtube_alert_events(payload);
+        assert_eq!(events.len(), 1, "one super chat → one donation");
+        let event = &events[0];
+        assert_eq!(event.kind, crate::alerts_ingest::AlertKind::Donation);
+        assert_eq!(event.user, "BigSpender");
+        assert_eq!(event.amount, Some(19.99));
+        assert_eq!(event.currency.as_deref(), Some("USD"));
+        assert_eq!(event.message.as_deref(), Some("love the stream"));
+        assert_eq!(
+            event.platform,
+            Some(crate::chat::ChatPlatform::YouTube),
+            "youtube alerts must carry the platform badge"
+        );
+    }
+
+    #[test]
+    fn parses_super_sticker_ticker_into_a_donation_event() {
+        let payload = r#"{
+            "continuationContents": { "liveChatContinuation": { "actions": [
+                { "addLiveChatTickerItemAction": { "item": { "liveChatPaidStickerRenderer": {
+                    "authorName": { "simpleText": "StickerFan" },
+                    "purchaseAmountText": { "simpleText": "5,00 €" },
+                    "moneyChipBackgroundColor": "MONEY_CHIP_GREEN"
+                } } } }
+            ] } }
+        }"#;
+        let events = parse_youtube_alert_events(payload);
+        assert_eq!(events.len(), 1, "one sticker → one donation");
+        let event = &events[0];
+        assert_eq!(event.kind, crate::alerts_ingest::AlertKind::Donation);
+        assert_eq!(event.user, "StickerFan");
+        assert_eq!(event.amount, Some(5.0));
+        assert_eq!(event.currency.as_deref(), Some("EUR"));
+        assert_eq!(event.tier.as_deref(), Some("MONEY_CHIP_GREEN"));
+        assert!(event.message.is_none(), "stickers carry no message text");
+    }
+
+    #[test]
+    fn parses_new_member_ticker_but_skips_milestones() {
+        // New-member welcome ticker.
+        let payload = r#"{
+            "continuationContents": { "liveChatContinuation": { "actions": [
+                { "addLiveChatTickerItemAction": { "item": { "liveChatMembershipItemRenderer": {
+                    "authorName": { "simpleText": "NewMember" },
+                    "headerPrimaryText": { "runs": [ { "text": "Welcome to the member's chat!" } ] }
+                } } } }
+            ] } }
+        }"#;
+        let events = parse_youtube_alert_events(payload);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, crate::alerts_ingest::AlertKind::Follow);
+        assert_eq!(events[0].user, "NewMember");
+        assert_eq!(
+            events[0].message.as_deref(),
+            Some("Welcome to the member's chat!")
+        );
+
+        // Milestone ticker ("x months") must not become a new-member event.
+        let payload = r#"{
+            "continuationContents": { "liveChatContinuation": { "actions": [
+                { "addLiveChatTickerItemAction": { "item": { "liveChatMembershipItemRenderer": {
+                    "authorName": { "simpleText": "Veteran" },
+                    "headerPrimaryText": { "runs": [ { "text": "Member for 12 months" } ] }
+                } } } }
+            ] } }
+        }"#;
+        assert!(
+            parse_youtube_alert_events(payload).is_empty(),
+            "milestone tickers are not new members"
+        );
+    }
+
+    #[test]
+    fn alert_parser_skips_malformed_and_non_engagement_actions() {
+        // Plain chat messages are the chat parser's job.
+        assert!(
+            parse_youtube_alert_events(payload_fixture()).is_empty(),
+            "plain chat text must not produce alert events"
+        );
+        // Super Chat without an author is unusable.
+        assert!(parse_youtube_alert_events(
+            r#"{"continuationContents":{"liveChatContinuation":{"actions":[{"addChatItemAction":{"item":{"liveChatPaidMessageRenderer":{"purchaseAmountText":{"simpleText":"$5.00"}}}}}]}}"#,
+        )
+        .is_empty());
+        // Unparseable amount text → no event (honest drop, no 0.00 noise).
+        assert!(parse_youtube_alert_events(
+            r#"{"continuationContents":{"liveChatContinuation":{"actions":[{"addChatItemAction":{"item":{"liveChatPaidMessageRenderer":{"authorName":{"simpleText":"A"},"purchaseAmountText":{"simpleText":"n/a"}}}}}]}}"#,
+        )
+        .is_empty());
+        // Garbage payloads yield nothing.
+        assert!(parse_youtube_alert_events("not json").is_empty());
+        assert!(parse_youtube_alert_events("{}").is_empty());
+    }
+
+    #[test]
+    fn amount_parser_handles_locale_displays() {
+        use super::parse_amount as p;
+        assert_eq!(p("$19.99"), Some((19.99, "USD".to_owned())));
+        assert_eq!(p("5,00 €"), Some((5.0, "EUR".to_owned())));
+        assert_eq!(p("US$ 3.50"), Some((3.5, "USD".to_owned())));
+        assert_eq!(p("₹1,000.00"), Some((1000.0, "INR".to_owned())));
+        assert_eq!(p("£10"), Some((10.0, "GBP".to_owned())));
+        assert_eq!(p("JPY 500"), Some((500.0, "JPY".to_owned())));
+        // Thousands separator only → whole units, no decimal split.
+        assert_eq!(p("1,000"), Some((1000.0, "".to_owned())));
+        assert_eq!(p(""), None);
+        assert_eq!(p("n/a"), None);
+    }
+
+    /// End-to-end: the real worker polls a local HTTP fixture whose payload
+    /// carries a Super Chat, and the donation lands on the alert receiver
+    /// while the plain chat line lands on the message receiver.
+    #[test]
+    fn worker_delivers_super_chats_to_the_alert_receiver() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        std::thread::spawn(move || {
+            // Connection 1: the initial live-chat page GET.
+            let (mut stream, _) = listener.accept().expect("accept page");
+            let _ = drain_request(&mut stream);
+            let page = r#"<script>var ytInitialData={"continuation":"TOKEN_1"};</script>"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                page.len(),
+                page
+            );
+            let _ = stream.write_all(response.as_bytes());
+
+            // Connection 2: the get_live_chat poll POST with a mixed
+            // payload: plain chat + Super Chat.
+            let (mut stream2, _) = listener.accept().expect("accept poll");
+            let _ = drain_request(&mut stream2);
+            let body = r#"{"continuationContents":{"liveChatContinuation":{"actions":[{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"authorName":{"simpleText":"Chatter"},"message":{"runs":[{"text":"plain line"}]}}}}},{"addChatItemAction":{"item":{"liveChatPaidMessageRenderer":{"authorName":{"simpleText":"WsDonor"},"purchaseAmountText":{"simpleText":"$7.50"},"message":{"runs":[{"text":"take my money"}]}}}}}],"continuations":[{"invalidationContinuationData":{"continuation":"TOKEN_2"}}]}}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream2.write_all(response.as_bytes());
+        });
+
+        let cfg = YouTubeChatConfig {
+            page_endpoint: format!("http://{addr}/live_chat?is_popout=1&v="),
+            poll_endpoint: format!("http://{addr}/get_live_chat"),
+            channel: "abc123".to_owned(),
+        };
+        let mut chat = YouTubeChat::new(&cfg);
+        assert!(chat.enabled());
+
+        // The plain chat line arrives on the message receiver…
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let chat_delivered = loop {
+            if let Some(rx) = chat.messages() {
+                if let Ok(msg) = rx.try_recv() {
+                    break Some(msg);
+                }
+            }
+            if chat.connection_state() == ChatConnState::Disconnected {
+                break None;
+            }
+            if std::time::Instant::now() > deadline {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        assert_eq!(chat_delivered.expect("chat delivered").text, "plain line");
+
+        // …and the Super Chat lands on the alert receiver.
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        let alert_delivered = loop {
+            if let Some(rx) = chat.alerts() {
+                if let Ok(event) = rx.try_recv() {
+                    break Some(event);
+                }
+            }
+            if chat.connection_state() == ChatConnState::Disconnected {
+                break None;
+            }
+            if std::time::Instant::now() > deadline {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        let event = alert_delivered.expect("alert delivered");
+        assert_eq!(event.kind, crate::alerts_ingest::AlertKind::Donation);
+        assert_eq!(event.user, "WsDonor");
+        assert_eq!(event.amount, Some(7.5));
+
         chat.disconnect();
     }
 }

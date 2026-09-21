@@ -81,6 +81,23 @@ entries, with redaction of tokens and privacy tests.
   drains them into the same `AlertIngest` — so Kick subs/gifts appear in
   both docks with the `[Kick]` platform badge, localized by the existing
   alert-kind keys. Unknown/malformed payloads yield no events.
+- **YouTube engagement events** — the YouTube chat worker parses Super
+  Chats, Super Stickers and new memberships from the same Innertube poll
+  feed as the chat messages (`parse_youtube_alert_events`):
+  `liveChatPaidMessageRenderer` becomes `AlertKind::Donation` (Super Chat;
+  amount/currency recovered from the `purchaseAmountText` display string
+  incl. locale formats like `$19.99`, `5,00 €`, `US$ 3.50`, `₹1,000.00`;
+  message joined from the runs),
+  `addLiveChatTickerItemAction`/`liveChatPaidStickerRenderer` becomes a
+  Donation too (Super Sticker; the `moneyChipBackgroundColor` is carried as
+  the tier label), and a membership ticker with a welcome header becomes
+  `AlertKind::Follow` (new member; milestone tickers naming a month count
+  are deliberately skipped). Amounts that cannot be parsed are dropped
+  instead of surfacing a meaningless `0.00`. The worker routes the events
+  to the same alert channel as Kick's, so they appear in both docks with
+  the `[YouTube]` badge, localized by the existing alert-kind keys.
+  Innertube is not a stable public API — if Google renames these renderers
+  the events stop (honestly) rather than misfire.
 - **Shared Chat sessions** ("Stream Together"): alerts are **not merged**
   across participants. EventSub delivers engagement notifications per
   subscription condition, and `from_broadcaster_user_id` raid subscriptions
@@ -149,6 +166,9 @@ parse → verify → `AlertIngest::push`.
 - `rivulet-core/src/kick_chat.rs` — engagement-event parsing
   (`parse_kick_alert_event`) and the worker alert channel wired from the
   Pusher chat stream (+5 parser tests, +1 worker e2e test)
+- `rivulet-core/src/youtube_chat.rs` — engagement-event parsing
+  (`parse_youtube_alert_events`, `parse_amount`) from the Innertube poll
+  feed (+5 parser tests incl. locale amount handling, +1 worker e2e test)
 - `rivulet-core/tests/ci_pinning.rs` — guards
   `m5_alerts_ingest_is_native_localized_and_pinned` (the ci_pinning guard
   pins the README/roadmap markers, the doc contents and the GUI wiring) and

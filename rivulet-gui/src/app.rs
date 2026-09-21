@@ -16478,6 +16478,45 @@ mod tests {
     }
 
     #[test]
+    fn youtube_super_chat_renders_as_a_donation_line_with_badge() {
+        // A YouTube Super Chat event (Donation kind, YouTube-tagged, exactly
+        // as parse_youtube_alert_events produces it) must surface in both
+        // docks as the localized donation line carrying the [YouTube] badge.
+        let mut app = RivuletApp::default();
+        app.alert_ingest
+            .push(rivulet_core::AlertEvent {
+                kind: rivulet_core::AlertKind::Donation,
+                user: "YTDonor".to_owned(),
+                recipient: None,
+                count: 0,
+                tier: None,
+                amount: Some(19.99),
+                currency: Some("USD".to_owned()),
+                message: Some("love the stream".to_owned()),
+                timestamp: 1_700_000_000,
+                platform: Some(rivulet_core::ChatPlatform::YouTube),
+            })
+            .then_some(())
+            .expect("queue accepts while enabled");
+
+        app.reconcile_chat();
+
+        assert_eq!(
+            app.chat_messages[0].text, "YTDonor donated 19.99 USD",
+            "the super chat must render as a localized donation line"
+        );
+        assert_eq!(
+            app.chat_messages[0].platform,
+            Some(rivulet_core::ChatPlatform::YouTube),
+            "the line must carry the youtube badge"
+        );
+        assert_eq!(
+            app.alert_events[0].text, "YTDonor donated 19.99 USD",
+            "the dedicated alerts dock accumulates the same event"
+        );
+    }
+
+    #[test]
     fn chat_dock_drain_covers_chat_worker_alert_receivers() {
         // Source-pin the kick drain so the combined dock keeps consuming the
         // chat workers' engagement receivers alongside EventSub/Streamlabs.
