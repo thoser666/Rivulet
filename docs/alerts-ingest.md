@@ -53,10 +53,19 @@ entries, with redaction of tokens and privacy tests.
   events; unknown/rejected frames are only counted.One end-to-end GUI test
   feeds a real follow frame from a local WebSocket puppet into the chat dock.
   The `channel.raid` subscription is created with the **directional**
-  `from_broadcaster_user_id` condition (Twitch rejects a plain
-  `broadcaster_user_id` for raids), so Rivulet alerts on raids *it sends*
-  and the raid parser's `from_broadcaster_*` payload fields match the
-  condition — a channel being raided does not fire a second alert.
+  condition (Twitch rejects a plain `broadcaster_user_id` for raids). The
+  direction is **user-configurable** in the Alerts settings
+  (`RaidAlertDirection`): **raid out** (`from_broadcaster_user_id`, the
+  default and historical behavior), **raided** (`to_broadcaster_user_id`),
+  or **both** (two subscriptions, one per condition field — Twitch's
+  condition object cannot hold both at once). The raid parser reads the
+  `from_broadcaster_*` payload fields, so raid-*out* alerts name the raiding
+  channel; for the *raided* direction the same parser names the incoming
+  raider (also carried in `from_broadcaster_user_name` of the delivered
+  event, because every raid event is delivered from the raider's
+  perspective). Changing the direction updates the worker config, whose
+  comparison in `apply_alerts_eventsub` restarts the EventSub WebSocket
+  worker so the subscriptions are re-created with the new condition.
 - **Shared Chat sessions** ("Stream Together"): alerts are **not merged**
   across participants. EventSub delivers engagement notifications per
   subscription condition, and `from_broadcaster_user_id` raid subscriptions

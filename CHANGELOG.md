@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+- feat(alerts): **Raid-Richtung konfigurierbar** — die Raid-Alerts sind jetzt
+  in den Alert-Einstellungen richtungssteuerbar: **Raid raus**
+  (`from_broadcaster_user_id`, bisheriges Verhalten), **Geraidet**
+  (`to_broadcaster_user_id`) oder **Beide Richtungen** (zwei Subscriptions,
+  eine pro Condition-Feld — Twitch erlaubt beide Felder nicht in einer
+  Condition). Die Wahl liegt als `RaidAlertDirection` in der persistierten
+  Konfiguration (serde `out`/`in`/`both`), fließt in `EventsubWsConfig` ein
+  und der Konfigurationsvergleich in `apply_alerts_eventsub` startet den
+  EventSub-Worker neu, sobald die Richtung wechselt — die Subscriptions
+  werden mit der neuen Condition neu angelegt. Labels EN/DE, neuer
+  Richtungstest (Out/In/Both-Bodies, Key-Roundtrip) und erweiterter
+  ci_pinning-Guard.
+
 - feat(chat): **Shared-Chat-Raumnamen** — das `↦`-Badge im kombinierten Dock
   löst die numerische `source-room-id` jetzt über eine gecachte Helix-
   `users`-Abfrage zum Channel-Login auf (`SharedRoomNameService` mit

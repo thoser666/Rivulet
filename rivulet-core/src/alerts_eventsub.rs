@@ -60,6 +60,69 @@ const KEEPALIVE_GRACE: Duration = Duration::from_secs(5);
 /// Upper bound of the event channel between the worker and the GUI.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
 
+/// Which raid direction(s) the `channel.raid` subscription covers.
+///
+/// `channel.raid` is **directional**: Twitch rejects a plain
+/// `broadcaster_user_id` condition and requires `from_broadcaster_user_id`
+/// (raids the streamer sends out) and/or `to_broadcaster_user_id` (raids the
+/// streamer receives). The default matches the historical behavior — raid
+/// out only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum RaidAlertDirection {
+    /// Notify when this broadcaster raids another channel (`from_`).
+    #[default]
+    #[serde(rename = "out")]
+    Out,
+    /// Notify when this broadcaster is raided (`to_`).
+    #[serde(rename = "in")]
+    In,
+    /// Both directions: the worker creates two raid subscriptions, one per
+    /// condition field.
+    #[serde(rename = "both")]
+    Both,
+}
+
+impl RaidAlertDirection {
+    /// Every direction in UI order (matches the GUI ComboBox order).
+    pub fn all() -> &'static [RaidAlertDirection] {
+        &[
+            RaidAlertDirection::Out,
+            RaidAlertDirection::In,
+            RaidAlertDirection::Both,
+        ]
+    }
+
+    /// Stable serde/serde-json discriminator (persisted in the GUI config).
+    pub fn key(self) -> &'static str {
+        match self {
+            RaidAlertDirection::Out => "out",
+            RaidAlertDirection::In => "in",
+            RaidAlertDirection::Both => "both",
+        }
+    }
+
+    /// Parse the discriminator (inverse of [`Self::key`]; unknown strings
+    /// fall back to the default).
+    pub fn from_key(key: &str) -> Self {
+        match key {
+            "in" => RaidAlertDirection::In,
+            "both" => RaidAlertDirection::Both,
+            _ => RaidAlertDirection::Out,
+        }
+    }
+
+    /// The raid subscription conditions this direction covers: `(from_, to_)`
+    /// flags. `Both` yields two subscriptions (one per condition field) —
+    /// Twitch's condition object cannot hold both fields at once.
+    pub fn raid_conditions(self) -> &'static [(bool, bool)] {
+        match self {
+            RaidAlertDirection::Out => &[(true, false)],
+            RaidAlertDirection::In => &[(false, true)],
+            RaidAlertDirection::Both => &[(true, false), (false, true)],
+        }
+    }
+}
+
 /// Worker settings persisted by the GUI (token masked, never logged).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventsubWsConfig {
@@ -75,6 +138,8 @@ pub struct EventsubWsConfig {
     pub ws_endpoint: String,
     /// Twitch Helix API base (subscription creation; tests use a local stub).
     pub api_base: String,
+    /// Which raid direction(s) to subscribe to (see [`RaidAlertDirection`]).
+    pub raid_direction: RaidAlertDirection,
 }
 
 impl Default for EventsubWsConfig {
@@ -85,6 +150,7 @@ impl Default for EventsubWsConfig {
             broadcaster_id: String::new(),
             ws_endpoint: DEFAULT_EVENTSUB_WS_ENDPOINT.to_owned(),
             api_base: DEFAULT_TWITCH_API_BASE.to_owned(),
+            raid_direction: RaidAlertDirection::default(),
         }
     }
 }
@@ -234,26 +300,63 @@ pub fn parse_eventsub_ws_message(json: &str) -> Result<EventsubWsMessage, Events
 /// Exception — `channel.raid` is **directional**: Twitch rejects plain
 /// `broadcaster_user_id` conditions for raids and requires either
 /// `from_broadcaster_user_id` (notify when this broadcaster raids out) or
-/// `to_broadcaster_user_id` (notify when this broadcaster is raided). Rivulet
-/// subscribes with `from_broadcaster_user_id` and its raid parser reads the
-/// `from_broadcaster_*` fields, so the condition matches the payload shape.
+/// `to_broadcaster_user_id` (notify when this broadcaster is raided). The
+/// `direction` selects the condition field; `RaidAlertDirection::Both`
+/// produces one body per condition field (call once per
+/// [`RaidAlertDirection::raid_conditions`] entry).
+pub fn build_subscription_body_with_direction(
+    subscription_type: &str,
+    version: &str,
+    broadcaster_id: &str,
+    session_id: &str,
+    direction: RaidAlertDirection,
+) -> Vec<serde_json::Value> {
+    if subscription_type != "channel.raid" {
+        return vec![serde_json::json!({
+            "type": subscription_type,
+            "version": version,
+            "condition": { "broadcaster_user_id": broadcaster_id },
+            "transport": { "method": "websocket", "session_id": session_id },
+        })];
+    }
+    direction
+        .raid_conditions()
+        .iter()
+        .map(|(from, _to)| {
+            let condition = if *from {
+                serde_json::json!({ "from_broadcaster_user_id": broadcaster_id })
+            } else {
+                serde_json::json!({ "to_broadcaster_user_id": broadcaster_id })
+            };
+            serde_json::json!({
+                "type": subscription_type,
+                "version": version,
+                "condition": condition,
+                "transport": { "method": "websocket", "session_id": session_id },
+            })
+        })
+        .collect()
+}
+
+/// Build the Helix subscription-create body for one alert subscription with
+/// the default raid direction (raid out). See
+/// [`build_subscription_body_with_direction`] for the directional form.
 pub fn build_subscription_body(
     subscription_type: &str,
     version: &str,
     broadcaster_id: &str,
     session_id: &str,
 ) -> serde_json::Value {
-    let condition = if subscription_type == "channel.raid" {
-        serde_json::json!({ "from_broadcaster_user_id": broadcaster_id })
-    } else {
-        serde_json::json!({ "broadcaster_user_id": broadcaster_id })
-    };
-    serde_json::json!({
-        "type": subscription_type,
-        "version": version,
-        "condition": condition,
-        "transport": { "method": "websocket", "session_id": session_id },
-    })
+    build_subscription_body_with_direction(
+        subscription_type,
+        version,
+        broadcaster_id,
+        session_id,
+        RaidAlertDirection::default(),
+    )
+    .into_iter()
+    .next()
+    .expect("non-directional default yields exactly one body")
 }
 
 /// Shared worker counters (diagnostics only; never contents or credentials).
@@ -552,26 +655,32 @@ fn create_alert_subscriptions(cfg: &EventsubWsConfig, session_id: &str, counters
         cfg.api_base.trim_end_matches('/')
     );
     for (subscription_type, version) in EVENTSUB_ALERT_SUBSCRIPTIONS {
-        let body =
-            build_subscription_body(subscription_type, version, &cfg.broadcaster_id, session_id);
-        let response = ureq::post(&api)
-            .header("Client-Id", cfg.client_id.as_str())
-            .header("Authorization", format!("Bearer {}", cfg.token))
-            .header("Content-Type", "application/json")
-            .send_json(body);
-        match response {
-            Ok(_) => {
-                counters
-                    .subscription_created
-                    .fetch_add(1, Ordering::Relaxed);
-            }
-            Err(error) => {
-                counters.subscription_error.fetch_add(1, Ordering::Relaxed);
-                tracing::warn!(
-                    subscription_type,
-                    error = %error,
-                    "EventSub subscription create failed"
-                );
+        for body in build_subscription_body_with_direction(
+            subscription_type,
+            version,
+            &cfg.broadcaster_id,
+            session_id,
+            cfg.raid_direction,
+        ) {
+            let response = ureq::post(&api)
+                .header("Client-Id", cfg.client_id.as_str())
+                .header("Authorization", format!("Bearer {}", cfg.token))
+                .header("Content-Type", "application/json")
+                .send_json(body);
+            match response {
+                Ok(_) => {
+                    counters
+                        .subscription_created
+                        .fetch_add(1, Ordering::Relaxed);
+                }
+                Err(error) => {
+                    counters.subscription_error.fetch_add(1, Ordering::Relaxed);
+                    tracing::warn!(
+                        subscription_type,
+                        error = %error,
+                        "EventSub subscription create failed"
+                    );
+                }
             }
         }
     }
@@ -721,15 +830,80 @@ mod tests {
         // Twitch rejects a plain broadcaster_user_id condition for raids —
         // the channel.raid condition must carry from_ or to_ (docs: "The
         // channel raid condition must include either from_broadcaster_user_id
-        // or to_broadcaster_user_id"). Rivulet raids out => from_. The event
-        // parser reads from_broadcaster_user_name, so the condition and the
-        // payload shape stay aligned, and raiding INTO another channel does
-        // not double-fire for the raided side.
+        // or to_broadcaster_user_id"). Default direction: raid out => from_.
+        // The event parser reads from_broadcaster_user_name, so the
+        // condition and the payload shape stay aligned, and raiding INTO
+        // another channel does not double-fire for the raided side.
         let body = build_subscription_body("channel.raid", "1", "123", "SES_abc123");
         assert_eq!(body["condition"]["from_broadcaster_user_id"], "123");
         assert!(body["condition"].get("broadcaster_user_id").is_none());
         assert!(body["condition"].get("to_broadcaster_user_id").is_none());
         assert_eq!(body["transport"]["session_id"], "SES_abc123");
+    }
+
+    #[test]
+    fn raid_direction_selects_the_condition_fields() {
+        // Out: one from_ body. In: one to_ body. Both: two bodies, one per
+        // condition field (Twitch's condition object cannot hold both at
+        // once). Non-raid types stay unaffected in every direction.
+        let bodies = |direction| {
+            build_subscription_body_with_direction(
+                "channel.raid",
+                "1",
+                "123",
+                "SES_abc123",
+                direction,
+            )
+        };
+        let out = bodies(RaidAlertDirection::Out);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["condition"]["from_broadcaster_user_id"], "123");
+        assert!(out[0]["condition"].get("to_broadcaster_user_id").is_none());
+
+        let into = bodies(RaidAlertDirection::In);
+        assert_eq!(into.len(), 1);
+        assert_eq!(into[0]["condition"]["to_broadcaster_user_id"], "123");
+        assert!(into[0]["condition"]
+            .get("from_broadcaster_user_id")
+            .is_none());
+
+        let both = bodies(RaidAlertDirection::Both);
+        assert_eq!(both.len(), 2, "both directions need two subscriptions");
+        assert_eq!(both[0]["condition"]["from_broadcaster_user_id"], "123");
+        assert_eq!(both[1]["condition"]["to_broadcaster_user_id"], "123");
+        for body in both {
+            assert_eq!(body["type"], "channel.raid");
+            assert_eq!(body["transport"]["session_id"], "SES_abc123");
+        }
+
+        let follow = build_subscription_body_with_direction(
+            "channel.follow",
+            "2",
+            "123",
+            "SES_abc123",
+            RaidAlertDirection::Both,
+        );
+        assert_eq!(follow.len(), 1, "non-raid types ignore the direction");
+        assert_eq!(follow[0]["condition"]["broadcaster_user_id"], "123");
+    }
+
+    #[test]
+    fn raid_direction_keys_round_trip_and_default_to_out() {
+        assert_eq!(RaidAlertDirection::default(), RaidAlertDirection::Out);
+        for direction in RaidAlertDirection::all() {
+            assert_eq!(
+                RaidAlertDirection::from_key(direction.key()),
+                *direction,
+                "{} must round-trip",
+                direction.key()
+            );
+        }
+        assert_eq!(
+            RaidAlertDirection::from_key("nonsense"),
+            RaidAlertDirection::Out,
+            "unknown keys fall back to the default"
+        );
+        assert_eq!(RaidAlertDirection::all().len(), 3);
     }
 
     #[test]
@@ -749,6 +923,7 @@ mod tests {
             broadcaster_id: "123".to_owned(),
             ws_endpoint: "ws://127.0.0.1:9".to_owned(),
             api_base: "http://127.0.0.1:9".to_owned(),
+            raid_direction: RaidAlertDirection::default(),
         });
         let debug = format!("{receiver:?}");
         assert!(!debug.contains("my-client-id"), "{debug}");
@@ -874,6 +1049,7 @@ mod tests {
             broadcaster_id: "123".to_owned(),
             ws_endpoint: format!("ws://127.0.0.1:{ws_port}"),
             api_base: format!("http://127.0.0.1:{api_port}"),
+            raid_direction: RaidAlertDirection::default(),
         });
 
         // Poll for the follow event and the delivered/stat counters a few

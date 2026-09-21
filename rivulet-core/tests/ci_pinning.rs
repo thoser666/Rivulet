@@ -438,9 +438,37 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
     // per-channel alert isolation (no session-lifecycle subscriptions) must
     // be documented.
     assert!(
-        eventsub.contains("subscription_type == \"channel.raid\"")
-            && eventsub.contains("from_broadcaster_user_id"),
-        "channel.raid subscriptions must use the directional from_broadcaster_user_id condition"
+        eventsub.contains("subscription_type != \"channel.raid\"")
+            && eventsub.contains("from_broadcaster_user_id")
+            && eventsub.contains("to_broadcaster_user_id"),
+        "channel.raid subscriptions must use the directional from_/to_broadcaster_user_id conditions"
+    );
+    // Raid direction is user-configurable (out/in/both): the enum must
+    // serialize for persistence, the worker config must carry it, and the
+    // GUI must offer the choice with the worker restarting on change.
+    assert!(
+        eventsub.contains("pub enum RaidAlertDirection")
+            && eventsub.contains("pub raid_direction: RaidAlertDirection")
+            && eventsub.contains("build_subscription_body_with_direction"),
+        "the raid direction must be a config field driving the subscription bodies"
+    );
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(
+        app.contains("alerts_raid_direction")
+            && app.contains("fn raid_direction_label")
+            && app.contains("alert_raid_direction_out"),
+        "the GUI must expose the raid direction choice with localized labels"
+    );
+    assert!(
+        i18n.matches("\"alert_raid_direction_out\"").count() >= 2
+            && i18n.matches("\"alert_raid_direction_in\"").count() >= 2
+            && i18n.matches("\"alert_raid_direction_both\"").count() >= 2,
+        "raid direction labels must exist in EN and DE"
+    );
+    let alerts_docs = read("docs/alerts-ingest.md");
+    assert!(
+        alerts_docs.contains("RaidAlertDirection") || alerts_docs.contains("direction"),
+        "alerts docs must describe the raid direction setting"
     );
     let alerts_docs = read("docs/alerts-ingest.md");
     assert!(
