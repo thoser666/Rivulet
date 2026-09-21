@@ -4691,6 +4691,25 @@ fn chat_dock_supports_kick_and_youtube() {
             && i18n.matches("\"chat_shared_chat_source_tooltip\"").count() >= 2,
         "the dock must badge shared-chat source rooms with a translated tooltip"
     );
+    // Room-name resolution: the numeric source-room-id must be resolvable to
+    // a channel login through the cached Helix lookup service, and the dock
+    // must render through it (raw id until the lookup lands).
+    let rooms = read("rivulet-core/src/chat_rooms.rs");
+    assert!(
+        rooms.contains("pub struct SharedRoomNameService")
+            && rooms.contains("pub fn helix_users_by_id")
+            && rooms.contains("MAX_ROOM_NAME_CACHE")
+            && rooms.contains("fn helix_resolver_hits_the_users_endpoint_with_headers"),
+        "the room-name service must provide the cached Helix lookup with tests"
+    );
+    assert!(
+        core.contains("pub mod chat_rooms") && core.contains("SharedRoomNameService"),
+        "the room-name service must be exported from core"
+    );
+    assert!(
+        app.contains("fn shared_room_badge") && app.contains("chat_room_name_rx"),
+        "the dock must resolve room ids through the background lookup"
+    );
     assert!(
         docs.contains("Shared Chat"),
         "the chat dock documentation must describe shared-chat attribution"

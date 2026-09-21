@@ -970,6 +970,16 @@ pub struct RivuletApp {
             Vec<(rivulet_core::InfoPlatform, rivulet_core::InfoUpdateOutcome)>,
         >,
     >,
+    /// Shared Chat room-name cache: resolves the numeric `source-room-id` of
+    /// duplicated Twitch messages to channel logins via a background Helix
+    /// lookup (`via <login>` badge). Never persisted, never logs
+    /// credentials; see `rivulet_core::SharedRoomNameService`. Not persisted.
+    #[serde(skip)]
+    chat_room_names: rivulet_core::SharedRoomNameService,
+    /// In-flight room-name lookup: dispatches one batched Helix request on a
+    /// background thread. Not persisted.
+    #[serde(skip)]
+    chat_room_name_rx: Option<std::sync::mpsc::Receiver<Vec<(String, String)>>>,
     /// Chat dock: stream-info editor — last per-platform outcomes (empty
     /// until the first apply). Shown until the next apply. Not persisted.
     #[serde(skip)]
@@ -1751,6 +1761,8 @@ impl Default for RivuletApp {
             chat_info_game: String::new(),
             chat_info_busy: false,
             chat_info_rx: None,
+            chat_room_names: rivulet_core::SharedRoomNameService::default(),
+            chat_room_name_rx: None,
             chat_info_outcomes: Vec::new(),
             chat_info_error: None,
             plugin_approvals: rivulet_core::PluginApprovals::default(),
@@ -6446,6 +6458,23 @@ impl RivuletApp {
         }
         self.apply_chat_state(worker_state);
 
+        // Drain a finished shared-chat room-name lookup (non-blocking):
+        // results land in the cache, the badge self-improves next frame.
+        if let Some(rx) = &self.chat_room_name_rx {
+            match rx.try_recv() {
+                Ok(resolved) => {
+                    self.chat_room_names.apply_results(resolved);
+                    self.chat_room_name_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // The thread died without sending (panic) — unblock.
+                    self.chat_room_names.release_in_flight();
+                    self.chat_room_name_rx = None;
+                }
+            }
+        }
+
         // Drain the stream-info editor: collect the per-platform outcomes
         // of a finished background apply (non-blocking poll).
         if let Some(rx) = &self.chat_info_rx {
@@ -8291,6 +8320,56 @@ impl RivuletApp {
         });
     }
 
+    /// Shared Chat badge label for `raw_id`: the cached channel login when
+    /// known, otherwise the raw id. Unknown ids start one batched background
+    /// Helix lookup (collapsed while in flight, released when dispatch is
+    /// impossible) — resolution never blocks rendering and runs only while a
+    /// shared-chat message is on screen.
+    fn shared_room_badge(&mut self, raw_id: &str) -> Option<String> {
+        match self.chat_room_names.step(raw_id) {
+            rivulet_core::RoomNameStep::Known(login) => Some(login),
+            // Until the lookup lands the raw id renders — same badge shape,
+            // honest fallback.
+            rivulet_core::RoomNameStep::Pending => Some(raw_id.to_owned()),
+            rivulet_core::RoomNameStep::Started(batch) => {
+                // Dispatch the lookup on a background thread only when a
+                // Twitch credential pair is actually configured; otherwise
+                // release the markers so a later frame can retry.
+                let client_id = self.alerts_eventsub_client_id.trim().to_owned();
+                let token = self
+                    .chat_accounts
+                    .iter()
+                    .find(|a| a.platform == rivulet_core::ChatPlatform::Twitch)
+                    .and_then(|account| {
+                        rivulet_core::ChatTokenStore::default()
+                            .load(rivulet_core::ChatPlatform::Twitch, &account.channel)
+                            .unwrap_or(None)
+                    });
+                match (client_id.is_empty(), token.as_deref()) {
+                    (false, Some(token)) if !token.trim().is_empty() => {
+                        use rivulet_core::RoomNameResolver as _;
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        let resolver = rivulet_core::HelixRoomResolver::default();
+                        let token = token.to_owned();
+                        let batch = batch.clone();
+                        std::thread::spawn(move || {
+                            let resolved = match resolver.resolve(&batch, &client_id, &token) {
+                                Ok(body) => rivulet_core::helix_users_by_id(&body),
+                                Err(_) => Vec::new(),
+                            };
+                            let _ = tx.send(resolved);
+                        });
+                        self.chat_room_name_rx = Some(rx);
+                    }
+                    _ => {
+                        self.chat_room_names.release_in_flight();
+                    }
+                }
+                Some(raw_id.to_owned())
+            }
+        }
+    }
+
     fn draw_chat_dock(&mut self, ui: &mut egui::Ui, max_list_height: f32) {
         ui.add_space(8.0);
         ui.label(egui::RichText::new(self.tr("chat_title")).strong());
@@ -8552,11 +8631,16 @@ impl RivuletApp {
                         // participating channel carry `source-room-id`; badge
                         // them so viewers can be attributed to their origin.
                         if let Some(source_room) = message.source_room_id.as_deref() {
-                            ui.small(egui::RichText::new(format!("[\u{21aa} {source_room}]")))
-                                .on_hover_text(self.tr_fmt(
-                                    "chat_shared_chat_source_tooltip",
-                                    &[source_room.to_owned()],
-                                ));
+                            // Resolve the numeric room id to a channel login
+                            // in the background (cached); until the result
+                            // lands the raw id renders — same shape, honest
+                            // fallback.
+                            if let Some(label) = self.shared_room_badge(source_room) {
+                                ui.small(egui::RichText::new(format!("[\u{21aa} {label}]")))
+                                    .on_hover_text(
+                                        self.tr_fmt("chat_shared_chat_source_tooltip", &[label]),
+                                    );
+                            }
                         }
                         ui.label(text);
                         if message.action {
@@ -17020,6 +17104,67 @@ mod tests {
         let app = RivuletApp::default();
         let line = app.alert_event_to_chat_message(&rivulet_core::AlertEvent::sample_follow());
         assert!(line.source_room_id.is_none());
+    }
+
+    #[test]
+    fn shared_room_badge_falls_back_and_retries_without_credentials() {
+        // Without a client id / Twitch token the badge stays on the raw id,
+        // nothing dials out, and the in-flight marker is released so a later
+        // frame retries instead of sticking. A landed resolution flips the
+        // label to the cached login.
+        let mut app = RivuletApp::default();
+        assert_eq!(app.shared_room_badge("12826"), Some("12826".to_owned()));
+        assert!(app.chat_room_name_rx.is_none(), "no lookup without creds");
+        assert_eq!(app.shared_room_badge("12826"), Some("12826".to_owned()));
+        app.chat_room_names
+            .apply_results(vec![("12826".to_owned(), "twitch".to_owned())]);
+        assert_eq!(app.shared_room_badge("12826"), Some("twitch".to_owned()));
+    }
+
+    #[test]
+    fn chat_dock_resolves_shared_chat_rooms_in_source() {
+        // Source contract: the badge helper drives the cached Helix lookup
+        // (collapsed in-flight, background dispatch, raw-id fallback) and the
+        // reconcile loop drains the finished lookup into the cache.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        assert!(
+            source.contains("fn shared_room_badge"),
+            "the badge helper must exist"
+        );
+        let draw = source
+            .split_once("fn draw_chat_dock")
+            .map(|(_, rest)| rest)
+            .expect("draw_chat_dock must exist");
+        assert!(
+            draw.contains("shared_room_badge"),
+            "the dock must render through the badge helper"
+        );
+        let helper = source
+            .split_once("fn shared_room_badge")
+            .map(|(_, rest)| rest)
+            .expect("shared_room_badge must exist");
+        for marker in [
+            "RoomNameStep::Known",
+            "RoomNameStep::Pending",
+            "release_in_flight",
+            "ChatTokenStore::default()",
+            "HelixRoomResolver::default()",
+            "helix_users_by_id",
+            "thread::spawn",
+        ] {
+            assert!(
+                helper.contains(marker),
+                "the badge helper must use {marker}"
+            );
+        }
+        let reconcile = source
+            .split_once("fn reconcile_chat")
+            .map(|(_, rest)| rest)
+            .expect("reconcile_chat must exist");
+        assert!(
+            reconcile.contains("chat_room_name_rx") && reconcile.contains("apply_results"),
+            "reconcile must drain finished room-name lookups into the cache"
+        );
     }
 
     #[test]
