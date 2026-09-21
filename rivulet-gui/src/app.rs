@@ -6505,7 +6505,8 @@ impl RivuletApp {
         self.apply_alerts_receiver();
         if let Some(receiver) = &self.alerts_receiver {
             while let Ok(event) = receiver.events().try_recv() {
-                self.alert_ingest.push(event);
+                self.alert_ingest
+                    .push_from(rivulet_core::AlertSource::StreamlabsWebhook, event);
             }
         }
 
@@ -6515,17 +6516,25 @@ impl RivuletApp {
         self.apply_alerts_eventsub();
         if let Some(eventsub) = &self.alerts_eventsub {
             while let Ok(event) = eventsub.events().try_recv() {
-                self.alert_ingest.push(event);
+                self.alert_ingest
+                    .push_from(rivulet_core::AlertSource::TwitchEventSub, event);
             }
         }
 
-        // Drain engagement events from the chat workers (Kick subs/gifts
-        // parsed from the Pusher chat stream) into the same local queue, so
-        // the alerts dock shows them next to the EventSub/Streamlabs lines.
+        // Drain engagement events from the chat workers (Kick subs/gifts and
+        // YouTube Super Chats parsed from their respective streams) into the
+        // same local queue, so the alerts dock shows them next to the
+        // EventSub/Streamlabs lines. Each platform is its own rate-limit
+        // source, so one spamming platform cannot starve the others.
         if let Some(multi) = &self.chat_worker_multi {
-            for rx in multi.alert_receivers() {
+            for (account, rx) in multi.alert_receivers_by_platform() {
+                let source = match account.platform {
+                    rivulet_core::ChatPlatform::Kick => rivulet_core::AlertSource::Kick,
+                    rivulet_core::ChatPlatform::YouTube => rivulet_core::AlertSource::YouTube,
+                    rivulet_core::ChatPlatform::Twitch => rivulet_core::AlertSource::TwitchEventSub,
+                };
                 while let Ok(event) = rx.try_recv() {
-                    self.alert_ingest.push(event);
+                    self.alert_ingest.push_from(source, event);
                 }
             }
         }
@@ -6540,9 +6549,18 @@ impl RivuletApp {
         // Drain once, surface twice: the combined chat dock keeps showing
         // alerts as action lines, and the dedicated alerts dock accumulates
         // the same events in its own bounded live list (both lists newest
-        // last, bottom-anchored).
-        for event in self.alert_ingest.drain() {
-            let message = self.alert_event_to_chat_message(&event);
+        // last, bottom-anchored). Suppression notices from the per-source
+        // rate limiter render as their own line in both docks, so a spam
+        // burst is visibly throttled instead of silently vanishing.
+        for entry in self.alert_ingest.drain_with_sources() {
+            let message = match entry {
+                rivulet_core::AlertQueueEntry::Event(event) => {
+                    self.alert_event_to_chat_message(&event)
+                }
+                rivulet_core::AlertQueueEntry::Suppressed(notice) => {
+                    self.alert_suppression_to_chat_message(&notice)
+                }
+            };
             self.chat_messages.push(message.clone());
             if self.chat_messages.len() > MAX_CHAT_MESSAGES {
                 let overflow = self.chat_messages.len() - MAX_CHAT_MESSAGES;
@@ -6604,6 +6622,35 @@ impl RivuletApp {
         }
     }
 
+    /// Render the per-source rate-limit notice as a neutral dock line. The
+    /// platform badge is deliberately `None`: the notice is about a delivery
+    /// channel (which may aggregate providers), so the source name is spelled
+    /// out in the text instead.
+    fn alert_suppression_to_chat_message(
+        &self,
+        notice: &rivulet_core::AlertSuppressionNotice,
+    ) -> rivulet_core::ChatMessage {
+        let text = self.tr_fmt(
+            "alerts_rate_limited",
+            &[
+                notice.source.display_name().to_owned(),
+                notice.suppressed.to_string(),
+            ],
+        );
+        rivulet_core::ChatMessage {
+            user: "rivulet".to_owned(),
+            text,
+            action: true,
+            color: Some("#8a8f98".to_owned()),
+            badges: Vec::new(),
+            broadcaster: false,
+            id: None,
+            timestamp: 0,
+            platform: None,
+            source_room_id: None,
+        }
+    }
+
     /// Push one deterministic sample of every alert kind into the local queue
     /// (chat-dock "Preview" button) so the surfacing can be verified without a
     /// live stream and the wiring is GUI-testable.
@@ -6640,7 +6687,8 @@ impl RivuletApp {
         ];
         self.alert_ingest.set_enabled(true);
         for event in events {
-            self.alert_ingest.push(event);
+            self.alert_ingest
+                .push_from(rivulet_core::AlertSource::LocalPreview, event);
         }
     }
 
@@ -16518,19 +16566,55 @@ mod tests {
 
     #[test]
     fn chat_dock_drain_covers_chat_worker_alert_receivers() {
-        // Source-pin the kick drain so the combined dock keeps consuming the
-        // chat workers' engagement receivers alongside EventSub/Streamlabs.
+        // Source-pin the platform drain so the combined dock keeps consuming
+        // the chat workers' engagement receivers alongside EventSub/Streamlabs,
+        // attributed per platform for the per-source rate limiter.
         let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/app.rs"));
         for required in [
-            "multi.alert_receivers()",
+            "multi.alert_receivers_by_platform()",
             "while let Ok(event) = rx.try_recv()",
-            "self.alert_ingest.push(event);",
+            "self.alert_ingest.push_from(source, event);",
         ] {
             assert!(
                 source.contains(required),
                 "chat-worker alert drain must stay wired: {required}"
             );
         }
+    }
+
+    #[test]
+    fn spam_burst_surfaces_one_localized_suppression_line() {
+        // A source exceeding its per-window budget must have its excess
+        // dropped and surface exactly one localized suppression line in both
+        // docks — throttling is visible, not silent.
+        let mut app = RivuletApp::default();
+        for i in 0..rivulet_core::ALERT_SOURCE_WINDOW_CAPACITY + 5 {
+            let event = rivulet_core::AlertEvent {
+                user: format!("Spammer{i}"),
+                ..rivulet_core::AlertEvent::sample_follow()
+            };
+            app.alert_ingest
+                .push_from(rivulet_core::AlertSource::TwitchEventSub, event);
+        }
+
+        app.reconcile_chat();
+
+        let dock_texts: Vec<&str> = app.alert_events.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(
+            dock_texts.len(),
+            rivulet_core::ALERT_SOURCE_WINDOW_CAPACITY + 1,
+            "accepted events plus exactly one suppression notice"
+        );
+        assert_eq!(
+            dock_texts.last().copied(),
+            Some("Twitch EventSub: 5 further alerts suppressed (rate limit)"),
+            "the suppression line names the source and the dropped count"
+        );
+        assert_eq!(
+            app.alert_events.last().map(|m| m.platform),
+            Some(None),
+            "the notice carries no platform badge"
+        );
     }
 
     #[test]
