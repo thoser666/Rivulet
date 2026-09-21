@@ -431,8 +431,23 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
         assert!(
             eventsub.contains(required),
             "alerts_eventsub module must define {required}"
-        );
+        )
     }
+    // Shared-session semantics: the raid subscription must stay directional
+    // (Twitch rejects a plain broadcaster_user_id for channel.raid), and the
+    // per-channel alert isolation (no session-lifecycle subscriptions) must
+    // be documented.
+    assert!(
+        eventsub.contains("subscription_type == \"channel.raid\"")
+            && eventsub.contains("from_broadcaster_user_id"),
+        "channel.raid subscriptions must use the directional from_broadcaster_user_id condition"
+    );
+    let alerts_docs = read("docs/alerts-ingest.md");
+    assert!(
+        alerts_docs.contains("Shared Chat sessions")
+            && alerts_docs.contains("channel.shared_chat.begin"),
+        "alerts docs must describe shared-session alert semantics"
+    );
     for required in [
         "alert_ingest: rivulet_core::AlertIngest",
         "alert_ingest_enabled",

@@ -50,8 +50,27 @@ entries, with redaction of tokens and privacy tests.
   refresh is a documented follow-up). Automatic reconnect with backoff; a
   500 ms socket read timeout keeps worker shutdown prompt. The token and
   client ID are never logged, never `Debug`-printed and never embedded in
-  events; unknown/rejected frames are only counted. One end-to-end GUI test
+  events; unknown/rejected frames are only counted.One end-to-end GUI test
   feeds a real follow frame from a local WebSocket puppet into the chat dock.
+  The `channel.raid` subscription is created with the **directional**
+  `from_broadcaster_user_id` condition (Twitch rejects a plain
+  `broadcaster_user_id` for raids), so Rivulet alerts on raids *it sends*
+  and the raid parser's `from_broadcaster_*` payload fields match the
+  condition — a channel being raided does not fire a second alert.
+- **Shared Chat sessions** ("Stream Together"): alerts are **not merged**
+  across participants. EventSub delivers engagement notifications per
+  subscription condition, and `from_broadcaster_user_id` raid subscriptions
+  only ever fire for the broadcaster in the condition — so a raid *into* a
+  fellow session participant's channel appears only in *their* Rivulet.
+  Follows/subs/gifts on other participants' channels are separate
+  subscriptions Rivulet deliberately does not create. Alerts keep working
+  unchanged inside a session (your own channel's events arrive as usual),
+  and the combined dock's per-line platform badge stays accurate because
+  alert events are tagged per delivery platform, not per session. Rivulet
+  also does not subscribe to the session-lifecycle subscription types
+  (`channel.shared_chat.begin`/`update`/`end`) — the dock treats shared
+  sessions as a chat-level concern (see the Shared Chat attribution badge
+  in `docs/twitch-chat.md`).
 - **GUI** — Settings → **Alerts** panel: persisted **ingestion** toggle
   (on by default, purely local), an opt-in **webhook receiver** section
   (enabled toggle, port, masked Twitch EventSub secret) and an opt-in

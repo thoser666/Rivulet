@@ -230,16 +230,28 @@ pub fn parse_eventsub_ws_message(json: &str) -> Result<EventsubWsMessage, Events
 /// Build the Helix subscription-create body for one alert subscription.
 /// Deterministic shape: `type` + `version` + `condition.broadcaster_user_id` +
 /// `transport` (websocket, bound to the active `session_id`).
+///
+/// Exception — `channel.raid` is **directional**: Twitch rejects plain
+/// `broadcaster_user_id` conditions for raids and requires either
+/// `from_broadcaster_user_id` (notify when this broadcaster raids out) or
+/// `to_broadcaster_user_id` (notify when this broadcaster is raided). Rivulet
+/// subscribes with `from_broadcaster_user_id` and its raid parser reads the
+/// `from_broadcaster_*` fields, so the condition matches the payload shape.
 pub fn build_subscription_body(
     subscription_type: &str,
     version: &str,
     broadcaster_id: &str,
     session_id: &str,
 ) -> serde_json::Value {
+    let condition = if subscription_type == "channel.raid" {
+        serde_json::json!({ "from_broadcaster_user_id": broadcaster_id })
+    } else {
+        serde_json::json!({ "broadcaster_user_id": broadcaster_id })
+    };
     serde_json::json!({
         "type": subscription_type,
         "version": version,
-        "condition": { "broadcaster_user_id": broadcaster_id },
+        "condition": condition,
         "transport": { "method": "websocket", "session_id": session_id },
     })
 }
@@ -701,6 +713,22 @@ mod tests {
         assert_eq!(body["version"], "2");
         assert_eq!(body["condition"]["broadcaster_user_id"], "123");
         assert_eq!(body["transport"]["method"], "websocket");
+        assert_eq!(body["transport"]["session_id"], "SES_abc123");
+    }
+
+    #[test]
+    fn raid_subscription_uses_the_directional_from_condition() {
+        // Twitch rejects a plain broadcaster_user_id condition for raids —
+        // the channel.raid condition must carry from_ or to_ (docs: "The
+        // channel raid condition must include either from_broadcaster_user_id
+        // or to_broadcaster_user_id"). Rivulet raids out => from_. The event
+        // parser reads from_broadcaster_user_name, so the condition and the
+        // payload shape stay aligned, and raiding INTO another channel does
+        // not double-fire for the raided side.
+        let body = build_subscription_body("channel.raid", "1", "123", "SES_abc123");
+        assert_eq!(body["condition"]["from_broadcaster_user_id"], "123");
+        assert!(body["condition"].get("broadcaster_user_id").is_none());
+        assert!(body["condition"].get("to_broadcaster_user_id").is_none());
         assert_eq!(body["transport"]["session_id"], "SES_abc123");
     }
 
