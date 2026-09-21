@@ -37,6 +37,96 @@ type HmacSha256 = Hmac<Sha256>;
 /// Bounded size of the local alert queue (oldest entry dropped when full).
 pub const DEFAULT_ALERT_QUEUE_CAPACITY: usize = 64;
 
+/// Maximum alert events accepted **per source per 10-second window**.
+///
+/// A source is a delivery channel (Twitch EventSub, the Streamlabs loopback
+/// webhook, Kick's chat stream, YouTube's poll feed, the local preview), not
+/// a viewer: one spamming channel cannot flood the alerts dock, while a busy
+/// multi-platform streamer still gets every source's own lane at full speed.
+/// When a source exceeds the budget the excess is dropped and a **single
+/// localized rate-limit notice** is queued instead, so the suppression is
+/// visible rather than silent.
+pub const ALERT_SOURCE_WINDOW_CAPACITY: usize = 24;
+
+/// Width of the fixed sliding window (seconds) enforced per source.
+pub const ALERT_SOURCE_WINDOW_SECONDS: u64 = 10;
+
+/// Identifies **where** an [`AlertEvent`] arrived from, for per-source rate
+/// limiting. Distinct from [`crate::chat::ChatPlatform`]: one delivery
+/// channel per variant, and Streamlabs is aggregated upstream so the webhook
+/// receiver is its own source regardless of the originating provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AlertSource {
+    /// Twitch EventSub (WebSocket worker or webhook notification).
+    TwitchEventSub,
+    /// Streamlabs loopback webhook receiver.
+    StreamlabsWebhook,
+    /// Kick engagement events parsed from the Pusher chat stream.
+    Kick,
+    /// YouTube engagement events parsed from the Innertube poll feed.
+    YouTube,
+    /// The local "Preview alerts" button and deterministic samples.
+    LocalPreview,
+}
+
+impl AlertSource {
+    /// All sources, in stable order (used by tests and diagnostics).
+    pub fn all() -> &'static [AlertSource] {
+        &[
+            AlertSource::TwitchEventSub,
+            AlertSource::StreamlabsWebhook,
+            AlertSource::Kick,
+            AlertSource::YouTube,
+            AlertSource::LocalPreview,
+        ]
+    }
+
+    /// Human-readable name used as a placeholder in the localized
+    /// rate-limit notice (technical names need no translation).
+    pub fn display_name(self) -> &'static str {
+        match self {
+            AlertSource::TwitchEventSub => "Twitch EventSub",
+            AlertSource::StreamlabsWebhook => "Streamlabs",
+            AlertSource::Kick => "Kick",
+            AlertSource::YouTube => "YouTube",
+            AlertSource::LocalPreview => "Local preview",
+        }
+    }
+}
+
+/// Per-source fixed-window budget for one [`AlertSource`].
+#[derive(Debug, Clone)]
+struct SourceWindow {
+    events_in_window: usize,
+    window_started: u64,
+}
+
+impl SourceWindow {
+    fn new() -> SourceWindow {
+        SourceWindow {
+            events_in_window: 0,
+            window_started: 0,
+        }
+    }
+}
+
+/// A queued suppression notice: one per source per burst window, rendered by
+/// the GUI as a dedicated dock line ("… suppressed N further alerts").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlertSuppressionNotice {
+    pub source: AlertSource,
+    /// How many events from this source were dropped in the burst.
+    pub suppressed: u32,
+}
+
+/// One drained item from the alert queue: either an accepted
+/// [`AlertEvent`] or a per-source [`AlertSuppressionNotice`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AlertQueueEntry {
+    Event(AlertEvent),
+    Suppressed(AlertSuppressionNotice),
+}
+
 /// The kind of engagement event an ingest entry represents.
 ///
 /// Each variant maps to exactly one i18n key (the parity test keeps EN and DE
@@ -459,6 +549,17 @@ pub struct AlertIngest {
     accepted_total: u64,
     skipped_disabled: u64,
     dropped_oldest: u64,
+    /// Per-source fixed-window budgets (created lazily on first push).
+    source_windows: std::collections::HashMap<AlertSource, SourceWindow>,
+    /// Queued suppression notices (one per source per burst window).
+    notices: VecDeque<AlertSuppressionNotice>,
+    /// In-window events suppressed per source (flushed as one notice when the
+    /// window rolls over, so a long burst surfaces exactly one line).
+    suppressed_pending: std::collections::HashMap<AlertSource, u32>,
+    /// Current time in seconds; injectable so tests are deterministic.
+    now_fn: fn() -> u64,
+    /// Rate limiting on/off (legacy `push` path stays unlimited).
+    rate_limit_enabled: bool,
 }
 
 impl fmt::Debug for AlertIngest {
@@ -471,6 +572,7 @@ impl fmt::Debug for AlertIngest {
             .field("accepted_total", &self.accepted_total)
             .field("skipped_disabled", &self.skipped_disabled)
             .field("dropped_oldest", &self.dropped_oldest)
+            .field("rate_limit_enabled", &self.rate_limit_enabled)
             .finish()
     }
 }
@@ -492,6 +594,16 @@ impl AlertIngest {
             accepted_total: 0,
             skipped_disabled: 0,
             dropped_oldest: 0,
+            source_windows: std::collections::HashMap::new(),
+            notices: VecDeque::new(),
+            suppressed_pending: std::collections::HashMap::new(),
+            now_fn: || {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0)
+            },
+            rate_limit_enabled: true,
         }
     }
 
@@ -517,6 +629,99 @@ impl AlertIngest {
         self.capacity
     }
 
+    /// Turn per-source rate limiting on/off. It is **on** by default; the
+    /// local preview and tests use [`AlertIngest::push`] (never limited) or
+    /// the explicit toggle.
+    pub fn set_rate_limit_enabled(&mut self, enabled: bool) {
+        self.rate_limit_enabled = enabled;
+    }
+
+    pub fn rate_limit_enabled(&self) -> bool {
+        self.rate_limit_enabled
+    }
+
+    /// Override the clock for deterministic tests (seconds).
+    pub fn set_now_fn(&mut self, now_fn: fn() -> u64) {
+        self.now_fn = now_fn;
+    }
+
+    /// Queue a source-tagged event under the per-source rate limit.
+    ///
+    /// Budget: [`ALERT_SOURCE_WINDOW_CAPACITY`] events per source per
+    /// [`ALERT_SOURCE_WINDOW_SECONDS`]. Events beyond the budget are dropped
+    /// and counted; the first burst queues one [`AlertSuppressionNotice`],
+    /// and the notice's `suppressed` count accumulates until that source's
+    /// window rolls over. Returns whether the event itself was queued.
+    pub fn push_from(&mut self, source: AlertSource, event: AlertEvent) -> bool {
+        if !self.enabled {
+            self.skipped_disabled += 1;
+            return false;
+        }
+        let now = (self.now_fn)();
+        let capacity = ALERT_SOURCE_WINDOW_CAPACITY;
+        let window = ALERT_SOURCE_WINDOW_SECONDS;
+        let entry = self
+            .source_windows
+            .entry(source)
+            .or_insert_with(SourceWindow::new);
+        // Roll over a stale window (and its pending suppression count) so the
+        // next burst starts fresh and queues its own notice.
+        if now.saturating_sub(entry.window_started) >= window {
+            self.suppressed_pending.remove(&source);
+            entry.window_started = now;
+            entry.events_in_window = 0;
+        }
+        if entry.events_in_window >= capacity {
+            match self.suppressed_pending.get_mut(&source) {
+                // Same burst continuing: grow the pending count and the
+                // burst's notice, so a long burst stays exactly one line.
+                Some(pending) => {
+                    *pending += 1;
+                    let count = *pending;
+                    if let Some(notice) = self.notices.iter_mut().rev().find(|n| n.source == source)
+                    {
+                        notice.suppressed = count;
+                    }
+                }
+                // First suppressed event of a fresh burst (window rolled
+                // over, or nothing suppressed before): its own notice.
+                None => {
+                    self.suppressed_pending.insert(source, 1);
+                    self.notices.push_back(AlertSuppressionNotice {
+                        source,
+                        suppressed: 1,
+                    });
+                }
+            }
+            return false;
+        }
+        entry.events_in_window += 1;
+        self.entries.push_back(event);
+        self.accepted_total += 1;
+        true
+    }
+
+    /// Remove and return all queued events (FIFO), clearing the queue.
+    ///
+    /// Legacy unlimited path: bypasses the notice stream. The GUI drains
+    /// through [`AlertIngest::drain_with_sources`], which also returns any
+    /// pending rate-limit suppression notices.
+    pub fn drain(&mut self) -> Vec<AlertEvent> {
+        self.entries.drain(..).collect()
+    }
+
+    /// Remove and return all queued items (FIFO): accepted events plus any
+    /// rate-limit suppression notices, which arrive **after** the events
+    /// accepted before them in queue order.
+    pub fn drain_with_sources(&mut self) -> Vec<AlertQueueEntry> {
+        let mut out: Vec<AlertQueueEntry> =
+            self.entries.drain(..).map(AlertQueueEntry::Event).collect();
+        for notice in self.notices.drain(..) {
+            out.push(AlertQueueEntry::Suppressed(notice));
+        }
+        out
+    }
+
     /// Queue an event. Returns `false` (and counts a skip) while disabled.
     pub fn push(&mut self, event: AlertEvent) -> bool {
         if !self.enabled {
@@ -530,11 +735,6 @@ impl AlertIngest {
         self.entries.push_back(event);
         self.accepted_total += 1;
         true
-    }
-
-    /// Remove and return all queued entries (FIFO), clearing the queue.
-    pub fn drain(&mut self) -> Vec<AlertEvent> {
-        self.entries.drain(..).collect()
     }
 
     pub fn len(&self) -> usize {
@@ -835,5 +1035,151 @@ mod tests {
         );
         assert_eq!(AlertEvent::sanitize_message("\u{0000}\n\t"), None);
         assert_eq!(AlertEvent::sanitize_message("  \u{200b}  "), None);
+    }
+
+    // ── Per-source rate limiting ───────────────────────────────────────
+
+    /// Deterministic test clock: seconds since an arbitrary epoch.
+    static TEST_NOW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1_000);
+
+    fn test_clock() -> u64 {
+        TEST_NOW.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn limited_ingest() -> AlertIngest {
+        let mut ingest = AlertIngest::new();
+        ingest.set_now_fn(test_clock);
+        ingest
+    }
+
+    fn follow_from(user: &str) -> AlertEvent {
+        AlertEvent {
+            user: user.to_owned(),
+            ..AlertEvent::sample_follow()
+        }
+    }
+
+    #[test]
+    fn burst_within_budget_is_fully_queued() {
+        let mut ingest = limited_ingest();
+        for i in 0..ALERT_SOURCE_WINDOW_CAPACITY {
+            assert!(
+                ingest.push_from(AlertSource::TwitchEventSub, follow_from(&format!("u{i}"))),
+                "event {i} within the budget must be accepted"
+            );
+        }
+        assert_eq!(ingest.len(), ALERT_SOURCE_WINDOW_CAPACITY);
+        assert!(matches!(
+            ingest.drain_with_sources()[..],
+            [AlertQueueEntry::Event(_), ..]
+        ));
+    }
+
+    #[test]
+    fn burst_beyond_budget_is_suppressed_with_one_notice() {
+        let mut ingest = limited_ingest();
+        for i in 0..ALERT_SOURCE_WINDOW_CAPACITY + 10 {
+            ingest.push_from(AlertSource::TwitchEventSub, follow_from(&format!("u{i}")));
+        }
+        assert_eq!(ingest.len(), ALERT_SOURCE_WINDOW_CAPACITY);
+        let drained = ingest.drain_with_sources();
+        // 24 accepted events + exactly one suppression notice.
+        assert_eq!(drained.len(), ALERT_SOURCE_WINDOW_CAPACITY + 1);
+        match drained.last() {
+            Some(AlertQueueEntry::Suppressed(notice)) => {
+                assert_eq!(notice.source, AlertSource::TwitchEventSub);
+                assert_eq!(notice.suppressed, 10);
+            }
+            other => panic!("expected a suppression notice, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn independent_sources_do_not_starve_each_other() {
+        let mut ingest = limited_ingest();
+        // Twitch exhausts its lane...
+        for i in 0..ALERT_SOURCE_WINDOW_CAPACITY {
+            assert!(ingest.push_from(AlertSource::TwitchEventSub, follow_from(&format!("u{i}"))));
+        }
+        // ...Kick still gets its full lane.
+        for i in 0..ALERT_SOURCE_WINDOW_CAPACITY {
+            assert!(ingest.push_from(AlertSource::Kick, follow_from(&format!("k{i}"))));
+        }
+        assert_eq!(ingest.len(), 2 * ALERT_SOURCE_WINDOW_CAPACITY);
+    }
+
+    #[test]
+    fn window_rollover_reopens_the_lane_and_starts_a_new_notice() {
+        let mut ingest = limited_ingest();
+        for i in 0..ALERT_SOURCE_WINDOW_CAPACITY {
+            ingest.push_from(AlertSource::Kick, follow_from(&format!("u{i}")));
+        }
+        // First burst: notice queued with count 1...
+        ingest.push_from(AlertSource::Kick, follow_from("burst1"));
+        assert_eq!(ingest.notices.len(), 1);
+
+        // ...window rolls over: pending count is dropped, so the notice
+        // keeps its last honest value and the next burst queues its own.
+        TEST_NOW.store(
+            1_000 + ALERT_SOURCE_WINDOW_SECONDS,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        for i in 0..ALERT_SOURCE_WINDOW_CAPACITY {
+            assert!(ingest.push_from(AlertSource::Kick, follow_from(&format!("v{i}"))));
+        }
+        ingest.push_from(AlertSource::Kick, follow_from("burst2"));
+        assert_eq!(ingest.notices.len(), 2, "a new burst needs its own notice");
+        match &ingest.notices[0] {
+            AlertSuppressionNotice {
+                source: AlertSource::Kick,
+                suppressed: 1,
+            } => {}
+            other => panic!("first notice must be untouched, got {other:?}"),
+        }
+        TEST_NOW.store(1_000, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[test]
+    fn disabled_ingest_skips_source_tagged_events_too() {
+        let mut ingest = limited_ingest();
+        ingest.set_enabled(false);
+        assert!(!ingest.push_from(AlertSource::YouTube, follow_from("u1")));
+        assert_eq!(ingest.skipped_disabled(), 1);
+        assert_eq!(ingest.len(), 0);
+    }
+
+    #[test]
+    fn legacy_push_bypasses_the_limiter() {
+        let mut ingest = limited_ingest();
+        // The legacy path never consults the per-source budget: more events
+        // than a full window's worth are all accepted (up to the queue
+        // capacity, which bounds every path).
+        for i in 0..ALERT_SOURCE_WINDOW_CAPACITY * 3 {
+            assert!(ingest.push(follow_from(&format!("u{i}"))));
+        }
+        assert_eq!(ingest.len(), DEFAULT_ALERT_QUEUE_CAPACITY);
+        assert_eq!(
+            ingest.dropped_oldest(),
+            (ALERT_SOURCE_WINDOW_CAPACITY * 3 - DEFAULT_ALERT_QUEUE_CAPACITY) as u64
+        );
+        assert!(
+            ingest.notices.is_empty(),
+            "legacy push never queues notices"
+        );
+        assert_eq!(
+            ingest.drain_with_sources().len(),
+            DEFAULT_ALERT_QUEUE_CAPACITY
+        );
+        assert!(ingest.drain().is_empty());
+    }
+
+    #[test]
+    fn local_preview_lane_is_rate_limited_like_any_other() {
+        let mut ingest = limited_ingest();
+        for i in 0..ALERT_SOURCE_WINDOW_CAPACITY {
+            assert!(ingest.push_from(AlertSource::LocalPreview, follow_from(&format!("u{i}"))));
+        }
+        assert!(!ingest.push_from(AlertSource::LocalPreview, follow_from("overflow")));
+        assert_eq!(ingest.notices.len(), 1);
     }
 }

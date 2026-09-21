@@ -493,6 +493,17 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
         "fn draw_alerts_dock",
         "fn clear_alert_events",
         "const MAX_ALERT_EVENTS: usize = 200;",
+        // Per-source rate limiting: every drain site must be source-tagged
+        // (one spamming platform must not starve the others' lanes), the
+        // suppression line must render, and the chat-worker drain must go
+        // through the platform-tagged accessor.
+        "push_from(rivulet_core::AlertSource::StreamlabsWebhook, event)",
+        "push_from(rivulet_core::AlertSource::TwitchEventSub, event)",
+        "push_from(rivulet_core::AlertSource::LocalPreview, event)",
+        "AlertSource::Kick",
+        "AlertSource::YouTube",
+        "fn alert_suppression_to_chat_message",
+        "multi.alert_receivers_by_platform()",
     ] {
         assert!(gui.contains(required), "GUI must wire {required}");
     }
@@ -508,6 +519,24 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
         i18n.matches("\"alert_eventsub_enable\"").count() >= 2,
         "EventSub settings keys must be localized in both locales"
     );
+    assert!(
+        i18n.matches("\"alerts_rate_limited\"").count() >= 2,
+        "the rate-limit notice must be localized in both locales"
+    );
+    let core = read("rivulet-core/src/alerts_ingest.rs");
+    for required in [
+        "pub enum AlertSource",
+        "pub fn push_from",
+        "pub fn drain_with_sources",
+        "pub struct AlertSuppressionNotice",
+        "ALERT_SOURCE_WINDOW_CAPACITY: usize = 24",
+        "ALERT_SOURCE_WINDOW_SECONDS: u64 = 10",
+    ] {
+        assert!(
+            core.contains(required),
+            "alerts_ingest must define {required}"
+        );
+    }
     assert!(
         changelog.contains("feat(alerts)"),
         "CHANGELOG must document the alerts feature"
@@ -4830,10 +4859,10 @@ fn kick_engagement_alerts_feed_the_alerts_dock() {
     );
     let app = read("rivulet-gui/src/app.rs");
     assert!(
-        app.contains("multi.alert_receivers()")
+        app.contains("multi.alert_receivers_by_platform()")
             && app.contains("fn kick_engagement_events_drain_into_both_docks_with_badge")
             && app.contains("fn youtube_super_chat_renders_as_a_donation_line_with_badge"),
-        "the GUI reconcile must drain chat-worker alerts and pin the rendering"
+        "the GUI reconcile must drain chat-worker alerts (platform-tagged for the rate limiter) and pin the rendering"
     );
     let docs = read("docs/alerts-ingest.md");
     assert!(

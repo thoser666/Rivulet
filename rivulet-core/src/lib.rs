@@ -37,7 +37,8 @@ pub use telemetry::{
 pub mod alerts_ingest;
 pub use alerts_ingest::{
     parse_streamlabs_webhook, parse_twitch_eventsub_notification, verify_twitch_eventsub_signature,
-    AlertEvent, AlertIngest, AlertIngestError, AlertKind,
+    AlertEvent, AlertIngest, AlertIngestError, AlertKind, AlertQueueEntry, AlertSource,
+    AlertSuppressionNotice, ALERT_SOURCE_WINDOW_CAPACITY, ALERT_SOURCE_WINDOW_SECONDS,
 };
 pub mod alerts_webhook;
 pub use alerts_webhook::{

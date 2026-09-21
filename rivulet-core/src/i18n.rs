@@ -600,6 +600,10 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ),
                 ("alerts_dock_clear", "Clear"),
                 ("alerts_dock_empty", "No alerts yet — connect a platform or press Preview alerts."),
+                (
+                    "alerts_rate_limited",
+                    "{0}: {1} further alerts suppressed (rate limit)",
+                ),
                 ("alert_receiver_section", "Webhook receiver"),
                 ("alert_receiver_enable", "Enable local webhook receiver"),
                 ("alert_receiver_port", "Port"),
@@ -1374,6 +1378,10 @@ Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."
                 (
                     "alerts_dock_empty",
                     "Noch keine Alerts — verbinde eine Plattform oder drücke Alerts-Vorschau.",
+                ),
+                (
+                    "alerts_rate_limited",
+                    "{0}: {1} weitere Alerts unterdrückt (Rate-Limit)",
                 ),
                 ("alert_receiver_section", "Webhook-Empfänger"),
                 ("alert_receiver_enable", "Lokalen Webhook-Empfänger aktivieren"),

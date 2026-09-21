@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- feat(alerts): **Per-Source-Rate-Limiting** — die Alert-Ingest-Queue
+  drosselt jetzt pro Lieferkanal (`AlertSource`: Twitch EventSub,
+  Streamlabs-Webhook, Kick, YouTube, lokale Vorschau) auf
+  `ALERT_SOURCE_WINDOW_CAPACITY` (24) Events pro Quelle und 10-Sekunden-
+  Fenster. Überschüsse eines Spam-Bursts werden verworfen und als genau
+  **eine** lokalisierte Unterdrückungszeile („… N weitere Alerts
+  unterdrückt (Rate-Limit)“) in beiden Docks sichtbar gemacht; die
+  Quellen-Lanes sind unabhängig — eine spammingende Plattform kann den
+  anderen nichts wegnehmen. Die lokale `push`/`drain`-Route (Vorschau,
+  Tests) bleibt unbegrenzt; Tests nutzen eine injizierbare Uhr.
+
 - feat(alerts): **YouTube-Engagement-Alerts** — Super Chats, Super Sticker
   und neue Mitglieder werden aus dem bestehenden Innertube-Poll-Feed des
   Chat-Workers geparst und in die Alert-Pipeline eingespeist:

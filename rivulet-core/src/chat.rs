@@ -277,6 +277,19 @@ impl MultiChat {
         self.workers.iter().filter_map(|(_, chat)| chat.alerts())
     }
 
+    /// Platform-tagged variant of [`MultiChat::alert_receivers`]: yields each
+    /// worker's alert receiver together with its [`ChatAccount`], so the
+    /// consumer can attribute drained events to a rate-limit source (one
+    /// spamming platform must not starve the others' lanes).
+    pub fn alert_receivers_by_platform(
+        &self,
+    ) -> impl Iterator<Item = (&ChatAccount, &Receiver<crate::alerts_ingest::AlertEvent>)> + '_
+    {
+        self.workers
+            .iter()
+            .filter_map(|(account, chat)| chat.alerts().map(|rx| (account, rx)))
+    }
+
     /// Constructor taking full configs (endpoint overrides included), so
     /// tests can point every worker at deterministic local listeners and
     /// advanced setups can tunnel the platform endpoints.
@@ -676,6 +689,28 @@ mod tests {
             receivers.len(),
             2,
             "kick and youtube feed the alert drain, twitch does not"
+        );
+    }
+
+    #[test]
+    fn multichat_tags_alert_receivers_with_their_platform() {
+        // The platform-tagged accessor is what lets the GUI attribute drained
+        // events to a per-source rate-limit lane (one spamming platform must
+        // not starve the others).
+        let multi = MultiChat::from_configs(&[
+            ChatConfig::new(ChatPlatform::Kick, "kickchannel".to_owned(), String::new()),
+            ChatConfig::new(ChatPlatform::YouTube, "abc123".to_owned(), String::new()),
+            ChatConfig::new(ChatPlatform::Twitch, "rivulet".to_owned(), String::new()),
+        ]);
+        let mut tagged: Vec<String> = multi
+            .alert_receivers_by_platform()
+            .map(|(account, _)| account.platform.label().to_owned())
+            .collect();
+        tagged.sort();
+        assert_eq!(
+            tagged,
+            vec!["Kick".to_owned(), "YouTube".to_owned()],
+            "kick and youtube are tagged, twitch (no receiver) is absent"
         );
     }
 

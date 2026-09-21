@@ -24,6 +24,18 @@ entries, with redaction of tokens and privacy tests.
   - `AlertIngest`: **bounded** local queue (default capacity 64, oldest
     dropped), enabled by default, `Debug` renders settings/counters **only** —
     never entry contents.
+  - **Per-source rate limiting** (on by default): `AlertIngest::push_from`
+    tags each event with its [`AlertSource`](#what-ships) delivery channel —
+    `TwitchEventSub`, `StreamlabsWebhook`, `Kick`, `YouTube` or
+    `LocalPreview` — and enforces a fixed window of
+    **`ALERT_SOURCE_WINDOW_CAPACITY` (24) events per source per
+    `ALERT_SOURCE_WINDOW_SECONDS` (10 s)**. Events beyond the budget are
+    dropped and exactly **one** localized suppression line
+    (`alerts_rate_limited`, e.g. "Twitch EventSub: 5 further alerts
+    suppressed (rate limit)") is queued per burst, so a spam flood throttles
+    visibly instead of silently. Lanes are independent: one spamming source
+    cannot starve the others, and the local `drain`/`push` path stays
+    unlimited for preview and tests.
 - **`rivulet-core::alerts_webhook`** — the optional **loopback receiver**:
   - A tiny, dependency-free HTTP/1.1 listener bound to **`127.0.0.1`** (never
     a non-loopback address). Routes: `POST /webhook/streamlabs` (Streamlabs
