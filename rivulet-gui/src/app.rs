@@ -6519,6 +6519,17 @@ impl RivuletApp {
             }
         }
 
+        // Drain engagement events from the chat workers (Kick subs/gifts
+        // parsed from the Pusher chat stream) into the same local queue, so
+        // the alerts dock shows them next to the EventSub/Streamlabs lines.
+        if let Some(multi) = &self.chat_worker_multi {
+            for rx in multi.alert_receivers() {
+                while let Ok(event) = rx.try_recv() {
+                    self.alert_ingest.push(event);
+                }
+            }
+        }
+
         // Surface pending local alert events in the chat dock, newest first.
         // Ingestion is local by default; the preview button and the loopback
         // webhook receiver feed the same queue.
@@ -16421,6 +16432,66 @@ mod tests {
             std::mem::take(&mut app.chat_last_send_outcomes),
             vec![(rivulet_core::ChatPlatform::Twitch, true)]
         );
+    }
+
+    #[test]
+    fn kick_engagement_events_drain_into_both_docks_with_badge() {
+        // The GUI drain path (alert_ingest -> both docks, kick badge on the
+        // rendered line) fed through the real queue with a kick-tagged sub
+        // event, exactly as the chat-worker drain produces it.
+        let mut app = RivuletApp::default();
+        app.alert_ingest
+            .push(rivulet_core::AlertEvent {
+                kind: rivulet_core::AlertKind::Subscribe,
+                user: "KickFan".to_owned(),
+                recipient: None,
+                count: 0,
+                tier: Some("Tier 2".to_owned()),
+                amount: None,
+                currency: None,
+                message: None,
+                timestamp: 1_700_000_000,
+                platform: Some(rivulet_core::ChatPlatform::Kick),
+            })
+            .then_some(())
+            .expect("queue accepts while enabled");
+
+        app.reconcile_chat();
+
+        let chat_texts: Vec<&str> = app.chat_messages.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(
+            chat_texts,
+            vec!["KickFan subscribed (Tier 2)"],
+            "the kick subscription must surface as a localized chat entry"
+        );
+        assert_eq!(
+            app.chat_messages[0].platform,
+            Some(rivulet_core::ChatPlatform::Kick),
+            "the line must carry the kick badge"
+        );
+        let dock_texts: Vec<&str> = app.alert_events.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(
+            dock_texts,
+            vec!["KickFan subscribed (Tier 2)"],
+            "the dedicated alerts dock accumulates the same event"
+        );
+    }
+
+    #[test]
+    fn chat_dock_drain_covers_chat_worker_alert_receivers() {
+        // Source-pin the kick drain so the combined dock keeps consuming the
+        // chat workers' engagement receivers alongside EventSub/Streamlabs.
+        let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/app.rs"));
+        for required in [
+            "multi.alert_receivers()",
+            "while let Ok(event) = rx.try_recv()",
+            "self.alert_ingest.push(event);",
+        ] {
+            assert!(
+                source.contains(required),
+                "chat-worker alert drain must stay wired: {required}"
+            );
+        }
     }
 
     #[test]

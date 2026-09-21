@@ -4788,6 +4788,43 @@ fn chat_dock_supports_kick_and_youtube() {
 }
 
 #[test]
+fn kick_engagement_alerts_feed_the_alerts_dock() {
+    // Kick subs/gifts are parsed from the same Pusher chat stream the chat
+    // worker already maintains: the parser must stay pure and tested, the
+    // worker must route engagement payloads to a dedicated alert channel,
+    // the MultiChat facade must expose those receivers, the combined alerts
+    // dock must drain them, and the feature must be documented.
+    let kick = read("rivulet-core/src/kick_chat.rs");
+    assert!(
+        kick.contains("pub fn parse_kick_alert_event")
+            && kick.contains("fn parses_subscription_event")
+            && kick.contains("fn parses_gifted_subscriptions_event")
+            && kick.contains("fn worker_delivers_engagement_events_to_the_alert_receiver"),
+        "the Kick worker must parse engagement events and pin them with parser + worker tests"
+    );
+    assert!(
+        kick.contains("alert_tx.send(event)"),
+        "the Kick worker loop must route parsed alerts to the alert channel"
+    );
+    let chat = read("rivulet-core/src/chat.rs");
+    assert!(
+        chat.contains("pub fn alerts(&self)") && chat.contains("pub fn alert_receivers("),
+        "the chat facades must expose the engagement receivers"
+    );
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(
+        app.contains("multi.alert_receivers()")
+            && app.contains("fn kick_engagement_events_drain_into_both_docks_with_badge"),
+        "the GUI reconcile must drain chat-worker alerts and pin the rendering"
+    );
+    let docs = read("docs/alerts-ingest.md");
+    assert!(
+        docs.contains("Kick"),
+        "the alerts docs must cover the Kick engagement source"
+    );
+}
+
+#[test]
 fn restream_multitarget_fanout_is_wired_and_documented() {
     // M6 multi-platform restream: the engine already has MultistreamSettings
     // with per-target fan-out, but the GUI must expose add/remove controls,

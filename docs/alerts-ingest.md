@@ -66,6 +66,21 @@ entries, with redaction of tokens and privacy tests.
   perspective). Changing the direction updates the worker config, whose
   comparison in `apply_alerts_eventsub` restarts the EventSub WebSocket
   worker so the subscriptions are re-created with the new condition.
+- **Kick engagement events** — the Kick chat worker listens to the same
+  Pusher chatroom channel for engagement payloads and routes them to a
+  dedicated alert channel alongside the chat messages:
+  `SubscriptionEvent` becomes `AlertKind::Subscribe` (tier label from
+  `subscription_plan_name`, falling back to `subscription_plan`, then the
+  default `"Tier 1"`), `GiftedSubscriptionsEvent` becomes
+  `AlertKind::GiftSub` (count from the `gifted_usernames` list length,
+  falling back to a `quantity` field, minimum 1; the gifter is named from
+  `gifter_username` or `username`). The pure `parse_kick_alert_event` parser
+  is unit-tested, a local-WebSocket worker test proves both channels deliver
+  in parallel, the `MultiChat` facade exposes the receivers via
+  `Chat::alerts()`/`MultiChat::alert_receivers()`, and the GUI reconcile
+  drains them into the same `AlertIngest` — so Kick subs/gifts appear in
+  both docks with the `[Kick]` platform badge, localized by the existing
+  alert-kind keys. Unknown/malformed payloads yield no events.
 - **Shared Chat sessions** ("Stream Together"): alerts are **not merged**
   across participants. EventSub delivers engagement notifications per
   subscription condition, and `from_broadcaster_user_id` raid subscriptions
@@ -131,7 +146,11 @@ parse → verify → `AlertIngest::push`.
   `draw_alerts_dock` / `clear_alert_events`, Settings panels, chat-dock
   preview button (+16 GUI tests incl. loopback
   Receiver/Streamlabs-end-to-end and EventSub-puppet-end-to-end)
-- `rivulet-core/tests/ci_pinning.rs` — guard
+- `rivulet-core/src/kick_chat.rs` — engagement-event parsing
+  (`parse_kick_alert_event`) and the worker alert channel wired from the
+  Pusher chat stream (+5 parser tests, +1 worker e2e test)
+- `rivulet-core/tests/ci_pinning.rs` — guards
   `m5_alerts_ingest_is_native_localized_and_pinned` (the ci_pinning guard
-  pins the README/roadmap markers, the doc contents and the GUI wiring)
+  pins the README/roadmap markers, the doc contents and the GUI wiring) and
+  `kick_engagement_alerts_feed_the_alerts_dock`
 - `docs/obs-vision-roadmap.md` — M5 row marked **Done**
