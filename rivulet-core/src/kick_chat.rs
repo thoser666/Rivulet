@@ -137,6 +137,90 @@ pub fn parse_kick_event(payload: &str) -> Option<ChatMessage> {
     })
 }
 
+/// Parse one Pusher engagement-event payload into an [`AlertEvent`].
+///
+/// Kick delivers engagement events on the same chatroom Pusher channel as
+/// chat messages. Handled shapes (event name suffix → kind):
+///
+/// - `SubscriptionEvent` → [`AlertKind::Subscribe`] (tier from
+///   `data.subscription_plan_name`, falling back to `subscription_plan`)
+/// - `GiftedSubscriptionsEvent` → [`AlertKind::GiftSub`] (count from
+///   `data.gifted_usernames` length, or `data.quantity`, gifter from
+///   `data.gifter_username`/`data.username`)
+///
+/// Everything else (chat messages, deletion events, Pusher protocol events)
+/// yields `None`. Pure and deterministic — no I/O. Names are sanitized by
+/// [`crate::alerts_ingest::AlertEvent`] validation at queue time, and the
+/// event carries no tokens.
+pub fn parse_kick_alert_event(payload: &str) -> Option<crate::alerts_ingest::AlertEvent> {
+    use crate::alerts_ingest::{AlertEvent, AlertKind};
+
+    let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+    let event = value.get("event")?.as_str()?;
+    let data = value.get("data")?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if event.ends_with("SubscriptionEvent") && !event.ends_with("GiftedSubscriptionsEvent") {
+        let user = data
+            .get("username")
+            .and_then(|u| u.as_str())
+            .map(str::trim)
+            .filter(|u| !u.is_empty())?;
+        let tier = data
+            .get("subscription_plan_name")
+            .and_then(|t| t.as_str())
+            .or_else(|| data.get("subscription_plan").and_then(|t| t.as_str()))
+            .map(str::to_owned)
+            .unwrap_or_else(|| "Tier 1".to_owned());
+        return Some(AlertEvent {
+            kind: AlertKind::Subscribe,
+            user: user.to_owned(),
+            recipient: None,
+            count: 0,
+            tier: Some(tier),
+            amount: None,
+            currency: None,
+            message: None,
+            timestamp: now,
+            platform: Some(crate::chat::ChatPlatform::Kick),
+        });
+    }
+    if event.ends_with("GiftedSubscriptionsEvent") {
+        let user = data
+            .get("gifter_username")
+            .or_else(|| data.get("username"))
+            .and_then(|u| u.as_str())
+            .map(str::trim)
+            .filter(|u| !u.is_empty())?;
+        let count = data
+            .get("gifted_usernames")
+            .and_then(|g| g.as_array())
+            .map(|list| list.len() as u32)
+            .or_else(|| {
+                data.get("quantity")
+                    .and_then(|q| q.as_u64())
+                    .map(|q| q as u32)
+            })
+            .unwrap_or(1)
+            .max(1);
+        return Some(AlertEvent {
+            kind: AlertKind::GiftSub,
+            user: user.to_owned(),
+            recipient: None,
+            count,
+            tier: None,
+            amount: None,
+            currency: None,
+            message: None,
+            timestamp: now,
+            platform: Some(crate::chat::ChatPlatform::Kick),
+        });
+    }
+    None
+}
+
 /// Resolve the numeric chatroom id for a channel slug via the Kick API
 /// (`GET {api_base}/api/v2/channels/{slug}` → `chatroom.id`). Deterministic
 /// against a local listener in tests.
@@ -188,6 +272,7 @@ pub fn kick_send_message(
 pub struct KickChat {
     tx: Option<Sender<Msg>>,
     messages: Option<Receiver<ChatMessage>>,
+    alerts: Option<Receiver<crate::alerts_ingest::AlertEvent>>,
     stop: Arc<AtomicBool>,
     conn: Arc<std::sync::atomic::AtomicU8>,
 }
@@ -205,6 +290,7 @@ impl KickChat {
         }
         let (tx, rx) = unbounded();
         let (msg_tx, msg_rx) = unbounded();
+        let (alert_tx, alert_rx) = unbounded();
         let stop = Arc::new(AtomicBool::new(false));
         let conn = Arc::new(std::sync::atomic::AtomicU8::new(0));
         let worker_conn = Arc::clone(&conn);
@@ -212,7 +298,7 @@ impl KickChat {
         let cfg = config.clone();
         let spawned = std::thread::Builder::new()
             .name("rivulet-kick-chat".to_owned())
-            .spawn(move || worker_loop(rx, cfg, worker_stop, worker_conn, msg_tx))
+            .spawn(move || worker_loop(rx, cfg, worker_stop, worker_conn, msg_tx, alert_tx))
             .is_ok();
         if !spawned {
             return Self::disabled();
@@ -220,6 +306,7 @@ impl KickChat {
         Self {
             tx: Some(tx),
             messages: Some(msg_rx),
+            alerts: Some(alert_rx),
             stop,
             conn,
         }
@@ -229,6 +316,7 @@ impl KickChat {
         Self {
             tx: None,
             messages: None,
+            alerts: None,
             stop: Arc::new(AtomicBool::new(true)),
             conn: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         }
@@ -251,6 +339,12 @@ impl KickChat {
     /// Receiver for parsed chat messages, polled by the GUI each frame.
     pub fn messages(&self) -> Option<&Receiver<ChatMessage>> {
         self.messages.as_ref()
+    }
+
+    /// Receiver for parsed engagement events (subscriptions/gifts), drained
+    /// by the GUI into the local alert ingest queue each frame.
+    pub fn alerts(&self) -> Option<&Receiver<crate::alerts_ingest::AlertEvent>> {
+        self.alerts.as_ref()
     }
 
     /// Enqueue a chat message to send. Returns `false` when the worker is
@@ -295,11 +389,12 @@ fn worker_loop(
     stop: Arc<AtomicBool>,
     conn: Arc<std::sync::atomic::AtomicU8>,
     msg_tx: Sender<ChatMessage>,
+    alert_tx: Sender<crate::alerts_ingest::AlertEvent>,
 ) {
     let mut backoff = 1u64;
     while !stop.load(Ordering::SeqCst) {
         conn.store(1, Ordering::SeqCst);
-        match run_session(&cfg, &msg_tx, &rx) {
+        match run_session(&cfg, &msg_tx, &alert_tx, &rx) {
             Ok(()) => {
                 if stop.load(Ordering::SeqCst) {
                     break;
@@ -343,6 +438,7 @@ fn ws_host_port(url: &str) -> anyhow::Result<(String, u16)> {
 fn run_session(
     cfg: &KickChatConfig,
     msg_tx: &Sender<ChatMessage>,
+    alert_tx: &Sender<crate::alerts_ingest::AlertEvent>,
     rx: &Receiver<Msg>,
 ) -> anyhow::Result<()> {
     let chatroom_id = kick_chatroom_id(&cfg.api_base, &cfg.channel)?;
@@ -387,6 +483,9 @@ fn run_session(
         }
         match ws.read() {
             Ok(tungstenite::Message::Text(text)) => {
+                if let Some(event) = parse_kick_alert_event(text.as_str()) {
+                    let _ = alert_tx.send(event);
+                }
                 if let Some(message) = parse_kick_event(text.as_str()) {
                     if !message.is_empty_artifact() {
                         let _ = msg_tx.send(message);
@@ -610,6 +709,187 @@ mod tests {
         assert_eq!(msg.user, "KickFan");
         assert_eq!(msg.text, "hello from kick ws");
         assert_eq!(msg.color.as_deref(), Some("#FF00FF"));
+
+        ws_thread.join().expect("ws server joined");
+        chat.disconnect();
+    }
+
+    #[test]
+    fn parses_subscription_event() {
+        let payload = r#"{
+            "event": "App\\Events\\SubscriptionEvent",
+            "data": {
+                "username": "SubFan",
+                "subscription_plan_name": "Tier 2"
+            }
+        }"#;
+        let event = parse_kick_alert_event(payload).expect("subscription alert");
+        assert_eq!(event.kind, crate::alerts_ingest::AlertKind::Subscribe);
+        assert_eq!(event.user, "SubFan");
+        assert_eq!(event.tier.as_deref(), Some("Tier 2"));
+        assert_eq!(event.count, 0, "plain subs carry no gift count");
+        assert_eq!(
+            event.platform,
+            Some(crate::chat::ChatPlatform::Kick),
+            "kick alerts must carry the platform badge"
+        );
+    }
+
+    #[test]
+    fn subscription_tier_falls_back_to_plan_id_and_default() {
+        // Numeric plan id instead of a display name.
+        let event = parse_kick_alert_event(
+            r#"{"event":"App\\Events\\SubscriptionEvent","data":{"username":"a","subscription_plan":"tier_3"}}"#,
+        )
+        .expect("alert");
+        assert_eq!(event.tier.as_deref(), Some("tier_3"));
+        // Neither field present → default tier label.
+        let event = parse_kick_alert_event(
+            r#"{"event":"App\\Events\\SubscriptionEvent","data":{"username":"a"}}"#,
+        )
+        .expect("alert");
+        assert_eq!(event.tier.as_deref(), Some("Tier 1"));
+    }
+
+    #[test]
+    fn parses_gifted_subscriptions_event() {
+        let payload = r#"{
+            "event": "App\\Events\\GiftedSubscriptionsEvent",
+            "data": {
+                "gifter_username": "GenerousGifter",
+                "gifted_usernames": ["rec1", "rec2", "rec3"]
+            }
+        }"#;
+        let event = parse_kick_alert_event(payload).expect("gift alert");
+        assert_eq!(event.kind, crate::alerts_ingest::AlertKind::GiftSub);
+        assert_eq!(event.user, "GenerousGifter");
+        assert_eq!(event.count, 3, "count comes from the recipient list length");
+        assert_eq!(
+            event.platform,
+            Some(crate::chat::ChatPlatform::Kick),
+            "kick alerts must carry the platform badge"
+        );
+    }
+
+    #[test]
+    fn gift_count_falls_back_to_quantity_field() {
+        let event = parse_kick_alert_event(
+            r#"{"event":"App\\Events\\GiftedSubscriptionsEvent","data":{"gifter_username":"g","quantity":5}}"#,
+        )
+        .expect("gift alert");
+        assert_eq!(event.count, 5);
+        // No list, no quantity → at least one.
+        let event = parse_kick_alert_event(
+            r#"{"event":"App\\Events\\GiftedSubscriptionsEvent","data":{"username":"anon-gifter"}}"#,
+        )
+        .expect("gift alert");
+        assert_eq!(event.count, 1);
+        assert_eq!(event.user, "anon-gifter", "username is the gifter fallback");
+    }
+
+    #[test]
+    fn ignores_non_engagement_events_and_malformed_payloads() {
+        // Chat messages are the chat parser's job, not the alert parser's.
+        assert!(parse_kick_alert_event(
+            r#"{"event":"App\\Events\\ChatMessageEvent","data":{"content":"hi","sender":{"username":"u"}}}"#
+        )
+        .is_none());
+        // Pusher protocol frames.
+        assert!(parse_kick_alert_event(r#"{"event":"pusher:ping","data":"{}"}"#).is_none());
+        // GiftedSubscriptionsEvent must not be swallowed by the plain-sub arm.
+        assert!(parse_kick_alert_event(
+            r#"{"event":"App\\Events\\GiftedSubscriptionsEvent","data":{}}"#
+        )
+        .is_none());
+        // Malformed JSON / missing fields.
+        assert!(parse_kick_alert_event("not json").is_none());
+        assert!(parse_kick_alert_event(r#"{"event":"App\\Events\\SubscriptionEvent"}"#).is_none());
+        assert!(
+            parse_kick_alert_event(
+                r#"{"event":"App\\Events\\SubscriptionEvent","data":{"username":"   "}}"#
+            )
+            .is_none(),
+            "blank usernames must not become alerts"
+        );
+    }
+
+    /// End-to-end: the real worker routes an engagement event pushed over the
+    /// chat WebSocket to the alert receiver while chat messages keep flowing
+    /// on their own channel.
+    #[test]
+    fn worker_delivers_engagement_events_to_the_alert_receiver() {
+        use tungstenite::accept;
+
+        let api_listener = TcpListener::bind("127.0.0.1:0").expect("bind api");
+        let api_addr = api_listener.local_addr().expect("api addr");
+        std::thread::spawn(move || {
+            let (mut stream, _) = api_listener.accept().expect("accept api");
+            let _ = drain_http_request(&mut stream);
+            let body = r#"{"chatroom":{"id":7}}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+        });
+
+        let ws_listener = TcpListener::bind("127.0.0.1:0").expect("bind ws");
+        let ws_addr = ws_listener.local_addr().expect("ws addr");
+        let ws_thread = std::thread::spawn(move || {
+            let (stream, _) = ws_listener.accept().expect("accept ws");
+            let mut ws = accept(stream).expect("ws handshake");
+            let _ = ws.read().expect("subscribe");
+            let chat_msg = r##"{"event":"App\\Events\\ChatMessageEvent","data":{"id":"9","content":"chat line","sender":{"username":"Chatter"},"type":"message"}}"##;
+            let sub_msg = r#"{"event":"App\\Events\\SubscriptionEvent","data":{"username":"WsSubber","subscription_plan_name":"Tier 1"}}"#;
+            ws.send(tungstenite::Message::Text(chat_msg.into()))
+                .expect("send chat");
+            ws.send(tungstenite::Message::Text(sub_msg.into()))
+                .expect("send sub");
+            ws.flush().expect("flush");
+            std::thread::sleep(Duration::from_millis(200));
+        });
+
+        let cfg = KickChatConfig {
+            ws_endpoint: format!("ws://{ws_addr}/app/test"),
+            api_base: format!("http://{api_addr}"),
+            channel: "testchannel".to_owned(),
+            token: String::new(),
+        };
+        let mut chat = KickChat::new(&cfg);
+        assert!(chat.enabled());
+
+        // The chat line arrives on the message receiver…
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let chat_delivered = loop {
+            if let Some(rx) = chat.messages() {
+                if let Ok(msg) = rx.try_recv() {
+                    break Some(msg);
+                }
+            }
+            if std::time::Instant::now() > deadline {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        assert_eq!(chat_delivered.expect("chat delivered").text, "chat line");
+
+        // …and the subscription lands on the alert receiver.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let alert_delivered = loop {
+            if let Some(rx) = chat.alerts() {
+                if let Ok(event) = rx.try_recv() {
+                    break Some(event);
+                }
+            }
+            if std::time::Instant::now() > deadline {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        let event = alert_delivered.expect("alert delivered");
+        assert_eq!(event.kind, crate::alerts_ingest::AlertKind::Subscribe);
+        assert_eq!(event.user, "WsSubber");
 
         ws_thread.join().expect("ws server joined");
         chat.disconnect();

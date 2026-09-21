@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- feat(alerts): **Kick-Engagement-Alerts** — Subscriptions und Gift-Subs von
+  Kick werden jetzt aus dem bestehenden Pusher-Chat-Stream geparst und in die
+  Alert-Pipeline eingespeist: `SubscriptionEvent` → `Subscribe` (Tier aus
+  `subscription_plan_name` mit Fallbacks), `GiftedSubscriptionsEvent` →
+  `GiftSub` (Anzahl aus der Empfängerliste bzw. `quantity`, Gifter aus
+  `gifter_username`/`username`). Der Worker führt die Events auf einem
+  eigenen Alert-Kanal parallel zu den Chat-Nachrichten; die `MultiChat`-
+  Fassade exponiert die Receiver (`Chat::alerts()`/
+  `MultiChat::alert_receivers()`) und der GUI-Reconcile drainiert sie in
+  dieselbe Ingest-Queue — Kick-Alerts erscheinen mit `[Kick]`-Badge in beiden
+  Docks, lokalisiert über die bestehenden Alert-Kind-Keys (keine neuen
+  i18n-Keys nötig). Tests: Parser-Unit-Tests, Worker-e2e über eine lokale
+  WebSocket-Fixture, Fassaden-Tests, GUI-Render- und Quellpin-Tests plus
+  neuer ci_pinning-Guard.
+
 - feat(alerts): **Raid-Richtung konfigurierbar** — die Raid-Alerts sind jetzt
   in den Alert-Einstellungen richtungssteuerbar: **Raid raus**
   (`from_broadcaster_user_id`, bisheriges Verhalten), **Geraidet**
