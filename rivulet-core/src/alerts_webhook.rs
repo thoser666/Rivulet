@@ -313,6 +313,14 @@ fn accept_loop(
     while !shutdown.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, _)) => {
+                // macOS/BSD: accepted sockets inherit the listener's
+                // O_NONBLOCK (Linux does not). The listener is nonblocking so
+                // the shutdown flag wins promptly, but session sockets must
+                // block on read — otherwise the first read races the client's
+                // write and returns WouldBlock, which the handler answers
+                // with a spurious 400 (flaky loopback tests, dropped
+                // deliveries on macOS).
+                let _ = stream.set_nonblocking(false);
                 let _ = stream.set_nodelay(true);
                 let config = config.clone();
                 let counters = counters.clone();
