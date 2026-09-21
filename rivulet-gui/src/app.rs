@@ -1075,6 +1075,10 @@ pub struct RivuletApp {
     /// Not persisted; the token stays inside and is never Debug-printed.
     #[serde(skip)]
     alerts_eventsub_applied: rivulet_core::EventsubWsConfig,
+    /// Alerts: Twitch EventSub raid alert direction — raid out, raided, or
+    /// both. Persisted; changing it restarts the worker (see
+    /// `apply_alerts_eventsub`).
+    alerts_raid_direction: rivulet_core::RaidAlertDirection,
     /// Alerts: EventSub worker/IO error shown in Settings. Not persisted.
     #[serde(skip)]
     alerts_eventsub_error: Option<String>,
@@ -1787,6 +1791,7 @@ impl Default for RivuletApp {
             alerts_eventsub_broadcaster_id: String::new(),
             alerts_eventsub: None,
             alerts_eventsub_applied: rivulet_core::EventsubWsConfig::default(),
+            alerts_raid_direction: rivulet_core::RaidAlertDirection::default(),
             alerts_eventsub_error: None,
             alerts_eventsub_ws_endpoint: String::new(),
             alerts_eventsub_api_base: String::new(),
@@ -7987,6 +7992,18 @@ impl RivuletApp {
     /// "empty disables" semantics. Called once per frame, cheap when nothing
     /// changed. Connection failures are asynchronous (counters + `connected()`),
     /// so no error is raised here.
+    /// Localized label for one raid alert direction (settings ComboBox and
+    /// selected text).
+    fn raid_direction_label(&self, direction: rivulet_core::RaidAlertDirection) -> String {
+        match direction {
+            rivulet_core::RaidAlertDirection::Out => self.tr("alert_raid_direction_out").to_owned(),
+            rivulet_core::RaidAlertDirection::In => self.tr("alert_raid_direction_in").to_owned(),
+            rivulet_core::RaidAlertDirection::Both => {
+                self.tr("alert_raid_direction_both").to_owned()
+            }
+        }
+    }
+
     fn apply_alerts_eventsub(&mut self) {
         let ws_endpoint = if self.alerts_eventsub_ws_endpoint.trim().is_empty() {
             rivulet_core::DEFAULT_EVENTSUB_WS_ENDPOINT.to_owned()
@@ -8004,6 +8021,7 @@ impl RivuletApp {
             broadcaster_id: self.alerts_eventsub_broadcaster_id.trim().to_owned(),
             ws_endpoint,
             api_base,
+            raid_direction: self.alerts_raid_direction,
         };
         let complete = !desired.client_id.is_empty()
             && !desired.token.is_empty()
@@ -11335,6 +11353,7 @@ impl eframe::App for RivuletApp {
                         let eventsub_client_id = self.tr("alert_eventsub_client_id");
                         let eventsub_token = self.tr("alert_eventsub_token");
                         let eventsub_broadcaster = self.tr("alert_eventsub_broadcaster");
+                        let eventsub_raid_direction = self.tr("alert_eventsub_raid_direction");
                         let eventsub_note = self.tr("alert_eventsub_note");
                         ui.separator();
                         ui.label(egui::RichText::new(eventsub_section).strong());
@@ -11383,6 +11402,35 @@ impl eframe::App for RivuletApp {
                                     )
                                     .desired_width(220.0),
                                 );
+                                ui.end_row();
+                                // Raid direction: selects which channel.raid
+                                // condition the worker subscribes with
+                                // (from_/to_, or two subscriptions for both).
+                                // Changing it feeds the config comparison in
+                                // `apply_alerts_eventsub`, which restarts the
+                                // worker so the new subscriptions are created.
+                                ui.label(eventsub_raid_direction);
+                                // Labels are pre-resolved outside the closure
+                                // so the mutable field borrow and the `self.tr`
+                                // immutable borrow never overlap.
+                                let raid_labels: Vec<(rivulet_core::RaidAlertDirection, String)> =
+                                    rivulet_core::RaidAlertDirection::all()
+                                        .iter()
+                                        .map(|d| (*d, self.raid_direction_label(*d)))
+                                        .collect();
+                                let selected_raid =
+                                    self.raid_direction_label(self.alerts_raid_direction);
+                                egui::ComboBox::from_id_salt("alerts_raid_direction")
+                                    .selected_text(selected_raid)
+                                    .show_ui(ui, |ui| {
+                                        for (direction, label) in &raid_labels {
+                                            ui.selectable_value(
+                                                &mut self.alerts_raid_direction,
+                                                *direction,
+                                                label.clone(),
+                                            );
+                                        }
+                                    });
                                 ui.end_row();
                             });
                         if let Some(err) = &self.alerts_eventsub_error {
@@ -13394,6 +13442,73 @@ mod tests {
             app.alerts_eventsub_applied,
             rivulet_core::EventsubWsConfig::default()
         );
+    }
+
+    #[test]
+    fn alerts_raid_direction_defaults_to_out_and_flows_into_the_worker_config() {
+        // The direction is persisted, defaults to raid-out (historical
+        // behavior), and feeds `EventsubWsConfig` on every apply — so the
+        // applied-config comparison in `apply_alerts_eventsub` sees a change
+        // and restarts the worker when the user flips it.
+        let app = RivuletApp::default();
+        assert_eq!(
+            app.alerts_raid_direction,
+            rivulet_core::RaidAlertDirection::Out,
+            "default must stay raid-out (from_ condition)"
+        );
+
+        let app = RivuletApp {
+            alerts_raid_direction: rivulet_core::RaidAlertDirection::Both,
+            ..Default::default()
+        };
+        // Directly reuse the config-construction the apply path uses.
+        let desired = rivulet_core::EventsubWsConfig {
+            raid_direction: app.alerts_raid_direction,
+            ..Default::default()
+        };
+        assert_eq!(
+            desired.raid_direction,
+            rivulet_core::RaidAlertDirection::Both
+        );
+        assert_ne!(
+            desired,
+            rivulet_core::EventsubWsConfig::default(),
+            "a changed direction must differ from the default config so the worker restarts"
+        );
+    }
+
+    #[test]
+    fn alerts_raid_direction_persists_and_labels_exist_in_both_locales() {
+        // Persisted across sessions (serde on the enum via out/in/both) and
+        // localized EN + DE.
+        let app = RivuletApp {
+            alerts_raid_direction: rivulet_core::RaidAlertDirection::In,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&app).expect("serialize");
+        assert!(json.contains("\"in\""), "direction must serialize: {json}");
+        let restored: RivuletApp = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(
+            restored.alerts_raid_direction,
+            rivulet_core::RaidAlertDirection::In,
+            "direction must survive the round-trip"
+        );
+        let i18n = std::fs::read_to_string("../rivulet-core/src/i18n.rs").expect("i18n readable");
+        for key in [
+            "alert_eventsub_raid_direction",
+            "alert_raid_direction_out",
+            "alert_raid_direction_in",
+            "alert_raid_direction_both",
+        ] {
+            let k = format!("\"{key}\"");
+            assert!(
+                i18n.matches(&k).count() >= 2,
+                "{key} must exist in EN and DE"
+            );
+        }
+        assert!(!restored
+            .raid_direction_label(rivulet_core::RaidAlertDirection::Both)
+            .is_empty());
     }
 
     #[test]

@@ -46,8 +46,9 @@ pub use alerts_webhook::{
 };
 pub mod alerts_eventsub;
 pub use alerts_eventsub::{
-    build_subscription_body, parse_eventsub_ws_message, EventsubReceiver, EventsubWsConfig,
-    EventsubWsError, EventsubWsMessage, DEFAULT_EVENTSUB_WS_ENDPOINT, DEFAULT_TWITCH_API_BASE,
+    build_subscription_body, build_subscription_body_with_direction, parse_eventsub_ws_message,
+    EventsubReceiver, EventsubWsConfig, EventsubWsError, EventsubWsMessage, RaidAlertDirection,
+    DEFAULT_EVENTSUB_WS_ENDPOINT, DEFAULT_TWITCH_API_BASE,
 };
 pub mod rate_limit;
 pub use rate_limit::{RateLimitConfig, RateLimiter};
