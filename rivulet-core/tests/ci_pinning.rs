@@ -4661,6 +4661,25 @@ fn chat_dock_supports_kick_and_youtube() {
         docs.contains("Combined multi-platform dock"),
         "the chat dock documentation must describe the combined account model"
     );
+    // Twitch Shared Chat attribution: the parser must carry the originating
+    // room (`source-room-id`) through the pipeline, the dock must badge it,
+    // and the synthetic docs line must be pinned as a parser test.
+    let twitch = read("rivulet-core/src/twitch_chat.rs");
+    assert!(
+        twitch.contains("pub source_room_id: Option<String>")
+            && twitch.contains("\"source-room-id\"")
+            && twitch.contains("fn parses_shared_chat_source_attribution"),
+        "the Twitch parser must carry source-room-id and pin the docs line as a test"
+    );
+    assert!(
+        app.contains("message.source_room_id")
+            && i18n.matches("\"chat_shared_chat_source_tooltip\"").count() >= 2,
+        "the dock must badge shared-chat source rooms with a translated tooltip"
+    );
+    assert!(
+        docs.contains("Shared Chat"),
+        "the chat dock documentation must describe shared-chat attribution"
+    );
     // Stream-info editor: per-platform and apply-to-all title/game updates
     // must stay wired through the shared core API with per-platform
     // outcomes and vault-only token access.

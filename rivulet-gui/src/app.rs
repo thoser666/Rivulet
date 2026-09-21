@@ -6555,6 +6555,7 @@ impl RivuletApp {
             id: None,
             timestamp: event.timestamp,
             platform: event.platform,
+            source_room_id: None,
         }
     }
 
@@ -8546,6 +8547,16 @@ impl RivuletApp {
                     ui.horizontal_wrapped(|ui| {
                         if let Some(platform) = message.platform {
                             ui.small(egui::RichText::new(format!("[{}]", platform.label())));
+                        }
+                        // Twitch Shared Chat: messages duplicated from another
+                        // participating channel carry `source-room-id`; badge
+                        // them so viewers can be attributed to their origin.
+                        if let Some(source_room) = message.source_room_id.as_deref() {
+                            ui.small(egui::RichText::new(format!("[\u{21aa} {source_room}]")))
+                                .on_hover_text(self.tr_fmt(
+                                    "chat_shared_chat_source_tooltip",
+                                    &[source_room.to_owned()],
+                                ));
                         }
                         ui.label(text);
                         if message.action {
@@ -16815,6 +16826,7 @@ mod tests {
             id: Some("1".to_owned()),
             timestamp: 1,
             platform: Some(rivulet_core::ChatPlatform::Kick),
+            source_room_id: None,
         });
         app.chat_messages.push(rivulet_core::ChatMessage {
             user: "PreviewViewer".to_owned(),
@@ -16826,6 +16838,7 @@ mod tests {
             id: None,
             timestamp: 2,
             platform: None,
+            source_room_id: None,
         });
         assert_eq!(
             app.chat_messages[0].platform,
@@ -16970,6 +16983,43 @@ mod tests {
                 "{key} must exist in EN and DE"
             );
         }
+    }
+
+    #[test]
+    fn chat_dock_badges_shared_chat_source_in_source() {
+        // Shared-Chat attribution contract: the dock must render a per-source
+        // badge for messages carrying `source_room_id` (Twitch Shared Chat),
+        // before the user name, with the translated hover explanation. Plain
+        // messages (no source room) must not hit the badge branch.
+        let source = std::fs::read_to_string("src/app.rs").expect("GUI source readable");
+        let draw = source
+            .split_once("fn draw_chat_dock")
+            .map(|(_, rest)| rest)
+            .expect("draw_chat_dock must exist in the Stream workspace");
+        assert!(
+            draw.contains("message.source_room_id"),
+            "the dock must branch on the shared-chat source tag"
+        );
+        let badge = draw
+            .find("chat_shared_chat_source_tooltip")
+            .expect("shared-chat badge in dock");
+        let name = draw.find("ui.label(text)").expect("user label in dock");
+        assert!(badge < name, "the badge must render before the user label");
+        let i18n = std::fs::read_to_string("../rivulet-core/src/i18n.rs").expect("i18n readable");
+        let k = "\"chat_shared_chat_source_tooltip\"";
+        assert!(
+            i18n.matches(k).count() >= 2,
+            "shared-chat tooltip must exist in EN and DE"
+        );
+    }
+
+    #[test]
+    fn alert_lines_never_claim_a_shared_chat_source() {
+        // Alert previews are host-local synthetic entries; they must never
+        // grow a shared-chat badge.
+        let app = RivuletApp::default();
+        let line = app.alert_event_to_chat_message(&rivulet_core::AlertEvent::sample_follow());
+        assert!(line.source_room_id.is_none());
     }
 
     #[test]

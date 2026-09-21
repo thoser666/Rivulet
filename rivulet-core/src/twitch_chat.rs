@@ -46,6 +46,12 @@ pub struct ChatMessage {
     /// combined dock can badge each line (`None` only for host-local
     /// synthetic entries such as alert previews).
     pub platform: Option<crate::chat::ChatPlatform>,
+    /// Twitch Shared Chat only: the room the message was *sent from*
+    /// (`source-room-id` tag). Messages duplicated into the joined room from
+    /// another participating channel carry it, so the dock can attribute
+    /// them to their originating channel; `None` outside shared sessions
+    /// and on other platforms.
+    pub source_room_id: Option<String>,
 }
 
 impl ChatMessage {
@@ -436,8 +442,9 @@ pub fn parse_notice(line: &str) -> Option<TwitchNotice> {
 /// carry no user message (PING, notices, joins, etc.).
 ///
 /// Handles the IRCv3 tag prefix (`@...`), the trailing `:text`, `/me` actions
-/// (`ACTION`), `display-name`/`color`/`badges` tags, and the broadcaster
-/// badge. Pure and deterministic — no I/O.
+/// (`ACTION`), `display-name`/`color`/`badges` tags, the broadcaster
+/// badge, and the Twitch Shared Chat `source-room-id` tag. Pure and
+/// deterministic — no I/O.
 pub fn parse_irc_line(line: &str) -> Option<ChatMessage> {
     let trimmed = line.trim_end_matches(['\r', '\n']);
     let mut rest = trimmed;
@@ -446,6 +453,8 @@ pub fn parse_irc_line(line: &str) -> Option<ChatMessage> {
     let mut color: Option<String> = None;
     let mut badges: Vec<String> = Vec::new();
     let mut display_name: Option<String> = None;
+    let mut msg_id: Option<String> = None;
+    let mut source_room_id: Option<String> = None;
     if let Some(after_tags) = rest.strip_prefix('@') {
         let (tags, remainder) = after_tags.split_once(' ')?;
         rest = remainder.trim_start();
@@ -454,6 +463,11 @@ pub fn parse_irc_line(line: &str) -> Option<ChatMessage> {
             match key {
                 "color" if !value.is_empty() => color = Some(value.to_owned()),
                 "display-name" if !value.is_empty() => display_name = Some(value.to_owned()),
+                "id" if !value.is_empty() => msg_id = Some(value.to_owned()),
+                // Twitch Shared Chat: messages duplicated from another
+                // participating room carry `source-room-id` (the originating
+                // room); the delivery room stays in `room-id`.
+                "source-room-id" if !value.is_empty() => source_room_id = Some(value.to_owned()),
                 "badges" => {
                     for badge in value.split(',') {
                         let name = badge.split('/').next().unwrap_or(badge);
@@ -503,17 +517,6 @@ pub fn parse_irc_line(line: &str) -> Option<ChatMessage> {
         }
 
         let broadcaster = badges.iter().any(|b| b == "broadcaster");
-        let mut msg_id: Option<String> = None;
-        if let Some(after_tags) = trimmed.strip_prefix('@') {
-            if let Some((tags, _)) = after_tags.split_once(' ') {
-                for tag in tags.split(';') {
-                    let (key, value) = tag.split_once('=').unwrap_or((tag, ""));
-                    if key == "id" && !value.is_empty() {
-                        msg_id = Some(value.to_owned());
-                    }
-                }
-            }
-        }
         Some(ChatMessage {
             user: display_name.unwrap_or(user),
             text,
@@ -527,6 +530,7 @@ pub fn parse_irc_line(line: &str) -> Option<ChatMessage> {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             platform: Some(crate::chat::ChatPlatform::Twitch),
+            source_room_id,
         })
     } else {
         None
@@ -557,6 +561,36 @@ mod tests {
             Some(crate::chat::ChatPlatform::Twitch),
             "the twitch parser must tag its messages"
         );
+    }
+
+    #[test]
+    fn parses_shared_chat_source_attribution() {
+        // Real-world shape from the Twitch IRC docs: a PRIVMSG sent in the
+        // source room (#twitch, room-id 12826) duplicated into the joined
+        // room (#twitchrivals, room-id 197886470). `source-room-id` names
+        // the originating room, `id` is the per-delivery id, `source-id`
+        // the original one.
+        let l = "@badge-info=;badges=staff/1,twitchcon-2024---san-diego/1;client-nonce=99a343c9cf2fcf4e96e0abc358f7b59b;color=#FF4500;display-name=TwitchDev;emotes=;flags=;id=17152d83-1fc8-4869-9d44-5157ee212ff1;mod=0;room-id=197886470;source-badge-info=;source-badges=staff/1,twitchcon-2024---san-diego/1;source-id=4dcec0e7-7f79-4a82-8aed-91aac9d0640c;source-room-id=12826;subscriber=0;tmi-sent-ts=1725918561648;turbo=0;user-id=141981764;user-type=staff :twitchdev!twitchdev@twitchdev.tmi.twitch.tv PRIVMSG #twitchrivals :Howdy!";
+        let msg = parse_irc_line(l).expect("message");
+        assert_eq!(msg.user, "TwitchDev");
+        assert_eq!(msg.text, "Howdy!");
+        assert!(msg.badges.contains(&"staff".to_owned()));
+        assert_eq!(
+            msg.id.as_deref(),
+            Some("17152d83-1fc8-4869-9d44-5157ee212ff1"),
+            "the per-delivery id must survive tag unification"
+        );
+        assert_eq!(
+            msg.source_room_id.as_deref(),
+            Some("12826"),
+            "source-room-id must be carried for shared-chat attribution"
+        );
+    }
+
+    #[test]
+    fn plain_messages_have_no_shared_chat_source() {
+        let msg = parse_irc_line(&line()).expect("message");
+        assert!(msg.source_room_id.is_none());
     }
 
     #[test]

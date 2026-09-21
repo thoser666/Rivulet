@@ -161,6 +161,7 @@ pub fn parse_youtube_payload(payload: &str) -> (Vec<ChatMessage>, Option<String>
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             platform: Some(crate::chat::ChatPlatform::YouTube),
+            source_room_id: None,
         });
     }
     (messages, continuation)

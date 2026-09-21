@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- feat(chat): **Twitch Shared-Chat-Attribution** — der IRC-Parser führt das
+  Tag `source-room-id` (der Raum, aus dem eine Nachricht in einer Shared-Chat-
+  Session stammt) als `ChatMessage::source_room_id` durch die Pipeline; das
+  kombinierte Dock zeigt dafür ein `↦ <room-id>`-Badge mit übersetztem
+  Tooltip (EN/DE). Eigene Nachrichten und alle Kick/YouTube/Alert-Zeilen
+  bleiben unverändert (kein Tag → kein Badge). Gepinnt durch den synthetic-
+  Test `parses_shared_chat_source_attribution` (echte IRC-Zeile aus der
+  Twitch-Doku) und den Guard in `chat_dock_supports_kick_and_youtube`.
+
 - ci(security): **Täglicher PAT-Expiry-Guard** — neuer Workflow
   `pat-expiry-guard.yml` prüft `SCOOP_BUCKET_TOKEN` täglich live (Auth-Probe
   gegen `/user` plus Scope-Probe gegen exakt den Bucket-Pfad, den die

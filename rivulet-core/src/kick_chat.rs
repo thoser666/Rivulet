@@ -133,6 +133,7 @@ pub fn parse_kick_event(payload: &str) -> Option<ChatMessage> {
             .map(|d| d.as_secs())
             .unwrap_or(0),
         platform: Some(crate::chat::ChatPlatform::Kick),
+        source_room_id: None,
     })
 }
 
