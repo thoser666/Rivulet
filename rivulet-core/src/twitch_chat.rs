@@ -594,6 +594,97 @@ mod tests {
     }
 
     #[test]
+    fn replies_target_the_shared_chat_delivery_id_of_the_joined_room() {
+        // Shared-Chat reply verification, end to end through the real worker
+        // against a local IRC fixture:
+        //
+        // A duplicated shared-session message arrives in the JOINED room with
+        // the delivery id in `id` and the origin in `source-id`/`source-room-id`
+        // (docs: "Each of these messages will have their own unique Message
+        // ID, specified by the id tag"). The parse layer must therefore expose
+        // the delivery id as the reply parent, and `send_reply` must thread
+        // exactly that id through `@reply-parent-msg-id` into a PRIVMSG aimed
+        // at the joined channel — which is also what the dock's reply button
+        // arms (message.id, never source-id).
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
+        let endpoint = listener.local_addr().expect("addr").to_string();
+        let cfg = TwitchChatConfig {
+            endpoint,
+            nick: "testbot".to_owned(),
+            oauth_token: String::new(),
+            channel: "rivulet".to_owned(),
+        };
+        let mut chat = TwitchChat::new(&cfg);
+
+        let (mut conn, _) = listener.accept().expect("accept worker");
+        conn.set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("timeout");
+        let mut reader = BufReader::new(conn.try_clone().expect("clone"));
+
+        // Drive the handshake to JOIN, as in the main smoke test.
+        let mut line = String::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut saw_join = false;
+        while !saw_join && std::time::Instant::now() < deadline {
+            line.clear();
+            if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                break;
+            }
+            saw_join |= line.starts_with("JOIN #rivulet");
+        }
+        assert!(saw_join, "worker must join the channel");
+
+        // The server sends a *duplicated* shared-chat PRIVMSG for the joined
+        // room (real docs example shape, TwitchRivals delivery). The reply
+        // parent must be the per-delivery id, not the source-id.
+        let delivery_id = "17152d83-1fc8-4869-9d44-5157ee212ff1";
+        let source_id = "4dcec0e7-7f79-4a82-8aed-91aac9d0640c";
+        writeln!(
+            conn,
+            "@badge-info=;badges=staff/1;color=#FF4500;display-name=TwitchDev;emotes=;flags=;id={delivery_id};mod=0;room-id=197886470;source-badge-info=;source-badges=staff/1;source-id={source_id};source-room-id=12826;subscriber=0;tmi-sent-ts=1725918561648;turbo=0;user-id=141981764;user-type=staff :twitchdev!twitchdev@twitchdev.tmi.twitch.tv PRIVMSG #rivulet :Howdy!"
+        )
+        .expect("send shared-chat PRIVMSG");
+        conn.flush().expect("flush");
+
+        let delivered = loop {
+            let rx = chat.messages().expect("message channel");
+            match rx.try_recv() {
+                Ok(msg) => break msg,
+                Err(_) => std::thread::sleep(Duration::from_millis(25)),
+            }
+        };
+        assert_eq!(delivered.user, "TwitchDev");
+        assert_eq!(
+            delivered.id.as_deref(),
+            Some(delivery_id),
+            "the delivery id must surface as the reply parent"
+        );
+        assert_eq!(delivered.source_room_id.as_deref(), Some("12826"));
+
+        // Replying to the parsed message must thread the delivery id through
+        // the IRCv3 reply tag aimed at the joined channel.
+        assert!(chat.send_reply("thanks!", delivered.id.as_deref().expect("delivery id"),));
+        line.clear();
+        let read = reader.read_line(&mut line).expect("read reply");
+        assert!(read > 0, "expected a reply PRIVMSG");
+        assert_eq!(
+            line.trim_end_matches(['\r', '\n']),
+            format!("@reply-parent-msg-id={delivery_id} PRIVMSG #rivulet :thanks!"),
+            "the reply must reference the joined room's delivery id"
+        );
+        assert!(
+            !line.contains(source_id),
+            "the origin id must never become the reply parent"
+        );
+
+        // Keep the disconnect-drain contract intact (see the main smoke test).
+        chat.disconnect();
+    }
+
+    #[test]
     fn parse_notice_recognizes_phone_verification_requirement() {
         let l = "@msg-id=msg_requires_verified_phone_number :tmi.twitch.tv NOTICE #rivulet :Your account must be phone verified in order to chat.";
         assert_eq!(

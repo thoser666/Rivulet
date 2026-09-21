@@ -143,6 +143,19 @@ sender name, with a translated hover text explaining the origin.
   and never logged or persisted.
 - Messages sent in the joined room itself carry no `source-room-id` and
   render exactly as before — outside shared sessions nothing changes.
+- **Threaded replies to foreign session messages work** and are pinned by an
+  end-to-end worker test (`replies_target_the_shared_chat_delivery_id_of_the_joined_room`):
+  every shared-chat delivery carries its **own unique `id`** while the origin
+  is preserved in `source-id` (IRC docs: "Each of these messages will have
+  their own unique Message ID"). Rivulet's reply button arms the delivery
+  `id` — never `source-id` — and `send_reply` threads exactly that id
+  through `@reply-parent-msg-id` into a PRIVMSG aimed at the joined
+  channel. Because the referenced id belongs to the joined room's delivery,
+  the thread is valid for everyone in the combined session. The same holds
+  on the Helix send path (`POST /chat/messages` with
+  `reply_parent_message_id`): replies are addressed to the joined room the
+  bot is connected to, not to the message's origin room, and Twitch
+  fan-outs the sent message to all session participants.
 - Kick and YouTube have no shared-chat equivalent; their parsers always
   leave `source_room_id` empty, and alert previews never grow the badge.
 
