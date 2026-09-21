@@ -129,14 +129,20 @@ When the joined Twitch channel participates in a **Shared Chat** session
 arrive on the normal IRC connection with a `source-room-id` tag naming the
 room they were *sent from* (the per-delivery `id` stays unique, the original
 message id is preserved in `source-id`). Rivulet parses that tag into
-`ChatMessage::source_room_id` and shows a small `↦ <room-id>` badge before
-the sender name, with a translated hover text explaining the origin.
+`ChatMessage::source_room_id` and shows a small `↦ <name>` badge before the
+sender name, with a translated hover text explaining the origin.
 
+- **Room-name resolution**: the numeric room id is resolved to the channel
+  login via a cached Helix `users` lookup
+  (`rivulet_core::SharedRoomNameService`). Unknown ids render as the raw id
+  and start one batched background lookup (collapsed while in flight, retry
+  released when no Twitch credentials are configured); results land in a
+  bounded cache (128 entries) so the lookup runs at most once per channel,
+  never per frame, and never blocks rendering. Credentials (client ID and
+  the Twitch chat account token) are read from the vault at dispatch time
+  and never logged or persisted.
 - Messages sent in the joined room itself carry no `source-room-id` and
   render exactly as before — outside shared sessions nothing changes.
-- Twitch exposes only the room *ID* over IRC (not the channel login), so the
-  badge shows the id; resolving it to a display name would need a Helix
-  lookup and is deliberately left out of the read path.
 - Kick and YouTube have no shared-chat equivalent; their parsers always
   leave `source_room_id` empty, and alert previews never grow the badge.
 

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- feat(chat): **Shared-Chat-Raumnamen** — das `↦`-Badge im kombinierten Dock
+  löst die numerische `source-room-id` jetzt über eine gecachte Helix-
+  `users`-Abfrage zum Channel-Login auf (`SharedRoomNameService` mit
+  128-Einträge-Cache, In-Flight-Kollaps und Raw-ID-Fallback). Die Abfrage
+  läuft einmal pro Kanal im Hintergrund (niemals pro Frame), Credentials
+  kommen zur Dispatch-Zeit aus dem OS-Tresor und werden nie geloggt oder
+  persistiert. Gepinnt durch den ci_pinning-Guard und einen echten
+  ureq-Puppet-Test gegen einen lokalen Helix-Doppelgänger.
+
 - feat(chat): **Twitch Shared-Chat-Attribution** — der IRC-Parser führt das
   Tag `source-room-id` (der Raum, aus dem eine Nachricht in einer Shared-Chat-
   Session stammt) als `ChatMessage::source_room_id` durch die Pipeline; das

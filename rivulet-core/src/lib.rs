@@ -18,6 +18,10 @@ pub use presence::{PresenceActivity, PresenceStatus};
 pub mod discord;
 pub use discord::{DiscordPresence, DiscordPresenceConfig};
 pub mod twitch_chat;
+pub use chat_rooms::{
+    helix_users_by_id, HelixRoomResolver, RoomNameResolver, RoomNameStep, SharedRoomNameService,
+    MAX_ROOM_NAME_CACHE,
+};
 pub use twitch_chat::{ChatConnState, ChatMessage, TwitchChat, TwitchChatConfig};
 pub mod kick_chat;
 pub use kick_chat::{KickChat, KickChatConfig};
@@ -73,6 +77,7 @@ pub use autoclip::{AutoClipConfig, SpikeDetector};
 pub mod replay;
 pub use replay::{save_replay, ReplayBuffer, ReplaySegment, ReplaySnapshot};
 
+pub mod chat_rooms;
 pub mod reconnect;
 pub mod stream_info;
 pub mod stream_runtime;
