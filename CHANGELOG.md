@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- feat(alerts): **YouTube-Engagement-Alerts** — Super Chats, Super Sticker
+  und neue Mitglieder werden aus dem bestehenden Innertube-Poll-Feed des
+  Chat-Workers geparst und in die Alert-Pipeline eingespeist:
+  `liveChatPaidMessageRenderer` → `Donation` (Super Chat; Betrag/Währung
+  aus dem `purchaseAmountText`-Display inkl. Locale-Formate wie `$19.99`,
+  `5,00 €`, `US$ 3.50`, `₹1,000.00`), `liveChatPaidStickerRenderer` →
+  `Donation` (Super Sticker; `moneyChipBackgroundColor` als Tier-Label),
+  Willkommens-Membership-Ticker → `Follow` (neues Mitglied; Monats-
+  Milestones bleiben bewusst außen vor). Nicht parsebare Beträge werden
+  ehrlich verworfen statt als `0.00` anzukommen. Die Events laufen über
+  denselben Alert-Kanal wie Kick und erscheinen mit `[YouTube]`-Badge in
+  beiden Docks, lokalisiert über die bestehenden Alert-Kind-Keys. Tests:
+  Parser-Unit-Tests (inkl. Locale-Beträge), Worker-e2e über die lokale
+  HTTP-Fixture, GUI-Render-Test, erweiterter ci_pinning-Guard.
+
 - feat(alerts): **Kick-Engagement-Alerts** — Subscriptions und Gift-Subs von
   Kick werden jetzt aus dem bestehenden Pusher-Chat-Stream geparst und in die
   Alert-Pipeline eingespeist: `SubscriptionEvent` → `Subscribe` (Tier aus
