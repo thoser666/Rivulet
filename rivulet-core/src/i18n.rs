@@ -579,6 +579,10 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("chat_reply_tooltip", "Reply to this message (threaded)"),
                 ("chat_reply_to", "Replying to {0}"),
                 ("chat_reply_cancel", "Cancel reply"),
+                (
+                    "chat_shared_chat_source_tooltip",
+                    "Shared Chat: sent in another participating channel (source room {0})",
+                ),
                 ("chat_phone_verification", "Twitch requires a phone-verified bot account to send chat — verify the account at twitch.tv/settings/security and use its token."),
                 ("chat_rate_budget", "Send budget: {0}/{1} messages"),
                 ("chat_rate_limited", "Rate limit reached — sending pauses until the budget refills."),
@@ -1340,6 +1344,10 @@ Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."
                 ("chat_reply_tooltip", "Auf diese Nachricht antworten (als Antwort)"),
                 ("chat_reply_to", "Antworte auf {0}"),
                 ("chat_reply_cancel", "Antwort abbrechen"),
+                (
+                    "chat_shared_chat_source_tooltip",
+                    "Shared Chat: in einem anderen teilnehmenden Kanal geschrieben (Quellraum {0})",
+                ),
                 ("chat_phone_verification", "Twitch verlangt einen telefonisch verifizierten Bot-Account zum Senden — verifiziere den Account unter twitch.tv/settings/security und nutze dessen Token."),
                 ("chat_rate_budget", "Sende-Budget: {0}/{1} Nachrichten"),
                 ("chat_rate_limited", "Ratenlimit erreicht — das Senden pausiert, bis sich das Budget wieder füllt."),
