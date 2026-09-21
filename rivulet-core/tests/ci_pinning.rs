@@ -4686,6 +4686,17 @@ fn chat_dock_supports_kick_and_youtube() {
             && twitch.contains("fn parses_shared_chat_source_attribution"),
         "the Twitch parser must carry source-room-id and pin the docs line as a test"
     );
+    // Reply threading across shared sessions: the delivery id (joined room)
+    // — never the origin source-id — must be the reply parent, verified end
+    // to end against the local IRC fixture and documented.
+    assert!(
+        twitch.contains("fn replies_target_the_shared_chat_delivery_id_of_the_joined_room"),
+        "shared-chat reply threading must be pinned by the worker test"
+    );
+    assert!(
+        docs.contains("Threaded replies to foreign session messages work"),
+        "the chat docs must state the shared-session reply semantics"
+    );
     assert!(
         app.contains("message.source_room_id")
             && i18n.matches("\"chat_shared_chat_source_tooltip\"").count() >= 2,
