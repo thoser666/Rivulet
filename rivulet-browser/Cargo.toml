@@ -1,0 +1,33 @@
+[package]
+name = "rivulet-browser"
+version.workspace = true
+edition = "2021"
+rust-version = "1.70"
+license.workspace = true
+description = "Native browser-source backend for Rivulet (wry spike / POC)"
+
+[dependencies]
+rivulet-core = { path = "../rivulet-core" }
+
+# The wry spike is Windows-only for now. Keeping these deps behind
+# `cfg(windows)` means the crate still builds on Linux/macOS in CI without
+# pulling in WebView2/WebKitGTK/WKWebView *and* without requiring the
+# platform webview system packages (libwebkit2gtk-dev etc.).
+[target.'cfg(windows)'.dependencies]
+wry = "0.57"
+winit = "0.30"
+# Direct access to the WebView2 COM API (`ICoreWebView2::CapturePreview`).
+webview2-com = "0.39"
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Memory",
+] }
+# PNG decode for the captured frame (also a dev-dependency for the spike test).
+image = { version = "0.25.1", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+# PNG decoding for frame capture; locked to the same major version the GUI
+# already uses so the workspace does not pull a second image stack.
+image = { version = "0.25.1", default-features = false, features = ["png"] }
