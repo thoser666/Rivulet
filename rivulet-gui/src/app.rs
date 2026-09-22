@@ -1530,6 +1530,10 @@ pub struct RivuletApp {
     source_kind_index: usize,
     #[serde(skip)]
     selected_composition_source: Option<uuid::Uuid>,
+    /// Index into the device list shown by the scene dialog's device picker
+    /// for capture sources. `None` = use the renderer default.
+    #[serde(skip)]
+    selected_scene_device_idx: Option<usize>,
     #[serde(skip)]
     scene_overlay_text: String,
     #[serde(skip)]
@@ -2002,6 +2006,7 @@ impl Default for RivuletApp {
             source_name_input: String::new(),
             source_kind_index: 0,
             selected_composition_source: None,
+            selected_scene_device_idx: None,
             scene_overlay_text: String::new(),
             scene_overlay_enabled: false,
             multi_view_enabled: false,
@@ -4753,11 +4758,173 @@ impl RivuletApp {
         }
     }
 
+    /// Create a scene source from the add dialog, applying the picked device id
+    /// when the kind supports a device picker.
+    fn add_scene_source_from_dialog(
+        &mut self,
+        scene_id: uuid::Uuid,
+        kind: &rivulet_core::SourceKind,
+    ) -> uuid::Uuid {
+        let name = if self.source_name_input.trim().is_empty() {
+            format!(
+                "{} {}",
+                kind.label(),
+                self.source_manager.sources().len() + 1
+            )
+        } else {
+            self.source_name_input.trim().to_string()
+        };
+        let mut source = rivulet_core::Source::new(name, kind.clone());
+        if let Some(device_id) = self.scene_device_id_for(kind) {
+            self.scene_status = Some(self.tr_fmt(
+                "composition_device_attached",
+                std::slice::from_ref(&device_id),
+            ));
+            source = source.with_device_id(device_id);
+        }
+        let id = self.source_manager.add_source(source);
+        self.source_manager.bind_source(id, scene_id, None);
+        self.selected_composition_source = Some(id);
+        self.source_name_input.clear();
+        id
+    }
+
+    /// Draw the device picker for the currently selected scene source kind.
+    ///
+    /// Capture sources (webcam, game capture, screen capture) pick a concrete
+    /// OS device from the same lists the record view uses; the choice is
+    /// applied to the new source's `device_id` on add.
+    fn draw_scene_device_picker(
+        &mut self,
+        ui: &mut egui::Ui,
+        kind: &rivulet_core::SourceKind,
+        colors: &theme::StatusColors,
+    ) {
+        let entries = self.scene_device_entries(kind);
+        if entries.is_empty() {
+            ui.colored_label(colors.hint, self.tr("composition_device_none"));
+            return;
+        }
+        self.selected_scene_device_idx = self
+            .selected_scene_device_idx
+            .filter(|idx| *idx < entries.len());
+        let selected_label = self
+            .selected_scene_device_idx
+            .and_then(|idx| entries.get(idx))
+            .map(|(label, _)| label.as_str())
+            .unwrap_or_else(|| self.tr("composition_device_default"));
+        egui::ComboBox::from_id_salt("scene_device_select")
+            .selected_text(selected_label)
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(
+                        self.selected_scene_device_idx.is_none(),
+                        self.tr("composition_device_default"),
+                    )
+                    .clicked()
+                {
+                    self.selected_scene_device_idx = None;
+                }
+                for (index, (label, _)) in entries.iter().enumerate() {
+                    if ui
+                        .selectable_label(
+                            self.selected_scene_device_idx == Some(index),
+                            label.as_str(),
+                        )
+                        .clicked()
+                    {
+                        self.selected_scene_device_idx = Some(index);
+                    }
+                }
+            });
+    }
+
+    /// Resolve the device id selected in the scene dialog, if any.
+    fn scene_device_id_for(&self, kind: &rivulet_core::SourceKind) -> Option<String> {
+        let entries = self.scene_device_entries(kind);
+        self.selected_scene_device_idx
+            .and_then(|idx| entries.get(idx))
+            .map(|(_, id)| id.clone())
+    }
+
+    /// List `(label, device_id)` for the current source kind using the same
+    /// device tables as the record view.
+    fn scene_device_entries(&self, kind: &rivulet_core::SourceKind) -> Vec<(String, String)> {
+        match kind {
+            rivulet_core::SourceKind::Webcam => self
+                .camera_devices
+                .iter()
+                .map(|camera| {
+                    let id = if camera.device_path.is_empty() {
+                        camera.element_factory.clone()
+                    } else {
+                        camera.device_path.clone()
+                    };
+                    (camera.name.clone(), format!("camera:{id}"))
+                })
+                .collect(),
+            rivulet_core::SourceKind::GameCapture => self
+                .game_windows
+                .iter()
+                .map(|window| (window.title.clone(), format!("game:{}", window.id)))
+                .collect(),
+            rivulet_core::SourceKind::ScreenCapture => self.scene_monitor_entries(),
+            _ => Vec::new(),
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn scene_monitor_entries(&self) -> Vec<(String, String)> {
+        self.monitors
+            .iter()
+            .enumerate()
+            .map(|(index, monitor)| {
+                let label = monitor
+                    .name()
+                    .ok()
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| format!("Monitor {}", index + 1));
+                let id = format!(
+                    "monitor:{}",
+                    monitor
+                        .index()
+                        .map(|i| i.to_string())
+                        .unwrap_or_else(|_| index.to_string())
+                );
+                (label, id)
+            })
+            .collect()
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn scene_monitor_entries(&self) -> Vec<(String, String)> {
+        self.monitors
+            .iter()
+            .enumerate()
+            .map(|(index, monitor)| {
+                let label = monitor
+                    .name()
+                    .ok()
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| format!("Monitor {}", index + 1));
+                let id = format!(
+                    "monitor:{}",
+                    monitor
+                        .id()
+                        .map(|id| id.to_string())
+                        .unwrap_or_else(|_| index.to_string())
+                );
+                (label, id)
+            })
+            .collect()
+    }
+
     /// Export the active scene (or Studio Mode Preview) as a deterministic PNG.
     ///
-    /// The exported image represents the current scene layout. Native source
-    /// pixels are intentionally not synthesized here; platform source
-    /// renderers can replace the tile renderer without changing this workflow.
+    /// The exported image represents the current scene layout. Native browser
+    /// pixels (if a frame is available) are composited into Browser layers;
+    /// the remaining source kinds fall back to their stable tile color until
+    /// their platform renderers are wired into the snapshot pipeline.
     fn save_scene_snapshot(&mut self) {
         let scene_id = if self.studio_mode.enabled() {
             self.studio_mode.preview()
@@ -4773,12 +4940,19 @@ impl RivuletApp {
             return;
         };
         let scene_name = scene.name.clone();
-        let snapshot = rivulet_core::SceneSnapshot::from_scene(
+        let mut snapshot = rivulet_core::SceneSnapshot::from_scene(
             scene,
             &self.source_manager,
             self.scenes.collection(),
             self.scenes.profile(),
         );
+        // Attach native browser pixels (if the browser source has produced a
+        // frame) so exported snapshots render real content for Browser layers.
+        snapshot.attach_frames(&|_source_id| {
+            self.browser_source.latest_frame().and_then(|frame| {
+                rivulet_core::SnapshotFrame::new(frame.width, frame.height, frame.rgba.clone())
+            })
+        });
         let Some(path) = rfd::FileDialog::new()
             .add_filter("PNG image", &["png"])
             .set_file_name(format!(
@@ -4831,11 +5005,12 @@ impl RivuletApp {
             rivulet_core::SourceKind::Audio,
         ];
         self.source_kind_index = self.source_kind_index.min(kinds.len() - 1);
+        let selected_kind = &kinds[self.source_kind_index];
         ui.horizontal(|ui| {
             ui.label(self.tr("composition_add_source"));
             ui.text_edit_singleline(&mut self.source_name_input);
             egui::ComboBox::from_id_salt("composition_source_kind")
-                .selected_text(kinds[self.source_kind_index].label())
+                .selected_text(selected_kind.label())
                 .show_ui(ui, |ui| {
                     for (index, kind) in kinds.iter().enumerate() {
                         if ui
@@ -4843,26 +5018,18 @@ impl RivuletApp {
                             .clicked()
                         {
                             self.source_kind_index = index;
+                            // A different capture kind has its own device list.
+                            if !rivulet_core::Source::supports_device_picker(kind) {
+                                self.selected_scene_device_idx = None;
+                            }
                         }
                     }
                 });
+            if rivulet_core::Source::supports_device_picker(selected_kind) {
+                self.draw_scene_device_picker(ui, selected_kind, colors);
+            }
             if theme::accent_button(ui, self.tr("composition_add")).clicked() {
-                let name = if self.source_name_input.trim().is_empty() {
-                    format!(
-                        "{} {}",
-                        kinds[self.source_kind_index].label(),
-                        self.source_manager.sources().len() + 1
-                    )
-                } else {
-                    self.source_name_input.trim().to_string()
-                };
-                let id = self.source_manager.add_source(rivulet_core::Source::new(
-                    name,
-                    kinds[self.source_kind_index].clone(),
-                ));
-                self.source_manager.bind_source(id, scene_id, None);
-                self.selected_composition_source = Some(id);
-                self.source_name_input.clear();
+                self.add_scene_source_from_dialog(scene_id, selected_kind);
             }
         });
 
@@ -15750,6 +15917,75 @@ mod tests {
             4,
             "destructive actions are app-local; only record/pause/mute/save_replay are global"
         );
+    }
+
+    #[test]
+    fn scene_device_picker_lists_webcam_game_and_monitor_devices() {
+        let mut app = RivuletApp::default();
+        app.camera_devices.push(rivulet_core::CameraDevice {
+            name: "Facecam".to_owned(),
+            element_factory: "vfsrc".to_owned(),
+            device_path: "/dev/video0".to_owned(),
+        });
+        app.game_windows.push(rivulet_core::GameWindow {
+            id: 42,
+            title: "Elden Ring".to_owned(),
+            width: 1920,
+            height: 1080,
+        });
+
+        let webcam_entries = app.scene_device_entries(&rivulet_core::SourceKind::Webcam);
+        assert_eq!(webcam_entries.len(), 1);
+        assert_eq!(webcam_entries[0].0, "Facecam");
+        assert_eq!(webcam_entries[0].1, "camera:/dev/video0");
+
+        let game_entries = app.scene_device_entries(&rivulet_core::SourceKind::GameCapture);
+        assert_eq!(game_entries.len(), 1);
+        assert_eq!(game_entries[0].1, "game:42");
+
+        // Non-capture kinds never offer a device list.
+        assert!(app
+            .scene_device_entries(&rivulet_core::SourceKind::Color)
+            .is_empty());
+        assert!(app
+            .scene_device_entries(&rivulet_core::SourceKind::Browser)
+            .is_empty());
+    }
+
+    #[test]
+    fn add_scene_source_applies_selected_device_id() {
+        let mut app = RivuletApp::default();
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+        app.camera_devices.push(rivulet_core::CameraDevice {
+            name: "Facecam".to_owned(),
+            element_factory: "vfsrc".to_owned(),
+            device_path: "/dev/video0".to_owned(),
+        });
+        app.selected_scene_device_idx = Some(0);
+
+        let id = app.add_scene_source_from_dialog(scene_id, &rivulet_core::SourceKind::Webcam);
+
+        let source = app.source_manager.get_source(id).expect("source added");
+        assert_eq!(source.device_id, "camera:/dev/video0");
+        assert_eq!(
+            app.scene_status.as_deref(),
+            Some("Source added with device \"camera:/dev/video0\".")
+        );
+        assert_eq!(app.selected_composition_source, Some(id));
+    }
+
+    #[test]
+    fn add_scene_source_without_device_selection_keeps_device_empty() {
+        let mut app = RivuletApp::default();
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+
+        let id = app.add_scene_source_from_dialog(scene_id, &rivulet_core::SourceKind::Color);
+
+        let source = app.source_manager.get_source(id).expect("source added");
+        assert_eq!(source.device_id, "");
+        assert_eq!(app.scene_status, None);
     }
 
     #[test]

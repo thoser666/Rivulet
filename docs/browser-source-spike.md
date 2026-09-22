@@ -131,6 +131,28 @@ The native webview adapter and GPU texture upload remain the next implementation
 slice. Until that adapter is present, the UI deliberately reports that it is
 waiting for the webview renderer instead of pretending a browser frame exists.
 
+### S5c reference backend (M6.9, issue #215)
+
+To de-risk the native adapter, `rivulet-core` now ships a deterministic,
+offscreen-safe implementation of the whole `BrowserSourceBackend` contract:
+
+- `SyntheticBrowserBackend` implements every trait method (`navigate`,
+  `resize`, `set_transparent`, `set_interaction_enabled`, `set_zoom_level`,
+  `evaluate_javascript`, `send_input`, `poll_frame`) without touching a native
+  window or event loop, so it runs in headless CI on all three platforms.
+- `poll_frame` emits reproducible RGBA frames whose colour is derived from the
+  URL, viewport, and monotonic sequence number; two instances navigating to the
+  same URL at the same viewport produce byte-identical frames.
+- `prime_browser_backend(backend, config)` applies a full `BrowserSource`
+  configuration in one call and returns the sequence of the first frame,
+  mirroring exactly the steps a GUI driver will take for a real adapter.
+- Unit tests cover reproducibility, input/JS forwarding, dimension and zoom
+  validation, and the priming driver.
+
+This gives the scene snapshot pipeline and the GUI↔backend wiring a testable
+happy path today, and serves as the behavioural template the native `wry`
+adapter must reproduce (per the acceptance criteria below).
+
 ### Adapter acceptance criteria
 
 A platform adapter can complete S5b when it:

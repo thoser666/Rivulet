@@ -139,6 +139,11 @@ pub struct Source {
     /// Optional chroma-key filter applied by the renderer.
     #[serde(default)]
     pub chroma_key: ChromaKey,
+    /// Preferred capture device id (monitor/window/camera) the scene renderer
+    /// should source this from. Empty means "use the default / let the user
+    /// choose later". Set via the scene device picker.
+    #[serde(default)]
+    pub device_id: String,
 }
 
 impl Source {
@@ -152,6 +157,7 @@ impl Source {
             locked: false,
             z_order: 0,
             chroma_key: ChromaKey::default(),
+            device_id: String::new(),
         }
     }
 
@@ -173,6 +179,20 @@ impl Source {
     pub fn locked(mut self, locked: bool) -> Self {
         self.locked = locked;
         self
+    }
+
+    pub fn with_device_id(mut self, device_id: impl Into<String>) -> Self {
+        self.device_id = device_id.into();
+        self
+    }
+
+    /// True for source kinds that capture a concrete OS device (monitor,
+    /// window, or camera) and therefore support a device picker.
+    pub fn supports_device_picker(kind: &SourceKind) -> bool {
+        matches!(
+            kind,
+            SourceKind::Webcam | SourceKind::GameCapture | SourceKind::ScreenCapture
+        )
     }
 }
 
@@ -625,6 +645,27 @@ mod tests {
         let a = Source::new("A".to_string(), SourceKind::Color);
         let b = Source::new("B".to_string(), SourceKind::Color);
         assert_ne!(a.id, b.id);
+    }
+
+    #[test]
+    fn source_device_id_defaults_to_empty_and_survives_serde_round_trip() {
+        let source = Source::new("Cam".to_string(), SourceKind::Webcam);
+        assert_eq!(source.device_id, "");
+        let with_device = source.clone().with_device_id("builtin-camera-0");
+        assert_eq!(with_device.device_id, "builtin-camera-0");
+        let json = serde_json::to_string(&with_device).expect("serialize source");
+        let restored: Source = serde_json::from_str(&json).expect("deserialize source");
+        assert_eq!(restored.device_id, "builtin-camera-0");
+    }
+
+    #[test]
+    fn supports_device_picker_matches_capture_kinds() {
+        assert!(Source::supports_device_picker(&SourceKind::Webcam));
+        assert!(Source::supports_device_picker(&SourceKind::GameCapture));
+        assert!(Source::supports_device_picker(&SourceKind::ScreenCapture));
+        assert!(!Source::supports_device_picker(&SourceKind::Image));
+        assert!(!Source::supports_device_picker(&SourceKind::Color));
+        assert!(!Source::supports_device_picker(&SourceKind::Browser));
     }
 
     // ── SceneSource ──────────────────────────────────────────────

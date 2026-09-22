@@ -168,7 +168,7 @@ pub mod scene;
 pub use scene::{Scene, SceneManager};
 
 pub mod scene_snapshot;
-pub use scene_snapshot::{SceneSnapshot, SnapshotLayer};
+pub use scene_snapshot::{SceneSnapshot, SnapshotFrame, SnapshotLayer};
 
 pub mod transition;
 pub use transition::{SceneTransition, TransitionKind};
@@ -202,8 +202,8 @@ pub use audio_source::{
 pub mod browser_source;
 pub mod ducking;
 pub use browser_source::{
-    BrowserFrame, BrowserInput, BrowserMouseButton, BrowserSource, BrowserSourceBackend,
-    BrowserSourceError,
+    prime_browser_backend, BrowserFrame, BrowserInput, BrowserMouseButton, BrowserSource,
+    BrowserSourceBackend, BrowserSourceError, SyntheticBrowserBackend,
 };
 
 pub mod alerts;

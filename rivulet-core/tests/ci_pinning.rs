@@ -650,6 +650,74 @@ fn m69_interim_backlog_is_pinned_in_readme() {
 }
 
 #[test]
+fn m69_scene_compositing_api_is_pinned() {
+    // Issue #217: the scene snapshot compositor must keep its native-frame
+    // path stable. A renamed/removed public construction entrypoint for real
+    // source frames, the attach hook, or the RGBA renderer fails CI.
+    let core_lib = read("rivulet-core/src/lib.rs");
+    let snapshot = read("rivulet-core/src/scene_snapshot.rs");
+    for required in [
+        "pub struct SnapshotFrame",
+        "pub fn attach_frames",
+        "pub fn render_rgba",
+        "fn clamp_frame_to_crop",
+    ] {
+        assert!(
+            snapshot.contains(required),
+            "scene compositing must define {required}"
+        );
+    }
+    assert!(core_lib.contains("SnapshotFrame"));
+}
+
+#[test]
+fn m69_device_picker_api_is_pinned() {
+    // Issue #216: the scene device picker needs a persisted per-source device
+    // id plus a GUI picker for capture kinds. Dropping the core field,
+    // the picker-capable kinds check, or the GUI helpers fails CI.
+    let source_core = read("rivulet-core/src/source.rs");
+    let gui = read("rivulet-gui/src/app.rs");
+    let mut asserts: Vec<(String, bool)> = Vec::new();
+    for (label, haystack) in [
+        ("pub device_id: String", source_core.as_str()),
+        ("with_device_id", source_core.as_str()),
+        ("supports_device_picker", source_core.as_str()),
+        ("draw_scene_device_picker", gui.as_str()),
+        ("scene_device_entries", gui.as_str()),
+        ("scene_device_id_for", gui.as_str()),
+        ("selected_scene_device_idx", gui.as_str()),
+    ] {
+        asserts.push((label.to_string(), haystack.contains(label)));
+    }
+    for (label, found) in &asserts {
+        assert!(found, "device picker must define {label}");
+    }
+}
+
+#[test]
+fn m69_browser_backend_reference_is_pinned() {
+    // Issue #215 slice: the testable BrowserSourceBackend reference must stay
+    // public and importable before a native wry adapter lands. Losing the
+    // synthetic backend or its priming helper fails CI.
+    let core_lib = read("rivulet-core/src/lib.rs");
+    let browser = read("rivulet-core/src/browser_source.rs");
+    for required in [
+        "SyntheticBrowserBackend",
+        "prime_browser_backend",
+        "BrowserSourceBackend",
+        "pub trait BrowserSourceBackend",
+        "stable_contents_color",
+    ] {
+        assert!(
+            browser.contains(required),
+            "browser backend slice must define {required}"
+        );
+    }
+    assert!(core_lib.contains("SyntheticBrowserBackend"));
+    assert!(core_lib.contains("prime_browser_backend"));
+}
+
+#[test]
 fn m6_audio_routing_is_specified_in_readme_gate_and_spec() {
     // M6 audio routing: the README milestone block, the M6 quality gate and
     // the feature spec must stay in sync — a silent edit to any of the three
