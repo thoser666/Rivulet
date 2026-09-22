@@ -308,6 +308,178 @@ pub trait BrowserSourceBackend {
     fn poll_frame(&mut self) -> Result<Option<BrowserFrame>, Self::Error>;
 }
 
+/// Deterministic, offscreen-safe reference implementation of the
+/// [`BrowserSourceBackend`] contract.
+///
+/// Unlike a real WebView2/WebKitGTK/WKWebView adapter, this backend never
+/// touches a native window or event loop, so it runs everywhere (including
+/// headless CI) and produces reproducible RGBA frames. Its raster relies only
+/// on the configured URL and viewport, which makes it ideal for:
+///
+/// - exercising the full GUI ↔ backend wiring without platform webview code,
+/// - golden-testing the scene snapshot pipeline, and
+/// - serving as a behavioural template for the native `wry` adapter.
+///
+/// Frames carry a monotonic sequence number (see [`BrowserFrame::sequence`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SyntheticBrowserBackend {
+    url: String,
+    width: u32,
+    height: u32,
+    transparent: bool,
+    interaction_enabled: bool,
+    zoom_level: f64,
+    sequence: u64,
+    last_js: Option<String>,
+    last_input: Option<BrowserInput>,
+    repaint: bool,
+}
+
+impl Default for SyntheticBrowserBackend {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            width: 1280,
+            height: 720,
+            transparent: false,
+            interaction_enabled: true,
+            zoom_level: 1.0,
+            sequence: 0,
+            last_js: None,
+            last_input: None,
+            repaint: true,
+        }
+    }
+}
+
+impl SyntheticBrowserBackend {
+    /// Latest JavaScript snippet passed to [`evaluate_javascript`], if any.
+    pub fn last_evaluated_javascript(&self) -> Option<&str> {
+        self.last_js.as_deref()
+    }
+
+    /// Latest input event forwarded by [`send_input`], if any.
+    pub fn last_input(&self) -> Option<&BrowserInput> {
+        self.last_input.as_ref()
+    }
+
+    /// Number of frames emitted since the backend was created.
+    pub fn frame_count(&self) -> u64 {
+        self.sequence
+    }
+
+    fn emit_frame(&mut self) -> Result<Option<BrowserFrame>, BrowserSourceError> {
+        self.sequence += 1;
+        let pixel_count = (self.width as usize) * (self.height as usize);
+        let mut rgba = vec![0u8; pixel_count * 4];
+        // Deterministic colour derived from the URL + viewport + sequence so
+        // the frame is reproducible but visibly distinct between navigations.
+        let (r, g, b) = stable_contents_color(&self.url, &(self.width, self.height), self.sequence);
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&[r, g, b, 255]);
+        }
+        BrowserFrame::new(self.width, self.height, rgba, self.sequence).map(Some)
+    }
+}
+
+impl BrowserSourceBackend for SyntheticBrowserBackend {
+    type Error = BrowserSourceError;
+
+    fn navigate(&mut self, url: &str) -> Result<(), Self::Error> {
+        BrowserSource::validate_url(url)?;
+        self.url = url.to_owned();
+        self.sequence = 0;
+        self.repaint = true;
+        Ok(())
+    }
+
+    fn resize(&mut self, width: u32, height: u32) -> Result<(), Self::Error> {
+        if !valid_dimensions(width, height) {
+            return Err(BrowserSourceError::InvalidDimensions { width, height });
+        }
+        self.width = width;
+        self.height = height;
+        self.repaint = true;
+        Ok(())
+    }
+
+    fn set_transparent(&mut self, transparent: bool) -> Result<(), Self::Error> {
+        self.transparent = transparent;
+        self.repaint = true;
+        Ok(())
+    }
+
+    fn set_interaction_enabled(&mut self, enabled: bool) -> Result<(), Self::Error> {
+        self.interaction_enabled = enabled;
+        Ok(())
+    }
+
+    fn set_zoom_level(&mut self, zoom_level: f64) -> Result<(), Self::Error> {
+        if !zoom_level.is_finite() || !(0.25..=5.0).contains(&zoom_level) {
+            return Err(BrowserSourceError::InvalidZoom(zoom_level as f32));
+        }
+        self.zoom_level = zoom_level;
+        Ok(())
+    }
+
+    fn evaluate_javascript(&mut self, script: &str) -> Result<(), Self::Error> {
+        self.last_js = Some(script.to_owned());
+        self.repaint = true;
+        Ok(())
+    }
+
+    fn send_input(&mut self, input: BrowserInput) -> Result<(), Self::Error> {
+        if !self.interaction_enabled {
+            return Ok(());
+        }
+        self.last_input = Some(input);
+        self.repaint = true;
+        Ok(())
+    }
+
+    fn poll_frame(&mut self) -> Result<Option<BrowserFrame>, Self::Error> {
+        if !self.repaint {
+            return Ok(None);
+        }
+        self.repaint = false;
+        self.emit_frame()
+    }
+}
+
+/// Derive a stable 24-bit colour from source identity + viewport + frame.
+fn stable_contents_color(url: &str, viewport: &(u32, u32), sequence: u64) -> (u8, u8, u8) {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in url.bytes().chain(sequence.to_le_bytes()) {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    // Fold the viewport in so different resolutions don't alias.
+    hash ^= (viewport.0 as u64) << 20;
+    hash ^= (viewport.1 as u64) << 40;
+    (
+        (hash & 0xff) as u8,
+        ((hash >> 8) & 0xff) as u8,
+        ((hash >> 16) & 0xff) as u8,
+    )
+}
+
+/// One-off convenience: drive a [`BrowserSourceBackend`] through the same
+/// configuration steps the GUI applies when it starts a browser source.
+///
+/// Returns the sequence number of the first frame, or `None` when the backend
+/// produced no frame (e.g. it still needs a native surface / event loop tick).
+pub fn prime_browser_backend(
+    backend: &mut dyn BrowserSourceBackend<Error = BrowserSourceError>,
+    config: &BrowserSource,
+) -> Result<Option<u64>, BrowserSourceError> {
+    backend.navigate(&config.url)?;
+    backend.resize(config.width, config.height)?;
+    backend.set_transparent(config.transparent)?;
+    backend.set_interaction_enabled(config.interaction_enabled)?;
+    backend.set_zoom_level(config.zoom_level)?;
+    Ok(backend.poll_frame()?.map(|frame| frame.sequence))
+}
+
 fn valid_dimensions(width: u32, height: u32) -> bool {
     (1..=8192).contains(&width) && (1..=8192).contains(&height)
 }
@@ -474,5 +646,65 @@ mod tests {
             source.summary(),
             "Browser · https://example.com/chat · 800x600 @ 30 FPS"
         );
+    }
+
+    // ── SyntheticBrowserBackend / BrowserSourceBackend slice ──────────
+
+    #[test]
+    fn synthetic_backend_emits_deterministic_frames() {
+        let mut backend = SyntheticBrowserBackend::default();
+        backend.navigate("https://example.com").unwrap();
+        let first = backend.poll_frame().unwrap().expect("first frame");
+        assert_eq!(first.sequence, 1);
+        assert_eq!((first.width, first.height), (1280, 720));
+        assert!(!first.rgba.is_empty());
+        // Same URL + no repaint: idle backend returns no new frame.
+        assert!(backend.poll_frame().unwrap().is_none());
+    }
+
+    #[test]
+    fn synthetic_backend_frames_are_reproducible_across_instances() {
+        let mut a = SyntheticBrowserBackend::default();
+        let mut b = SyntheticBrowserBackend::default();
+        a.navigate("https://example.com/live").unwrap();
+        b.navigate("https://example.com/live").unwrap();
+        a.resize(320, 180).unwrap();
+        b.resize(320, 180).unwrap();
+        let fa = a.poll_frame().unwrap().unwrap();
+        let fb = b.poll_frame().unwrap().unwrap();
+        assert_eq!(fa.rgba, fb.rgba);
+        assert_eq!(fa.sequence, fb.sequence);
+    }
+
+    #[test]
+    fn synthetic_backend_forwards_input_and_javascript() {
+        let mut backend = SyntheticBrowserBackend::default();
+        backend
+            .send_input(BrowserInput::MouseMove { x: 12.0, y: 34.0 })
+            .unwrap();
+        assert!(matches!(
+            backend.last_input(),
+            Some(BrowserInput::MouseMove { x: 12.0, y: 34.0 })
+        ));
+        backend.evaluate_javascript("document.title").unwrap();
+        assert_eq!(backend.last_evaluated_javascript(), Some("document.title"));
+    }
+
+    #[test]
+    fn synthetic_backend_validates_dimensions_and_zoom() {
+        let mut backend = SyntheticBrowserBackend::default();
+        assert!(backend.resize(0, 720).is_err());
+        assert!(backend.set_zoom_level(f64::NAN).is_err());
+        assert!(backend.set_zoom_level(6.0).is_err());
+    }
+
+    #[test]
+    fn prime_browser_backend_applies_config_and_returns_sequence() {
+        let config = BrowserSource::new("https://example.com", 640, 360).unwrap();
+        let mut backend = SyntheticBrowserBackend::default();
+        let sequence = prime_browser_backend(&mut backend, &config).unwrap();
+        assert_eq!(sequence, Some(1));
+        assert_eq!(backend.url, "https://example.com");
+        assert_eq!((backend.width, backend.height), (640, 360));
     }
 }
