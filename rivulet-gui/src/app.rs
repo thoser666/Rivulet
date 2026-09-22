@@ -4776,9 +4776,10 @@ impl RivuletApp {
         };
         let mut source = rivulet_core::Source::new(name, kind.clone());
         if let Some(device_id) = self.scene_device_id_for(kind) {
-            self.scene_status = Some(
-                self.tr_fmt("composition_device_attached", std::slice::from_ref(&device_id)),
-            );
+            self.scene_status = Some(self.tr_fmt(
+                "composition_device_attached",
+                std::slice::from_ref(&device_id),
+            ));
             source = source.with_device_id(device_id);
         }
         let id = self.source_manager.add_source(source);
