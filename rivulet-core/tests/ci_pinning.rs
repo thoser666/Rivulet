@@ -116,6 +116,78 @@ fn wiki_policy_and_user_guide_are_linked() {
 }
 
 #[test]
+fn streamdeck_compat_surface_is_pinned_to_obs_websocket_v5() {
+    // The ecosystem's Stream Deck OBS plugins (obs-websocket-js based,
+    // e.g. "OBS Tools", Bitfocus Companion, Touch Portal) speak obs-websocket
+    // v5 with the exact wire names below. This guard keeps the server's
+    // vocabulary, version payload, and compat CI test from drifting.
+    let protocol = read("rivulet-obs-websocket/src/protocol.rs");
+    for name in [
+        "\"GetVersion\"",
+        "\"GetSceneList\"",
+        "\"SetCurrentProgramScene\"",
+        "\"GetInputList\"",
+        "\"GetRecordStatus\"",
+        "\"StartRecord\"",
+        "\"StopRecord\"",
+        "\"ToggleRecord\"",
+        "\"PauseRecord\"",
+        "\"UnpauseRecord\"",
+        "\"GetStreamStatus\"",
+        "\"StartStream\"",
+        "\"StopStream\"",
+        "\"ToggleStream\"",
+        "\"ToggleInputMute\"",
+    ] {
+        assert!(
+            protocol.contains(name),
+            "protocol.rs must support the v5 request {name}"
+        );
+    }
+    // v4 spellings must stay absent from the request table.
+    for legacy in [
+        "StartRecording",
+        "StopRecording",
+        "ToggleRecording",
+        "StartStreaming",
+        "StopStreaming",
+        "ToggleStreaming",
+    ] {
+        assert!(
+            !protocol.contains(&format!("\"{legacy}\"")),
+            "protocol.rs must not advertise the v4 wire name {legacy}"
+        );
+    }
+    // The compat test exists and pins the plugin-facing contract.
+    let compat = read("rivulet-obs-websocket/tests/streamdeck_compat.rs");
+    assert!(compat.contains("get_version_advertises_the_v5_action_set_plugins_bind"));
+    assert!(compat.contains("full_deck_action_set_round_trips_with_events"));
+    assert!(compat.contains("v4_wire_names_are_rejected_as_unknown"));
+    assert!(compat.contains("obsWebSocketVersion"));
+    assert!(compat.contains("availableRequests"));
+    // Hello/GetVersion must keep the version fields plugins gate on.
+    let server = read("rivulet-obs-websocket/src/server.rs");
+    assert!(server.contains("\"obsWebSocketVersion\": \"5.0.0\""));
+    assert!(server.contains("\"rpcVersion\": protocol::RPC_VERSION"));
+    assert!(server.contains("ToggleInputMute"));
+    // Mute round-trips through the backend and the GUI state.
+    let backend = read("rivulet-obs-websocket/src/backend.rs");
+    assert!(backend.contains("InputMuteStateChanged"));
+    assert!(backend.contains("ToggleMute"));
+    assert!(backend.contains("pub muted: bool"));
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(app.contains("ObsCommand::PauseRecording"));
+    assert!(app.contains("ObsCommand::UnpauseRecording"));
+    assert!(app.contains("ObsCommand::ToggleMute"));
+    assert!(app.contains("InputMuteStateChanged"));
+    // Docs advertise the v5 surface (the Stream Deck section).
+    let docs = read("docs/obs-websocket.md");
+    assert!(docs.contains("`StartRecord`"));
+    assert!(docs.contains("`ToggleInputMute`"));
+    assert!(docs.contains("tests/streamdeck_compat.rs"));
+}
+
+#[test]
 fn user_guide_is_linked_and_covers_core_workflows() {
     let readme = read("README.md");
     let guide = read("docs/user-guide.md");
@@ -2486,8 +2558,8 @@ fn m6_remote_companion_is_wired_up_and_pinned() {
     // The permission gate refuses stream start/stop on a LAN bind unless
     // explicitly allowed (the page may switch scenes and record without it).
     assert!(server.contains("STREAM_CONTROL_DENIED_COMMENT"));
-    assert!(server.contains("RequestType::StartStreaming"));
-    assert!(server.contains("RequestType::StopStreaming"));
+    assert!(server.contains("RequestType::StartStream"));
+    assert!(server.contains("RequestType::StopStream"));
     // The smoke itself must cover denial AND the existence of the LAN
     // surfaces: binding to 0.0.0.0 without a password is an error.
     let smoke = read("rivulet-obs-websocket/tests/companion_smoke.rs");

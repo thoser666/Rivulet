@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+- feat(remote): **Stream-Deck-Kompatibilität (OBS WebSocket v5, echte Wire-Namen)** —
+  der Server hat seine Request-Vokabel auf die v5-Schreibweisen umgestellt
+  (`StartRecord`/`StopRecord`/`ToggleRecord`, `PauseRecord`/`UnpauseRecord`,
+  `StartStream`/`StopStream`/`ToggleStream`); die v4-Schreibweisen
+  (`StartRecording`, `ToggleStreaming`, …) werden — wie bei echtem obs-websocket —
+  mit `UnknownRequestType` (204) abgelehnt. Neu: `ToggleInputMute` (mit
+  `inputName`-Validierung, 300/600) und Pause-Semantik; neues Event
+  `InputMuteStateChanged` (Intent `Inputs`), Mute-Zustand läuft durch GUI und
+  Snapshot. Der `Hello`/`GetVersion`-Payload ist unverändert v5-konform
+  (`obsWebSocketVersion 5.0.0`, `rpcVersion 1`, vollständige
+  `availableRequests`-Liste). Neuer CI-Vertragstest
+  `tests/streamdeck_compat.rs` fährt exakt die Connect-then-Control-Sequenz
+  der obs-websocket-js-basierten Stream-Deck-Plugins (inkl. Auth-Handshake,
+  Batch-Refresh und v4-Ablehnung); ein ci_pinning-Guard pinnt die Vokabel.
+  Die offiziellen Elgato-"OBS Studio"-Plugins sindnative OBS-Plugins ohne
+  obs-websocket; der Kompatibilitätshebel für Stream Decks ist die
+  v5-Protokolloberfläche selbst.
+
 - feat(alerts): **Per-Source-Rate-Limiting** — die Alert-Ingest-Queue
   drosselt jetzt pro Lieferkanal (`AlertSource`: Twitch EventSub,
   Streamlabs-Webhook, Kick, YouTube, lokale Vorschau) auf

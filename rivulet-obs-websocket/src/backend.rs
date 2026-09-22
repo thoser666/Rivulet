@@ -34,6 +34,10 @@ pub struct ObsSnapshot {
     pub skipped_frames: u64,
     /// Total frames (0 when unknown).
     pub total_frames: u64,
+    /// Whether the microphone/main input is muted (the mute verb targets the
+    /// single implicit input Rivulet exposes; Stream Deck mute buttons read
+    /// this through `GetInputList`/`ToggleInputMute` round-trips).
+    pub muted: bool,
 }
 
 /// A mutating command a client can issue.
@@ -42,10 +46,13 @@ pub enum ObsCommand {
     SetCurrentScene(String),
     StartRecording,
     StopRecording,
+    PauseRecording,
+    UnpauseRecording,
     ToggleRecording,
     StartStreaming,
     StopStreaming,
     ToggleStreaming,
+    ToggleMute,
 }
 
 impl ObsCommand {
@@ -53,12 +60,15 @@ impl ObsCommand {
     pub fn request_type(&self) -> RequestType {
         match self {
             ObsCommand::SetCurrentScene(_) => RequestType::SetCurrentProgramScene,
-            ObsCommand::StartRecording => RequestType::StartRecording,
-            ObsCommand::StopRecording => RequestType::StopRecording,
-            ObsCommand::ToggleRecording => RequestType::ToggleRecording,
-            ObsCommand::StartStreaming => RequestType::StartStreaming,
-            ObsCommand::StopStreaming => RequestType::StopStreaming,
-            ObsCommand::ToggleStreaming => RequestType::ToggleStreaming,
+            ObsCommand::StartRecording => RequestType::StartRecord,
+            ObsCommand::StopRecording => RequestType::StopRecord,
+            ObsCommand::PauseRecording => RequestType::PauseRecord,
+            ObsCommand::UnpauseRecording => RequestType::UnpauseRecord,
+            ObsCommand::ToggleRecording => RequestType::ToggleRecord,
+            ObsCommand::StartStreaming => RequestType::StartStream,
+            ObsCommand::StopStreaming => RequestType::StopStream,
+            ObsCommand::ToggleStreaming => RequestType::ToggleStream,
+            ObsCommand::ToggleMute => RequestType::ToggleInputMute,
         }
     }
 }
@@ -84,6 +94,8 @@ pub enum ObsEvent {
     RecordStateChanged { active: bool, paused: bool },
     /// The streaming output state changed.
     StreamStateChanged { active: bool, reconnecting: bool },
+    /// The mute state of the main input changed.
+    InputMuteStateChanged { input_name: String, muted: bool },
 }
 
 impl ObsEvent {
@@ -94,6 +106,8 @@ impl ObsEvent {
             ObsEvent::RecordStateChanged { .. } | ObsEvent::StreamStateChanged { .. } => {
                 intent::OUTPUTS
             }
+            // v5 puts input (audio) events in the INPUTS intent.
+            ObsEvent::InputMuteStateChanged { .. } => intent::INPUTS,
         }
     }
 
@@ -103,6 +117,7 @@ impl ObsEvent {
             ObsEvent::CurrentProgramSceneChanged { .. } => "CurrentProgramSceneChanged",
             ObsEvent::RecordStateChanged { .. } => "RecordStateChanged",
             ObsEvent::StreamStateChanged { .. } => "StreamStateChanged",
+            ObsEvent::InputMuteStateChanged { .. } => "InputMuteStateChanged",
         }
     }
 
@@ -120,6 +135,9 @@ impl ObsEvent {
                 reconnecting,
             } => {
                 serde_json::json!({ "outputActive": active, "outputReconnecting": reconnecting })
+            }
+            ObsEvent::InputMuteStateChanged { input_name, muted } => {
+                serde_json::json!({ "inputName": input_name, "inputMuted": muted })
             }
         }
     }
@@ -252,11 +270,23 @@ mod tests {
         );
         assert_eq!(
             ObsCommand::ToggleRecording.request_type(),
-            RequestType::ToggleRecording
+            RequestType::ToggleRecord
         );
         assert_eq!(
             ObsCommand::ToggleStreaming.request_type(),
-            RequestType::ToggleStreaming
+            RequestType::ToggleStream
+        );
+        assert_eq!(
+            ObsCommand::PauseRecording.request_type(),
+            RequestType::PauseRecord
+        );
+        assert_eq!(
+            ObsCommand::UnpauseRecording.request_type(),
+            RequestType::UnpauseRecord
+        );
+        assert_eq!(
+            ObsCommand::ToggleMute.request_type(),
+            RequestType::ToggleInputMute
         );
     }
 
@@ -277,6 +307,17 @@ mod tests {
         assert_eq!(
             rec.data(),
             serde_json::json!({ "outputActive": true, "outputPaused": false })
+        );
+
+        let mute = ObsEvent::InputMuteStateChanged {
+            input_name: "Mic".into(),
+            muted: true,
+        };
+        assert_eq!(mute.intent(), intent::INPUTS);
+        assert_eq!(mute.event_type(), "InputMuteStateChanged");
+        assert_eq!(
+            mute.data(),
+            serde_json::json!({ "inputName": "Mic", "inputMuted": true })
         );
     }
 

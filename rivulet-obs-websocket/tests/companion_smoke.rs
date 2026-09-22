@@ -102,8 +102,8 @@ fn page_served_over_loopback_with_security_headers() {
     assert!(res
         .body
         .contains("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"));
-    assert!(res.body.contains("ToggleRecording"));
-    assert!(res.body.contains("ToggleStreaming"));
+    assert!(res.body.contains("ToggleRecord"));
+    assert!(res.body.contains("ToggleStream"));
     // No secrets in the page.
     assert!(!res.body.contains("hunter2"));
 }
@@ -193,6 +193,8 @@ impl ObsBackend for MemoryBackend {
             }
             ObsCommand::StartRecording
             | ObsCommand::StopRecording
+            | ObsCommand::PauseRecording
+            | ObsCommand::UnpauseRecording
             | ObsCommand::ToggleRecording => {
                 let mut snap = self.snapshot.lock().unwrap();
                 snap.recording = !snap.recording;
@@ -209,6 +211,18 @@ impl ObsBackend for MemoryBackend {
                 ObsCommandResult::Success(vec![ObsEvent::StreamStateChanged {
                     active: snap.streaming,
                     reconnecting: false,
+                }])
+            }
+            ObsCommand::ToggleMute => {
+                let mut snap = self.snapshot.lock().unwrap();
+                snap.muted = !snap.muted;
+                ObsCommandResult::Success(vec![ObsEvent::InputMuteStateChanged {
+                    input_name: snap
+                        .sources
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "Mic".into()),
+                    muted: snap.muted,
                 }])
             }
         }
@@ -330,7 +344,7 @@ fn lan_bind_without_permission_denies_stream_control() {
     assert!(d["requestStatus"]["result"].as_bool().unwrap());
 
     // Stream toggle must be denied without explicit permission…
-    let d = client.request("ToggleStreaming", serde_json::json!({}));
+    let d = client.request("ToggleStream", serde_json::json!({}));
     assert_eq!(d["requestStatus"]["result"], false);
     assert_eq!(d["requestStatus"]["code"], protocol::status::GENERIC_ERROR);
     assert!(
@@ -347,7 +361,7 @@ fn lan_bind_without_permission_denies_stream_control() {
     );
 
     // …while recording stays remotely controllable (M6 scope: streams only).
-    let d = client.request("ToggleRecording", serde_json::json!({}));
+    let d = client.request("ToggleRecord", serde_json::json!({}));
     assert!(d["requestStatus"]["result"].as_bool().unwrap());
     assert_eq!(
         *backend.last_command.lock().unwrap(),
@@ -362,7 +376,7 @@ fn lan_bind_without_permission_denies_stream_control() {
 fn lan_bind_with_permission_allows_stream_control() {
     let (_handle, port, backend) = start_server_lan(true);
     let mut client = ObsClient::connect(port, Some("hunter2"));
-    let d = client.request("ToggleStreaming", serde_json::json!({}));
+    let d = client.request("ToggleStream", serde_json::json!({}));
     assert!(
         d["requestStatus"]["result"].as_bool().unwrap(),
         "stream toggle must succeed with explicit permission: {d}"
@@ -390,7 +404,7 @@ fn loopback_bind_keeps_m5_stream_control_without_permission() {
     .expect("loopback server binds");
     let port = handle.local_addr().port();
     let mut client = ObsClient::connect(port, None);
-    let d = client.request("ToggleStreaming", serde_json::json!({}));
+    let d = client.request("ToggleStream", serde_json::json!({}));
     assert!(d["requestStatus"]["result"].as_bool().unwrap());
     assert_eq!(
         *backend.last_command.lock().unwrap(),

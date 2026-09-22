@@ -93,6 +93,48 @@ impl ObsBackend for MemoryBackend {
                     }
                 }
             }
+            ObsCommand::PauseRecording => {
+                let mut snap = self.snapshot.lock().unwrap();
+                if snap.recording && !snap.recording_paused {
+                    snap.recording_paused = true;
+                    ObsCommandResult::Success(vec![ObsEvent::RecordStateChanged {
+                        active: true,
+                        paused: true,
+                    }])
+                } else {
+                    ObsCommandResult::Failure {
+                        status_code: protocol::status::OUTPUT_NOT_PAUSED,
+                        comment: "Recording not active or already paused".into(),
+                    }
+                }
+            }
+            ObsCommand::UnpauseRecording => {
+                let mut snap = self.snapshot.lock().unwrap();
+                if snap.recording && snap.recording_paused {
+                    snap.recording_paused = false;
+                    ObsCommandResult::Success(vec![ObsEvent::RecordStateChanged {
+                        active: true,
+                        paused: false,
+                    }])
+                } else {
+                    ObsCommandResult::Failure {
+                        status_code: protocol::status::OUTPUT_NOT_PAUSED,
+                        comment: "Recording not paused".into(),
+                    }
+                }
+            }
+            ObsCommand::ToggleMute => {
+                let mut snap = self.snapshot.lock().unwrap();
+                snap.muted = !snap.muted;
+                ObsCommandResult::Success(vec![ObsEvent::InputMuteStateChanged {
+                    input_name: snap
+                        .sources
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "Mic".into()),
+                    muted: snap.muted,
+                }])
+            }
             ObsCommand::ToggleRecording => {
                 let mut snap = self.snapshot.lock().unwrap();
                 snap.recording = !snap.recording;
@@ -326,14 +368,14 @@ fn real_client_controls_recording_and_streaming() {
     let mut client = TestClient::connect(port, None);
 
     // Start recording.
-    let d = client.request("StartRecording", serde_json::json!({}));
+    let d = client.request("StartRecord", serde_json::json!({}));
     assert!(d["requestStatus"]["result"].as_bool().unwrap());
     let event = read_json(&mut client.ws);
     assert_eq!(event["d"]["eventType"], "RecordStateChanged");
     assert_eq!(event["d"]["eventData"]["outputActive"], true);
 
     // Second start fails with OUTPUT_RUNNING.
-    let d = client.request("StartRecording", serde_json::json!({}));
+    let d = client.request("StartRecord", serde_json::json!({}));
     assert_eq!(d["requestStatus"]["result"], false);
     assert_eq!(d["requestStatus"]["code"], protocol::status::OUTPUT_RUNNING);
 
@@ -342,14 +384,14 @@ fn real_client_controls_recording_and_streaming() {
     assert_eq!(d["responseData"]["outputActive"], true);
 
     // Stop recording.
-    let d = client.request("StopRecording", serde_json::json!({}));
+    let d = client.request("StopRecord", serde_json::json!({}));
     assert!(d["requestStatus"]["result"].as_bool().unwrap());
     let event = read_json(&mut client.ws);
     assert_eq!(event["d"]["eventType"], "RecordStateChanged");
     assert_eq!(event["d"]["eventData"]["outputActive"], false);
 
-    // Stream toggle off->on via ToggleStreaming.
-    let d = client.request("ToggleStreaming", serde_json::json!({}));
+    // Stream toggle off->on via ToggleStream (v5 wire name).
+    let d = client.request("ToggleStream", serde_json::json!({}));
     assert!(d["requestStatus"]["result"].as_bool().unwrap());
     let event = read_json(&mut client.ws);
     assert_eq!(event["d"]["eventType"], "StreamStateChanged");

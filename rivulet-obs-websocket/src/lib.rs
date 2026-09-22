@@ -11,8 +11,11 @@
 //! - Authentication (SHA-256 challenge/response, opt-in via password)
 //! - Scenes: `GetSceneList`, `GetCurrentProgramScene`, `SetCurrentProgramScene`
 //! - Sources: `GetInputList`
-//! - Recording: `StartRecording`, `StopRecording`, `ToggleRecording`, `GetRecordStatus`
-//! - Streaming: `StartStreaming`, `StopStreaming`, `ToggleStreaming`, `GetStreamStatus`
+//! - Recording: `StartRecord`, `StopRecord`, `ToggleRecord`, `PauseRecord`,
+//!   `UnpauseRecord`, `GetRecordStatus`
+//! - Streaming: `StartStream`, `StopStream`, `ToggleStream`, `GetStreamStatus`
+//! - Audio: `ToggleInputMute` (v5 wire names throughout — v4 spellings like
+//!   `StartRecording` are NOT accepted, matching real OBS clients)
 //! - Events: `CurrentProgramSceneChanged`, `RecordStateChanged`, `StreamStateChanged`
 //! - Version queries: `GetVersion`, `GetAuthRequired`
 //!

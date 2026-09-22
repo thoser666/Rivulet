@@ -1714,6 +1714,7 @@ struct ObsWsPublicState {
     recording_paused: bool,
     streaming: bool,
     reconnecting: bool,
+    muted: bool,
 }
 
 impl Default for RivuletApp {
@@ -7109,6 +7110,12 @@ impl RivuletApp {
                             reconnecting: current.reconnecting,
                         });
                     }
+                    if current.muted != last.muted {
+                        events.push(rivulet_obs_websocket::ObsEvent::InputMuteStateChanged {
+                            input_name: self.obs_ws_primary_input_name(),
+                            muted: current.muted,
+                        });
+                    }
                     server.broadcast(events);
                 }
             }
@@ -7318,6 +7325,7 @@ impl RivuletApp {
             recording_paused: self.is_paused,
             streaming: self.engine.is_streaming(),
             reconnecting: false,
+            muted: self.is_muted,
         }
     }
 
@@ -7399,6 +7407,58 @@ impl RivuletApp {
                     self.execute_obs_command(ObsCommand::StartRecording)
                 }
             }
+            ObsCommand::PauseRecording => {
+                if self.any_recording_active() && !self.is_paused {
+                    self.is_paused = true;
+                    self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
+                    rivulet_obs_websocket::ObsCommandResult::Success(vec![
+                        ObsEvent::RecordStateChanged {
+                            active: true,
+                            paused: true,
+                        },
+                    ])
+                } else {
+                    rivulet_obs_websocket::ObsCommandResult::Failure {
+                        status_code: rivulet_obs_websocket::protocol::status::OUTPUT_NOT_PAUSED,
+                        comment: if self.any_recording_active() {
+                            "Recording is already paused".into()
+                        } else {
+                            "Recording not active".into()
+                        },
+                    }
+                }
+            }
+            ObsCommand::UnpauseRecording => {
+                if self.any_recording_active() && self.is_paused {
+                    self.is_paused = false;
+                    self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
+                    rivulet_obs_websocket::ObsCommandResult::Success(vec![
+                        ObsEvent::RecordStateChanged {
+                            active: true,
+                            paused: false,
+                        },
+                    ])
+                } else {
+                    rivulet_obs_websocket::ObsCommandResult::Failure {
+                        status_code: rivulet_obs_websocket::protocol::status::OUTPUT_NOT_PAUSED,
+                        comment: if self.any_recording_active() {
+                            "Recording is not paused".into()
+                        } else {
+                            "Recording not active".into()
+                        },
+                    }
+                }
+            }
+            ObsCommand::ToggleMute => {
+                self.is_muted = !self.is_muted;
+                self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
+                rivulet_obs_websocket::ObsCommandResult::Success(vec![
+                    ObsEvent::InputMuteStateChanged {
+                        input_name: self.obs_ws_primary_input_name(),
+                        muted: self.is_muted,
+                    },
+                ])
+            }
             ObsCommand::StartStreaming => {
                 if self.engine.is_streaming() {
                     rivulet_obs_websocket::ObsCommandResult::Failure {
@@ -7463,6 +7523,18 @@ impl RivuletApp {
                 }
             }
         }
+    }
+
+    /// The display name the websocket server publishes for the app's main
+    /// (implicit) audio input. `ToggleInputMute` validates against this name,
+    /// so it must stay in sync with the sources list written into the shared
+    /// snapshot.
+    fn obs_ws_primary_input_name(&self) -> String {
+        self.obs_ws_snapshot
+            .as_ref()
+            .map(|snap| snap.lock().unwrap().clone())
+            .and_then(|snap| snap.sources.first().cloned())
+            .unwrap_or_else(|| "Microphone".to_string())
     }
 
     /// Shared action dispatch used by both the in-app (focused) key handling
