@@ -409,12 +409,12 @@ must not be implied by beta parity.
 
 *Complements the shipped M6 creator toolkit and the M2 scenes foundation with the scene/source depth and per-platform stream-metadata polish OBS users expect.*
 
-- [ ] **Per-platform stream title/game values** ([#214](https://github.com/thoser666/Rivulet/issues/214)) — the Stream-info editor currently shares one title/game draft applied per-platform or to all (M6); allow each platform (Twitch/Kick/YouTube) to hold its own title + game simultaneously, additionally editable and re-appliable
+- [x] **Per-platform stream title/game values** ([#214](https://github.com/thoser666/Rivulet/issues/214)) — shipped in PR [#220](https://github.com/thoser666/Rivulet/pull/220): the Stream-info editor has scope tabs (*All platforms / Twitch / Kick / YouTube*) with fully independent per-platform title + game drafts; *Apply to all* pushes each platform's own values in one batch (empty drafts are skipped, not failed) and platform tabs get a dedicated *Apply to <platform>* button
 - [ ] **Native Browser-source engine** ([#215](https://github.com/thoser666/Rivulet/issues/215)) — wire an actual webview (wry/WebView2/WebKitGTK/WKWebView) into `BrowserSourceBackend` so the Browser scene source renders real frames instead of "waiting for the webview renderer" (follow-up to the M2 browser-source contract, see `docs/browser-source-spike.md`)
 - [ ] **Device/window/monitor picker in scene items** ([#216](https://github.com/thoser666/Rivulet/issues/216)) — adding a source to a scene chooses only name + source kind; persist the concrete device/window/monitor/game-window selection on the scene item itself (OBS parity for Screen/Game/Webcam capture)
 - [ ] **Native scene compositing** ([#217](https://github.com/thoser666/Rivulet/issues/217)) — replace the placeholder color-tile scene snapshot (`SceneSnapshot::layer_color()`) with real source-frame composition for the implemented kinds (F-M2-002 follow-up)
 
-**Goal:** Close the two visible gaps that keep Rivulet from feeling "production-ready" to OBS users — per-platform stream metadata and real scene composition.
+**Goal:** Close the two visible gaps that keep Rivulet from feeling "production-ready" to OBS users — per-platform stream metadata (✅ #214) and real scene composition (#216–#217).
 
 ---
 
