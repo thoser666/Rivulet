@@ -176,8 +176,13 @@ zeigt die Nachrichten **aller verbundenen Plattformen in derselben Liste** an:
   „20 Nachrichten pro 30 s“) und die Plattform, für die das Limit gilt –
   Plattform-Limits werden pro Kanal separat durchgesetzt.
 - **Stream-Info-Editor**: Im Dock legst du **Titel** und **Spiel/Kategorie**
-  in einem gemeinsamen Entwurf fest und übernimmst sie pro Plattform
-  einzeln oder mit einem Klick **auf alle**. Jede Anwendung läuft im
+  **pro Plattform** fest – über die Reiter *Alle Plattformen / Twitch /
+  Kick / YouTube*. Jede Plattform behält ihre eigenen Entwürfe (der
+  Reiterwechsel kopiert nichts); in der Alle-Plattformen-Sicht hat jede
+  konfigurierte Plattform eine eigene Zeile, und **Auf alle anwenden**
+  übernimmt jeden Plattform-Entwurf in einem Batch (leere Entwürfe werden
+  übersprungen). Im Plattform-Reiter gibt es den dedizierten
+  **Auf <Plattform> anwenden**-Knopf. Jede Anwendung läuft im
   Hintergrund und meldet ein ehrliches Ergebnis pro Plattform (Twitch über
   die Helix-Kanalaktualisierung inkl. Game-Lookup, Kick über den
   Public-Channels-Endpunkt inkl. Category-Lookup, YouTube-Titel über die

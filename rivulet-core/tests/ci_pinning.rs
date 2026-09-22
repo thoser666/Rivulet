@@ -4888,15 +4888,20 @@ fn chat_dock_supports_kick_and_youtube() {
         docs.contains("Shared Chat"),
         "the chat dock documentation must describe shared-chat attribution"
     );
-    // Stream-info editor: per-platform and apply-to-all title/game updates
-    // must stay wired through the shared core API with per-platform
-    // outcomes and vault-only token access.
+    // Stream-info editor: per-platform drafts (each platform holds its own
+    // title/game, #214) and apply-to-all must stay wired through the core
+    // API with per-platform outcomes and vault-only token access.
     let core_stream = read("rivulet-core/src/stream_info.rs");
     assert!(
         app.contains("fn apply_chat_stream_info")
-            && app.contains("update_all_stream_info")
-            && app.contains("chat_info_apply_all"),
-        "the dock must offer per-platform and apply-to-all stream-info updates"
+            && app.contains("update_platform_stream_info")
+            && app.contains("chat_info_apply_all")
+            && app.contains("chat_info_scope_all"),
+        "the dock must offer per-platform drafts, per-platform updates, and apply-to-all"
+    );
+    assert!(
+        core_stream.contains("pub fn index(self) -> usize"),
+        "InfoPlatform must expose a stable per-platform array index"
     );
     assert!(
         app.contains("fn chat_info_credentials_for"),
@@ -4913,7 +4918,10 @@ fn chat_dock_supports_kick_and_youtube() {
         "stream-info outcomes must be reported per platform"
     );
     assert!(
-        i18n.contains("(\"chat_info_apply_all\", ") && i18n.contains("(\"chat_info_updated\", "),
+        i18n.contains("(\"chat_info_apply_all\", ")
+            && i18n.contains("(\"chat_info_updated\", ")
+            && i18n.contains("(\"chat_info_scope_all\", ")
+            && i18n.contains("(\"chat_info_apply_platform\", "),
         "stream-info editor keys must exist in both locales"
     );
     assert!(

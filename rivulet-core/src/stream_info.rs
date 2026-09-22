@@ -41,6 +41,16 @@ impl InfoPlatform {
             Self::YouTube => "YouTube",
         }
     }
+
+    /// Stable index into per-platform value arrays (`[String; 3]` in the
+    /// GUI): the position of the platform in [`Self::ALL`].
+    pub fn index(self) -> usize {
+        match self {
+            Self::Twitch => 0,
+            Self::Kick => 1,
+            Self::YouTube => 2,
+        }
+    }
 }
 
 /// Map a chat-dock account platform to the matching stream-info
