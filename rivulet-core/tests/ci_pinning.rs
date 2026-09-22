@@ -616,6 +616,22 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
 }
 
 #[test]
+fn m69_interim_backlog_is_pinned_in_readme() {
+    // M6.9 is an interim backlog milestone for post-M6 follow-up work that
+    // belongs in neither M7 nor M8. The README milestone row and the roadmap
+    // section must stay in sync with the GitHub milestone and keep its issue
+    // scope visible; a lost interim milestone or silently dropped item fails
+    // CI.
+    let readme = read("README.md");
+    assert!(readme.contains("M6.9 – Scene & Stream Polish"));
+    assert!(readme.contains("milestones%2F13"));
+    assert!(readme.contains("#214"));
+    assert!(readme.contains("#215"));
+    assert!(readme.contains("#216"));
+    assert!(readme.contains("#217"));
+}
+
+#[test]
 fn m6_audio_routing_is_specified_in_readme_gate_and_spec() {
     // M6 audio routing: the README milestone block, the M6 quality gate and
     // the feature spec must stay in sync — a silent edit to any of the three
