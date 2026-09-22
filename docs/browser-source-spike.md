@@ -164,6 +164,51 @@ A platform adapter can complete S5b when it:
 5. runs the same adapter contract tests on Windows, Linux, and macOS.
 
 
+## Windows POC (M6.9, issue #215)
+
+A proof of concept in `rivulet-browser` (described in `rivulet-browser/src/wry_backend.rs`)
+proves all remaining #215 risk items on Windows:
+
+- **Embedding:** a real WebView2 viewport is created with `wry` 0.57 inside a
+  dedicated `winit` 0.30 event-loop thread. `EventLoop` and `WebView` are
+  `!Send`, so the loop + app are built in the thread and the GUI side only
+  holds an `EventLoopProxy` + HWND. `EventLoopBuilderExtWindows::with_any_thread`
+  is required because the loop does not live on the main thread.
+- **Decoupled contract:** commands (`navigate`, `resize`, `zoom`, `evaluate`)
+  flow one way through the proxy; frames come back the other way through the
+  existing `BrowserSourceBackend` contract (`BrowserFrame::new(w, h, rgba, seq)`).
+- **Frame capture via `ICoreWebView2::CapturePreview`:** renders PNG into an
+  `IStream` (`CreateStreamOnHGlobal`), read back with `Stat`→`cbSize`,
+  `Seek(STREAM_SEEK_SET)` and `Read`, then decoded to RGBA on the calling
+  thread. GDI (`PrintWindow`/`BitBlt`) was tried first but only ever produced
+  white frames because WebView2 composites through DirectComposition, not the
+  window DC — the experiment is kept in the git history of the module.
+- **Verified end-to-end:** the `#[ignore]` spike test serves a pink
+  (`#ca3b7f`) page from a local HTTP server and asserts the captured centre
+  pixel matches, with the correct 320×180 size, several runs in a row. Run
+  with `cargo test -p rivulet-browser -- --ignored`.
+
+Implementation notes from the spike that a production adapter must keep:
+
+- The first `CapturePreview` call may fail with `0x8007139F`
+  (`ERROR_WRONG_STATE`) while the webview is still on `about:blank`; the poll
+  loop treats that as "no frame yet" and retries.
+- The test server must fully drain the request headers before answering,
+  otherwise WebView2 intermittently rejects the page with
+  `chrome-error://chromewebdata/` (classic `ECONNRESET` race on
+  `Connection: close`).
+- A timed-out spike run leaves a stuck WebView2 browser process behind that
+  holds the profile folder; killing stray `msedgewebview2.exe` processes
+  restores stability before re-running.
+- `data:` URLs are still rejected by the core URL policy, which is why the
+  spike navigates to a loopback HTTP server instead.
+
+Not yet covered by the POC: input forwarding (`SendInput` is a no-op
+placeholder), transparency (needs `ICoreWebView2CompositionController`), and
+the WebView2 composition controller route for direct texture sharing. Those
+remain production-adapter work and are tracked under #215.
+
+
 ## References
 
 - [wry GitHub](https://github.com/nicedoc/wry)
