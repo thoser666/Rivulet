@@ -233,6 +233,28 @@ Unter **Settings → MIDI** kannst du MIDI-Geräte verbinden und Aktionen auf Co
 
 Rivulet bietet einen OBS-WebSocket-v5-kompatiblen Server (siehe [`obs-websocket.md`](obs-websocket.md)). Damit lassen sich Rivulet-Steuerungen wie Streamdeck oder Touch Portal anschließen, und das Protokoll ist mit bestehenden OBS-Tools kompatibel. Der Server lauscht standardmäßig auf `127.0.0.1` und kann mit einem Passwort geschützt werden.
 
+#### Elgato Stream Deck anschließen
+
+Das Stream Deck spricht obs-websocket v5 über ein Plugin — Rivulet implementiert genau dieses Protokoll (fünfte Version, echte v5-Request-Namen wie `StartRecord` und `ToggleStream`). So verbindest du es:
+
+1. **Rivulet vorbereiten:** Öffne **Settings → OBS WebSocket (Stream Deck)**, aktiviere **Remote control aktivieren** und notiere dir den Port (Standard `4455`, OBS-kompatibel). Lege optional ein Passwort fest — leer bedeutet ohne Authentifizierung. Der Server lauscht nur auf diesem Rechner (`127.0.0.1`); für die Steuerung über das LAN nutze den Remote-Begleiter (siehe unten).
+2. **Plugin installieren:** Installiere im Stream-Deck-Store ein OBS-Plugin, das obs-websocket v5 spricht (z. B. "OBS Tools" von BarRaider oder eine der obs-websocket-js-basierten Integrationen). Die offiziellen "OBS Studio"-Plugins von Elgato sind interne OBS-Plugins und verbinden sich nicht über obs-websocket.
+3. **Verbindung anlegen:** In den Plugin-Einstellungen eine neue Verbindung mit **Host `127.0.0.1`**, **Port `4455`** und dem in Rivulet gesetzten Passwort (leer lassen, wenn keine Authentifizierung aktiv ist). Protokollversion **5** wählen, falls das Plugin fragt.
+4. **Aktionen belegen:** Szenen-Knöpfe füllen ihre Dropdowns live über `GetSceneList` — ist eine Liste leer, drücke **Refresh** in den Aktions-Einstellungen, während Rivulet läuft.
+
+Verfügbare Aktionen und die dahinterliegenden Requests:
+
+| Aktion | Request | Hinweis |
+|---|---|---|
+| Szene wechseln | `SetCurrentProgramScene` | Dropdown aus `GetSceneList` |
+| Aufnahme Start/Stopp | `StartRecord` / `StopRecord` | oder `ToggleRecord` als Umschalter |
+| Aufnahme pausieren | `PauseRecord` / `UnpauseRecord` | Icon folgt `RecordStateChanged` |
+| Stream Start/Stopp | `StartStream` / `StopStream` | oder `ToggleStream` als Umschalter |
+| Mute | `ToggleInputMute` | braucht den Input-Namen aus `GetInputList` |
+| Status-Icons | `GetRecordStatus` / `GetStreamStatus` | pro Knopf, beim Verbinden und per Event |
+
+Zustandsänderungen, die du im Rivulet-Fenster machst (Aufnahme über den Knopf, Mute im Mixer), werden als Events an die verbundenen Decks gesendet — die Knopf-Icons bleiben also aktuell, ohne dass du etwas tust. Details, Beispiel-Payloads und die Kompatibilitäts-Tests stehen in [`obs-websocket.md`](obs-websocket.md).
+
 ### Remote-Begleiter (Handy / Browser)
 
 Unter **Settings → Remote-Begleiter (Handy / Browser)** kannst du Rivulet vom Smartphone oder einem Browser im selben Netzwerk steuern: Szenen wechseln, Aufnahme starten/stoppen und – mit ausdrücklicher Freigabe – den Stream starten/stoppen (siehe [`remote-companion.md`](remote-companion.md)).
