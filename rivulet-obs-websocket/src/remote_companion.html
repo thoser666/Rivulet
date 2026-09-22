@@ -468,10 +468,10 @@ function initHandlers() {
     if (name) request("SetCurrentProgramScene", { sceneName: name }, "scenes-");
   });
   $("recordBtn").addEventListener("click", function () {
-    request("ToggleRecording", {}, "rec-");
+    request("ToggleRecord", {}, "rec-");
   });
   $("streamBtn").addEventListener("click", function () {
-    request("ToggleStreaming", {}, "stream-");
+    request("ToggleStream", {}, "stream-");
   });
 }
 

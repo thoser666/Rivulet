@@ -22,9 +22,10 @@ against OBS Studio.
 | Authentication | Optional SHA-256 challenge/response (`base64(SHA256(secret + challenge))`, `secret = base64(SHA256(password + salt))`), wrong password closes with `AuthenticationFailed` (4009) |
 | Scenes | `GetSceneList`, `GetCurrentProgramScene`, `SetCurrentProgramScene` |
 | Sources | `GetInputList` |
-| Recording | `StartRecording`, `StopRecording`, `ToggleRecording`, `GetRecordStatus` |
-| Streaming | `StartStreaming`, `StopStreaming`, `ToggleStreaming`, `GetStreamStatus` |
-| Events | `CurrentProgramSceneChanged` (intent `Scenes`), `RecordStateChanged` / `StreamStateChanged` (intent `Outputs`) — delivered only to clients subscribed to that intent |
+| Recording | `StartRecord`, `StopRecord`, `ToggleRecord`, `PauseRecord`, `UnpauseRecord`, `GetRecordStatus` |
+| Streaming | `StartStream`, `StopStream`, `ToggleStream`, `GetStreamStatus` |
+| Audio | `ToggleInputMute` (requires `inputName`; validates against `GetInputList`) |
+| Events | `CurrentProgramSceneChanged` (intent `Scenes`), `RecordStateChanged` / `StreamStateChanged` (intent `Outputs`), `InputMuteStateChanged` (intent `Inputs`) — delivered only to clients subscribed to that intent |
 | Batching | `RequestBatch`/`RequestBatchResponse` with serial execution and `haltOnFailure` |
 
 Status codes follow the v5 reference (`Success`=100, `UnknownRequestType`=204,
@@ -63,7 +64,10 @@ Password: <the password you configured, or empty>
 The client does a normal v5 handshake: `Hello` (op 0) → `Identify` (op 1) →
 `Identified` (op 2), then requests (op 6) and batches (op 8). Subscribe to
 events by sending `eventSubscriptions` in `Identify` (bitmask; e.g. `1 + 4 +
-64` for General + Scenes + Outputs).
+64` for General + Scenes + Outputs). The `Hello` frame reports
+`obsWebSocketVersion 5.0.0` and `rpcVersion 1` — the exact values Stream Deck
+plugins check before offering their actions, and pinned by the Stream Deck
+compat test (`tests/streamdeck_compat.rs`).
 
 ## Stream Deck (OBS plugin)
 
@@ -89,9 +93,10 @@ Common actions and the requests they issue:
 | Action | Request | Payload |
 |---|---|---|
 | Switch Scene | `SetCurrentProgramScene` | `{"sceneName": "<name>"}` |
-| Record | `ToggleRecording` | `{}` |
-| Stream | `ToggleStreaming` | `{}` |
+| Record | `ToggleRecord` | `{}` |
+| Stream | `ToggleStream` | `{}` |
 | Record state (icon) | `GetRecordStatus` | `{}` |
+| Mute | `ToggleInputMute` | `{"inputName": "<input>"}` |
 | Stream state (icon) | `GetStreamStatus` | `{}` |
 
 ## TouchPortal
@@ -108,7 +113,7 @@ For a **Custom Request** button, the request body is the v5 payload exactly
 as sent on the wire, e.g.:
 
 ```json
-{"requestType": "ToggleRecording", "requestData": {}}
+{"requestType": "ToggleRecord", "requestData": {}}
 ```
 
 The plugin wraps this into the `{ "op": 6, "d": … }` envelope for you.
@@ -128,7 +133,7 @@ scripts, `websocat`, or `obs-websocket-js`. Each request is `op` 6 with a
 Response data (abridged):
 
 ```json
-{"obsVersion": "0.65.0-alpha.55", "obsWebSocketVersion": "5.0.0", "rpcVersion": 1, "availableRequests": ["GetVersion", "GetSceneList", "StartRecording", "…"]}
+{"obsVersion": "0.65.0-alpha.55", "obsWebSocketVersion": "5.0.0", "rpcVersion": 1, "availableRequests": ["GetVersion", "GetSceneList", "StartRecord", "ToggleInputMute", "…"]}
 ```
 
 **GetSceneList** — request:
@@ -156,10 +161,10 @@ Success → `{"result": true, "code": 100}`. Subscribed clients also receive
 {"op": 5, "d": {"eventType": "CurrentProgramSceneChanged", "eventIntent": 4, "eventData": {"sceneName": "Cam"}}}
 ```
 
-**Toggle recording** — request:
+**Toggle recording** — request (v5 wire name; the v4 `ToggleRecording` is NOT accepted):
 
 ```json
-{"op": 6, "d": {"requestType": "ToggleRecording", "requestId": "r1", "requestData": {}}}
+{"op": 6, "d": {"requestType": "ToggleRecord", "requestId": "r1", "requestData": {}}}
 ```
 
 If no capture source is selected, this fails honestly instead of silently
@@ -183,7 +188,7 @@ doing nothing:
 `op` 8 with `haltOnFailure`:
 
 ```json
-{"op": 8, "d": {"requestId": "b1", "haltOnFailure": true, "executionType": 1, "requests": [{"requestType": "SetCurrentProgramScene", "requestData": {"sceneName": "Game"}}, {"requestType": "StartStreaming", "requestData": {}}]}}
+{"op": 8, "d": {"requestId": "b1", "haltOnFailure": true, "executionType": 1, "requests": [{"requestType": "SetCurrentProgramScene", "requestData": {"sceneName": "Game"}}, {"requestType": "StartStream", "requestData": {}}]}}
 ```
 
 Each entry answers with its own `requestStatus`; the batch response (`op` 9)
@@ -258,6 +263,14 @@ The crate contains two layers of tests:
   control, request batches incl. `haltOnFailure`, unknown request rejection,
   and clean shutdown. This is the “verified with a real client” acceptance
   criterion of the issue.
+- **Stream Deck compatibility contract** in `tests/streamdeck_compat.rs` — a
+  v5 client drives the exact connect-then-control sequence the ecosystem's
+  Stream Deck plugins use: version check against `availableRequests`, scene
+  list/switch, record start/pause/unpause/stop + `ToggleRecord`, stream
+  start/stop + `ToggleStream`, `ToggleInputMute` (missing/unknown input →
+  `300`/`600`), a batch refresh, and the authenticated handshake. It also pins
+  that the v4 spellings (`StartRecording`, `ToggleStreaming`, …) are rejected
+  with `UnknownRequestType`, so a silent protocol regression cannot pass CI.
 - **CI loopback smoke** — the `OBS WebSocket Smoke` job in `.github/workflows/ci.yml`
   runs `cargo test -p rivulet-obs-websocket --test client_smoke` on every push,
   starting the server on `127.0.0.1` and driving it with the real tungstenite

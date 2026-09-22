@@ -111,6 +111,11 @@ pub const RPC_VERSION: u32 = 1;
 pub const JSON_SUBPROTOCOL: &str = "obswebsocket.json";
 
 /// An obs-websocket v5 request name. Currently supported subset.
+///
+/// Wire names follow the v5 protocol exactly (`StartRecord`, `ToggleStream`,
+/// …) — NOT the v4 spellings (`StartRecording`, `ToggleStreaming`) — so that
+/// real v5 clients (obs-websocket-js based Stream Deck plugins, Bitfocus
+/// Companion, Touch Portal, …) can drive Rivulet unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestType {
     GetVersion,
@@ -120,13 +125,16 @@ pub enum RequestType {
     SetCurrentProgramScene,
     GetInputList,
     GetRecordStatus,
-    StartRecording,
-    StopRecording,
-    ToggleRecording,
+    StartRecord,
+    StopRecord,
+    ToggleRecord,
+    PauseRecord,
+    UnpauseRecord,
     GetStreamStatus,
-    StartStreaming,
-    StopStreaming,
-    ToggleStreaming,
+    StartStream,
+    StopStream,
+    ToggleStream,
+    ToggleInputMute,
 }
 
 impl RequestType {
@@ -139,13 +147,16 @@ impl RequestType {
             RequestType::SetCurrentProgramScene => "SetCurrentProgramScene",
             RequestType::GetInputList => "GetInputList",
             RequestType::GetRecordStatus => "GetRecordStatus",
-            RequestType::StartRecording => "StartRecording",
-            RequestType::StopRecording => "StopRecording",
-            RequestType::ToggleRecording => "ToggleRecording",
+            RequestType::StartRecord => "StartRecord",
+            RequestType::StopRecord => "StopRecord",
+            RequestType::ToggleRecord => "ToggleRecord",
+            RequestType::PauseRecord => "PauseRecord",
+            RequestType::UnpauseRecord => "UnpauseRecord",
             RequestType::GetStreamStatus => "GetStreamStatus",
-            RequestType::StartStreaming => "StartStreaming",
-            RequestType::StopStreaming => "StopStreaming",
-            RequestType::ToggleStreaming => "ToggleStreaming",
+            RequestType::StartStream => "StartStream",
+            RequestType::StopStream => "StopStream",
+            RequestType::ToggleStream => "ToggleStream",
+            RequestType::ToggleInputMute => "ToggleInputMute",
         }
     }
 }
@@ -162,13 +173,16 @@ impl std::str::FromStr for RequestType {
             "SetCurrentProgramScene" => Ok(RequestType::SetCurrentProgramScene),
             "GetInputList" => Ok(RequestType::GetInputList),
             "GetRecordStatus" => Ok(RequestType::GetRecordStatus),
-            "StartRecording" => Ok(RequestType::StartRecording),
-            "StopRecording" => Ok(RequestType::StopRecording),
-            "ToggleRecording" => Ok(RequestType::ToggleRecording),
+            "StartRecord" => Ok(RequestType::StartRecord),
+            "StopRecord" => Ok(RequestType::StopRecord),
+            "ToggleRecord" => Ok(RequestType::ToggleRecord),
+            "PauseRecord" => Ok(RequestType::PauseRecord),
+            "UnpauseRecord" => Ok(RequestType::UnpauseRecord),
             "GetStreamStatus" => Ok(RequestType::GetStreamStatus),
-            "StartStreaming" => Ok(RequestType::StartStreaming),
-            "StopStreaming" => Ok(RequestType::StopStreaming),
-            "ToggleStreaming" => Ok(RequestType::ToggleStreaming),
+            "StartStream" => Ok(RequestType::StartStream),
+            "StopStream" => Ok(RequestType::StopStream),
+            "ToggleStream" => Ok(RequestType::ToggleStream),
+            "ToggleInputMute" => Ok(RequestType::ToggleInputMute),
             _ => Err(()),
         }
     }
@@ -231,13 +245,16 @@ mod tests {
             RequestType::SetCurrentProgramScene,
             RequestType::GetInputList,
             RequestType::GetRecordStatus,
-            RequestType::StartRecording,
-            RequestType::StopRecording,
-            RequestType::ToggleRecording,
+            RequestType::StartRecord,
+            RequestType::StopRecord,
+            RequestType::ToggleRecord,
+            RequestType::PauseRecord,
+            RequestType::UnpauseRecord,
             RequestType::GetStreamStatus,
-            RequestType::StartStreaming,
-            RequestType::StopStreaming,
-            RequestType::ToggleStreaming,
+            RequestType::StartStream,
+            RequestType::StopStream,
+            RequestType::ToggleStream,
+            RequestType::ToggleInputMute,
         ] {
             assert_eq!(RequestType::from_str(rt.as_str()), Ok(rt));
         }

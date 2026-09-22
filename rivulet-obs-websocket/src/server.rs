@@ -623,19 +623,27 @@ impl SessionThread {
                     serde_json::Value::Null,
                 )
             }
-            RequestType::StartRecording => (
+            RequestType::StartRecord => (
                 self.run_command(ObsCommand::StartRecording),
                 serde_json::Value::Null,
             ),
-            RequestType::StopRecording => (
+            RequestType::StopRecord => (
                 self.run_command(ObsCommand::StopRecording),
                 serde_json::Value::Null,
             ),
-            RequestType::ToggleRecording => (
+            RequestType::PauseRecord => (
+                self.run_command(ObsCommand::PauseRecording),
+                serde_json::Value::Null,
+            ),
+            RequestType::UnpauseRecord => (
+                self.run_command(ObsCommand::UnpauseRecording),
+                serde_json::Value::Null,
+            ),
+            RequestType::ToggleRecord => (
                 self.run_command(ObsCommand::ToggleRecording),
                 serde_json::Value::Null,
             ),
-            RequestType::StartStreaming => {
+            RequestType::StartStream => {
                 if self.stream_control_denied() {
                     return self.deny_stream_control();
                 }
@@ -644,7 +652,7 @@ impl SessionThread {
                     serde_json::Value::Null,
                 )
             }
-            RequestType::StopStreaming => {
+            RequestType::StopStream => {
                 if self.stream_control_denied() {
                     return self.deny_stream_control();
                 }
@@ -653,12 +661,38 @@ impl SessionThread {
                     serde_json::Value::Null,
                 )
             }
-            RequestType::ToggleStreaming => {
+            RequestType::ToggleStream => {
                 if self.stream_control_denied() {
                     return self.deny_stream_control();
                 }
                 (
                     self.run_command(ObsCommand::ToggleStreaming),
+                    serde_json::Value::Null,
+                )
+            }
+            RequestType::ToggleInputMute => {
+                // v5: inputName is required; an unknown input is 600.
+                let Some(input_name) = request_data
+                    .get("inputName")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                else {
+                    return (
+                        crate::backend::missing_request_field("inputName"),
+                        serde_json::Value::Null,
+                    );
+                };
+                if !self.backend.snapshot().sources.contains(&input_name) {
+                    return (
+                        ObsCommandResult::Failure {
+                            status_code: protocol::status::RESOURCE_NOT_FOUND,
+                            comment: format!("Input '{input_name}' not found"),
+                        },
+                        serde_json::Value::Null,
+                    );
+                }
+                (
+                    self.run_command(ObsCommand::ToggleMute),
                     serde_json::Value::Null,
                 )
             }
@@ -787,9 +821,10 @@ fn read_response_data(rt: RequestType, snapshot: &ObsSnapshot) -> serde_json::Va
             "availableRequests": [
                 "GetVersion", "GetAuthRequired", "GetSceneList",
                 "GetCurrentProgramScene", "SetCurrentProgramScene",
-                "GetInputList", "StartRecording", "StopRecording",
-                "ToggleRecording", "GetRecordStatus", "StartStreaming",
-                "StopStreaming", "ToggleStreaming", "GetStreamStatus",
+                "GetInputList", "GetRecordStatus", "StartRecord",
+                "StopRecord", "ToggleRecord", "PauseRecord",
+                "UnpauseRecord", "GetStreamStatus", "StartStream",
+                "StopStream", "ToggleStream", "ToggleInputMute",
             ],
         }),
         RequestType::GetAuthRequired => serde_json::json!({ "authRequired": false }),
@@ -1098,6 +1133,7 @@ mod tests {
             output_duration_ms: 1_000,
             skipped_frames: 1,
             total_frames: 30,
+            muted: false,
         };
         let scenes = read_response_data(RequestType::GetSceneList, &snapshot);
         assert_eq!(scenes["scenes"][0]["sceneName"], "Game");
