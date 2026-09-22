@@ -170,6 +170,7 @@ werden.
 | M4 – Advanced Output & Capture | Virtual Camera, Replay Buffer, Filters, Formats | ✅ Complete (conditional: integration follow-ups; milestone closed) | — | [![M4](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F2&query=open_issues&label=M4&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/2) |
 | M5 – Ecosystem & Parity | WASM Plugins, OBS Compat (descoped → M11), Platform Parity | ✅ Complete (milestone closed; signing identities wait on certificate purchase [#50](https://github.com/thoser666/Rivulet/issues/50), macOS live verification hardware-blocked, OBS compat descoped → M11 #147) | — | [![M5](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F6&query=open_issues&label=M5&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/6) |
 | M6 – Creator Toolkit & Interactivity | Chat auto-clips, Restream, Remote, Multi-track Audio Routing | ✅ Complete (milestone closed; see [`docs/m6-creator-toolkit-completion-report.md`](docs/m6-creator-toolkit-completion-report.md)) | — | [![M6](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F11&query=open_issues&label=M6&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/11) |
+| M6.9 – Scene & Stream Polish | Interims-Backlog: per-Platform Chat-Metadaten, Browser-Engine, Device-Picker, natives Scene-Compositing | 🔄 Open (interim backlog, see [M6.9](#-69--scene--stream-polish)) | — | [![M6.9](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F13&query=open_issues&label=M6.9&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/13) |
 | M7 – Automation & Determinism | Headless CLI, CI Rendering, Reproducible Pipelines | 🔄 In progress (CLI MVP shipped: [`rivulet-cli`](rivulet-cli/)) | — | [![M7](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F7&query=open_issues&label=M7&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/7) |
 | M8 – Embeddable Engine & API | Stable `rivulet-core` API, Docs, Tooling | 📅 Planned | — | [![M8](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F8&query=open_issues&label=M8&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/8) |
 | M9 – Modern Architecture | WebGPU, Zero-copy, Compute Filters | 📅 Planned | — | [![M9](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F9&query=open_issues&label=M9&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/9) |
@@ -399,6 +400,21 @@ must not be implied by beta parity.
 - [x] **Mobile & HTTP remote companion** — drive scenes, record, and stream from the phone or a browser on the LAN, building on the shipped obs-websocket v5 server (M5) with optional auth; self-contained mobile page (no CDN) served over HTTP with explicit LAN bind, LAN-requires-password policy, and a permission gate for remote stream start/stop (see [`docs/remote-companion.md`](docs/remote-companion.md))
 
 **Goal:** The creator workflows that make a streamer choose Rivulet — clips appear when chat pops off, the stream reaches every platform at once, and the setup is controllable from the couch.
+
+---
+
+### 🎬 M6.9 – Scene & Stream Polish
+
+**Status: Open** (interim backlog milestone [#13](https://github.com/thoser666/Rivulet/milestone/13); collects post-M6 follow-up work that belongs in neither M7 (Automation & Determinism) nor M8 (Embeddable Engine & API))
+
+*Complements the shipped M6 creator toolkit and the M2 scenes foundation with the scene/source depth and per-platform stream-metadata polish OBS users expect.*
+
+- [ ] **Per-platform stream title/game values** ([#214](https://github.com/thoser666/Rivulet/issues/214)) — the Stream-info editor currently shares one title/game draft applied per-platform or to all (M6); allow each platform (Twitch/Kick/YouTube) to hold its own title + game simultaneously, additionally editable and re-appliable
+- [ ] **Native Browser-source engine** ([#215](https://github.com/thoser666/Rivulet/issues/215)) — wire an actual webview (wry/WebView2/WebKitGTK/WKWebView) into `BrowserSourceBackend` so the Browser scene source renders real frames instead of "waiting for the webview renderer" (follow-up to the M2 browser-source contract, see `docs/browser-source-spike.md`)
+- [ ] **Device/window/monitor picker in scene items** ([#216](https://github.com/thoser666/Rivulet/issues/216)) — adding a source to a scene chooses only name + source kind; persist the concrete device/window/monitor/game-window selection on the scene item itself (OBS parity for Screen/Game/Webcam capture)
+- [ ] **Native scene compositing** ([#217](https://github.com/thoser666/Rivulet/issues/217)) — replace the placeholder color-tile scene snapshot (`SceneSnapshot::layer_color()`) with real source-frame composition for the implemented kinds (F-M2-002 follow-up)
+
+**Goal:** Close the two visible gaps that keep Rivulet from feeling "production-ready" to OBS users — per-platform stream metadata and real scene composition.
 
 ---
 
