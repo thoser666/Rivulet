@@ -188,6 +188,80 @@ impl ObsBackend for MemoryBackend {
                     muted: snap.muted,
                 }])
             }
+            ObsCommand::StartReplayBuffer => {
+                let mut snap = self.snapshot.lock().unwrap();
+                if snap.replay_buffer_active {
+                    ObsCommandResult::Failure {
+                        status_code: protocol::status::OUTPUT_RUNNING,
+                        comment: "Replay buffer already active".into(),
+                    }
+                } else {
+                    snap.replay_buffer_active = true;
+                    ObsCommandResult::Success(vec![ObsEvent::ReplayBufferStateChanged {
+                        active: true,
+                    }])
+                }
+            }
+            ObsCommand::StopReplayBuffer => {
+                let mut snap = self.snapshot.lock().unwrap();
+                if snap.replay_buffer_active {
+                    snap.replay_buffer_active = false;
+                    ObsCommandResult::Success(vec![ObsEvent::ReplayBufferStateChanged {
+                        active: false,
+                    }])
+                } else {
+                    ObsCommandResult::Failure {
+                        status_code: protocol::status::OUTPUT_NOT_RUNNING,
+                        comment: "Replay buffer not active".into(),
+                    }
+                }
+            }
+            ObsCommand::ToggleReplayBuffer => {
+                let mut snap = self.snapshot.lock().unwrap();
+                snap.replay_buffer_active = !snap.replay_buffer_active;
+                ObsCommandResult::Success(vec![ObsEvent::ReplayBufferStateChanged {
+                    active: snap.replay_buffer_active,
+                }])
+            }
+            ObsCommand::SaveReplayBuffer => {
+                let snap = self.snapshot.lock().unwrap();
+                if snap.replay_buffer_active {
+                    ObsCommandResult::Success(vec![ObsEvent::ReplayBufferSaved {
+                        saved_replay_path: None,
+                    }])
+                } else {
+                    ObsCommandResult::Failure {
+                        status_code: protocol::status::OUTPUT_NOT_RUNNING,
+                        comment: "Replay buffer not active".into(),
+                    }
+                }
+            }
+            ObsCommand::SaveReplayBufferTo(path) => {
+                let snap = self.snapshot.lock().unwrap();
+                if snap.replay_buffer_active {
+                    ObsCommandResult::Success(vec![ObsEvent::ReplayBufferSaved {
+                        saved_replay_path: Some(path.clone()),
+                    }])
+                } else {
+                    ObsCommandResult::Failure {
+                        status_code: protocol::status::OUTPUT_NOT_RUNNING,
+                        comment: "Replay buffer not active".into(),
+                    }
+                }
+            }
+            ObsCommand::SetStudioMode(enabled) => {
+                let enabled = *enabled;
+                let mut snap = self.snapshot.lock().unwrap();
+                if snap.studio_mode == enabled {
+                    ObsCommandResult::Failure {
+                        status_code: protocol::status::RESOURCE_ALREADY_EXISTS,
+                        comment: "Studio mode already in that state".into(),
+                    }
+                } else {
+                    snap.studio_mode = enabled;
+                    ObsCommandResult::Success(vec![ObsEvent::StudioModeStateChanged { enabled }])
+                }
+            }
         }
     }
 }
@@ -203,6 +277,18 @@ impl V5Client {
     /// Connect like the Stream Deck plugins do: advertise the JSON
     /// subprotocol and (optionally) answer the auth challenge.
     fn connect(port: u16, password: Option<&str>) -> Self {
+        Self::connect_with_intents(
+            port,
+            password,
+            protocol::intent::SCENES | protocol::intent::OUTPUTS | protocol::intent::INPUTS,
+        )
+    }
+
+    /// As [`Self::connect`], but with an explicit intent mask: plugins
+    /// subscribe to the intents their buttons need (Scenes + Outputs is the
+    /// classic record/stream/scene set; mute buttons also need Inputs, and
+    /// studio-mode buttons need UI for `StudioModeStateChanged`).
+    fn connect_with_intents(port: u16, password: Option<&str>, intents: u32) -> Self {
         let url = format!("ws://127.0.0.1:{port}");
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
@@ -242,12 +328,6 @@ impl V5Client {
         }
 
         // ── Identify ─────────────────────────────────────────────────────
-        // Plugins subscribe to the intents their buttons need: Scenes +
-        // Outputs is the classic record/stream/scene set; mute buttons also
-        // need Inputs (InputMuteStateChanged is NOT delivered otherwise —
-        // exactly as the v5 spec and real obs-websocket behave).
-        let intents =
-            protocol::intent::SCENES | protocol::intent::OUTPUTS | protocol::intent::INPUTS;
         let mut identify = serde_json::json!({
             "op": 1,
             "d": { "rpcVersion": 1, "eventSubscriptions": intents }
@@ -370,6 +450,13 @@ fn get_version_advertises_the_v5_action_set_plugins_bind() {
         "StopStream",
         "ToggleStream",
         "ToggleInputMute",
+        "GetReplayBufferStatus",
+        "StartReplayBuffer",
+        "StopReplayBuffer",
+        "ToggleReplayBuffer",
+        "SaveReplayBuffer",
+        "GetStudioModeEnabled",
+        "SetStudioModeEnabled",
     ] {
         assert!(
             available.contains(&request_name),
@@ -478,6 +565,112 @@ fn full_deck_action_set_round_trips_with_events() {
         d["requestStatus"]["code"],
         protocol::status::RESOURCE_NOT_FOUND
     );
+}
+
+/// The replay-buffer action set ("OBS Tools"-style replay buttons): status,
+/// start with event, the not-running guard on save, an explicit-path save
+/// echoed back through `ReplayBufferSaved`, and the toggle round-trip.
+#[test]
+fn replay_buffer_action_set_round_trips() {
+    let (_handle, port, backend) = start_server(None);
+    let mut client = V5Client::connect(port, None);
+
+    // Disabled by default.
+    let d = client.ok("GetReplayBufferStatus", serde_json::json!({}));
+    assert_eq!(d["outputActive"], false);
+
+    // Saving while disabled must fail with OUTPUT_NOT_RUNNING.
+    let d = client.request("SaveReplayBuffer", serde_json::json!({}));
+    assert_eq!(
+        d["requestStatus"]["code"],
+        protocol::status::OUTPUT_NOT_RUNNING
+    );
+
+    // Start + event; double start is an error.
+    client.ok("StartReplayBuffer", serde_json::json!({}));
+    let data = client.expect_event("ReplayBufferStateChanged");
+    assert_eq!(data["outputActive"], true);
+    let d = client.request("StartReplayBuffer", serde_json::json!({}));
+    assert_eq!(d["requestStatus"]["code"], protocol::status::OUTPUT_RUNNING);
+
+    // Save with an explicit path: the event carries it back verbatim.
+    client.ok(
+        "SaveReplayBuffer",
+        serde_json::json!({ "saveReplayPath": "C:/clips/last.mp4" }),
+    );
+    let data = client.expect_event("ReplayBufferSaved");
+    assert_eq!(data["savedReplayPath"], "C:/clips/last.mp4");
+    assert!(matches!(
+        backend.last_command.lock().unwrap().as_ref(),
+        Some(ObsCommand::SaveReplayBufferTo(path)) if path == "C:/clips/last.mp4"
+    ));
+
+    // Toggle off, status reflects it.
+    client.ok("ToggleReplayBuffer", serde_json::json!({}));
+    let _ = client.expect_event("ReplayBufferStateChanged");
+    let d = client.ok("GetReplayBufferStatus", serde_json::json!({}));
+    assert_eq!(d["outputActive"], false);
+
+    assert!(matches!(
+        backend.last_command.lock().unwrap().as_ref(),
+        Some(ObsCommand::ToggleReplayBuffer)
+    ));
+}
+
+/// Studio-mode buttons: status read, enable with the UI-intent event,
+/// idempotency guard, and disable.
+#[test]
+fn studio_mode_action_set_round_trips() {
+    let (_handle, port, backend) = start_server(None);
+    let mut client = V5Client::connect_with_intents(
+        port,
+        None,
+        protocol::intent::SCENES
+            | protocol::intent::OUTPUTS
+            | protocol::intent::INPUTS
+            | protocol::intent::UI,
+    );
+
+    let d = client.ok("GetStudioModeEnabled", serde_json::json!({}));
+    assert_eq!(d["studioModeEnabled"], false);
+
+    // Missing studioModeEnabled is a 300 (plugins rely on the status code).
+    let d = client.request("SetStudioModeEnabled", serde_json::json!({}));
+    assert_eq!(
+        d["requestStatus"]["code"],
+        protocol::status::MISSING_REQUEST_FIELD
+    );
+
+    // Enable → event → status reflects it → disable.
+    client.ok(
+        "SetStudioModeEnabled",
+        serde_json::json!({ "studioModeEnabled": true }),
+    );
+    let data = client.expect_event("StudioModeStateChanged");
+    assert_eq!(data["studioModeEnabled"], true);
+    let d = client.ok("GetStudioModeEnabled", serde_json::json!({}));
+    assert_eq!(d["studioModeEnabled"], true);
+    client.ok(
+        "SetStudioModeEnabled",
+        serde_json::json!({ "studioModeEnabled": false }),
+    );
+    let data = client.expect_event("StudioModeStateChanged");
+    assert_eq!(data["studioModeEnabled"], false);
+
+    // Disabling while already off → RESOURCE_ALREADY_EXISTS, per the v5 spec.
+    let d = client.request(
+        "SetStudioModeEnabled",
+        serde_json::json!({ "studioModeEnabled": false }),
+    );
+    assert_eq!(
+        d["requestStatus"]["code"],
+        protocol::status::RESOURCE_ALREADY_EXISTS
+    );
+
+    assert!(matches!(
+        backend.last_command.lock().unwrap().as_ref(),
+        Some(ObsCommand::SetStudioMode(false))
+    ));
 }
 
 /// A batch as the plugins send it (initial refresh: version + scenes + inputs

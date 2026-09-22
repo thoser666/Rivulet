@@ -25,7 +25,9 @@ against OBS Studio.
 | Recording | `StartRecord`, `StopRecord`, `ToggleRecord`, `PauseRecord`, `UnpauseRecord`, `GetRecordStatus` |
 | Streaming | `StartStream`, `StopStream`, `ToggleStream`, `GetStreamStatus` |
 | Audio | `ToggleInputMute` (requires `inputName`; validates against `GetInputList`) |
-| Events | `CurrentProgramSceneChanged` (intent `Scenes`), `RecordStateChanged` / `StreamStateChanged` (intent `Outputs`), `InputMuteStateChanged` (intent `Inputs`) — delivered only to clients subscribed to that intent |
+| Replay buffer | `GetReplayBufferStatus`, `StartReplayBuffer`, `StopReplayBuffer`, `ToggleReplayBuffer`, `SaveReplayBuffer` (optional `saveReplayPath` override, echoed back through the saved event) |
+| Studio mode | `GetStudioModeEnabled`, `SetStudioModeEnabled` (requires boolean `studioModeEnabled`) |
+| Events | `CurrentProgramSceneChanged` (intent `Scenes`), `RecordStateChanged` / `StreamStateChanged` / `ReplayBufferStateChanged` / `ReplayBufferSaved` (intent `Outputs`), `InputMuteStateChanged` (intent `Inputs`), `StudioModeStateChanged` (intent `UI`) — delivered only to clients subscribed to that intent |
 | Batching | `RequestBatch`/`RequestBatchResponse` with serial execution and `haltOnFailure` |
 
 Status codes follow the v5 reference (`Success`=100, `UnknownRequestType`=204,
@@ -71,9 +73,11 @@ compat test (`tests/streamdeck_compat.rs`).
 
 ## Stream Deck (OBS plugin)
 
-1. Install the **OBS Studio** plugin from the Stream Deck store (BarRaider's
-   or the official OBS plugin) — it speaks the OBS WebSocket v5 protocol
-   Rivulet implements.
+1. Install a Stream Deck plugin that speaks the OBS WebSocket v5 protocol
+   Rivulet implements (obs-websocket-js based, e.g. BarRaider's "OBS Tools",
+   or the Bitfocus Companion / Touch Portal integrations). Note: the official
+   Elgato "OBS Studio" plugins are internal OBS plugins and do not connect
+   over obs-websocket.
 2. Start Rivulet and enable the server: **Settings → OBS WebSocket (Stream
    Deck) → Enable remote control** (default port `4455`, password optional).
 3. Open Stream Deck → add the **OBS Studio** action you want (e.g. *Switch
@@ -98,6 +102,10 @@ Common actions and the requests they issue:
 | Record state (icon) | `GetRecordStatus` | `{}` |
 | Mute | `ToggleInputMute` | `{"inputName": "<input>"}` |
 | Stream state (icon) | `GetStreamStatus` | `{}` |
+| Replay Save | `SaveReplayBuffer` | `{}` (or `{"saveReplayPath": "<path>"}`) |
+| Replay On/Off | `ToggleReplayBuffer` | `{}` |
+| Replay state (icon) | `GetReplayBufferStatus` | `{}` |
+| Studio Mode | `SetStudioModeEnabled` | `{"studioModeEnabled": true/false}` |
 
 ## TouchPortal
 
@@ -268,9 +276,13 @@ The crate contains two layers of tests:
   Stream Deck plugins use: version check against `availableRequests`, scene
   list/switch, record start/pause/unpause/stop + `ToggleRecord`, stream
   start/stop + `ToggleStream`, `ToggleInputMute` (missing/unknown input →
-  `300`/`600`), a batch refresh, and the authenticated handshake. It also pins
-  that the v4 spellings (`StartRecording`, `ToggleStreaming`, …) are rejected
-  with `UnknownRequestType`, so a silent protocol regression cannot pass CI.
+  `300`/`600`), the replay-buffer action set (status, start, save with an
+  explicit path echoed through `ReplayBufferSaved`, toggle, not-running
+  guard), the studio-mode set (status, enable/disable with the `UI`-intent
+  event, idempotency guard), a batch refresh, and the authenticated handshake.
+  It also pins that the v4 spellings (`StartRecording`, `ToggleStreaming`, …)
+  are rejected with `UnknownRequestType`, so a silent protocol regression
+  cannot pass CI.
 - **CI loopback smoke** — the `OBS WebSocket Smoke` job in `.github/workflows/ci.yml`
   runs `cargo test -p rivulet-obs-websocket --test client_smoke` on every push,
   starting the server on `127.0.0.1` and driving it with the real tungstenite

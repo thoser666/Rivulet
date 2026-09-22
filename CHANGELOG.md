@@ -16,9 +16,20 @@
   `tests/streamdeck_compat.rs` fährt exakt die Connect-then-Control-Sequenz
   der obs-websocket-js-basierten Stream-Deck-Plugins (inkl. Auth-Handshake,
   Batch-Refresh und v4-Ablehnung); ein ci_pinning-Guard pinnt die Vokabel.
-  Die offiziellen Elgato-"OBS Studio"-Plugins sindnative OBS-Plugins ohne
+  Die offiziellen Elgato-"OBS Studio"-Plugins sind native OBS-Plugins ohne
   obs-websocket; der Kompatibilitätshebel für Stream Decks ist die
   v5-Protokolloberfläche selbst.
+
+- feat(m5): extend the OBS WebSocket v5 surface with the replay-buffer action
+  set (`GetReplayBufferStatus`, `StartReplayBuffer`, `StopReplayBuffer`,
+  `ToggleReplayBuffer`, `SaveReplayBuffer` mit optionalem `saveReplayPath`)
+  und Studio-Mode (`GetStudioModeEnabled`, `SetStudioModeEnabled`) — neue
+  `ReplayBufferStateChanged`/`ReplayBufferSaved`/`StudioModeStateChanged`-
+  Events mit korrektem Intent-Routing, Deck-initiierte Replay-Saves landen im
+  Videos-Ordner, und Compat-Vertragstest + Pinning-Guard decken die neuen
+  Aktionen ab.
+- docs: Replay-Buffer- und Studio-Mode-Deck-Aktionen in der Stream-Deck-
+  Anleitung dokumentiert (Repo-Doku + Wiki, alle Sprachen).
 
 - feat(alerts): **Per-Source-Rate-Limiting** — die Alert-Ingest-Queue
   drosselt jetzt pro Lieferkanal (`AlertSource`: Twitch EventSub,

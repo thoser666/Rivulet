@@ -1715,6 +1715,8 @@ struct ObsWsPublicState {
     streaming: bool,
     reconnecting: bool,
     muted: bool,
+    replay_buffer_active: bool,
+    studio_mode: bool,
 }
 
 impl Default for RivuletApp {
@@ -5860,16 +5862,35 @@ impl RivuletApp {
         else {
             return;
         };
+        self.save_replay_to(path);
+    }
+
+    /// Save the buffered replay clip to an explicit path and report the
+    /// outcome (localized) in `replay_status`. Shared by the GUI button and
+    /// the OBS WebSocket replay requests (`SaveReplayBuffer`).
+    fn save_replay_to(
+        &mut self,
+        path: std::path::PathBuf,
+    ) -> rivulet_obs_websocket::ObsCommandResult {
         match self.engine.save_replay(path.clone()) {
             Ok(_) => {
                 self.replay_status = Some((
                     true,
                     self.tr_fmt("replay_saved", &[path.display().to_string()]),
                 ));
+                rivulet_obs_websocket::ObsCommandResult::Success(vec![
+                    rivulet_obs_websocket::ObsEvent::ReplayBufferSaved {
+                        saved_replay_path: Some(path.display().to_string()),
+                    },
+                ])
             }
             Err(e) => {
                 self.replay_status =
                     Some((false, self.tr_fmt("replay_save_failed", &[e.to_string()])));
+                rivulet_obs_websocket::ObsCommandResult::Failure {
+                    status_code: rivulet_obs_websocket::protocol::status::REQUEST_PROCESSING_FAILED,
+                    comment: e.to_string(),
+                }
             }
         }
     }
@@ -7116,6 +7137,16 @@ impl RivuletApp {
                             muted: current.muted,
                         });
                     }
+                    if current.replay_buffer_active != last.replay_buffer_active {
+                        events.push(rivulet_obs_websocket::ObsEvent::ReplayBufferStateChanged {
+                            active: current.replay_buffer_active,
+                        });
+                    }
+                    if current.studio_mode != last.studio_mode {
+                        events.push(rivulet_obs_websocket::ObsEvent::StudioModeStateChanged {
+                            enabled: current.studio_mode,
+                        });
+                    }
                     server.broadcast(events);
                 }
             }
@@ -7314,6 +7345,8 @@ impl RivuletApp {
         snap.recording = self.any_recording_active();
         snap.streaming = self.engine.is_streaming();
         snap.reconnecting = false;
+        snap.replay_buffer_active = self.replay_duration_secs.is_some();
+        snap.studio_mode = self.studio_mode.enabled();
         snap.output_duration_ms = self.record_started.elapsed().as_millis() as u64;
     }
 
@@ -7326,6 +7359,8 @@ impl RivuletApp {
             streaming: self.engine.is_streaming(),
             reconnecting: false,
             muted: self.is_muted,
+            replay_buffer_active: self.replay_duration_secs.is_some(),
+            studio_mode: self.studio_mode.enabled(),
         }
     }
 
@@ -7457,6 +7492,86 @@ impl RivuletApp {
                         input_name: self.obs_ws_primary_input_name(),
                         muted: self.is_muted,
                     },
+                ])
+            }
+            ObsCommand::StartReplayBuffer => {
+                if self.replay_duration_secs.is_some() {
+                    rivulet_obs_websocket::ObsCommandResult::Failure {
+                        status_code: rivulet_obs_websocket::protocol::status::OUTPUT_RUNNING,
+                        comment: "Replay buffer already active".into(),
+                    }
+                } else {
+                    self.replay_duration_secs = Some(30);
+                    self.apply_replay_setting();
+                    self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
+                    rivulet_obs_websocket::ObsCommandResult::Success(vec![
+                        ObsEvent::ReplayBufferStateChanged { active: true },
+                    ])
+                }
+            }
+            ObsCommand::StopReplayBuffer => {
+                if self.replay_duration_secs.is_none() {
+                    rivulet_obs_websocket::ObsCommandResult::Failure {
+                        status_code: rivulet_obs_websocket::protocol::status::OUTPUT_NOT_RUNNING,
+                        comment: "Replay buffer not active".into(),
+                    }
+                } else {
+                    self.replay_duration_secs = None;
+                    self.apply_replay_setting();
+                    self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
+                    rivulet_obs_websocket::ObsCommandResult::Success(vec![
+                        ObsEvent::ReplayBufferStateChanged { active: false },
+                    ])
+                }
+            }
+            ObsCommand::ToggleReplayBuffer => {
+                if self.replay_duration_secs.is_some() {
+                    self.execute_obs_command(ObsCommand::StopReplayBuffer)
+                } else {
+                    self.execute_obs_command(ObsCommand::StartReplayBuffer)
+                }
+            }
+            ObsCommand::SaveReplayBuffer => {
+                if self.replay_duration_secs.is_none() {
+                    return rivulet_obs_websocket::ObsCommandResult::Failure {
+                        status_code: rivulet_obs_websocket::protocol::status::OUTPUT_NOT_RUNNING,
+                        comment: "Replay buffer not active".into(),
+                    };
+                }
+                // Derive a non-interactive path (the deck button has no file
+                // dialog): the engine's filename pattern in the Videos dir.
+                let dir = dirs::video_dir()
+                    .unwrap_or_else(std::env::temp_dir)
+                    .join("Rivulet");
+                let _ = std::fs::create_dir_all(&dir);
+                let path = self
+                    .engine
+                    .default_recording_path(&dir.display().to_string(), "replay");
+                let path = path.with_extension("mp4");
+                self.save_replay_to(path)
+            }
+            ObsCommand::SaveReplayBufferTo(path) => {
+                if self.replay_duration_secs.is_none() {
+                    return rivulet_obs_websocket::ObsCommandResult::Failure {
+                        status_code: rivulet_obs_websocket::protocol::status::OUTPUT_NOT_RUNNING,
+                        comment: "Replay buffer not active".into(),
+                    };
+                }
+                let path = std::path::PathBuf::from(&path);
+                self.save_replay_to(path)
+            }
+            ObsCommand::SetStudioMode(enabled) => {
+                if self.studio_mode.enabled() == enabled {
+                    return rivulet_obs_websocket::ObsCommandResult::Failure {
+                        status_code:
+                            rivulet_obs_websocket::protocol::status::RESOURCE_ALREADY_EXISTS,
+                        comment: "Studio mode already in that state".into(),
+                    };
+                }
+                self.studio_mode.set_enabled(enabled, self.scenes.active());
+                self.obs_ws_last_public_state = Some(self.obs_ws_public_state());
+                rivulet_obs_websocket::ObsCommandResult::Success(vec![
+                    ObsEvent::StudioModeStateChanged { enabled },
                 ])
             }
             ObsCommand::StartStreaming => {

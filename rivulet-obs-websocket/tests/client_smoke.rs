@@ -181,6 +181,23 @@ impl ObsBackend for MemoryBackend {
                     reconnecting: false,
                 }])
             }
+            ObsCommand::StartReplayBuffer
+            | ObsCommand::StopReplayBuffer
+            | ObsCommand::ToggleReplayBuffer
+            | ObsCommand::SaveReplayBuffer
+            | ObsCommand::SaveReplayBufferTo(_) => {
+                let mut snap = self.snapshot.lock().unwrap();
+                snap.replay_buffer_active = !snap.replay_buffer_active;
+                ObsCommandResult::Success(vec![ObsEvent::ReplayBufferStateChanged {
+                    active: snap.replay_buffer_active,
+                }])
+            }
+            ObsCommand::SetStudioMode(enabled) => {
+                let enabled = *enabled;
+                let mut snap = self.snapshot.lock().unwrap();
+                snap.studio_mode = enabled;
+                ObsCommandResult::Success(vec![ObsEvent::StudioModeStateChanged { enabled }])
+            }
         }
     }
 }
