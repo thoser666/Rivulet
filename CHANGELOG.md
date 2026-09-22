@@ -30,6 +30,13 @@
   Aktionen ab.
 - docs: Replay-Buffer- und Studio-Mode-Deck-Aktionen in der Stream-Deck-
   Anleitung dokumentiert (Repo-Doku + Wiki, alle Sprachen).
+- feat(m6.9): **Per-Plattform-Stream-Metadaten** (#214) — der Stream-Info-
+  Editor im kombinierten Chat-Dock führt Reiter ein (Alle Plattformen /
+  Twitch / Kick / YouTube); jede Plattform behält ihre eigenen Titel- und
+  Game-Entwürfe, „Auf alle anwenden" pusht jeden Plattform-Entwurf in
+  einem Batch (leere Entwürfe werden übersprungen), Plattform-Reiter haben
+  einen dedizierten Apply-Knopf. i18n EN/DE, Doku in twitch-chat.md und
+  Bedienungsanleitung, Pinning-Guard erweitert.
 
 - feat(alerts): **Per-Source-Rate-Limiting** — die Alert-Ingest-Queue
   drosselt jetzt pro Lieferkanal (`AlertSource`: Twitch EventSub,

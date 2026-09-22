@@ -107,9 +107,15 @@ and **YouTube** (Innertube polling) from one unified UI.
 
 ### Stream info editor
 
-The combined dock also carries a **stream info editor**: one shared title
-and game/category draft with an *apply* button per platform plus an
-**Apply to all** button. Each apply runs on a background thread and
+The combined dock also carries a **stream info editor** with scope tabs:
+**All platforms**, **Twitch**, **Kick**, **YouTube**. Every platform holds
+its **own title and game/category drafts** — switching tabs never copies
+values between platforms. In the *All platforms* view each configured
+platform shows its own row (title + game side by side); a platform tab
+edits that platform's drafts alone. **Apply to all** pushes *each
+platform's own values* in one batch (platforms with empty drafts are
+skipped, not failed), and a platform tab has a dedicated **Apply to
+&lt;platform&gt;** button. Each apply runs on a background thread and
 reports an honest per-platform outcome:
 
 | Platform | API | Notes |

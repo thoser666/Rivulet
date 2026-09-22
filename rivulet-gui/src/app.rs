@@ -950,14 +950,20 @@ pub struct RivuletApp {
     #[serde(skip)]
     chat_action_pending: Option<ChatAction>,
 
-    /// Chat dock: stream-info editor — shared title draft. Not persisted
-    /// (pure input state, no reason to survive a restart).
+    /// Chat dock: stream-info editor — per-platform title drafts, indexed
+    /// by [`rivulet_core::InfoPlatform::index`]. Not persisted (pure input
+    /// state, no reason to survive a restart).
     #[serde(skip)]
-    chat_info_title: String,
-    /// Chat dock: stream-info editor — shared game/category draft. Not
-    /// persisted.
+    chat_info_title: [String; 3],
+    /// Chat dock: stream-info editor — per-platform game/category drafts,
+    /// indexed the same way. Not persisted.
     #[serde(skip)]
-    chat_info_game: String,
+    chat_info_game: [String; 3],
+    /// Chat dock: stream-info editor — which platform's drafts are edited
+    /// (`None` = the shared "all platforms" drafts, the pre-#214 behavior).
+    /// Not persisted.
+    #[serde(skip)]
+    chat_info_scope: Option<rivulet_core::InfoPlatform>,
     /// Chat dock: stream-info editor — in-flight update marker. Blocks a
     /// second apply while the background thread is running. Not persisted.
     #[serde(skip)]
@@ -1764,8 +1770,9 @@ impl Default for RivuletApp {
             chat_worker_multi: None,
             chat_messages: Vec::new(),
             chat_action_pending: None,
-            chat_info_title: String::new(),
-            chat_info_game: String::new(),
+            chat_info_title: Default::default(),
+            chat_info_game: Default::default(),
+            chat_info_scope: None,
             chat_info_busy: false,
             chat_info_rx: None,
             chat_room_names: rivulet_core::SharedRoomNameService::default(),
@@ -8533,11 +8540,30 @@ impl RivuletApp {
         if self.chat_info_busy {
             return;
         }
-        let update = rivulet_core::StreamInfoUpdate {
-            title: Some(self.chat_info_title.clone()),
-            game: Some(self.chat_info_game.clone()),
-        };
-        if !update.has_changes() {
+        // Per-platform updates (#214): every platform carries its own
+        // title/game drafts; "apply to all" pushes each platform's own
+        // values at once. Platforms with empty drafts have nothing to
+        // apply and are skipped instead of failing with an empty update.
+        let updates: Vec<(rivulet_core::InfoPlatform, rivulet_core::StreamInfoUpdate)> =
+            rivulet_core::InfoPlatform::ALL
+                .into_iter()
+                .filter(|p| match only {
+                    Some(only) => only == *p,
+                    None => true,
+                })
+                .map(|p| {
+                    let idx = p.index();
+                    (
+                        p,
+                        rivulet_core::StreamInfoUpdate {
+                            title: Some(self.chat_info_title[idx].clone()),
+                            game: Some(self.chat_info_game[idx].clone()),
+                        },
+                    )
+                })
+                .filter(|(_, update)| update.has_changes())
+                .collect();
+        if updates.is_empty() {
             self.chat_info_error = Some(self.tr("chat_info_nothing").to_owned());
             return;
         }
@@ -8551,6 +8577,9 @@ impl RivuletApp {
         if let Some(only) = only {
             platforms.retain(|p| *p == only);
         }
+        // A configured platform without any draft content is not part of
+        // this batch (nothing would change on it).
+        platforms.retain(|p| updates.iter().any(|(target, _)| target == p));
         if platforms.is_empty() {
             self.chat_info_error = Some(self.tr("chat_info_nothing").to_owned());
             return;
@@ -8558,28 +8587,44 @@ impl RivuletApp {
         // Credentials are resolved *here*, on the UI thread, before any
         // background thread exists — the vault is only touched from the
         // main thread.
-        let targets: Vec<(rivulet_core::InfoPlatform, rivulet_core::InfoCredentials)> = platforms
+        let targets: Vec<(
+            rivulet_core::InfoPlatform,
+            rivulet_core::InfoCredentials,
+            rivulet_core::StreamInfoUpdate,
+        )> = platforms
             .iter()
-            .map(|p| (*p, self.chat_info_credentials_for(*p)))
+            .map(|p| {
+                let update = updates
+                    .iter()
+                    .find(|(target, _)| target == p)
+                    .map(|(_, update)| update.clone())
+                    .unwrap_or_default();
+                (*p, self.chat_info_credentials_for(*p), update)
+            })
             .collect();
 
         let (tx, rx) = std::sync::mpsc::channel();
         self.chat_info_rx = Some(rx);
         self.chat_info_busy = true;
         std::thread::spawn(move || {
-            let outcomes = rivulet_core::update_all_stream_info(
-                &targets.iter().map(|(p, _)| *p).collect::<Vec<_>>(),
-                &update,
-                |platform| {
-                    targets
-                        .iter()
-                        .find(|(p, _)| *p == platform)
-                        .map(|(_, c)| c.clone())
-                        .unwrap_or_default()
-                },
-                &rivulet_core::InfoEndpoints::default(),
-                &rivulet_core::UreqHttp,
-            );
+            // One call per platform with its own update (the shared
+            // `update_all_stream_info` helper applies one update to many
+            // platforms; #214 needs per-platform values).
+            let outcomes = targets
+                .iter()
+                .map(|(platform, credentials, update)| {
+                    (
+                        *platform,
+                        rivulet_core::update_platform_stream_info(
+                            *platform,
+                            update,
+                            credentials,
+                            &rivulet_core::InfoEndpoints::default(),
+                            &rivulet_core::UreqHttp,
+                        ),
+                    )
+                })
+                .collect::<Vec<_>>();
             let _ = tx.send(outcomes);
         });
     }
@@ -8735,57 +8780,124 @@ impl RivuletApp {
             ui.colored_label(colors.warning, error);
         }
 
-        // Stream-info editor: one shared title/game draft, applied per
-        // platform or to all configured platforms at once. Outcomes are
-        // per-platform (one failure never hides the others).
+        // Stream-info editor: every platform keeps its own title/game draft
+        // (#214), edited through the scope tabs; "apply to all" pushes each
+        // platform's own values at once. Outcomes are per-platform (one
+        // failure never hides the others).
         ui.add_space(4.0);
         ui.separator();
         ui.label(egui::RichText::new(self.tr("chat_info_title")).strong());
+        let scope = self.chat_info_scope;
+        let field_width = if scope.is_none() { 150.0 } else { 220.0 };
+        let scopes: Vec<(Option<rivulet_core::InfoPlatform>, String)> =
+            std::iter::once((None, self.tr("chat_info_scope_all").to_owned()))
+                .chain(
+                    rivulet_core::InfoPlatform::ALL
+                        .into_iter()
+                        .map(|p| (Some(p), p.label().to_owned())),
+                )
+                .collect();
         ui.horizontal_wrapped(|ui| {
-            ui.label(self.tr("chat_info_field_title"));
-            let title_hint = self.tr("chat_info_hint_title").to_owned();
-            ui.add(
-                egui::TextEdit::singleline(&mut self.chat_info_title)
-                    .hint_text(title_hint)
-                    .desired_width(220.0),
-            );
-        });
-        ui.horizontal_wrapped(|ui| {
-            ui.label(self.tr("chat_info_field_game"));
-            let game_hint = self.tr("chat_info_hint_game").to_owned();
-            ui.add(
-                egui::TextEdit::singleline(&mut self.chat_info_game)
-                    .hint_text(game_hint)
-                    .desired_width(220.0),
-            );
-        });
-        ui.horizontal_wrapped(|ui| {
-            for platform in rivulet_core::InfoPlatform::ALL {
-                let configured = self.chat_accounts.iter().any(|a| {
-                    rivulet_core::chat_info_platform_of_chat(a.platform) == Some(platform)
-                });
-                let button = egui::Button::new(format!("{} ↗", platform.label()));
-                if ui
-                    .add_enabled(!self.chat_info_busy && configured, button)
-                    .clicked()
-                {
-                    self.apply_chat_stream_info(Some(platform));
+            for (tab_scope, label) in &scopes {
+                let configured = match tab_scope {
+                    None => !self.chat_accounts.is_empty(),
+                    Some(platform) => self.chat_accounts.iter().any(|a| {
+                        rivulet_core::chat_info_platform_of_chat(a.platform) == Some(*platform)
+                    }),
+                };
+                let selected = self.chat_info_scope == *tab_scope;
+                let button = if selected {
+                    egui::Button::new(egui::RichText::new(label.clone()).strong())
+                } else {
+                    egui::Button::new(label.clone())
+                };
+                if ui.add_enabled(configured, button).clicked() {
+                    self.chat_info_scope = *tab_scope;
                 }
             }
-            if ui
-                .add_enabled(
-                    !self.chat_info_busy && !self.chat_accounts.is_empty(),
-                    egui::Button::new(self.tr("chat_info_apply_all")),
-                )
-                .clicked()
-            {
-                self.apply_chat_stream_info(None);
-            }
-            if self.chat_info_busy {
-                ui.spinner();
-                ui.label(self.tr("chat_info_busy"));
-            }
         });
+        match scope {
+            None => {
+                // All-platforms view: one row per configured platform, each
+                // editing that platform's own drafts.
+                for platform in rivulet_core::InfoPlatform::ALL {
+                    let configured = self.chat_accounts.iter().any(|a| {
+                        rivulet_core::chat_info_platform_of_chat(a.platform) == Some(platform)
+                    });
+                    if !configured {
+                        continue;
+                    }
+                    let idx = platform.index();
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(format!("{}:", platform.label())).strong());
+                        ui.label(self.tr("chat_info_field_title"));
+                        let title_hint = self.tr("chat_info_hint_title").to_owned();
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.chat_info_title[idx])
+                                .hint_text(title_hint)
+                                .desired_width(field_width),
+                        );
+                        ui.label(self.tr("chat_info_field_game"));
+                        let game_hint = self.tr("chat_info_hint_game").to_owned();
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.chat_info_game[idx])
+                                .hint_text(game_hint)
+                                .desired_width(field_width),
+                        );
+                    });
+                }
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add_enabled(
+                            !self.chat_info_busy && !self.chat_accounts.is_empty(),
+                            egui::Button::new(self.tr("chat_info_apply_all")),
+                        )
+                        .clicked()
+                    {
+                        self.apply_chat_stream_info(None);
+                    }
+                    if self.chat_info_busy {
+                        ui.spinner();
+                        ui.label(self.tr("chat_info_busy"));
+                    }
+                });
+            }
+            Some(platform) => {
+                let idx = platform.index();
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(self.tr("chat_info_field_title"));
+                    let title_hint = self.tr("chat_info_hint_title").to_owned();
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.chat_info_title[idx])
+                            .hint_text(title_hint)
+                            .desired_width(field_width),
+                    );
+                });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(self.tr("chat_info_field_game"));
+                    let game_hint = self.tr("chat_info_hint_game").to_owned();
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.chat_info_game[idx])
+                            .hint_text(game_hint)
+                            .desired_width(field_width),
+                    );
+                });
+                ui.horizontal_wrapped(|ui| {
+                    let label =
+                        self.tr_fmt("chat_info_apply_platform", &[platform.label().to_owned()]);
+                    if ui
+                        .add_enabled(!self.chat_info_busy, egui::Button::new(label))
+                        .clicked()
+                    {
+                        self.apply_chat_stream_info(Some(platform));
+                    }
+                    if self.chat_info_busy {
+                        ui.spinner();
+                        ui.label(self.tr("chat_info_busy"));
+                    }
+                });
+            }
+        }
         if let Some(error) = &self.chat_info_error {
             let colors = theme::StatusColors::for_ui(ui);
             ui.colored_label(colors.warning, error.clone());
@@ -18314,7 +18426,7 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
             rivulet_core::ChatPlatform::Kick,
             "somechannel".to_owned(),
         ));
-        app.chat_info_title = "New title".to_owned();
+        app.chat_info_title[rivulet_core::InfoPlatform::Kick.index()] = "New title".to_owned();
         app.chat_info_error = Some("stale".to_owned());
         app.apply_chat_stream_info(None);
         assert!(app.chat_info_busy, "apply must mark the editor busy");
@@ -18356,7 +18468,7 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
             rivulet_core::ChatPlatform::Kick,
             "chan".to_owned(),
         ));
-        app.chat_info_game = "Just Chatting".to_owned();
+        app.chat_info_game[rivulet_core::InfoPlatform::Twitch.index()] = "Just Chatting".to_owned();
         app.apply_chat_stream_info(Some(rivulet_core::InfoPlatform::Twitch));
         assert!(app.chat_info_busy);
         for _ in 0..100 {
@@ -18388,8 +18500,11 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
             app.chat_accounts
                 .push(rivulet_core::ChatAccount::new(platform, channel.to_owned()));
         }
-        app.chat_info_title = "Same title".to_owned();
-        app.chat_info_game = "Software".to_owned();
+        for platform in rivulet_core::InfoPlatform::ALL {
+            let idx = platform.index();
+            app.chat_info_title[idx] = format!("{label} title", label = platform.label());
+            app.chat_info_game[idx] = "Software".to_owned();
+        }
         app.apply_chat_stream_info(None);
         for _ in 0..100 {
             app.reconcile_chat();
@@ -18421,7 +18536,7 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
             rivulet_core::ChatPlatform::Kick,
             "chan".to_owned(),
         ));
-        app.chat_info_title = "x".to_owned();
+        app.chat_info_title[rivulet_core::InfoPlatform::Kick.index()] = "x".to_owned();
         app.apply_chat_stream_info(None);
         assert!(app.chat_info_busy);
         app.apply_chat_stream_info(None);
@@ -18447,6 +18562,66 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
     }
 
     #[test]
+    fn chat_info_per_platform_drafts_are_independent() {
+        let mut app = RivuletApp::default();
+        for (platform, channel) in [
+            (rivulet_core::ChatPlatform::Twitch, "chan"),
+            (rivulet_core::ChatPlatform::Kick, "chan"),
+        ] {
+            app.chat_accounts
+                .push(rivulet_core::ChatAccount::new(platform, channel.to_owned()));
+        }
+        // Only Twitch has a draft; Kick stays empty. An apply-to-all must
+        // reach exactly the platform with content (#214 core behavior).
+        app.chat_info_title[rivulet_core::InfoPlatform::Twitch.index()] = "Twitch only".to_owned();
+        app.apply_chat_stream_info(None);
+        for _ in 0..100 {
+            app.reconcile_chat();
+            if !app.chat_info_busy {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(
+            app.chat_info_outcomes.len(),
+            1,
+            "empty per-platform drafts must be skipped, not failed"
+        );
+        assert_eq!(
+            app.chat_info_outcomes[0].0,
+            rivulet_core::InfoPlatform::Twitch
+        );
+    }
+
+    #[test]
+    fn chat_info_scope_tabs_switch_the_edited_drafts() {
+        let mut app = RivuletApp::default();
+        app.chat_accounts.push(rivulet_core::ChatAccount::new(
+            rivulet_core::ChatPlatform::Kick,
+            "chan".to_owned(),
+        ));
+        // Default scope: all platforms.
+        assert_eq!(app.chat_info_scope, None);
+        // Switching the scope does not copy values between platforms —
+        // each platform's drafts stay independent.
+        app.chat_info_scope = Some(rivulet_core::InfoPlatform::Kick);
+        app.chat_info_title[rivulet_core::InfoPlatform::Kick.index()] = "Kick draft".to_owned();
+        app.chat_info_scope = Some(rivulet_core::InfoPlatform::Twitch);
+        app.chat_info_title[rivulet_core::InfoPlatform::Twitch.index()] = "Twitch draft".to_owned();
+        assert_eq!(
+            app.chat_info_title[rivulet_core::InfoPlatform::Kick.index()],
+            "Kick draft",
+            "drafts must not leak between platform scopes"
+        );
+        // Back to all: drafts remain per platform.
+        app.chat_info_scope = None;
+        assert_eq!(
+            app.chat_info_title[rivulet_core::InfoPlatform::Kick.index()],
+            "Kick draft"
+        );
+    }
+
+    #[test]
     fn chat_info_fields_are_not_persisted() {
         let json = serde_json::json!({});
         assert!(json.get("chat_info_title").is_none());
@@ -18455,6 +18630,7 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         for key in [
             "chat_info_title",
             "chat_info_game",
+            "chat_info_scope",
             "chat_info_busy",
             "chat_info_rx",
             "chat_info_outcomes",

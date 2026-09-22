@@ -88,8 +88,9 @@ pub use reconnect::{
     StreamingReconnectSupervisor, TargetReconnectState,
 };
 pub use stream_info::{
-    chat_info_platform, chat_info_platform_of_chat, update_all_stream_info, InfoCredentials,
-    InfoEndpoints, InfoPlatform, InfoUpdateOutcome, StreamInfoUpdate, UreqHttp,
+    chat_info_platform, chat_info_platform_of_chat, update_all_stream_info,
+    update_platform_stream_info, InfoCredentials, InfoEndpoints, InfoPlatform, InfoUpdateOutcome,
+    StreamInfoUpdate, UreqHttp,
 };
 pub use stream_runtime::{AdaptiveBitrateController, BitrateChange, DelaySupervisor};
 
