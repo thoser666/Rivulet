@@ -138,6 +138,13 @@ fn streamdeck_compat_surface_is_pinned_to_obs_websocket_v5() {
         "\"StopStream\"",
         "\"ToggleStream\"",
         "\"ToggleInputMute\"",
+        "\"GetReplayBufferStatus\"",
+        "\"StartReplayBuffer\"",
+        "\"StopReplayBuffer\"",
+        "\"ToggleReplayBuffer\"",
+        "\"SaveReplayBuffer\"",
+        "\"GetStudioModeEnabled\"",
+        "\"SetStudioModeEnabled\"",
     ] {
         assert!(
             protocol.contains(name),
@@ -162,6 +169,8 @@ fn streamdeck_compat_surface_is_pinned_to_obs_websocket_v5() {
     let compat = read("rivulet-obs-websocket/tests/streamdeck_compat.rs");
     assert!(compat.contains("get_version_advertises_the_v5_action_set_plugins_bind"));
     assert!(compat.contains("full_deck_action_set_round_trips_with_events"));
+    assert!(compat.contains("replay_buffer_action_set_round_trips"));
+    assert!(compat.contains("studio_mode_action_set_round_trips"));
     assert!(compat.contains("v4_wire_names_are_rejected_as_unknown"));
     assert!(compat.contains("obsWebSocketVersion"));
     assert!(compat.contains("availableRequests"));
@@ -170,20 +179,29 @@ fn streamdeck_compat_surface_is_pinned_to_obs_websocket_v5() {
     assert!(server.contains("\"obsWebSocketVersion\": \"5.0.0\""));
     assert!(server.contains("\"rpcVersion\": protocol::RPC_VERSION"));
     assert!(server.contains("ToggleInputMute"));
-    // Mute round-trips through the backend and the GUI state.
+    // Mute and the replay/studio extension round-trip through the backend
+    // and the GUI state.
     let backend = read("rivulet-obs-websocket/src/backend.rs");
     assert!(backend.contains("InputMuteStateChanged"));
     assert!(backend.contains("ToggleMute"));
     assert!(backend.contains("pub muted: bool"));
+    assert!(backend.contains("ReplayBufferStateChanged"));
+    assert!(backend.contains("ReplayBufferSaved"));
+    assert!(backend.contains("StudioModeStateChanged"));
     let app = read("rivulet-gui/src/app.rs");
     assert!(app.contains("ObsCommand::PauseRecording"));
     assert!(app.contains("ObsCommand::UnpauseRecording"));
     assert!(app.contains("ObsCommand::ToggleMute"));
     assert!(app.contains("InputMuteStateChanged"));
+    assert!(app.contains("ObsCommand::SaveReplayBufferTo"));
+    assert!(app.contains("ObsCommand::SetStudioMode"));
+    assert!(app.contains("fn save_replay_to"));
     // Docs advertise the v5 surface (the Stream Deck section).
     let docs = read("docs/obs-websocket.md");
     assert!(docs.contains("`StartRecord`"));
     assert!(docs.contains("`ToggleInputMute`"));
+    assert!(docs.contains("`SaveReplayBuffer`"));
+    assert!(docs.contains("`SetStudioModeEnabled`"));
     assert!(docs.contains("tests/streamdeck_compat.rs"));
 }
 

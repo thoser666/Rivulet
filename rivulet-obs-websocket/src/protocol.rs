@@ -135,6 +135,13 @@ pub enum RequestType {
     StopStream,
     ToggleStream,
     ToggleInputMute,
+    GetReplayBufferStatus,
+    StartReplayBuffer,
+    StopReplayBuffer,
+    ToggleReplayBuffer,
+    SaveReplayBuffer,
+    GetStudioModeEnabled,
+    SetStudioModeEnabled,
 }
 
 impl RequestType {
@@ -157,6 +164,13 @@ impl RequestType {
             RequestType::StopStream => "StopStream",
             RequestType::ToggleStream => "ToggleStream",
             RequestType::ToggleInputMute => "ToggleInputMute",
+            RequestType::GetReplayBufferStatus => "GetReplayBufferStatus",
+            RequestType::StartReplayBuffer => "StartReplayBuffer",
+            RequestType::StopReplayBuffer => "StopReplayBuffer",
+            RequestType::ToggleReplayBuffer => "ToggleReplayBuffer",
+            RequestType::SaveReplayBuffer => "SaveReplayBuffer",
+            RequestType::GetStudioModeEnabled => "GetStudioModeEnabled",
+            RequestType::SetStudioModeEnabled => "SetStudioModeEnabled",
         }
     }
 }
@@ -183,6 +197,13 @@ impl std::str::FromStr for RequestType {
             "StopStream" => Ok(RequestType::StopStream),
             "ToggleStream" => Ok(RequestType::ToggleStream),
             "ToggleInputMute" => Ok(RequestType::ToggleInputMute),
+            "GetReplayBufferStatus" => Ok(RequestType::GetReplayBufferStatus),
+            "StartReplayBuffer" => Ok(RequestType::StartReplayBuffer),
+            "StopReplayBuffer" => Ok(RequestType::StopReplayBuffer),
+            "ToggleReplayBuffer" => Ok(RequestType::ToggleReplayBuffer),
+            "SaveReplayBuffer" => Ok(RequestType::SaveReplayBuffer),
+            "GetStudioModeEnabled" => Ok(RequestType::GetStudioModeEnabled),
+            "SetStudioModeEnabled" => Ok(RequestType::SetStudioModeEnabled),
             _ => Err(()),
         }
     }
@@ -255,6 +276,13 @@ mod tests {
             RequestType::StopStream,
             RequestType::ToggleStream,
             RequestType::ToggleInputMute,
+            RequestType::GetReplayBufferStatus,
+            RequestType::StartReplayBuffer,
+            RequestType::StopReplayBuffer,
+            RequestType::ToggleReplayBuffer,
+            RequestType::SaveReplayBuffer,
+            RequestType::GetStudioModeEnabled,
+            RequestType::SetStudioModeEnabled,
         ] {
             assert_eq!(RequestType::from_str(rt.as_str()), Ok(rt));
         }

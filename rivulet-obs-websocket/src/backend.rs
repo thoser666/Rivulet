@@ -38,6 +38,10 @@ pub struct ObsSnapshot {
     /// single implicit input Rivulet exposes; Stream Deck mute buttons read
     /// this through `GetInputList`/`ToggleInputMute` round-trips).
     pub muted: bool,
+    /// Whether the replay buffer is enabled and capturing.
+    pub replay_buffer_active: bool,
+    /// Whether studio mode is enabled (independent program/preview scenes).
+    pub studio_mode: bool,
 }
 
 /// A mutating command a client can issue.
@@ -53,6 +57,14 @@ pub enum ObsCommand {
     StopStreaming,
     ToggleStreaming,
     ToggleMute,
+    StartReplayBuffer,
+    StopReplayBuffer,
+    ToggleReplayBuffer,
+    SaveReplayBuffer,
+    /// Save with an explicit file path (the request may carry
+    /// `saveReplayPath`); the path is echoed back through the saved event.
+    SaveReplayBufferTo(String),
+    SetStudioMode(bool),
 }
 
 impl ObsCommand {
@@ -69,6 +81,13 @@ impl ObsCommand {
             ObsCommand::StopStreaming => RequestType::StopStream,
             ObsCommand::ToggleStreaming => RequestType::ToggleStream,
             ObsCommand::ToggleMute => RequestType::ToggleInputMute,
+            ObsCommand::StartReplayBuffer => RequestType::StartReplayBuffer,
+            ObsCommand::StopReplayBuffer => RequestType::StopReplayBuffer,
+            ObsCommand::ToggleReplayBuffer => RequestType::ToggleReplayBuffer,
+            ObsCommand::SaveReplayBuffer | ObsCommand::SaveReplayBufferTo(_) => {
+                RequestType::SaveReplayBuffer
+            }
+            ObsCommand::SetStudioMode(_) => RequestType::SetStudioModeEnabled,
         }
     }
 }
@@ -96,6 +115,12 @@ pub enum ObsEvent {
     StreamStateChanged { active: bool, reconnecting: bool },
     /// The mute state of the main input changed.
     InputMuteStateChanged { input_name: String, muted: bool },
+    /// The replay buffer started or stopped capturing.
+    ReplayBufferStateChanged { active: bool },
+    /// A replay was saved to disk (`None` when the path is unavailable).
+    ReplayBufferSaved { saved_replay_path: Option<String> },
+    /// Studio mode was enabled or disabled.
+    StudioModeStateChanged { enabled: bool },
 }
 
 impl ObsEvent {
@@ -108,6 +133,12 @@ impl ObsEvent {
             }
             // v5 puts input (audio) events in the INPUTS intent.
             ObsEvent::InputMuteStateChanged { .. } => intent::INPUTS,
+            // Replay buffer state rides the OUTPUTS intent (it is an output).
+            ObsEvent::ReplayBufferStateChanged { .. } | ObsEvent::ReplayBufferSaved { .. } => {
+                intent::OUTPUTS
+            }
+            // Studio mode is a UI-level feature per the v5 spec.
+            ObsEvent::StudioModeStateChanged { .. } => intent::UI,
         }
     }
 
@@ -118,6 +149,9 @@ impl ObsEvent {
             ObsEvent::RecordStateChanged { .. } => "RecordStateChanged",
             ObsEvent::StreamStateChanged { .. } => "StreamStateChanged",
             ObsEvent::InputMuteStateChanged { .. } => "InputMuteStateChanged",
+            ObsEvent::ReplayBufferStateChanged { .. } => "ReplayBufferStateChanged",
+            ObsEvent::ReplayBufferSaved { .. } => "ReplayBufferSaved",
+            ObsEvent::StudioModeStateChanged { .. } => "StudioModeStateChanged",
         }
     }
 
@@ -138,6 +172,15 @@ impl ObsEvent {
             }
             ObsEvent::InputMuteStateChanged { input_name, muted } => {
                 serde_json::json!({ "inputName": input_name, "inputMuted": muted })
+            }
+            ObsEvent::ReplayBufferStateChanged { active } => {
+                serde_json::json!({ "outputActive": active })
+            }
+            ObsEvent::ReplayBufferSaved { saved_replay_path } => {
+                serde_json::json!({ "savedReplayPath": saved_replay_path })
+            }
+            ObsEvent::StudioModeStateChanged { enabled } => {
+                serde_json::json!({ "studioModeEnabled": enabled })
             }
         }
     }

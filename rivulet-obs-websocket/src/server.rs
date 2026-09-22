@@ -696,6 +696,69 @@ impl SessionThread {
                     serde_json::Value::Null,
                 )
             }
+            // ── Replay buffer ─────────────────────────────────────────────
+            RequestType::StartReplayBuffer => (
+                self.run_command(ObsCommand::StartReplayBuffer),
+                serde_json::Value::Null,
+            ),
+            RequestType::StopReplayBuffer => (
+                self.run_command(ObsCommand::StopReplayBuffer),
+                serde_json::Value::Null,
+            ),
+            RequestType::ToggleReplayBuffer => (
+                self.run_command(ObsCommand::ToggleReplayBuffer),
+                serde_json::Value::Null,
+            ),
+            RequestType::SaveReplayBuffer => {
+                // v5: saveReplayPath is an optional override; when present it
+                // is echoed back verbatim through the saved event.
+                if let Some(path) = request_data
+                    .get("saveReplayPath")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|p| !p.trim().is_empty())
+                {
+                    let result = self
+                        .backend
+                        .execute(ObsCommand::SaveReplayBufferTo(path.to_owned()));
+                    if let ObsCommandResult::Success(events) = &result {
+                        if !events.is_empty() {
+                            self.broadcast(events.clone());
+                        }
+                    }
+                    (result, serde_json::Value::Null)
+                } else {
+                    (
+                        self.run_command(ObsCommand::SaveReplayBuffer),
+                        serde_json::Value::Null,
+                    )
+                }
+            }
+            // ── Studio mode ───────────────────────────────────────────────
+            RequestType::SetStudioModeEnabled => {
+                // v5: studioModeEnabled is required; wrong types are 400.
+                let Some(enabled) = request_data
+                    .get("studioModeEnabled")
+                    .and_then(|v| v.as_bool())
+                else {
+                    if request_data.get("studioModeEnabled").is_none() {
+                        return (
+                            crate::backend::missing_request_field("studioModeEnabled"),
+                            serde_json::Value::Null,
+                        );
+                    }
+                    return (
+                        ObsCommandResult::Failure {
+                            status_code: protocol::status::INVALID_REQUEST_FIELD,
+                            comment: "Field: studioModeEnabled (expected boolean)".into(),
+                        },
+                        serde_json::Value::Null,
+                    );
+                };
+                (
+                    self.run_command(ObsCommand::SetStudioMode(enabled)),
+                    serde_json::Value::Null,
+                )
+            }
             _ => (
                 ObsCommandResult::Failure {
                     status_code: protocol::status::UNKNOWN_REQUEST_TYPE,
@@ -807,6 +870,8 @@ impl RequestType {
                 | RequestType::GetInputList
                 | RequestType::GetRecordStatus
                 | RequestType::GetStreamStatus
+                | RequestType::GetReplayBufferStatus
+                | RequestType::GetStudioModeEnabled
         )
     }
 }
@@ -825,6 +890,9 @@ fn read_response_data(rt: RequestType, snapshot: &ObsSnapshot) -> serde_json::Va
                 "StopRecord", "ToggleRecord", "PauseRecord",
                 "UnpauseRecord", "GetStreamStatus", "StartStream",
                 "StopStream", "ToggleStream", "ToggleInputMute",
+                "GetReplayBufferStatus", "StartReplayBuffer",
+                "StopReplayBuffer", "ToggleReplayBuffer", "SaveReplayBuffer",
+                "GetStudioModeEnabled", "SetStudioModeEnabled",
             ],
         }),
         RequestType::GetAuthRequired => serde_json::json!({ "authRequired": false }),
@@ -870,6 +938,12 @@ fn read_response_data(rt: RequestType, snapshot: &ObsSnapshot) -> serde_json::Va
             "outputBytes": snapshot.output_bytes,
             "outputSkippedFrames": snapshot.skipped_frames,
             "outputTotalFrames": snapshot.total_frames,
+        }),
+        RequestType::GetReplayBufferStatus => serde_json::json!({
+            "outputActive": snapshot.replay_buffer_active,
+        }),
+        RequestType::GetStudioModeEnabled => serde_json::json!({
+            "studioModeEnabled": snapshot.studio_mode,
         }),
         _ => serde_json::Value::Null,
     }
@@ -1134,6 +1208,8 @@ mod tests {
             skipped_frames: 1,
             total_frames: 30,
             muted: false,
+            replay_buffer_active: false,
+            studio_mode: false,
         };
         let scenes = read_response_data(RequestType::GetSceneList, &snapshot);
         assert_eq!(scenes["scenes"][0]["sceneName"], "Game");
