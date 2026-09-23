@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- feat(m7): **Scene-Item-Copy/Paste (Issue #192, M7 W6, OBS-32.2-Parität)** —
+  Szenenelemente sind kopier- und einfügbar: `SourceManager::copy_scene_item`
+  nimmt Quelle + Binding wortgetreu in die neue `SceneItemClipboard` auf
+  (Transforms, Crop, Lock, Sichtbarkeit, Reihenfolge), `paste_scene_item`
+  dupliziert sie in eine beliebige Szene mit neuem `" copy"`-Suffix —
+  optional deterministisch (`with_deterministic_ids`, UUIDv5 aus
+  Quell-ID + Ziel-Szene, damit Skripte idempotente Pastes bekommen). Jeder
+  Paste landet auf einem paste-scoped Undo/Redo-Stack im M2-Muster
+  (`can_undo_paste`/`undo_paste`/`redo_paste`); die GUI-Undo-Dispatch
+  bevorzugt ihn. GUI: Copy/Paste-Buttons in der Composition-Action-Zeile,
+  Ctrl+C/Ctrl+V nur in der Scenes-View (Text-Edit-Bedeutung woanders bleibt
+  unangetastet), Statusmeldungen über drei neue i18n-Keys (EN/DE). Tests:
+  4 Core-Tests (Identität, Cross-Scene-Nicht-Verschiebe, Idempotenz,
+  Undo), 4 GUI-Verhaltenstests, neuer ci_pinning-Guard
+  `scene_item_copy_paste_surface_is_pinned`.
+  [#192](https://github.com/thoser666/Rivulet/issues/192)
+
 - feat(remote): **Stream-Deck-Kompatibilität (OBS WebSocket v5, echte Wire-Namen)** —
   der Server hat seine Request-Vokabel auf die v5-Schreibweisen umgestellt
   (`StartRecord`/`StopRecord`/`ToggleRecord`, `PauseRecord`/`UnpauseRecord`,

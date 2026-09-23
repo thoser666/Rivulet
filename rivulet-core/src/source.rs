@@ -1,4 +1,17 @@
+//! Sources, scene bindings, and the scene-item clipboard (copy/paste/duplicate).
+//!
+//! The clipboard powers the M7 scene-item copy/paste API (OBS 32.2 frontend
+//! parity, spec § W6): a copied *scene item* is the source definition plus its
+//! per-scene binding (transform, crop, visibility, lock, z-order), so pasting
+//! reproduces the full item — not just the source. Paste duplicates the source
+//! (new identity, "<name> copy") and re-binds it with every property
+//! preserved, in the same scene or a different one. Ids are regenerated
+//! **deterministically** when the manager runs in deterministic-id mode, so
+//! pasting the same clipboard content twice yields identical scene state
+//! (scriptable, test-pinned).
+
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 /// Chroma-key settings for removing a target color from a video source.
@@ -124,7 +137,7 @@ impl Transform {
 
 /// A source in the application — identified by a UUID, carrying a kind,
 /// a default name, and per-source metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Source {
     pub id: Uuid,
     pub name: String,
@@ -201,7 +214,7 @@ impl Source {
 /// Different scenes can position the same source differently.  When
 /// `transform_override` is `None`, the source's default transform is
 /// used.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SceneSource {
     pub source_id: Uuid,
     pub scene_id: Uuid,
@@ -255,17 +268,215 @@ impl SceneSource {
     }
 }
 
+/// A copied scene item on the clipboard: the source definition plus the
+/// binding it was copied from. Paste creates a *new* source from the stored
+/// definition and re-binds it with the stored properties — duplicate
+/// semantics, never a move.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SceneItemClipboard {
+    pub source: Source,
+    pub binding: SceneSource,
+}
+
+impl SceneItemClipboard {
+    /// Deterministic id in Rivulet's clipboard namespace, derived from the
+    /// copied source's identity **and** the target scene. `uuid`'s `v5`
+    /// feature is not enabled in the workspace, so this computes SHA-256
+    /// directly over a fixed namespace marker and the seeds — a UUIDv5-style
+    /// recipe (SHA-256 variant), truncated to 128 bits.
+    ///
+    /// Deriving from the target scene means pasting the same content into
+    /// different scenes yields different identities, and pasting into the
+    /// same scene is idempotent (the paste upserts, see
+    /// [`SourceManager::paste_scene_item`]).
+    fn deterministic_source_id(&self, target_scene: Uuid) -> Uuid {
+        let mut hasher = Sha256::new();
+        hasher.update([0x9a; 16]); // fixed clipboard-namespace marker
+        hasher.update(self.source.id.as_bytes());
+        hasher.update(target_scene.as_bytes());
+        let digest = hasher.finalize();
+        let mut bytes = [0u8; 16];
+        bytes.copy_from_slice(&digest[..16]);
+        Uuid::from_bytes(bytes)
+    }
+}
+
 /// Manages the collection of sources and their scene bindings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SourceManager {
     sources: Vec<Source>,
     /// Scene → ordered list of scene-sources.
+    bindings: Vec<SceneSource>,
+    /// When true (deterministic-id mode), paste regenerates ids from the
+    /// clipboard content instead of `Uuid::new_v4()` — same clipboard in,
+    /// same resulting scene state out. Scripting/tests only; the GUI keeps
+    /// randomness so two pastes are two real duplicates.
+    #[serde(default, skip)]
+    deterministic_ids: bool,
+    /// Undo/redo history for copy/paste mutations, following the M2
+    /// SceneManager pattern (snapshot before, restore on undo). Scoped to
+    /// paste/duplicate so unrelated source edits keep their own undo paths.
+    #[serde(default, skip)]
+    paste_undo_stack: Vec<SourceCollectionSnapshot>,
+    #[serde(default, skip)]
+    paste_redo_stack: Vec<SourceCollectionSnapshot>,
+}
+
+/// Full-state snapshot of the source collection (M2 undo pattern).
+#[derive(Debug, Clone, PartialEq)]
+struct SourceCollectionSnapshot {
+    sources: Vec<Source>,
     bindings: Vec<SceneSource>,
 }
 
 impl SourceManager {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Enables deterministic-id mode for paste: ids are derived from the
+    /// clipboard content (SHA-256 over the copied item's identity) instead
+    /// of `Uuid::new_v4()`, so pasting the same clipboard content twice
+    /// produces identical scene state. Headless/scripting/test surface.
+    pub fn with_deterministic_ids(mut self) -> Self {
+        self.deterministic_ids = true;
+        self
+    }
+
+    /// Copies a scene item (source + binding) onto a fresh clipboard.
+    /// The clipboard is returned by value so callers own exactly what was
+    /// copied — the same value pasted twice must yield identical state.
+    pub fn copy_scene_item(&self, source_id: Uuid, scene_id: Uuid) -> Option<SceneItemClipboard> {
+        let binding = self
+            .bindings
+            .iter()
+            .find(|b| b.source_id == source_id && b.scene_id == scene_id)?;
+        let source = self.get_source(source_id)?;
+        Some(SceneItemClipboard {
+            source: source.clone(),
+            binding: binding.clone(),
+        })
+    }
+
+    /// Pastes a clipboard item into `scene_id`: creates a new source from
+    /// the stored definition (name suffixed with " copy", fresh or
+    /// deterministic id) and re-binds it with every scene-item property
+    /// preserved (transform override, crop, visibility, lock, z-order).
+    ///
+    /// Duplicate semantics: the clipboard is unchanged and the original
+    /// source/binding stay where they are — pasting into another scene never
+    /// moves the item out of its source scene.
+    ///
+    /// Returns the new source id on success.
+    pub fn paste_scene_item(
+        &mut self,
+        clipboard: &SceneItemClipboard,
+        scene_id: Uuid,
+    ) -> Option<Uuid> {
+        // The scene list lives in SceneManager, not here, so target-scene
+        // validation is the caller's job (GUI/engine own both managers).
+        let new_source_id = if self.deterministic_ids {
+            clipboard.deterministic_source_id(scene_id)
+        } else {
+            Uuid::new_v4()
+        };
+        if self.deterministic_ids && self.sources.iter().any(|s| s.id == new_source_id) {
+            // Deterministic paste is an idempotent upsert: the same content
+            // into the same scene always lands on the same identity, so a
+            // second paste must not push a duplicate-id source.
+            //
+            // Edge case: if the pasted binding was deleted afterwards, the
+            // source identity still exists but the scene item is gone —
+            // re-bind so a repeated paste restores the item instead of
+            // silently reporting success with nothing visible.
+            if !self
+                .bindings
+                .iter()
+                .any(|b| b.source_id == new_source_id && b.scene_id == scene_id)
+            {
+                self.record_paste_change();
+                let mut rebind = clipboard.binding.clone();
+                rebind.source_id = new_source_id;
+                rebind.scene_id = scene_id;
+                self.bindings.push(rebind);
+            }
+            return Some(new_source_id);
+        }
+
+        let mut new_source = clipboard.source.clone();
+        new_source.id = new_source_id;
+        new_source.name = format!("{} copy", clipboard.source.name);
+
+        let mut new_binding = clipboard.binding.clone();
+        new_binding.source_id = new_source_id;
+        new_binding.scene_id = scene_id;
+
+        self.record_paste_change();
+        self.sources.push(new_source);
+        self.bindings.push(new_binding);
+        Some(new_source_id)
+    }
+
+    /// Snapshots the collection before a paste/duplicate mutation (M2
+    /// undo pattern: full-state snapshot, redo cleared on new change).
+    fn record_paste_change(&mut self) {
+        self.paste_undo_stack.push(SourceCollectionSnapshot {
+            sources: self.sources.clone(),
+            bindings: self.bindings.clone(),
+        });
+        self.paste_redo_stack.clear();
+    }
+
+    /// Whether a paste/duplicate undo is available.
+    pub fn can_undo_paste(&self) -> bool {
+        !self.paste_undo_stack.is_empty()
+    }
+
+    /// Whether a paste/duplicate redo is available.
+    pub fn can_redo_paste(&self) -> bool {
+        !self.paste_redo_stack.is_empty()
+    }
+
+    /// Undo the most recent paste/duplicate: restores the exact pre-paste
+    /// source collection (both sources and scene bindings). Returns whether
+    /// an undo was applied.
+    pub fn undo_paste(&mut self) -> bool {
+        let Some(previous) = self.paste_undo_stack.pop() else {
+            return false;
+        };
+        self.paste_redo_stack.push(self.current_snapshot());
+        self.sources = previous.sources;
+        self.bindings = previous.bindings;
+        true
+    }
+
+    /// Redo the most recently undone paste/duplicate.
+    pub fn redo_paste(&mut self) -> bool {
+        let Some(next) = self.paste_redo_stack.pop() else {
+            return false;
+        };
+        self.paste_undo_stack.push(self.current_snapshot());
+        self.sources = next.sources;
+        self.bindings = next.bindings;
+        true
+    }
+
+    fn current_snapshot(&self) -> SourceCollectionSnapshot {
+        SourceCollectionSnapshot {
+            sources: self.sources.clone(),
+            bindings: self.bindings.clone(),
+        }
+    }
+
+    /// Test/inspection accessor: the full current collection state.
+    pub fn current_collection(&self) -> (Vec<Source>, Vec<SceneSource>) {
+        (self.sources.clone(), self.bindings.clone())
+    }
+
+    /// Convenience wrapper: duplicate a scene item within its own scene.
+    pub fn duplicate_scene_item(&mut self, source_id: Uuid, scene_id: Uuid) -> Option<Uuid> {
+        let clipboard = self.copy_scene_item(source_id, scene_id)?;
+        self.paste_scene_item(&clipboard, scene_id)
     }
 
     // ── source CRUD ──────────────────────────────────────────────
@@ -985,5 +1196,213 @@ mod tests {
         let mgr2 = mgr.clone();
         assert_eq!(mgr2.sources().len(), 1);
         assert_eq!(mgr2.source_count_in_scene(scene), 1);
+    }
+
+    // ── Scene-item copy/paste (M7 W6, issue #192) ───────────────
+
+    fn clipboard_fixture() -> (SourceManager, Uuid, Uuid) {
+        // A manager with one source bound to one scene, carrying every
+        // scene-item property set to non-default values.
+        let mut mgr = SourceManager::new();
+        let scene = Uuid::new_v4();
+        let mut source = Source::new("Cam".to_string(), SourceKind::Webcam);
+        source.transform = Transform::new(12.0, 34.0, 640.0, 480.0);
+        source.z_order = 3;
+        let sid = mgr.add_source(source);
+        mgr.bind_source(sid, scene, Some(Transform::new(56.0, 78.0, 320.0, 240.0)));
+        mgr.set_crop(sid, scene, Crop::new(1, 2, 3, 4));
+        mgr.set_visibility(sid, scene, false);
+        mgr.set_locked(sid, scene, true);
+        mgr.reorder_source(sid, scene, 7);
+        (mgr, scene, sid)
+    }
+
+    #[test]
+    fn paste_of_same_clipboard_twice_is_identical_scene_state() {
+        // Acceptance criterion: deterministic id generation, test-pinned.
+        // Two fresh managers pasting the same clipboard content must land
+        // on identical scene state — same id, same name, same properties.
+        let (mgr_a, scene_a, sid_a) = clipboard_fixture();
+        let clipboard = mgr_a.copy_scene_item(sid_a, scene_a).unwrap();
+
+        let run = || {
+            let mut mgr = SourceManager::new().with_deterministic_ids();
+            mgr.paste_scene_item(&clipboard, scene_a).unwrap();
+            mgr
+        };
+        let state_a = run();
+        let state_b = run();
+        assert_eq!(state_a, state_b);
+
+        let pasted = state_a.sources().iter().next().unwrap();
+        assert_eq!(pasted.name, "Cam copy");
+        assert_ne!(pasted.id, sid_a);
+        // Deterministic: rerunning yields the same new id.
+        assert_eq!(pasted.id, run().sources()[0].id);
+        // Deterministic but scene-scoped: pasting into another scene must
+        // not collide with the first paste's identity.
+        let mut other = SourceManager::new().with_deterministic_ids();
+        let other_scene = Uuid::new_v4();
+        let other_id = other.paste_scene_item(&clipboard, other_scene).unwrap();
+        assert_ne!(other_id, pasted.id);
+    }
+
+    #[test]
+    fn paste_without_deterministic_mode_generates_unique_ids() {
+        let (mgr, scene, sid) = clipboard_fixture();
+        let clipboard = mgr.copy_scene_item(sid, scene).unwrap();
+        let mut target = SourceManager::new();
+        let first = target.paste_scene_item(&clipboard, scene).unwrap();
+        let second = target.paste_scene_item(&clipboard, scene).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(target.sources().len(), 2);
+        assert_eq!(target.source_count_in_scene(scene), 2);
+    }
+
+    #[test]
+    fn paste_preserves_all_scene_item_properties() {
+        let (mgr, scene, sid) = clipboard_fixture();
+        let clipboard = mgr.copy_scene_item(sid, scene).unwrap();
+        // Clipboard stores the binding and source verbatim.
+        assert_eq!(clipboard.binding.source_id, sid);
+        assert_eq!(clipboard.binding.scene_id, scene);
+
+        let mut target = SourceManager::new();
+        let new_id = target.paste_scene_item(&clipboard, scene).unwrap();
+        let binding = target
+            .scene_sources(scene)
+            .into_iter()
+            .find(|b| b.source_id == new_id)
+            .unwrap()
+            .clone();
+        assert_eq!(
+            binding.transform_override,
+            clipboard.binding.transform_override
+        );
+        assert_eq!(binding.crop, clipboard.binding.crop);
+        assert_eq!(binding.visible, clipboard.binding.visible);
+        assert_eq!(binding.locked, clipboard.binding.locked);
+        assert_eq!(binding.z_order, clipboard.binding.z_order);
+        let source = target.get_source(new_id).unwrap();
+        assert_eq!(source.kind, SourceKind::Webcam);
+        assert_eq!(source.transform, clipboard.source.transform);
+        assert_eq!(source.z_order, clipboard.source.z_order);
+        // chroma key and device id ride along (source-level properties).
+        assert_eq!(source.chroma_key, clipboard.source.chroma_key);
+        assert_eq!(source.device_id, clipboard.source.device_id);
+    }
+
+    #[test]
+    fn cross_scene_paste_keeps_source_scene_intact() {
+        // Acceptance criterion: duplicate semantics, not move.
+        let (mut mgr, scene_a, sid) = clipboard_fixture();
+        let scene_b = Uuid::new_v4();
+        let clipboard = mgr.copy_scene_item(sid, scene_a).unwrap();
+        let new_id = mgr.paste_scene_item(&clipboard, scene_b).unwrap();
+
+        // Source scene still owns the original item…
+        assert_eq!(mgr.source_count_in_scene(scene_a), 1);
+        assert!(mgr
+            .scene_sources(scene_a)
+            .into_iter()
+            .any(|b| b.source_id == sid));
+        // …the target scene owns only the new item…
+        assert_eq!(mgr.source_count_in_scene(scene_b), 1);
+        assert!(mgr
+            .scene_sources(scene_b)
+            .into_iter()
+            .all(|b| b.source_id != sid));
+        // …and the original binding points at the original scene.
+        assert_eq!(clipboard.binding.scene_id, scene_a);
+        let _ = new_id;
+    }
+
+    #[test]
+    fn deterministic_paste_is_idempotent_upsert() {
+        let (mgr, scene, sid) = clipboard_fixture();
+        let clipboard = mgr.copy_scene_item(sid, scene).unwrap();
+        let mut target = SourceManager::new().with_deterministic_ids();
+        let first = target.paste_scene_item(&clipboard, scene).unwrap();
+        let second = target.paste_scene_item(&clipboard, scene).unwrap();
+        assert_eq!(first, second);
+        // No duplicate-id source, exactly one pasted item.
+        assert_eq!(target.sources().len(), 1);
+        assert_eq!(target.source_count_in_scene(scene), 1);
+        // Deleting the pasted item and pasting again must restore the
+        // scene item (upsert covers the binding, not just the source).
+        target.unbind_source(first, scene);
+        assert_eq!(target.source_count_in_scene(scene), 0);
+        let restored = target.paste_scene_item(&clipboard, scene).unwrap();
+        assert_eq!(restored, first);
+        assert_eq!(target.source_count_in_scene(scene), 1);
+        assert_eq!(target.sources().len(), 1);
+    }
+
+    #[test]
+    fn undo_paste_restores_pre_paste_state_exactly() {
+        // Acceptance criterion: undo restores the pre-paste scene state
+        // exactly (sources AND scene bindings).
+        let (mut mgr, scene, sid) = clipboard_fixture();
+        let before = mgr.current_collection();
+        let new_id = mgr.duplicate_scene_item(sid, scene).unwrap();
+        assert!(mgr.can_undo_paste());
+        assert!(mgr.undo_paste());
+        assert_eq!(mgr.current_collection(), before);
+        assert_eq!(mgr.source_count_in_scene(scene), 1);
+        assert!(mgr.get_source(new_id).is_none());
+
+        // Redo brings the duplicate back with the SAME id (deterministic
+        // mode) and the same restored state.
+        assert!(mgr.can_redo_paste());
+        assert!(mgr.redo_paste());
+        assert_eq!(mgr.source_count_in_scene(scene), 2);
+        assert!(mgr.get_source(new_id).is_some());
+
+        // A new paste clears the redo stack (M2 pattern).
+        let count = mgr.source_count_in_scene(scene);
+        let clipboard = mgr.copy_scene_item(sid, scene).unwrap();
+        mgr.paste_scene_item(&clipboard, scene).unwrap();
+        assert!(!mgr.can_redo_paste(), "new change must clear redo");
+        assert!(mgr.can_undo_paste());
+        let _ = count;
+    }
+
+    #[test]
+    fn undo_paste_with_empty_stack_is_a_no_op() {
+        let (mut mgr, _scene, _sid) = clipboard_fixture();
+        assert!(!mgr.can_undo_paste());
+        assert!(!mgr.undo_paste(), "empty stack must be a no-op");
+        assert!(!mgr.redo_paste());
+    }
+
+    #[test]
+    fn duplicate_scene_item_copies_within_own_scene() {
+        let (mut mgr, scene, sid) = clipboard_fixture();
+        let new_id = mgr.duplicate_scene_item(sid, scene).unwrap();
+        assert_ne!(new_id, sid);
+        assert_eq!(mgr.source_count_in_scene(scene), 2);
+        let original = mgr
+            .scene_sources(scene)
+            .into_iter()
+            .find(|b| b.source_id == sid)
+            .unwrap()
+            .clone();
+        let copy = mgr
+            .scene_sources(scene)
+            .into_iter()
+            .find(|b| b.source_id == new_id)
+            .unwrap()
+            .clone();
+        assert_eq!(copy.transform_override, original.transform_override);
+        assert_eq!(copy.crop, original.crop);
+        assert_eq!(copy.z_order, original.z_order);
+        assert_eq!(mgr.get_source(new_id).unwrap().name, "Cam copy");
+    }
+
+    #[test]
+    fn copy_scene_item_fails_for_unknown_binding() {
+        let (mgr, _scene, _sid) = clipboard_fixture();
+        assert!(mgr.copy_scene_item(Uuid::new_v4(), _scene).is_none());
+        assert!(mgr.copy_scene_item(_sid, Uuid::new_v4()).is_none());
     }
 }

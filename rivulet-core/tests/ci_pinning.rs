@@ -6477,3 +6477,54 @@ fn cli_mvp_schema_and_docs_are_pinned() {
         );
     }
 }
+
+#[test]
+fn scene_item_copy_paste_surface_is_pinned() {
+    // Issue #192 (M7 W6): the scene-item copy/paste API is the OBS 32.2
+    // frontend-parity item. Pin the full vertical slice — core clipboard
+    // model, deterministic-paste API, paste-undo stack, GUI affordances and
+    // the spec section — so the surface cannot silently erode.
+    let core = read("rivulet-core/src/source.rs");
+    for needle in [
+        "pub struct SceneItemClipboard",
+        "pub fn copy_scene_item",
+        "pub fn paste_scene_item",
+        "pub fn can_undo_paste",
+        "pub fn undo_paste",
+        "with_deterministic_ids",
+        "paste_undo_stack",
+    ] {
+        assert!(
+            core.contains(needle),
+            "source.rs must pin the copy/paste surface: {needle}"
+        );
+    }
+
+    let gui = read("rivulet-gui/src/app.rs");
+    for needle in [
+        "scene_item_clipboard",
+        "fn copy_selected_composition_source",
+        "fn paste_scene_item_clipboard",
+        "composition_copy_ok",
+        "composition_paste_ok",
+        "composition_paste_empty",
+        "AppView::Scenes",
+    ] {
+        assert!(
+            gui.contains(needle),
+            "app.rs must pin the copy/paste affordances: {needle}"
+        );
+    }
+
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.contains("\"composition_copy_ok\""),
+        "i18n must pin the copy/paste status keys"
+    );
+
+    let spec = read("docs/m7-automation.md");
+    assert!(
+        spec.contains("Scene-item copy/paste API — issue"),
+        "m7 spec must document the copy/paste workstream"
+    );
+}

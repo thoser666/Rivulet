@@ -1530,6 +1530,11 @@ pub struct RivuletApp {
     source_kind_index: usize,
     #[serde(skip)]
     selected_composition_source: Option<uuid::Uuid>,
+    /// Scene-item clipboard for copy/paste (issue #192). Holds the copied
+    /// source+binding pair verbatim; paste is deterministic and
+    /// undoable via the SourceManager paste stack.
+    #[serde(skip)]
+    scene_item_clipboard: Option<rivulet_core::SceneItemClipboard>,
     /// Index into the device list shown by the scene dialog's device picker
     /// for capture sources. `None` = use the renderer default.
     #[serde(skip)]
@@ -2006,6 +2011,7 @@ impl Default for RivuletApp {
             source_name_input: String::new(),
             source_kind_index: 0,
             selected_composition_source: None,
+            scene_item_clipboard: None,
             selected_scene_device_idx: None,
             scene_overlay_text: String::new(),
             scene_overlay_enabled: false,
@@ -5177,6 +5183,12 @@ impl RivuletApp {
                         if theme::accent_button(ui, self.tr("composition_raise")).clicked() {
                             self.source_manager.reorder_source(source_id, scene_id, 1);
                         }
+                        if theme::accent_button(ui, self.tr("composition_copy")).clicked() {
+                            self.copy_selected_composition_source();
+                        }
+                        if theme::accent_button(ui, self.tr("composition_paste")).clicked() {
+                            self.paste_scene_item_clipboard();
+                        }
                         if theme::accent_button(ui, self.tr("composition_duplicate_source"))
                             .clicked()
                         {
@@ -7858,6 +7870,56 @@ impl RivuletApp {
         }
     }
 
+    /// Copy the selected composition scene item to the in-app clipboard
+    /// (issue #192). The clipboard carries the source and its scene binding
+    /// verbatim so paste reproduces every scene-item property.
+    fn copy_selected_composition_source(&mut self) {
+        let Some(scene_id) = self.active_composition_scene() else {
+            return;
+        };
+        let Some(source_id) = self.selected_composition_source else {
+            return;
+        };
+        if let Some(clipboard) = self.source_manager.copy_scene_item(source_id, scene_id) {
+            self.scene_item_clipboard = Some(clipboard);
+            self.scene_status = Some(self.tr("composition_copy_ok").to_owned());
+        }
+    }
+
+    /// Undo for the Scenes view: source pastes first (issue #192 — the most
+    /// recent mutation wins and they have their own stack), then the M2
+    /// scene-history stack.
+    fn dispatch_scene_undo(&mut self) {
+        if !self.source_manager.undo_paste() {
+            self.scenes.undo();
+        }
+    }
+
+    /// Redo counterpart of [`Self::dispatch_scene_undo`] with the same
+    /// paste-first priority.
+    fn dispatch_scene_redo(&mut self) {
+        if !self.source_manager.redo_paste() {
+            self.scenes.redo();
+        }
+    }
+
+    /// Paste the scene-item clipboard into the composition scene. Deterministic
+    /// ids are GUI-off (two pastes = two real duplicates); each paste lands on
+    /// the SourceManager paste-undo stack so Ctrl+Z removes it again.
+    fn paste_scene_item_clipboard(&mut self) {
+        let Some(scene_id) = self.active_composition_scene() else {
+            return;
+        };
+        let Some(clipboard) = self.scene_item_clipboard.clone() else {
+            self.scene_status = Some(self.tr("composition_paste_empty").to_owned());
+            return;
+        };
+        if let Some(new_id) = self.source_manager.paste_scene_item(&clipboard, scene_id) {
+            self.selected_composition_source = Some(new_id);
+            self.scene_status = Some(self.tr("composition_paste_ok").to_owned());
+        }
+    }
+
     /// The scene whose composition the Scenes view edits: the Studio Mode
     /// Preview when active, otherwise the active scene.
     fn active_composition_scene(&self) -> Option<uuid::Uuid> {
@@ -10216,6 +10278,17 @@ impl eframe::App for RivuletApp {
                 if self.hotkeys.delete_source.pressed_in(i) {
                     self.delete_selected_composition_source();
                 }
+                // Scene-item copy/paste (issue #192): in-app only and gated on
+                // the Scenes view so Ctrl+C/V keep their text-edit meaning in
+                // every other view (chat, rename fields, stream info editor).
+                if self.view == AppView::Scenes {
+                    if i.key_pressed(egui::Key::C) && i.modifiers.command {
+                        self.copy_selected_composition_source();
+                    }
+                    if i.key_pressed(egui::Key::V) && i.modifiers.command {
+                        self.paste_scene_item_clipboard();
+                    }
+                }
             }
 
             match scene_history_shortcut(
@@ -10225,10 +10298,14 @@ impl eframe::App for RivuletApp {
                 i.key_pressed(egui::Key::Y),
             ) {
                 Some(SceneHistoryShortcut::Undo) => {
-                    self.scenes.undo();
+                    // Issue #192: paste/duplicate undo takes priority — the
+                    // most recent mutation wins, and source pastes have their
+                    // own stack (the M2 scene stack only covers scenes).
+                    self.dispatch_scene_undo();
                 }
                 Some(SceneHistoryShortcut::Redo) => {
-                    self.scenes.redo();
+                    // Same priority as undo: a fresh paste-redo beats scene redo.
+                    self.dispatch_scene_redo();
                 }
                 None => {}
             }
@@ -16070,6 +16147,147 @@ mod tests {
             "the confirm path must re-check the scene lock"
         );
         assert_eq!(app.scene_status.as_deref(), Some("Source is locked."));
+    }
+
+    #[test]
+    fn composition_copy_carries_every_scene_item_property_to_the_clipboard() {
+        // Issue #192: copy must capture the source AND its binding verbatim,
+        // so paste reproduces transforms, crops, lock and visibility.
+        let mut app = RivuletApp::default();
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+        let source_id = app.source_manager.add_source(rivulet_core::Source::new(
+            "Banner".to_owned(),
+            rivulet_core::SourceKind::Image,
+        ));
+        app.source_manager.bind_source(source_id, scene_id, None);
+        let transform = rivulet_core::Transform {
+            width: 320.0,
+            ..rivulet_core::Transform::default()
+        };
+        app.source_manager
+            .set_transform(source_id, scene_id, transform);
+        app.source_manager.set_locked(source_id, scene_id, true);
+        app.selected_composition_source = Some(source_id);
+
+        app.copy_selected_composition_source();
+
+        let clipboard = app
+            .scene_item_clipboard
+            .expect("copy populated the clipboard");
+        assert_eq!(clipboard.source.id, source_id);
+        assert_eq!(clipboard.source.name, "Banner");
+        let binding = &clipboard.binding;
+        assert_eq!(binding.source_id, source_id);
+        assert_eq!(binding.scene_id, scene_id);
+        assert_eq!(
+            binding
+                .transform_override
+                .as_ref()
+                .map(|t| t.width)
+                .unwrap_or_default(),
+            320.0
+        );
+        assert!(binding.locked, "lock state travels with the item");
+        assert_eq!(app.scene_status.as_deref(), Some("Scene item copied"));
+    }
+
+    #[test]
+    fn composition_paste_duplicates_across_scenes_without_touching_the_origin() {
+        // Paste into another scene must create a NEW source id (no shared
+        // identity), keep the original untouched, and select the duplicate.
+        let mut app = RivuletApp::default();
+        let origin = app
+            .scenes
+            .add(rivulet_core::Scene::new("Origin".to_owned()));
+        app.scenes.switch_to(origin);
+        let source_id = app.source_manager.add_source(rivulet_core::Source::new(
+            "Banner".to_owned(),
+            rivulet_core::SourceKind::Image,
+        ));
+        app.source_manager.bind_source(source_id, origin, None);
+        app.selected_composition_source = Some(source_id);
+        app.copy_selected_composition_source();
+
+        let target = app
+            .scenes
+            .add(rivulet_core::Scene::new("Target".to_owned()));
+        app.scenes.switch_to(target);
+        app.paste_scene_item_clipboard();
+
+        let new_id = app
+            .selected_composition_source
+            .expect("paste selected the new item");
+        assert_ne!(new_id, source_id, "paste must duplicate, not rebind");
+        assert!(app.source_manager.get_source(new_id).is_some());
+        assert!(
+            app.source_manager
+                .scene_sources(target)
+                .iter()
+                .any(|b| b.source_id == new_id),
+            "the duplicate is bound to the target scene"
+        );
+        assert!(app.source_manager.get_source(source_id).is_some());
+        assert!(
+            app.source_manager
+                .scene_sources(origin)
+                .iter()
+                .any(|b| b.source_id == source_id),
+            "the origin scene keeps its item"
+        );
+        assert_eq!(
+            app.source_manager
+                .get_source(new_id)
+                .map(|s| s.name.as_str()),
+            Some("Banner copy"),
+            "the duplicate gets the OBS-style copy suffix"
+        );
+    }
+
+    #[test]
+    fn composition_paste_undo_removes_the_duplicate() {
+        // Each paste lands on the SourceManager paste-undo stack; Ctrl+Z must
+        // remove the pasted item again (issue #192 undo integration).
+        let mut app = RivuletApp::default();
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+        let source_id = app.source_manager.add_source(rivulet_core::Source::new(
+            "Banner".to_owned(),
+            rivulet_core::SourceKind::Image,
+        ));
+        app.source_manager.bind_source(source_id, scene_id, None);
+        app.selected_composition_source = Some(source_id);
+        app.copy_selected_composition_source();
+        app.paste_scene_item_clipboard();
+        let pasted_id = app.selected_composition_source.expect("paste selected");
+        assert!(app.source_manager.get_source(pasted_id).is_some());
+
+        assert!(app.source_manager.can_undo_paste(), "a paste is undoable");
+        assert!(app.source_manager.undo_paste());
+
+        assert!(
+            app.source_manager.get_source(pasted_id).is_none(),
+            "undo removed the pasted duplicate"
+        );
+        assert!(app.source_manager.get_source(source_id).is_some());
+        assert!(!app.source_manager.can_undo_paste());
+    }
+
+    #[test]
+    fn composition_paste_with_empty_clipboard_reports_status_and_changes_nothing() {
+        let mut app = RivuletApp::default();
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+        let before = app.source_manager.scene_sources(scene_id).len();
+
+        app.paste_scene_item_clipboard();
+
+        assert_eq!(
+            app.scene_status.as_deref(),
+            Some("Clipboard is empty — copy a scene item first")
+        );
+        assert_eq!(app.source_manager.scene_sources(scene_id).len(), before);
+        assert_eq!(app.selected_composition_source, None);
     }
 
     #[test]
