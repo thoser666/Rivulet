@@ -21,19 +21,27 @@
 //! shortcut. The PNG is decoded back to RGBA on the calling (GUI) thread, so
 //! the COM stream stays confined to the webview thread.
 
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{mpsc, Arc};
 
 use rivulet_core::browser_source::{
-    BrowserFrame, BrowserInput, BrowserSource, BrowserSourceBackend, BrowserSourceError,
+    BrowserFrame, BrowserInput, BrowserMouseButton, BrowserSource, BrowserSourceBackend,
+    BrowserSourceError,
 };
 use webview2_com::CapturePreviewCompletedHandler;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    ICoreWebView2, COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
+    ICoreWebView2, ICoreWebView2Controller, ICoreWebView2Controller2,
+    COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, COREWEBVIEW2_COLOR,
 };
-use windows::Win32::Foundation::HGLOBAL;
+use windows::core::Interface;
+use windows::Win32::Foundation::{HGLOBAL, HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::System::Com::IStream;
 use windows::Win32::System::Com::StructuredStorage::CreateStreamOnHGlobal;
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetWindow, GetWindowRect, PostMessageW, GW_CHILD, WM_CHAR, WM_KEYDOWN, WM_KEYUP,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE,
+    WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP,
+};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
@@ -58,12 +66,12 @@ enum Command {
     SetInteractionEnabled(bool),
     SetZoom(f64),
     EvaluateJavaScript(String),
-    /// No-op placeholder: full input forwarding needs the WebView2
-    /// `MouseInput`/`KeyboardInput` API and is out of scope for the spike.
+    /// Forward a [`BrowserInput`] event to the WebView2 viewport by posting
+    /// the equivalent Windows-message sequence to its shared HWND.
     SendInput(BrowserInput),
-    /// Capture a frame with `ICoreWebView2::CapturePreview` and return the
-    /// PNG bytes over `tx`.
-    Capture(mpsc::Sender<Result<Vec<u8>, String>>),
+    /// Capture a frame with `ICoreWebView2::CapturePreview` and publish the
+    /// PNG bytes on the thread's persistent frame channel.
+    Capture,
     Shutdown,
 }
 
@@ -76,6 +84,29 @@ struct WryWindowState {
 struct WryApp {
     hwnd: Arc<AtomicIsize>,
     state: Option<WryWindowState>,
+    /// Mirrors `BrowserSource::interaction_enabled`; while disabled, posted
+    /// input events are dropped instead of forwarded.
+    interaction_enabled: bool,
+    /// Set while a `CapturePreview` request is in flight; additional capture
+    /// commands are dropped so the engine never runs concurrent captures.
+    /// Shared with the completion handler so it can be cleared on finish.
+    capture_busy: Arc<AtomicBool>,
+    /// Persistent sink for captured PNGs, consumed by the backend's poll loop.
+    frame_tx: mpsc::Sender<Result<Vec<u8>, String>>,
+}
+
+impl WryApp {
+    fn webview_hwnd(&self) -> Option<HWND> {
+        self.state.as_ref().map(|state| {
+            // wry's `hwnd()` is the container window; the real WebView2
+            // surface is its first child (Chrome_WidgetWin). Input messages
+            // must reach that child window.
+            let container = WebViewExtWindows::hwnd(&state.webview);
+            unsafe { GetWindow(container, GW_CHILD) }
+                .ok()
+                .unwrap_or(container)
+        })
+    }
 }
 
 impl ApplicationHandler<Command> for WryApp {
@@ -119,8 +150,14 @@ impl ApplicationHandler<Command> for WryApp {
                         .request_inner_size(winit::dpi::PhysicalSize::new(width, height));
                 }
             }
-            Command::SetTransparent(_transparent) => {}
-            Command::SetInteractionEnabled(_enabled) => {}
+            Command::SetTransparent(transparent) => {
+                if let Some(state) = self.state.as_ref() {
+                    let _ = set_webview_transparent(&state.webview, transparent);
+                }
+            }
+            Command::SetInteractionEnabled(enabled) => {
+                self.interaction_enabled = enabled;
+            }
             Command::SetZoom(zoom) => {
                 if let Some(state) = self.state.as_ref() {
                     let _ = state.webview.zoom(zoom);
@@ -131,10 +168,23 @@ impl ApplicationHandler<Command> for WryApp {
                     let _ = state.webview.evaluate_script(&script);
                 }
             }
-            Command::SendInput(_input) => {}
-            Command::Capture(tx) => {
+            Command::SendInput(input) => {
+                if self.interaction_enabled {
+                    if let Some(hwnd) = self.webview_hwnd() {
+                        let _ = forward_browser_input(hwnd, &input);
+                    }
+                }
+            }
+            Command::Capture => {
                 if let Some(state) = self.state.as_ref() {
-                    capture_preview(&state.webview, tx);
+                    // Never stack concurrent CapturePreview calls; the
+                    // completion handler clears the flag.
+                    if self.capture_busy.swap(true, Ordering::SeqCst) {
+                        return;
+                    }
+                    let busy = Arc::clone(&self.capture_busy);
+                    let tx = self.frame_tx.clone();
+                    capture_preview(&state.webview, busy, tx);
                 }
             }
             Command::Shutdown => event_loop.exit(),
@@ -152,6 +202,10 @@ pub struct WryBrowserBackend {
     proxy: EventLoopProxy<Command>,
     width: u32,
     height: u32,
+    sequence: u64,
+    /// PNG frames come back over this channel; the GUI poll loop only ever
+    /// does `try_recv`, so it never blocks on a slow webview thread.
+    frame_rx: mpsc::Receiver<Result<Vec<u8>, String>>,
 }
 
 impl WryBrowserBackend {
@@ -160,7 +214,11 @@ impl WryBrowserBackend {
     pub fn spawn() -> Result<Self, BrowserSourceError> {
         let hwnd = Arc::new(AtomicIsize::new(0));
         let (proxy_tx, proxy_rx) = std::sync::mpsc::channel::<EventLoopProxy<Command>>();
+        // Frames flow from the webview thread to the poll loop over their own
+        // bounded-free channel; `poll_frame` only ever does `try_recv`.
+        let (frame_tx, frame_rx) = mpsc::channel::<Result<Vec<u8>, String>>();
         let spawned_hwnd = Arc::clone(&hwnd);
+        let spawned_frame_tx = frame_tx;
         std::thread::spawn(move || {
             // `EventLoop` and `WebView` are `!Send`, so the whole loop must
             // be created and owned inside this thread.
@@ -175,6 +233,9 @@ impl WryBrowserBackend {
             let mut app = WryApp {
                 hwnd: spawned_hwnd,
                 state: None,
+                interaction_enabled: true,
+                capture_busy: Arc::new(AtomicBool::new(false)),
+                frame_tx: spawned_frame_tx,
             };
             let _ = event_loop.run_app(&mut app);
         });
@@ -190,6 +251,8 @@ impl WryBrowserBackend {
                     proxy,
                     width: SPIKE_WIDTH,
                     height: SPIKE_HEIGHT,
+                    sequence: 0,
+                    frame_rx,
                 });
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -207,14 +270,13 @@ impl WryBrowserBackend {
     }
 
     /// Capture the current WebView2 pixels via `CapturePreview` (PNG) and
-    /// decode back to RGBA for the core [`BrowserFrame`]. Returns `None` when
-    /// the webview is not ready to produce a frame yet
-    /// (`ERROR_WRONG_STATE`/timeout), so the poll loop just retries later.
-    fn capture_frame(&self) -> Result<Option<BrowserFrame>, BrowserSourceError> {
-        let (tx, rx) = mpsc::channel();
-        self.send(Command::Capture(tx))?;
-        // The PNG is produced on the webview thread; wait for it here.
-        let png = match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+    /// decode back to RGBA for the core [`BrowserFrame`]. The capture is
+    /// requested asynchronous; PNGs arrive on `frame_rx` and are consumed
+    /// with `try_recv`, so this never blocks the GUI thread. Returns `None`
+    /// when no frame is ready yet (the poll loop retries later).
+    fn capture_frame(&mut self) -> Result<Option<BrowserFrame>, BrowserSourceError> {
+        self.send(Command::Capture)?;
+        let png = match self.frame_rx.try_recv() {
             Ok(Ok(png)) => png,
             _ => return Ok(None),
         };
@@ -228,7 +290,13 @@ impl WryBrowserBackend {
             .to_rgba8();
         let width = image.width();
         let height = image.height();
-        Ok(Some(BrowserFrame::new(width, height, image.into_raw(), 1)?))
+        self.sequence += 1;
+        Ok(Some(BrowserFrame::new(
+            width,
+            height,
+            image.into_raw(),
+            self.sequence,
+        )?))
     }
 }
 
@@ -289,19 +357,26 @@ impl BrowserSourceBackend for WryBrowserBackend {
 /// The completion handler runs on the same UI thread the webview was created
 /// on, so this must be called from inside the event-loop thread (see
 /// [`Command::Capture`]).
-fn capture_preview(webview: &wry::WebView, tx: mpsc::Sender<Result<Vec<u8>, String>>) {
+fn capture_preview(
+    webview: &wry::WebView,
+    busy: Arc<AtomicBool>,
+    tx: mpsc::Sender<Result<Vec<u8>, String>>,
+) {
     let core: ICoreWebView2 = wry::WebViewExtWindows::webview(webview);
     let stream = match unsafe { CreateStreamOnHGlobal(HGLOBAL::default(), true) } {
         Ok(stream) => stream,
         Err(e) => {
+            busy.store(false, Ordering::SeqCst);
             let _ = tx.send(Err(e.to_string()));
             return;
         }
     };
     let stream_for_result = stream.clone();
     let tx_for_handler = tx.clone();
+    let busy_for_handler = Arc::clone(&busy);
     // Webview writes the PNG into `stream`, then invokes the handler.
     let handler = CapturePreviewCompletedHandler::create(Box::new(move |result| {
+        busy_for_handler.store(false, Ordering::SeqCst);
         match result {
             Ok(()) => {
                 let png = read_istream(&stream_for_result).map_err(|e| e.to_string());
@@ -320,6 +395,7 @@ fn capture_preview(webview: &wry::WebView, tx: mpsc::Sender<Result<Vec<u8>, Stri
             &handler,
         )
     } {
+        busy.store(false, Ordering::SeqCst);
         let _ = tx.send(Err(e.to_string()));
     }
 }
@@ -345,6 +421,267 @@ fn read_istream(stream: &IStream) -> windows::core::Result<Vec<u8>> {
         );
         hresult.ok()?;
         Ok(buffer)
+    }
+}
+
+/// Toggle WebView2 transparency at runtime via
+/// `ICoreWebView2Controller2::SetDefaultBackgroundColor`. A background alpha
+/// of `0` yields transparent pixels (alpha 0) in `CapturePreview` PNGs.
+fn set_webview_transparent(webview: &wry::WebView, transparent: bool) -> windows::core::Result<()> {
+    let color = if transparent {
+        COREWEBVIEW2_COLOR {
+            A: 0,
+            R: 0,
+            G: 0,
+            B: 0,
+        }
+    } else {
+        COREWEBVIEW2_COLOR {
+            A: 255,
+            R: 255,
+            G: 255,
+            B: 255,
+        }
+    };
+    let controller: ICoreWebView2Controller = wry::WebViewExtWindows::controller(webview);
+    let controller2: ICoreWebView2Controller2 = controller.cast()?;
+    unsafe { controller2.SetDefaultBackgroundColor(color) }
+}
+
+// ── Windows-message input bridge ────────────────────────────────────
+//
+// WebView2's *windowed* hosting mode receives input as plain Windows
+// messages. `forward_browser_input` translates a [`BrowserInput`] into the
+// matching message(s) and posts them to the WebView2 surface, so the real
+// engine handles hit-testing, focus and scroll targets.
+
+/// Compose a `MAKELPARAM`-style client coordinate from CSS-pixel floats.
+fn pack_client_coords(x: f32, y: f32) -> isize {
+    let x = (x as i64).clamp(0, 0x7FFF) as u16;
+    let y = (y as i64).clamp(0, 0x7FFF) as u16;
+    (u32::from(y) << 16 | u32::from(x)) as i32 as isize
+}
+
+/// Post a plain mouse message with client coordinates.
+fn post_mouse(hwnd: HWND, msg: u32, modifiers: usize, x: f32, y: f32) {
+    let _ = unsafe {
+        PostMessageW(
+            Some(hwnd),
+            msg,
+            WPARAM(modifiers),
+            LPARAM(pack_client_coords(x, y)),
+        )
+    };
+}
+
+/// Post a wheel message; `delta` is in 120ths of a wheel notch and travels in
+/// the high word of `wParam`, per `WM_MOUSEWHEEL`/`WM_MOUSEHWHEEL`. The
+/// pointer position is taken from the centre of the surface's screen rect so
+/// the event always lands on the viewport.
+fn post_wheel(hwnd: HWND, msg: u32, delta: i32) {
+    let mut rect = RECT::default();
+    let _ = unsafe { GetWindowRect(hwnd, &mut rect) };
+    let (cx, cy) = (
+        rect.left + (rect.right - rect.left) / 2,
+        rect.top + (rect.bottom - rect.top) / 2,
+    );
+    let _ = unsafe {
+        PostMessageW(
+            Some(hwnd),
+            msg,
+            WPARAM((delta as usize & 0xFFFF) << 16),
+            LPARAM(pack_client_coords(cx as f32, cy as f32)),
+        )
+    };
+}
+
+/// `WM_MOUSEWHEEL`/`WM_MOUSEHWHEEL` deltas live in units of `WHEEL_DELTA`
+/// (120 = one notch). winit's scroll events arrive in physical pixels, so
+/// scale one notch to 120 shares (a pixel-per-notch mapping is the browser
+/// convention).
+fn wheel_delta_from_scroll(scroll: f32) -> i32 {
+    (scroll * 120.0)
+        .round()
+        .clamp(i32::MIN as f32, i32::MAX as f32) as i32
+}
+
+/// Map a platform-independent key name (as used by the core contract) to a
+/// Windows virtual-key code. Returns `None` for keys the bridge does not
+/// know; those are simply dropped.
+fn key_to_vk(key: &str) -> Option<u16> {
+    let upper = key.to_ascii_uppercase();
+    match upper.as_str() {
+        "ENTER" | "RETURN" => Some(0x0D),
+        "TAB" => Some(0x09),
+        "ESCAPE" | "ESC" => Some(0x1B),
+        "SPACE" => Some(0x20),
+        "BACKSPACE" => Some(0x08),
+        "DELETE" | "DEL" => Some(0x2E),
+        "INSERT" => Some(0x2D),
+        "HOME" => Some(0x24),
+        "END" => Some(0x23),
+        "PAGEUP" => Some(0x21),
+        "PAGEDOWN" => Some(0x22),
+        "ARROWUP" | "UP" => Some(0x26),
+        "ARROWDOWN" | "DOWN" => Some(0x28),
+        "ARROWLEFT" | "LEFT" => Some(0x25),
+        "ARROWRIGHT" | "RIGHT" => Some(0x27),
+        "SHIFT" => Some(0x10),
+        "CONTROL" | "CTRL" => Some(0x11),
+        "ALT" => Some(0x12),
+        _ => {
+            if let Some(ascii) = single_vk_ascii(&upper) {
+                return Some(ascii);
+            }
+            if let Some(num) = upper.strip_prefix('F').and_then(|s| s.parse::<u8>().ok()) {
+                if (1..=24).contains(&num) {
+                    return Some(0x70 + num as u16 - 1);
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Single letters/digits map to their ASCII virtual-key code.
+fn single_vk_ascii(upper: &str) -> Option<u16> {
+    let b = upper.as_bytes();
+    if b.len() != 1 {
+        return None;
+    }
+    let byte = b[0];
+    match byte {
+        b'A'..=b'Z' => Some(byte as u16),
+        b'0'..=b'9' => Some(byte as u16),
+        _ => None,
+    }
+}
+
+/// Forward a [`BrowserInput`] to a WebView2 surface by posting the matching
+/// Windows messages.
+fn forward_browser_input(hwnd: HWND, input: &BrowserInput) -> Result<(), BrowserSourceError> {
+    match input {
+        BrowserInput::MouseMove { x, y } => {
+            post_mouse(hwnd, WM_MOUSEMOVE, 0, *x, *y);
+        }
+        BrowserInput::MouseButton {
+            x,
+            y,
+            button,
+            pressed,
+        } => {
+            post_mouse(hwnd, WM_MOUSEMOVE, 0, *x, *y);
+            let msg = match (button, pressed) {
+                (BrowserMouseButton::Left, true) => WM_LBUTTONDOWN,
+                (BrowserMouseButton::Left, false) => WM_LBUTTONUP,
+                (BrowserMouseButton::Right, true) => WM_RBUTTONDOWN,
+                (BrowserMouseButton::Right, false) => WM_RBUTTONUP,
+                (BrowserMouseButton::Middle, true) => WM_MBUTTONDOWN,
+                (BrowserMouseButton::Middle, false) => WM_MBUTTONUP,
+            };
+            post_mouse(hwnd, msg, 0, *x, *y);
+        }
+        BrowserInput::Scroll { x, y } => {
+            let dx = wheel_delta_from_scroll(*x);
+            let dy = wheel_delta_from_scroll(*y);
+            if dy != 0 {
+                post_wheel(hwnd, WM_MOUSEWHEEL, dy);
+            }
+            if dx != 0 {
+                post_wheel(hwnd, WM_MOUSEHWHEEL, dx);
+            }
+        }
+        BrowserInput::Key { key, pressed } => {
+            let Some(vk) = key_to_vk(key) else {
+                return Ok(());
+            };
+            let wparam = WPARAM(vk as usize);
+            let lparam = if *pressed {
+                LPARAM(1)
+            } else {
+                // Bit 31 set marks a key-up transition.
+                LPARAM(0xC000_0001usize as isize)
+            };
+            let _ = unsafe { PostMessageW(Some(hwnd), WM_KEYDOWN, wparam, lparam) };
+            if *pressed {
+                if let Some(ch) = key_to_char(key) {
+                    let _ = unsafe {
+                        PostMessageW(Some(hwnd), WM_CHAR, WPARAM(ch as usize), LPARAM(1))
+                    };
+                }
+            } else {
+                let _ = unsafe { PostMessageW(Some(hwnd), WM_KEYUP, wparam, lparam) };
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A printable character for `WM_CHAR`, if the key name is a single glyph.
+fn key_to_char(key: &str) -> Option<u16> {
+    let upper = key.to_ascii_uppercase();
+    let b = upper.as_bytes();
+    match b {
+        [b'A'..=b'Z'] | [b'0'..=b'9'] => Some(upper.chars().next()? as u16),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod input_bridge_tests {
+    use super::*;
+
+    #[test]
+    fn key_names_map_to_virtual_key_codes() {
+        assert_eq!(key_to_vk("Enter"), Some(0x0D));
+        assert_eq!(key_to_vk("tab"), Some(0x09));
+        assert_eq!(key_to_vk("Esc"), Some(0x1B));
+        assert_eq!(key_to_vk("Space"), Some(0x20));
+        assert_eq!(key_to_vk("Backspace"), Some(0x08));
+        assert_eq!(key_to_vk("ArrowUp"), Some(0x26));
+        assert_eq!(key_to_vk("ArrowDown"), Some(0x28));
+        assert_eq!(key_to_vk("ArrowLeft"), Some(0x25));
+        assert_eq!(key_to_vk("ArrowRight"), Some(0x27));
+        assert_eq!(key_to_vk("Delete"), Some(0x2E));
+        assert_eq!(key_to_vk("Home"), Some(0x24));
+        assert_eq!(key_to_vk("End"), Some(0x23));
+        assert_eq!(key_to_vk("Shift"), Some(0x10));
+        assert_eq!(key_to_vk("Control"), Some(0x11));
+        assert_eq!(key_to_vk("Alt"), Some(0x12));
+        assert_eq!(key_to_vk("F5"), Some(0x74));
+        assert_eq!(key_to_vk("f12"), Some(0x7B));
+        assert_eq!(key_to_vk("a"), Some(0x41));
+        assert_eq!(key_to_vk("z"), Some(0x5A));
+        assert_eq!(key_to_vk("7"), Some(0x37));
+        assert_eq!(key_to_vk("???unknown"), None);
+        assert_eq!(key_to_vk(""), None);
+    }
+
+    #[test]
+    fn printable_keys_yield_wm_char() {
+        assert_eq!(key_to_char("a"), Some(0x41));
+        assert_eq!(key_to_char("Enter"), None);
+        assert_eq!(key_to_char("F5"), None);
+    }
+
+    #[test]
+    fn client_coords_pack_into_lparam_like_makelparam() {
+        // MAKELPARAM(10, 4) → low word 10, high word 4.
+        assert_eq!(pack_client_coords(10.0, 4.0), (4i32 << 16 | 10) as isize);
+        assert_eq!(pack_client_coords(0.0, 0.0), 0);
+        // Negative coords clamp to 0; the low word is the x coordinate.
+        require_positive_order();
+        fn require_positive_order() {
+            let packed = pack_client_coords(1.0, 0.0);
+            assert_eq!(packed, 1);
+        }
+    }
+
+    #[test]
+    fn wheel_deltas_scale_to_wheel_units() {
+        assert_eq!(wheel_delta_from_scroll(1.0), 120);
+        assert_eq!(wheel_delta_from_scroll(-0.5), -60);
+        assert_eq!(wheel_delta_from_scroll(0.25), 30);
     }
 }
 

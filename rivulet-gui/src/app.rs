@@ -1538,6 +1538,25 @@ pub struct RivuletApp {
     /// adapter is intentionally not stored in the app state yet; this config
     /// is the portable contract used by the future WebView2/WebKit backend.
     browser_source: rivulet_core::BrowserSource,
+    /// Live native webview backend driven by `browser_source` (issue #227).
+    /// The wry adapter only exists on Windows; on other platforms this stays
+    /// `None` and the panel shows the pending preview. Kept platform-neutral
+    /// so GUI sync tests can inject the synthetic reference backend.
+    #[serde(skip)]
+    browser_backend: Option<
+        Box<dyn rivulet_core::BrowserSourceBackend<Error = rivulet_core::BrowserSourceError>>,
+    >,
+    /// Set once spawning the native backend failed, so the tick does not
+    /// retry (and spam status lines) on every frame.
+    #[serde(skip)]
+    browser_backend_failed: bool,
+    /// Tracks which `browser_source` settings were already pushed to the
+    /// backend, so the tick only forwards diffs.
+    #[serde(skip)]
+    browser_applied: Option<rivulet_core::BrowserAppliedState>,
+    /// Uploaded preview of the latest [`rivulet_core::BrowserFrame`].
+    #[serde(skip)]
+    browser_preview_texture: Option<egui::TextureHandle>,
     /// Alert overlay import state (provider + token) for the browser source.
     /// The token is only ever used to build the widget URL; it is not logged.
     #[serde(skip)]
@@ -2040,6 +2059,10 @@ impl Default for RivuletApp {
 
             scenes: rivulet_core::SceneManager::new(),
             browser_source: rivulet_core::BrowserSource::default(),
+            browser_backend: None,
+            browser_backend_failed: false,
+            browser_applied: None,
+            browser_preview_texture: None,
             alert_provider: rivulet_core::AlertProvider::default(),
             alert_token: String::new(),
             alert_custom_url: String::new(),
@@ -5589,6 +5612,78 @@ impl RivuletApp {
     /// Configure the S5b browser source from the Scenes view. Rendering is
     /// delegated to a platform adapter; this panel owns the portable URL,
     /// viewport, interaction, transparency, zoom, and CSS settings.
+    /// Ensure the native webview backend exists (issue #227).
+    ///
+    /// Spawns the wry/WebView2 adapter on Windows exactly once; a failed
+    /// spawn sets [`Self::browser_backend_failed`] so the tick never retries
+    /// (and never spams the status line). On other platforms nothing happens
+    /// and the panel keeps showing the pending preview.
+    fn ensure_browser_backend(&mut self) {
+        if self.browser_backend.is_some() || self.browser_backend_failed {
+            return;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            match rivulet_browser::WryBrowserBackend::spawn() {
+                Ok(backend) => self.browser_backend = Some(Box::new(backend)),
+                Err(error) => {
+                    tracing::warn!("native browser backend unavailable: {error}");
+                    self.browser_backend_failed = true;
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Native adapter is Windows-only for now.
+            self.browser_backend_failed = true;
+        }
+    }
+
+    /// Run one backend tick: push changed settings, drain queued input, and
+    /// poll the next RGBA frame into `browser_source`.
+    ///
+    /// Returns a status message when the backend reported an error; the
+    /// caller (the Scenes view panel) surfaces it via `scene_status`. The
+    /// poll is non-blocking — the wry backend only `try_recv`s a frame — so
+    /// this is safe to call every frame.
+    fn tick_browser_source(&mut self) -> Result<(), rivulet_core::BrowserSourceError> {
+        self.ensure_browser_backend();
+        let Some(backend) = self.browser_backend.as_deref_mut() else {
+            return Ok(());
+        };
+        rivulet_core::sync_browser_backend(
+            backend,
+            &self.browser_source,
+            &mut self.browser_applied,
+        )?;
+        for input in self.browser_source.take_input_events() {
+            backend.send_input(input)?;
+        }
+        if let Some(frame) = backend.poll_frame()? {
+            self.browser_source.submit_frame(frame)?;
+        }
+        Ok(())
+    }
+
+    /// Upload the latest browser frame to an egui texture (no-op when the
+    /// backend has not produced one yet or the texture is already current).
+    fn upload_browser_preview(&mut self, ctx: &egui::Context) {
+        let Some(frame) = self.browser_source.latest_frame() else {
+            return;
+        };
+        let image = egui::ColorImage::from_rgba_unmultiplied(
+            [frame.width as usize, frame.height as usize],
+            &frame.rgba,
+        );
+        match &mut self.browser_preview_texture {
+            Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
+            None => {
+                self.browser_preview_texture =
+                    Some(ctx.load_texture("browser_preview", image, egui::TextureOptions::LINEAR));
+            }
+        }
+    }
+
     fn draw_browser_source_panel(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
         ui.separator();
         ui.label(egui::RichText::new(self.tr("browser_source")).strong());
@@ -5687,6 +5782,12 @@ impl RivuletApp {
                 .get_or_insert_with(String::new);
             ui.add(egui::TextEdit::singleline(css).desired_width(360.0));
         });
+        // Run one backend tick (settings sync, input drain, frame poll) and
+        // refresh the preview texture before drawing it (issue #227).
+        if let Err(error) = self.tick_browser_source() {
+            self.scene_status = Some(error.to_string());
+        }
+        self.upload_browser_preview(ui.ctx());
         if let Some(frame) = self.browser_source.latest_frame() {
             ui.label(self.tr_fmt(
                 "browser_frame_ready",
@@ -5698,6 +5799,17 @@ impl RivuletApp {
             ));
         } else {
             ui.colored_label(colors.hint, self.tr("browser_preview_pending"));
+        }
+        // Live preview of the browser surface at the configured viewport.
+        if let Some(texture) = &self.browser_preview_texture {
+            let (width, height) = (
+                self.browser_source.width as f32,
+                self.browser_source.height as f32,
+            );
+            let available = ui.available_width();
+            let scale = (available / width).min(1.0);
+            let size = egui::vec2(width * scale, height * scale);
+            ui.image((texture.id(), size));
         }
         if let Some(status) = &self.scene_status {
             ui.colored_label(colors.info, status);
@@ -19727,6 +19839,118 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
             assert!(
                 serialized.get(key).is_none(),
                 "{key} must be #[serde(skip)] (pure draft state)"
+            );
+        }
+    }
+
+    // ── browser-source backend wiring (issue #227) ───────────────────
+
+    /// Build an app with a synthetic backend injected, so the tick drives
+    /// real sync/input/poll logic without touching a native webview.
+    fn app_with_synthetic_browser_backend() -> RivuletApp {
+        RivuletApp {
+            browser_backend: Some(Box::new(rivulet_core::SyntheticBrowserBackend::default())),
+            ..RivuletApp::default()
+        }
+    }
+
+    #[test]
+    fn browser_tick_syncs_settings_polls_and_submits_a_frame() {
+        let mut app = app_with_synthetic_browser_backend();
+        let config = rivulet_core::BrowserSource::new("https://example.com", 640, 480)
+            .expect("valid source");
+        app.browser_source = config;
+
+        app.tick_browser_source().expect("tick must not fail");
+
+        // The synthetic backend paints a deterministic frame for the synced
+        // viewport; the tick must have submitted it back into `browser_source`.
+        let frame = app.browser_source.latest_frame().expect("a frame");
+        assert_eq!((frame.width, frame.height), (640, 480));
+        // Applied state now tracks the source, so a second tick is a no-op.
+        assert_eq!(
+            app.browser_applied.as_ref().expect("applied state"),
+            &rivulet_core::BrowserAppliedState::from_source(&app.browser_source)
+        );
+        let sequence = frame.sequence;
+        app.tick_browser_source().expect("tick must not fail");
+        // Idle backend (repaint flag cleared) → no new frame, same sequence.
+        assert_eq!(
+            app.browser_source.latest_frame().map(|f| f.sequence),
+            Some(sequence)
+        );
+    }
+
+    #[test]
+    fn browser_tick_forward_diffs_only_after_changes() {
+        let mut app = app_with_synthetic_browser_backend();
+        app.tick_browser_source().expect("initial sync");
+        let first = app
+            .browser_source
+            .latest_frame()
+            .expect("frame")
+            .rgba
+            .clone();
+
+        // Navigating invalidates the frame cache and repaints with a new,
+        // URL-derived colour (the synthetic backend's deterministic fill).
+        app.browser_source
+            .navigate("https://other.example/page")
+            .expect("nav");
+        app.tick_browser_source().expect("tick");
+        let frame = app.browser_source.latest_frame().expect("frame");
+        assert_ne!(frame.rgba, first, "navigation repaints new content");
+        assert_eq!(frame.width, app.browser_source.width);
+    }
+
+    #[test]
+    fn browser_tick_drains_queued_input_to_backend() {
+        let mut app = app_with_synthetic_browser_backend();
+        assert!(app
+            .browser_source
+            .enqueue_input(rivulet_core::BrowserInput::MouseMove { x: 12.0, y: 34.0 }));
+
+        app.tick_browser_source().expect("tick");
+        assert_eq!(
+            app.browser_source.pending_input_count(),
+            0,
+            "queued input must be forwarded to the backend"
+        );
+    }
+
+    #[test]
+    fn browser_tick_skips_input_when_interaction_disabled() {
+        let mut app = app_with_synthetic_browser_backend();
+        app.browser_source.interaction_enabled = false;
+        assert!(!app
+            .browser_source
+            .enqueue_input(rivulet_core::BrowserInput::MouseMove { x: 1.0, y: 1.0 }));
+        assert_eq!(app.browser_source.pending_input_count(), 0);
+    }
+
+    #[test]
+    fn browser_tick_without_backend_is_a_noop() {
+        let mut app = RivuletApp {
+            browser_backend_failed: true,
+            ..RivuletApp::default()
+        };
+        app.tick_browser_source().expect("no backend, no error");
+        assert!(app.browser_source.latest_frame().is_none());
+    }
+
+    #[test]
+    fn browser_backend_fields_are_not_persisted() {
+        let mut app = app_with_synthetic_browser_backend();
+        app.tick_browser_source().expect("tick");
+        let serialized = serde_json::to_value(&app).expect("app must serialize");
+        for key in [
+            "browser_backend",
+            "browser_applied",
+            "browser_preview_texture",
+        ] {
+            assert!(
+                serialized.get(key).is_none(),
+                "{key} must be #[serde(skip)] (transient backend state)"
             );
         }
     }

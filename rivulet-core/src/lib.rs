@@ -205,8 +205,9 @@ pub use audio_source::{
 pub mod browser_source;
 pub mod ducking;
 pub use browser_source::{
-    prime_browser_backend, BrowserFrame, BrowserInput, BrowserMouseButton, BrowserSource,
-    BrowserSourceBackend, BrowserSourceError, SyntheticBrowserBackend,
+    prime_browser_backend, sync_browser_backend, BrowserAppliedState, BrowserFrame, BrowserInput,
+    BrowserMouseButton, BrowserSource, BrowserSourceBackend, BrowserSourceError,
+    SyntheticBrowserBackend,
 };
 
 pub mod alerts;

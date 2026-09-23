@@ -164,7 +164,7 @@ A platform adapter can complete S5b when it:
 5. runs the same adapter contract tests on Windows, Linux, and macOS.
 
 
-## Windows POC (M6.9, issue #215)
+## Windows POC (M6.9, issue #215) + first adapter slice (#227)
 
 A proof of concept in `rivulet-browser` (described in `rivulet-browser/src/wry_backend.rs`)
 proves all remaining #215 risk items on Windows:
@@ -188,6 +188,32 @@ proves all remaining #215 risk items on Windows:
   pixel matches, with the correct 320×180 size, several runs in a row. Run
   with `cargo test -p rivulet-browser -- --ignored`.
 
+Issue #227 turns the POC into the first production-adapter slice:
+
+- **Input forwarding (real, not a placeholder):** wry 0.57 hosts WebView2 in
+  *windowed* mode (`ICoreWebView2Controller`), so the composition-only
+  `SendMouseInput`/`SendPointerInput` APIs are unavailable. Input is instead
+  translated to the equivalent Win32 message sequence (`WM_MOUSEMOVE`,
+  `WM_LBUTTONDOWN/UP`, `WM_RBUTTONDOWN/UP`, `WM_MBUTTONDOWN/UP`,
+  `WM_MOUSEWHEEL`/`WM_MOUSEHWHEEL`, `WM_KEYDOWN/WM_CHAR/WM_KEYUP`) and posted
+  to the WebView2 surface HWND (the container's `GW_CHILD`). The pure
+  mapping functions (`key_to_vk`, `key_to_char`, `pack_client_coords`,
+  `wheel_delta_from_scroll`) are unit-tested without a window. Interaction is
+  a no-op while `interaction_enabled` is false.
+- **Transparency:** runtime toggle through
+  `ICoreWebView2Controller2::SetDefaultBackgroundColor`
+  (`COREWEBVIEW2_COLOR{A:0}` → transparent alpha in the captured PNG).
+- **Non-blocking poll:** captured PNGs arrive on a persistent channel; the
+  GUI tick only `try_recv`s, guarded by an in-flight flag so `CapturePreview`
+  never stacks. `WryBrowserBackend` tracks a monotonic frame sequence.
+- **GUI wiring:** `rivulet-gui` holds a
+  `Box<dyn BrowserSourceBackend<Error = BrowserSourceError>>`, spawns the wry
+  adapter on Windows (exactly once; fail → `browser_backend_failed`), and each
+  Scenes-frame tick calls `sync_browser_backend` (diff-only settings push),
+  drains `take_input_events()`, polls a frame into `browser_source`, and
+  uploads it as an egui preview texture. Sync/input/poll are covered by GUI
+  tests against `SyntheticBrowserBackend` on every platform.
+
 Implementation notes from the spike that a production adapter must keep:
 
 - The first `CapturePreview` call may fail with `0x8007139F`
@@ -203,10 +229,9 @@ Implementation notes from the spike that a production adapter must keep:
 - `data:` URLs are still rejected by the core URL policy, which is why the
   spike navigates to a loopback HTTP server instead.
 
-Not yet covered by the POC: input forwarding (`SendInput` is a no-op
-placeholder), transparency (needs `ICoreWebView2CompositionController`), and
-the WebView2 composition controller route for direct texture sharing. Those
-remain production-adapter work and are tracked under #215.
+The remaining #227 scope is on the roadmap: the WebView2 composition
+controller route for direct texture sharing, and Linux/macOS adapters that run
+the same contract tests.
 
 
 ## References
