@@ -471,23 +471,14 @@ mod tests {
         assert_eq!(nAvgBytesPerSec, 48_000 * 8);
         assert_eq!(cbSize, 0);
     }
-
     #[test]
     fn device_list_returns_both_flows() {
-        // A running Windows system has at least one render endpoint (the
-        // console default) and one capture endpoint (a microphone or the
-        // default communications device). The enumeration must never panic
-        // or fail wholesale — best-effort is the contract.
+        // Best-effort enumeration is the contract: the call never panics or
+        // fails wholesale, even on endpoint-less hosts (hosted CI runners
+        // ship no audio devices at all). Shape assertions apply only to the
+        // entries that exist; every entry round-trips through the core
+        // DeviceTarget convention.
         let devices = list_audio_devices();
-        assert!(
-            devices.iter().any(|d| d.is_output),
-            "at least one render endpoint exists on a running desktop session"
-        );
-        assert!(
-            devices.iter().any(|d| d.is_default),
-            "the console default endpoints are marked"
-        );
-        // Every entry round-trips through the core DeviceTarget convention.
         for device in &devices {
             let id = device.device_id();
             let parsed = DeviceTarget::parse(&id).expect("picker ids must round-trip");
@@ -495,6 +486,13 @@ mod tests {
             assert!(
                 !device.name.is_empty(),
                 "fallback naming guarantees non-empty"
+            );
+        }
+        // When defaults were resolved, the default endpoint sorts first.
+        if devices.iter().any(|d| d.is_default) {
+            assert!(
+                devices.first().is_some_and(|d| d.is_default),
+                "the console default endpoints are marked and sort first"
             );
         }
     }
@@ -526,12 +524,18 @@ mod tests {
 
     #[test]
     fn device_capture_round_trip_on_the_default_render_endpoint() {
-        // The console default render endpoint exists on every desktop
-        // session; activating it must succeed (or fail cleanly, never hang).
-        let default = list_audio_devices()
+        // The console default render endpoint exists on real desktop
+        // sessions, where activating it must succeed (or fail cleanly,
+        // never hang). Endpoint-less hosts (hosted CI runners have no audio
+        // devices) degrade to a no-op instead of failing — the live
+        // activation contract is exercised wherever endpoints exist.
+        let Some(default) = list_audio_devices()
             .into_iter()
             .find(|d| d.is_output && d.is_default)
-            .expect("a default render endpoint exists");
+        else {
+            eprintln!("no default render endpoint on this host — skipping live capture");
+            return;
+        };
         let frames = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counter = frames.clone();
         let capture = AudioDeviceCapture::start(
