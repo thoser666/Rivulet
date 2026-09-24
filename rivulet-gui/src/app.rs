@@ -200,6 +200,12 @@ const GAME_WINDOWS_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::
 /// plain polling, so a newly plugged endpoint appears without a restart.
 const AUDIO_DEVICES_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// How often the per-app process list behind the Mixer's Application source
+/// picker re-enumerates while the picker is in use (#154 follow-up): plain
+/// polling with the same cadence as the device picker, so a newly started
+/// process appears without a manual refresh.
+const APP_AUDIO_PROCESSES_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Maximum UI update rate for the recording thumbnail. The capture pipeline
 /// remains at its configured frame rate; only texture uploads are throttled.
 const RECORDING_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
@@ -1422,6 +1428,11 @@ pub struct RivuletApp {
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[serde(skip)]
     app_audio_processes: Option<Vec<rivulet_audio::AppAudioProcess>>,
+    /// When the process list was last enumerated — drives the picker's
+    /// bounded auto-refresh (same pattern as `audio_device_list_last_refresh`).
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    #[serde(skip)]
+    app_audio_processes_last_refresh: Option<std::time::Instant>,
     /// pid selection for the source being added (Application kind).
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[serde(skip)]
@@ -2114,6 +2125,8 @@ impl Default for RivuletApp {
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             app_audio_processes: None,
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+            app_audio_processes_last_refresh: None,
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             audio_mixer_new_source_pid: None,
             #[cfg(target_os = "windows")]
             audio_device_list: None,
@@ -2176,6 +2189,51 @@ impl RivuletApp {
             self.engine.set_audio_sources(self.audio_sources.clone());
             self.audio_mixer_needs_sync = false;
         }
+    }
+
+    /// Start or stop the WASAPI per-application captures so they exactly
+    /// mirror the Application-kind sources with a resolved `pid:<n>` target
+    /// while a capture session is active (Phase 3 Windows / Phase 4 Linux,
+    /// issue #154). Called every UI tick; starting is idempotent per source id
+    /// and stopping joins the capture threads.
+    ///
+    /// Frames travel through an mpsc channel and are drained on the UI thread
+    /// (the same architecture as the macOS audio capture), so the engine is
+    /// only ever touched from the UI thread.
+    /// Re-enumerate the per-app process list in place (#154 follow-up): a
+    /// newly started process appears without a manual refresh; one that has
+    /// exited drops out. The current pid selection survives when the process
+    /// still exists; when it exited, the selection is cleared so the
+    /// pending-process hint shows and the add button cannot silently target
+    /// a dead pid. macOS lists devices under the shared fallback pid, so
+    /// the existence check is the pid identity itself.
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    fn refresh_app_audio_processes_live(&mut self) {
+        self.app_audio_processes = Some(rivulet_audio::list_audio_processes());
+        self.app_audio_processes_last_refresh = Some(std::time::Instant::now());
+        if let Some(selected) = &self.audio_mixer_new_source_pid {
+            let still_alive = self
+                .app_audio_processes
+                .as_ref()
+                .is_some_and(|ps| ps.iter().any(|p| &p.pid == selected));
+            if !still_alive {
+                tracing::debug!(
+                    pid = selected,
+                    "selected process exited; clearing picker selection"
+                );
+                self.audio_mixer_new_source_pid = None;
+            }
+        }
+    }
+
+    /// Whether the process list is due for a live refresh: never enumerated,
+    /// or the bounded interval has elapsed. Pure so the contract is testable
+    /// on every platform.
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    fn app_audio_processes_refresh_due(&self, now: std::time::Instant) -> bool {
+        self.app_audio_processes_last_refresh
+            .map(|last| now.duration_since(last) >= APP_AUDIO_PROCESSES_REFRESH_INTERVAL)
+            .unwrap_or(true)
     }
 
     /// Start or stop the WASAPI per-application captures so they exactly
@@ -2639,8 +2697,15 @@ impl RivuletApp {
                     .button("⟳")
                     .on_hover_text(self.tr("audio_source_refresh_processes"))
                     .clicked();
-                if refresh_clicked || self.app_audio_processes.is_none() {
-                    self.app_audio_processes = Some(rivulet_audio::list_audio_processes());
+                // Bounded live refresh: re-enumerate while the picker is
+                // visible so a newly started process appears without a
+                // manual refresh. A selection whose process exited is
+                // cleared so the pending-process hint shows instead of
+                // silently adding a dead pid (first open counts as due).
+                if refresh_clicked
+                    || self.app_audio_processes_refresh_due(std::time::Instant::now())
+                {
+                    self.refresh_app_audio_processes_live();
                 }
                 let picker_label = self
                     .audio_mixer_new_source_pid
@@ -19320,6 +19385,77 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         assert!(source.contains("push_audio_source"));
     }
 
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn app_audio_processes_refresh_due_is_bounded_by_interval() {
+        // Same bounded-polling contract as the device picker: a never
+        // enumerated cache is due, a fresh one is not, and the interval
+        // elapsed since the last enumeration makes it due again.
+        let app = RivuletApp::default();
+        assert!(
+            app.app_audio_processes_refresh_due(std::time::Instant::now()),
+            "never enumerated => due"
+        );
+        let app = RivuletApp {
+            app_audio_processes_last_refresh: Some(std::time::Instant::now()),
+            ..RivuletApp::default()
+        };
+        assert!(
+            !app.app_audio_processes_refresh_due(std::time::Instant::now()),
+            "a fresh enumeration is not due"
+        );
+        let app = RivuletApp {
+            app_audio_processes_last_refresh: Some(
+                std::time::Instant::now() - APP_AUDIO_PROCESSES_REFRESH_INTERVAL,
+            ),
+            ..RivuletApp::default()
+        };
+        assert!(
+            app.app_audio_processes_refresh_due(std::time::Instant::now()),
+            "interval elapsed => due again"
+        );
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn refresh_app_audio_processes_live_keeps_selection_and_clears_exited() {
+        // A selection whose process still exists survives the live refresh;
+        // an exited one is cleared so the pending-process hint shows instead
+        // of silently adding a dead pid. The survival pid comes from the
+        // enumerated list itself (macOS lists devices under the shared
+        // fallback pid, not per-process pids; headless CI hosts may
+        // enumerate nothing at all), `u32::MAX` is a safe stand-in for an
+        // exited process on every platform.
+        let enumerated = rivulet_audio::list_audio_processes();
+        if let Some(alive) = enumerated.first().map(|p| p.pid) {
+            let mut app = RivuletApp {
+                audio_mixer_new_source_pid: Some(alive),
+                ..RivuletApp::default()
+            };
+            app.refresh_app_audio_processes_live();
+            assert_eq!(
+                app.audio_mixer_new_source_pid,
+                Some(alive),
+                "a live selection must survive the refresh"
+            );
+            assert!(
+                app.app_audio_processes.is_some(),
+                "the refresh populated the cache"
+            );
+            assert!(app.app_audio_processes_last_refresh.is_some());
+        }
+
+        let mut app = RivuletApp {
+            audio_mixer_new_source_pid: Some(u32::MAX),
+            ..RivuletApp::default()
+        };
+        app.refresh_app_audio_processes_live();
+        assert!(
+            app.audio_mixer_new_source_pid.is_none(),
+            "an exited selection must not survive the refresh"
+        );
+    }
+
     #[test]
     fn per_app_capture_gating_covers_all_backends() {
         // Phase 5 (issue #154): the per-app capture wiring must be compiled
@@ -19333,6 +19469,10 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         let wiring_markers = [
             "fn sync_app_audio_captures(&mut self)",
             "fn drain_app_audio_frames(&mut self)",
+            "fn refresh_app_audio_processes_live(&mut self)",
+            "fn app_audio_processes_refresh_due(&self",
+            "app_audio_processes_last_refresh: Option<std::time::Instant>",
+            "app_audio_processes_last_refresh: None,",
             "audio_mixer_new_source_pid: Option<u32>",
             "audio_mixer_new_source_pid: None,",
         ];

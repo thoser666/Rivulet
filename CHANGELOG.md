@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- feat(gui): **Live-Refresh für den Prozess-Picker (#154-Follow-up)** —
+  derselbe Mechanismus wie beim Device-Picker, jetzt für Application-Quellen:
+  der Mixer enumeriert die Prozessliste im offenen Picker erneut, alle 2 s
+  gebunden, statt nur beim ersten Öffnen — neu gestartete Prozesse erscheinen
+  ohne manuellen Refresh, beendete verschwinden. Eine pid-Auswahl überlebt
+  den Refresh, solange der Prozess lebt; ist er weg, wird sie gelöscht
+  (Pending-Hint statt toter pid). Der ⟳-Button bleibt Sofort-Refresh;
+  Gating-Test um die neuen Marker erweitert, ci_pinning pinnt die
+  Live-Refresh-Oberfläche.
+
 - feat(gui): **Live-Refresh für den WASAPI-Device-Picker (#229-Follow-up)** —
   der Mixer enumeriert die Endpoint-Liste im offenen Picker erneut, alle
   2 s gebunden (Muster des Game-Window-Pickers), statt nur beim ersten
