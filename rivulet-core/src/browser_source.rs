@@ -480,6 +480,89 @@ pub fn prime_browser_backend(
     Ok(backend.poll_frame()?.map(|frame| frame.sequence))
 }
 
+/// Which [`BrowserSource`] knobs a backend already has applied.
+///
+/// Tracked by the GUI so only *changed* settings are sent to the backend on
+/// each frame instead of re-navigating or re-resizing constantly.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct BrowserAppliedState {
+    /// URL last sent to the backend.
+    pub url: String,
+    /// Viewport last sent to the backend.
+    pub width: u32,
+    pub height: u32,
+    /// Transparency last sent to the backend.
+    pub transparent: bool,
+    /// Interaction state last sent to the backend.
+    pub interaction_enabled: bool,
+    /// Zoom factor last sent to the backend.
+    pub zoom_level: f64,
+}
+
+impl BrowserAppliedState {
+    /// Track the settings of `source`.
+    pub fn from_source(source: &BrowserSource) -> Self {
+        Self {
+            url: source.url.clone(),
+            width: source.width,
+            height: source.height,
+            transparent: source.transparent,
+            interaction_enabled: source.interaction_enabled,
+            zoom_level: source.zoom_level,
+        }
+    }
+}
+
+/// Synchronize a backend with `source`, sending only the settings that
+/// differ from the last applied state.
+///
+/// With `applied == None` (the first call for a backend) every setting is
+/// applied — the incremental equivalent of [`prime_browser_backend`].
+/// Returns `true` when at least one setting was forwarded, so callers can
+/// tell "already in sync" from "just changed".
+pub fn sync_browser_backend(
+    backend: &mut dyn BrowserSourceBackend<Error = BrowserSourceError>,
+    source: &BrowserSource,
+    applied: &mut Option<BrowserAppliedState>,
+) -> Result<bool, BrowserSourceError> {
+    let previous = applied.take();
+    let mut changed = false;
+    let initial = previous.is_none();
+    if let Some(previous) = &previous {
+        if previous.url != source.url {
+            backend.navigate(&source.url)?;
+            changed = true;
+        }
+        if previous.width != source.width || previous.height != source.height {
+            backend.resize(source.width, source.height)?;
+            changed = true;
+        }
+        if previous.transparent != source.transparent {
+            backend.set_transparent(source.transparent)?;
+            changed = true;
+        }
+        if previous.interaction_enabled != source.interaction_enabled {
+            backend.set_interaction_enabled(source.interaction_enabled)?;
+            changed = true;
+        }
+        if previous.zoom_level != source.zoom_level {
+            backend.set_zoom_level(source.zoom_level)?;
+            changed = true;
+        }
+    } else {
+        backend.navigate(&source.url)?;
+        backend.resize(source.width, source.height)?;
+        backend.set_transparent(source.transparent)?;
+        backend.set_interaction_enabled(source.interaction_enabled)?;
+        backend.set_zoom_level(source.zoom_level)?;
+        changed = true;
+    }
+    *applied = Some(BrowserAppliedState::from_source(source));
+    // An initial apply also must clear a stale frame on `source`, which the
+    // core setters already do; report it as a change so a poll happens.
+    Ok(changed || initial)
+}
+
 fn valid_dimensions(width: u32, height: u32) -> bool {
     (1..=8192).contains(&width) && (1..=8192).contains(&height)
 }
@@ -706,5 +789,73 @@ mod tests {
         assert_eq!(sequence, Some(1));
         assert_eq!(backend.url, "https://example.com");
         assert_eq!((backend.width, backend.height), (640, 360));
+    }
+
+    // ── BrowserAppliedState / sync_browser_backend ───────────────────
+
+    #[test]
+    fn applied_state_tracks_source_settings() {
+        let source = BrowserSource::new("https://example.com/live", 800, 450).unwrap();
+        let state = BrowserAppliedState::from_source(&source);
+        assert_eq!(state.url, "https://example.com/live");
+        assert_eq!((state.width, state.height), (800, 450));
+        assert!(!state.transparent);
+        assert!(state.interaction_enabled);
+        assert_eq!(state.zoom_level, 1.0);
+    }
+
+    #[test]
+    fn sync_applies_everything_on_first_call() {
+        let mut config = BrowserSource::new("https://example.com", 640, 360).unwrap();
+        config.transparent = true;
+        config.zoom_level = 1.5;
+        config.interaction_enabled = false;
+        let mut backend = SyntheticBrowserBackend::default();
+        let mut applied = None;
+        let changed = sync_browser_backend(&mut backend, &config, &mut applied).unwrap();
+        assert!(changed, "first sync reports a change");
+        let state = applied.expect("state after first sync");
+        assert_eq!(state.url, "https://example.com");
+        assert_eq!((state.width, state.height), (640, 360));
+        assert!(state.transparent);
+        assert!(!state.interaction_enabled);
+        assert_eq!(state.zoom_level, 1.5);
+    }
+
+    #[test]
+    fn sync_only_sends_changed_settings() {
+        let mut config = BrowserSource::new("https://example.com", 640, 360).unwrap();
+        let mut backend = SyntheticBrowserBackend::default();
+        let mut applied = None;
+        sync_browser_backend(&mut backend, &config, &mut applied).unwrap();
+
+        // Nothing changed: no settings forwarded.
+        let changed = sync_browser_backend(&mut backend, &config, &mut applied).unwrap();
+        assert!(!changed, "no-op sync reports no change");
+
+        // URL change only: navigate happens, resize does not.
+        let url = "https://example.org".to_owned();
+        config.navigate(url).unwrap();
+        // apply navigate via sync
+        let changed_after = sync_browser_backend(&mut backend, &config, &mut applied).unwrap();
+        assert!(changed_after, "url change reports a change");
+        assert_eq!(backend.url, "https://example.org");
+        assert_eq!((backend.width, backend.height), (640, 360));
+
+        // Zoom change only.
+        config.zoom_level = 2.0;
+        let changed_after = sync_browser_backend(&mut backend, &config, &mut applied).unwrap();
+        assert!(changed_after, "zoom change reports a change");
+        assert_eq!(backend.zoom_level, 2.0);
+    }
+
+    #[test]
+    fn sync_after_change_to_unchanged_settings_is_noop() {
+        let config = BrowserSource::new("https://example.com", 640, 360).unwrap();
+        let mut backend = SyntheticBrowserBackend::default();
+        let mut applied = None;
+        sync_browser_backend(&mut backend, &config, &mut applied).unwrap();
+        let changed = sync_browser_backend(&mut backend, &config, &mut applied).unwrap();
+        assert!(!changed);
     }
 }
