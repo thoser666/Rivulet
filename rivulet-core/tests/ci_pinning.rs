@@ -6528,3 +6528,64 @@ fn scene_item_copy_paste_surface_is_pinned() {
         "m7 spec must document the copy/paste workstream"
     );
 }
+
+#[test]
+fn wasapi_device_capture_surface_is_pinned() {
+    // Issue #229 (S8): WASAPI device capture is the device half of the audio
+    // matrix — virtual mixer endpoints (e.g. SteelSeries GG/Sonar channels)
+    // become selectable sources. Pin the full vertical slice — device-id
+    // convention, enumeration/capture backend, GUI picker wiring and the
+    // spec section — so the surface cannot silently erode.
+    let core = read("rivulet-core/src/audio_source.rs");
+    for needle in [
+        "pub enum DeviceTarget",
+        "wasapi-out:",
+        "wasapi-in:",
+        "pub fn device_target",
+        "pub fn wasapi_device",
+    ] {
+        assert!(
+            core.contains(needle),
+            "audio_source.rs must pin the device-id convention: {needle}"
+        );
+    }
+
+    let audio = read("rivulet-audio/src/device_capture.rs");
+    for needle in [
+        "pub fn list_audio_devices",
+        "pub struct AudioDeviceCapture",
+        "pub fn start_for_target",
+        "AUDCLNT_STREAMFLAGS_LOOPBACK",
+        "AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM",
+    ] {
+        assert!(
+            audio.contains(needle),
+            "device_capture.rs must pin the WASAPI backend: {needle}"
+        );
+    }
+
+    let gui = read("rivulet-gui/src/app.rs");
+    for needle in [
+        "audio_mixer_new_source_device_id",
+        "fn routed_device_targets",
+        "fn sync_device_audio_captures",
+        "fn drain_device_audio_frames",
+    ] {
+        assert!(
+            gui.contains(needle),
+            "app.rs must pin the device-picker wiring: {needle}"
+        );
+    }
+
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.contains("\"audio_source_pick_device\""),
+        "i18n must pin the device-picker keys"
+    );
+
+    let spec = read("docs/m6-audio-routing.md");
+    assert!(
+        spec.contains("WASAPI device capture — issue"),
+        "m6 spec must document the device-capture workstream"
+    );
+}

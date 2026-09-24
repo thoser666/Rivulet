@@ -198,7 +198,8 @@ pub use media_source::{MediaSource, MediaType, PlaybackMode};
 
 pub mod audio_source;
 pub use audio_source::{
-    AudioFilterConfig, AudioRouting, AudioRoutingConfig, AudioSource, AudioSourceKind,
+    device_target, AudioFilterConfig, AudioRouting, AudioRoutingConfig, AudioSource,
+    AudioSourceKind, DeviceTarget,
 };
 
 pub mod browser_source;
