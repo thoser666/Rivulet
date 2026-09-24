@@ -6570,6 +6570,8 @@ fn wasapi_device_capture_surface_is_pinned() {
         "fn routed_device_targets",
         "fn sync_device_audio_captures",
         "fn drain_device_audio_frames",
+        "fn refresh_audio_devices_live",
+        "fn audio_devices_refresh_due",
     ] {
         assert!(
             gui.contains(needle),

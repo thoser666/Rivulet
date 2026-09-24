@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- feat(gui): **Live-Refresh für den WASAPI-Device-Picker (#229-Follow-up)** —
+  der Mixer enumeriert die Endpoint-Liste im offenen Picker erneut, alle
+  2 s gebunden (Muster des Game-Window-Pickers), statt nur beim ersten
+  Öffnen: frisch angeschlossene Geräte erscheinen ohne Neustart, gezogene
+  verschwinden. Eine Auswahl überlebt den Refresh, solange der Endpoint
+  existiert; verschwindet er, wird sie gelöscht, damit der Pending-Hint
+  zeigt und kein toter Device-ID landet. Der ⟳-Button bleibt als
+  Sofort-Refresh; Tests: Intervall-Vertrag + Auswahl-Semantik, Wiring-
+  Tests und ci_pinning-Guard erweitert.
+
 - feat(audio): **WASAPI-Geräte-Capture (Issue #229, S8-Follow-up)** —
   die Geräte-Hälfte der Audio-Matrix: virtuelle Mixer-Kanäle (z. B.
   SteelSeries GG/Sonar) und Mikrofone werden als echte Quellen wählbar.

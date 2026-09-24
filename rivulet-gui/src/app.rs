@@ -195,6 +195,11 @@ const GAME_PREVIEW_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 const GAME_WINDOWS_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// How often the WASAPI device list behind the Mixer's Input/Output source
+/// picker re-enumerates while the picker is in use (issue #229 follow-up):
+/// plain polling, so a newly plugged endpoint appears without a restart.
+const AUDIO_DEVICES_REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Maximum UI update rate for the recording thumbnail. The capture pipeline
 /// remains at its configured frame rate; only texture uploads are throttled.
 const RECORDING_PREVIEW_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
@@ -1427,6 +1432,11 @@ pub struct RivuletApp {
     #[cfg(target_os = "windows")]
     #[serde(skip)]
     audio_device_list: Option<Vec<rivulet_audio::AudioDeviceInfo>>,
+    /// When the device list was last enumerated — drives the picker's
+    /// bounded auto-refresh (same pattern as `game_windows_last_refresh`).
+    #[cfg(target_os = "windows")]
+    #[serde(skip)]
+    audio_device_list_last_refresh: Option<std::time::Instant>,
     /// Device-id selection for the source being added (Input/Output kind).
     #[cfg(target_os = "windows")]
     #[serde(skip)]
@@ -2108,6 +2118,8 @@ impl Default for RivuletApp {
             #[cfg(target_os = "windows")]
             audio_device_list: None,
             #[cfg(target_os = "windows")]
+            audio_device_list_last_refresh: None,
+            #[cfg(target_os = "windows")]
             audio_mixer_new_source_device_id: None,
             #[cfg(target_os = "windows")]
             device_audio_captures: Vec::new(),
@@ -2238,8 +2250,41 @@ impl RivuletApp {
     fn audio_device_list(&mut self) -> Vec<rivulet_audio::AudioDeviceInfo> {
         if self.audio_device_list.is_none() {
             self.audio_device_list = Some(list_audio_devices());
+            self.audio_device_list_last_refresh = Some(std::time::Instant::now());
         }
         self.audio_device_list.clone().unwrap_or_default()
+    }
+
+    /// Re-enumerate the WASAPI endpoint list in place (issue #229
+    /// follow-up): a newly plugged or unplugged endpoint appears or
+    /// disappears without a restart. The current device-id selection
+    /// survives when the endpoint still exists; when it vanished, the
+    /// selection is cleared so the pending-device hint shows and the add
+    /// button cannot silently target a dead endpoint.
+    #[cfg(target_os = "windows")]
+    fn refresh_audio_devices_live(&mut self) {
+        self.audio_device_list = Some(list_audio_devices());
+        self.audio_device_list_last_refresh = Some(std::time::Instant::now());
+        if let Some(selected) = &self.audio_mixer_new_source_device_id {
+            if !self
+                .audio_device_list
+                .as_ref()
+                .is_some_and(|list| list.iter().any(|d| &d.device_id() == selected))
+            {
+                tracing::debug!(device_id = %selected, "selected WASAPI endpoint vanished; clearing picker selection");
+                self.audio_mixer_new_source_device_id = None;
+            }
+        }
+    }
+
+    /// Whether the device list is due for a live refresh: never enumerated,
+    /// or the bounded interval has elapsed. Pure so the contract is testable
+    /// on every platform (the enumeration itself stays Windows-only).
+    #[cfg(target_os = "windows")]
+    fn audio_devices_refresh_due(&self, now: std::time::Instant) -> bool {
+        self.audio_device_list_last_refresh
+            .map(|last| now.duration_since(last) >= AUDIO_DEVICES_REFRESH_INTERVAL)
+            .unwrap_or(true)
     }
 
     /// Start/stop the WASAPI device captures for the routed device sources
@@ -2633,7 +2678,9 @@ impl RivuletApp {
         // Issue #229: WASAPI device picker for Input/Output-kind sources
         // (Windows). Lists active render/capture endpoints with friendly
         // names; the console defaults are marked. Mirrors the process picker
-        // above: cached list, manual refresh, pending-selection hint.
+        // above: cached list, manual refresh, pending-selection hint — plus
+        // a bounded live refresh so plugged/unplugged endpoints appear or
+        // drop out without a restart (same pattern as the game-window list).
         #[cfg(target_os = "windows")]
         if self.audio_mixer_new_source_kind == 1 || self.audio_mixer_new_source_kind == 2 {
             ui.horizontal(|ui| {
@@ -2642,8 +2689,13 @@ impl RivuletApp {
                     .button("⟳")
                     .on_hover_text(self.tr("audio_source_refresh_devices"))
                     .clicked();
-                if refresh_clicked || self.audio_device_list.is_none() {
-                    self.audio_device_list = Some(list_audio_devices());
+                // Bounded live refresh: re-enumerate while the picker is
+                // visible so a newly plugged endpoint appears without a
+                // restart. A vanished endpoint clears the selection so the
+                // pending-device hint shows instead of silently adding a
+                // dead device id (first open counts as due).
+                if refresh_clicked || self.audio_devices_refresh_due(std::time::Instant::now()) {
+                    self.refresh_audio_devices_live();
                 }
                 let default_marker = self.tr("audio_source_default_device").to_owned();
                 let picker_label = self
@@ -19150,6 +19202,79 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
 
     #[cfg(target_os = "windows")]
     #[test]
+    fn audio_devices_refresh_due_is_bounded_by_interval() {
+        // Same bounded-polling contract as the game-window list: a never
+        // enumerated cache is due, a fresh one is not, and the interval
+        // elapsed since the last enumeration makes it due again.
+        let app = RivuletApp::default();
+        assert!(
+            app.audio_devices_refresh_due(std::time::Instant::now()),
+            "never enumerated => due"
+        );
+        let app = RivuletApp {
+            audio_device_list_last_refresh: Some(std::time::Instant::now()),
+            ..RivuletApp::default()
+        };
+        assert!(
+            !app.audio_devices_refresh_due(std::time::Instant::now()),
+            "a fresh enumeration is not due"
+        );
+        let app = RivuletApp {
+            audio_device_list_last_refresh: Some(
+                std::time::Instant::now() - AUDIO_DEVICES_REFRESH_INTERVAL,
+            ),
+            ..RivuletApp::default()
+        };
+        assert!(
+            app.audio_devices_refresh_due(std::time::Instant::now()),
+            "interval elapsed => due again"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn refresh_audio_devices_live_keeps_selection_and_clears_vanished() {
+        // A selection whose endpoint still exists survives the live refresh;
+        // a vanished one is cleared so the pending-device hint shows instead
+        // of silently adding a dead device id.
+        let devices = RivuletApp::default().audio_device_list();
+        let existing = devices
+            .first()
+            .map(|d| d.device_id())
+            .unwrap_or_else(|| "wasapi-out:{0.0.0.00000000}.{ci}".to_owned());
+        let mut app = RivuletApp {
+            audio_mixer_new_source_device_id: Some(existing.clone()),
+            ..RivuletApp::default()
+        };
+        app.refresh_audio_devices_live();
+        if devices.is_empty() {
+            // Endpoint-less host (hosted CI runner): nothing can survive.
+            assert!(app.audio_mixer_new_source_device_id.is_none());
+        } else {
+            assert_eq!(
+                app.audio_mixer_new_source_device_id.as_deref(),
+                Some(existing.as_str()),
+                "a live endpoint selection must survive the refresh"
+            );
+        }
+        let mut app = RivuletApp {
+            audio_mixer_new_source_device_id: Some("wasapi-out:{0.0.0.00000000}.{gone}".to_owned()),
+            ..RivuletApp::default()
+        };
+        app.refresh_audio_devices_live();
+        assert!(
+            app.audio_mixer_new_source_device_id.is_none(),
+            "a vanished endpoint must not survive the refresh"
+        );
+        assert!(
+            app.audio_device_list.is_some(),
+            "the refresh populated the cache"
+        );
+        assert!(app.audio_device_list_last_refresh.is_some());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
     fn wasapi_device_picker_ui_is_wired() {
         // The Mixer's Input/Output rows show the device picker; the selected
         // endpoint becomes the source's `wasapi-out:`/`wasapi-in:` device id
@@ -19158,6 +19283,10 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         for needle in [
             "audio_mixer_new_source_device_id",
             "audio_device_list",
+            "audio_device_list_last_refresh",
+            "fn audio_devices_refresh_due",
+            "fn refresh_audio_devices_live",
+            "AUDIO_DEVICES_REFRESH_INTERVAL",
             "fn routed_device_targets",
             "fn audio_device_picker_label",
             "fn audio_device_strip_label",
