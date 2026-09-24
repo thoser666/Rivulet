@@ -969,6 +969,19 @@ fn m6_audio_routing_phase3_windows_backend_is_pinned() {
         "per-app frames must travel through an mpsc channel drained on the UI thread"
     );
 
+    // Live picker refresh (#154 follow-up): the process list re-enumerates
+    // while the picker is open, bounded, with exit-aware selection clearing.
+    for needle in [
+        "fn refresh_app_audio_processes_live",
+        "fn app_audio_processes_refresh_due",
+        "APP_AUDIO_PROCESSES_REFRESH_INTERVAL",
+    ] {
+        assert!(
+            gui.contains(needle),
+            "per-app picker live-refresh surface must be pinned: {needle}"
+        );
+    }
+
     // Phase-3 i18n keys in both locales.
     let i18n = read("rivulet-core/src/i18n.rs");
     for key in [
