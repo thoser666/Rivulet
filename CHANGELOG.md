@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+- fix(gui): **WebView2Loader.dll wird beim Build automatisch neben die GUI-Exe kopiert** —
+  seit dem Browser-Adapter (#227) importiert das GUI-Binary die
+  WebView2-Loader-DLL; Windows löst Import-DLLs aber nur neben der Exe oder
+  auf PATH auf, nicht aus cargos Build-Script-Output — ein schlichtes
+  `cargo build` erzeugte damit ein Binary, das vor der ersten Log-Zeile
+  still starb. Der GUI-build.rs kolokalisiert die x64-Loader-DLL jetzt bei
+  jedem Windows-Build mit der Exe (dasselbe Ziel-Muster wie das
+  Vulkan-Layer-Manifest, überlebt auch `cargo clean`); wenn webview2-com-sys
+  noch nicht gebaut hat, warnt der Build sichtbar statt still zu sterben.
+  Neuer `build_outputs`-Integrations-Test pinnt den Vertrag (Exe + DLL
+  nebeneinander, build.rs-Schritt verdrahtet); README Development-Abschnitt
+  umgeschrieben (automatisch + manueller Fallback).
+
 - feat(gui): **Live-Refresh für den Prozess-Picker (#154-Follow-up)** —
   derselbe Mechanismus wie beim Device-Picker, jetzt für Application-Quellen:
   der Mixer enumeriert die Prozessliste im offenen Picker erneut, alle 2 s

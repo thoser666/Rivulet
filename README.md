@@ -723,17 +723,24 @@ opt in to WER crash dumps with `RIVULET_ENABLE_CRASH_DUMPS=1`.
 
 The GUI binary imports `WebView2Loader.dll` (wry/webview2-com, browser-source
 adapter). Windows resolves import DLLs only next to the executable or on
-`PATH` — **not** from cargo's build-script output directory — so a plain
-`cargo build -p rivulet-gui` produces a binary that dies silently before any
-log line (stderr: `error while loading shared libraries:
-api-ms-win-core-winrt-error-l1-1-0.dll`). After building, copy the x64 loader
-next to the exe:
+`PATH` — **not** from cargo's build-script output directory — so a binary
+without the loader next to it dies silently before any log line (stderr:
+`error while loading shared libraries: api-ms-win-core-winrt-error-l1-1-0.dll`).
+
+The GUI build script colocates the x64 loader with the executable
+automatically on every Windows build (`rivulet-gui/build.rs`, same destination
+contract as the Vulkan layer manifest), so a plain `cargo build`/`cargo test`
+keeps the exe startable — also after `cargo clean`. If the build ever prints
+`WebView2Loader.dll not found under …`, webview2-com-sys has not built yet:
+build once more (the first `cargo test -p rivulet-gui` run does it), or copy
+manually as a fallback:
 
 ```bash
 cp target/debug/build/webview2-com-sys-*/out/x64/WebView2Loader.dll target/debug/
 ```
 
-A `cargo clean` wipes the copy — re-run the command after a rebuild.
+The colocate contract is pinned by the `build_outputs` integration test in
+`rivulet-gui/tests/`.
 
 
 
