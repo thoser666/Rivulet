@@ -715,6 +715,22 @@ fn m69_browser_backend_reference_is_pinned() {
     }
     assert!(core_lib.contains("SyntheticBrowserBackend"));
     assert!(core_lib.contains("prime_browser_backend"));
+
+    // The GUI binary imports WebView2Loader.dll via the wry adapter; the
+    // build script must keep colocating it with the executable (Windows
+    // never resolves import DLLs from cargo's build-script output, so a
+    // lost copy step means every dev GUI start dies silently).
+    let build_script = read("rivulet-gui/build.rs");
+    for required in [
+        "fn copy_webview2_loader",
+        "WebView2Loader.dll",
+        "webview2-com-sys-",
+    ] {
+        assert!(
+            build_script.contains(required),
+            "GUI build.rs must keep the WebView2Loader colocate step: {required}"
+        );
+    }
 }
 
 #[test]
