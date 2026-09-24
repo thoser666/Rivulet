@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+- feat(audio): **WASAPI-Geräte-Capture (Issue #229, S8-Follow-up)** —
+  die Geräte-Hälfte der Audio-Matrix: virtuelle Mixer-Kanäle (z. B.
+  SteelSeries GG/Sonar) und Mikrofone werden als echte Quellen wählbar.
+  Neue Device-ID-Konvention `wasapi-out:<endpoint>`/`wasapi-in:<endpoint>`
+  (`DeviceTarget` in rivulet-core; stabile WASAPI-Endpoint-Strings, damit
+  persistierte Konfigs Reboots überleben). rivulet-audio gewinnt das
+  Windows-Modul `device_capture`: `list_audio_devices()` enumeriert aktive
+  Render-/Capture-Endpoints mit Friendly Names und Default-Marker (Render
+  zuerst, Default oben), `AudioDeviceCapture` streamt einen Endpoint als
+  48-kHz-Stereo-f32 — Shared-Mode-Loopback für Output-Endpoints, plain
+  Capture für Inputs, `AUTOCONVERTPCM | SRC_DEFAULT_QUALITY` konvertiert
+  das native Mix-Format (kein Resampling im Code). GUI: Device-Picker im
+  Mixer für Input/Output-Quellen (Cached List, ⟳-Refresh, Pending-Hint,
+  lokalisierter Default-Marker) statt der hartcodierten
+  `system_loopback`/`default_input`-Platzhalter; geroutete Device-Quellen
+  bekommen je einen Capture-Thread mit demselben mpsc-Drain-Lifecycle wie
+  der Per-App-Pfad, Strips zeigen den Friendly Name. Ohne Auswahl bleiben
+  die Legacy-Platzhalter aktiv, andere Plattformen sind unverändert.
+  Tests: 3 Core-Tests (Konvention), 5 Audio-Tests (Format-Caps, beide
+  Flows, Round-Trips), 5 GUI-Tests, neuer ci_pinning-Guard
+  `wasapi_device_capture_surface_is_pinned`.
+  [#229](https://github.com/thoser666/Rivulet/issues/229)
+
 - feat(m7): **Scene-Item-Copy/Paste (Issue #192, M7 W6, OBS-32.2-Parität)** —
   Szenenelemente sind kopier- und einfügbar: `SourceManager::copy_scene_item`
   nimmt Quelle + Binding wortgetreu in die neue `SceneItemClipboard` auf

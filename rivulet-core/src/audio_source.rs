@@ -279,6 +279,54 @@ pub fn device_pid(device_id: &str) -> Option<u32> {
     rest.parse::<u32>().ok().filter(|pid| *pid != 0)
 }
 
+/// Device-id conventions carried by WASAPI device sources (issue #229).
+///
+/// `wasapi-out:<endpoint id>` selects a render endpoint captured in loopback
+/// mode (what that output device plays), `wasapi-in:<endpoint id>` selects a
+/// capture endpoint (microphone). The endpoint id is the stable WASAPI
+/// endpoint string; friendly names live only in the picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceTarget {
+    /// A render endpoint captured in loopback mode.
+    Output(String),
+    /// A capture endpoint (e.g. microphone).
+    Input(String),
+}
+
+impl DeviceTarget {
+    /// Parse a device id into a [`DeviceTarget`]. Returns [`None`] for every
+    /// other form (legacy placeholders, `pid:` ids, or the pending markers).
+    pub fn parse(device_id: &str) -> Option<Self> {
+        if let Some(rest) = device_id.strip_prefix("wasapi-out:") {
+            let id = rest.trim();
+            (!id.is_empty()).then(|| Self::Output(id.to_owned()))
+        } else if let Some(rest) = device_id.strip_prefix("wasapi-in:") {
+            let id = rest.trim();
+            (!id.is_empty()).then(|| Self::Input(id.to_owned()))
+        } else {
+            None
+        }
+    }
+
+    /// The device id this target round-trips to.
+    pub fn device_id(&self) -> String {
+        match self {
+            Self::Output(id) => format!("wasapi-out:{id}"),
+            Self::Input(id) => format!("wasapi-in:{id}"),
+        }
+    }
+
+    /// Whether the target selects a render (loopback) endpoint.
+    pub fn is_output(&self) -> bool {
+        matches!(self, Self::Output(_))
+    }
+}
+
+/// Extract the WASAPI device target from a device id, if any.
+pub fn device_target(device_id: &str) -> Option<DeviceTarget> {
+    DeviceTarget::parse(device_id)
+}
+
 /// The type of audio source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AudioSourceKind {
@@ -388,6 +436,13 @@ impl AudioSource {
     /// placeholder and yield [`None`].
     pub fn device_pid(&self) -> Option<u32> {
         device_pid(&self.device_id)
+    }
+
+    /// Extract the WASAPI device target from this source's `device_id`
+    /// (issue #229: `wasapi-out:<id>` render-loopback / `wasapi-in:<id>`
+    /// capture endpoints). [`None`] for every other convention.
+    pub fn wasapi_device(&self) -> Option<DeviceTarget> {
+        device_target(&self.device_id)
     }
 
     /// Create an input device source (microphone).
@@ -975,5 +1030,73 @@ mod tests {
 
         let mic = AudioSource::input_device("Mic", "default_input");
         assert_eq!(mic.device_pid(), None);
+    }
+
+    #[test]
+    fn device_target_parses_wasapi_conventions() {
+        // Issue #229: render and capture endpoint conventions round-trip.
+        let out = DeviceTarget::parse("wasapi-out:{0.0.0.00000000}.{abc-123}")
+            .expect("wasapi-out id parses");
+        assert_eq!(
+            out,
+            DeviceTarget::Output("{0.0.0.00000000}.{abc-123}".to_owned())
+        );
+        assert!(out.is_output());
+        assert_eq!(
+            out.device_id(),
+            "wasapi-out:{0.0.0.00000000}.{abc-123}",
+            "round-trip is stable"
+        );
+
+        let input = DeviceTarget::parse("wasapi-in:{0.0.1.00000000}.{def-456}")
+            .expect("wasapi-in id parses");
+        assert_eq!(
+            input,
+            DeviceTarget::Input("{0.0.1.00000000}.{def-456}".to_owned())
+        );
+        assert!(!input.is_output());
+        assert_eq!(input.device_id(), "wasapi-in:{0.0.1.00000000}.{def-456}");
+    }
+
+    #[test]
+    fn device_target_rejects_other_forms_and_empties() {
+        // Legacy placeholders and other conventions must not be mistaken
+        // for WASAPI endpoint selections.
+        assert_eq!(DeviceTarget::parse("system_loopback"), None);
+        assert_eq!(DeviceTarget::parse("default_input"), None);
+        assert_eq!(DeviceTarget::parse("pending_app"), None);
+        assert_eq!(DeviceTarget::parse("pid:1234"), None);
+        assert_eq!(DeviceTarget::parse(""), None);
+        assert_eq!(DeviceTarget::parse("WASAPI-OUT:x"), None, "case sensitive");
+        // Empty endpoint ids are meaningless selections, not defaults.
+        assert_eq!(DeviceTarget::parse("wasapi-out:"), None);
+        assert_eq!(DeviceTarget::parse("wasapi-out:   "), None);
+        assert_eq!(DeviceTarget::parse("wasapi-in:"), None);
+    }
+
+    #[test]
+    fn audio_source_wasapi_device_delegates() {
+        let out = AudioSource::output_device(
+            "Sonar Stream",
+            "wasapi-out:{0.0.0.00000000}.{sonar-stream}",
+        );
+        assert_eq!(
+            out.wasapi_device(),
+            Some(DeviceTarget::Output(
+                "{0.0.0.00000000}.{sonar-stream}".to_owned()
+            ))
+        );
+
+        let mic = AudioSource::input_device("Podcast Mic", "wasapi-in:{mic-endpoint}");
+        assert_eq!(
+            mic.wasapi_device(),
+            Some(DeviceTarget::Input("{mic-endpoint}".to_owned()))
+        );
+
+        // Legacy sources keep yielding None.
+        assert_eq!(AudioSource::system_default().wasapi_device(), None);
+        assert_eq!(AudioSource::microphone_default().wasapi_device(), None);
+        let app = AudioSource::application("Game", "pid:42");
+        assert_eq!(app.wasapi_device(), None);
     }
 }
