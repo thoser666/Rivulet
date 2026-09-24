@@ -719,6 +719,24 @@ opt in to WER crash dumps with `RIVULET_ENABLE_CRASH_DUMPS=1`.
 
 
 
+### Running the GUI locally (Windows)
+
+The GUI binary imports `WebView2Loader.dll` (wry/webview2-com, browser-source
+adapter). Windows resolves import DLLs only next to the executable or on
+`PATH` — **not** from cargo's build-script output directory — so a plain
+`cargo build -p rivulet-gui` produces a binary that dies silently before any
+log line (stderr: `error while loading shared libraries:
+api-ms-win-core-winrt-error-l1-1-0.dll`). After building, copy the x64 loader
+next to the exe:
+
+```bash
+cp target/debug/build/webview2-com-sys-*/out/x64/WebView2Loader.dll target/debug/
+```
+
+A `cargo clean` wipes the copy — re-run the command after a rebuild.
+
+
+
 ### Tests
 
 Run the full test suite:
