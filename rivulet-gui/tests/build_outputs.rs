@@ -1,7 +1,10 @@
 use std::fs;
-use std::path::{Path, PathBuf};
 
-fn profile_dir() -> PathBuf {
+#[cfg(target_os = "windows")]
+#[test]
+fn webview2_loader_is_colocated_with_the_gui_executable() {
+    use std::path::{Path, PathBuf};
+
     // CARGO_MANIFEST_DIR is rivulet-gui; the GUI exe lands in the workspace
     // profile directory (target/debug | target/release).
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -12,20 +15,16 @@ fn profile_dir() -> PathBuf {
     } else {
         "release"
     };
-    workspace.join("target").join(profile)
-}
+    let profile_dir: PathBuf = workspace.join("target").join(profile);
 
-#[cfg(target_os = "windows")]
-#[test]
-fn webview2_loader_is_colocated_with_the_gui_executable() {
     // The browser-source adapter (#227) made the GUI binary import
     // WebView2Loader.dll. Windows resolves import DLLs only next to the
     // executable (or on PATH), never from cargo's build-script output — a
     // missing copy means the exe dies silently before the first log line.
     // The build script colocates the x64 loader with the exe; this guard
     // fails CI the moment that copy step regresses.
-    let exe = profile_dir().join("rivulet-gui.exe");
-    let loader = profile_dir().join("WebView2Loader.dll");
+    let exe = profile_dir.join("rivulet-gui.exe");
+    let loader = profile_dir.join("WebView2Loader.dll");
     assert!(
         exe.exists(),
         "the GUI exe must be built for this test (cargo builds bin targets during `cargo test`): {}",
