@@ -279,18 +279,25 @@ pub fn device_pid(device_id: &str) -> Option<u32> {
     rest.parse::<u32>().ok().filter(|pid| *pid != 0)
 }
 
-/// Device-id conventions carried by WASAPI device sources (issue #229).
+/// Device-id conventions carried by device sources (issues #229 / #231).
 ///
-/// `wasapi-out:<endpoint id>` selects a render endpoint captured in loopback
-/// mode (what that output device plays), `wasapi-in:<endpoint id>` selects a
-/// capture endpoint (microphone). The endpoint id is the stable WASAPI
-/// endpoint string; friendly names live only in the picker.
+/// `wasapi-out:<endpoint id>` selects a Windows render endpoint captured in
+/// loopback mode (what that output device plays), `wasapi-in:<endpoint id>`
+/// a Windows capture endpoint (microphone). On Linux, `pw-src:<node id>`
+/// selects a PipeWire *source* node (microphone, virtual device) and
+/// `pw-mon:<node id>` a sink *monitor* (what that sink plays). The id after
+/// the prefix is the platform-stable target (`pw_metadata`-style node ids on
+/// Linux); friendly names live only in the picker.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceTarget {
     /// A render endpoint captured in loopback mode.
     Output(String),
     /// A capture endpoint (e.g. microphone).
     Input(String),
+    /// A PipeWire source node captured directly (issue #231).
+    PwSource(u32),
+    /// A PipeWire sink monitor captured in monitor mode (issue #231).
+    PwMonitor(u32),
 }
 
 impl DeviceTarget {
@@ -303,6 +310,12 @@ impl DeviceTarget {
         } else if let Some(rest) = device_id.strip_prefix("wasapi-in:") {
             let id = rest.trim();
             (!id.is_empty()).then(|| Self::Input(id.to_owned()))
+        } else if let Some(rest) = device_id.strip_prefix("pw-src:") {
+            let id = rest.trim().parse::<u32>().ok().filter(|id| *id != 0);
+            id.map(Self::PwSource)
+        } else if let Some(rest) = device_id.strip_prefix("pw-mon:") {
+            let id = rest.trim().parse::<u32>().ok().filter(|id| *id != 0);
+            id.map(Self::PwMonitor)
         } else {
             None
         }
@@ -313,12 +326,14 @@ impl DeviceTarget {
         match self {
             Self::Output(id) => format!("wasapi-out:{id}"),
             Self::Input(id) => format!("wasapi-in:{id}"),
+            Self::PwSource(id) => format!("pw-src:{id}"),
+            Self::PwMonitor(id) => format!("pw-mon:{id}"),
         }
     }
 
     /// Whether the target selects a render (loopback) endpoint.
     pub fn is_output(&self) -> bool {
-        matches!(self, Self::Output(_))
+        matches!(self, Self::Output(_) | Self::PwMonitor(_))
     }
 }
 
@@ -438,9 +453,11 @@ impl AudioSource {
         device_pid(&self.device_id)
     }
 
-    /// Extract the WASAPI device target from this source's `device_id`
-    /// (issue #229: `wasapi-out:<id>` render-loopback / `wasapi-in:<id>`
-    /// capture endpoints). [`None`] for every other convention.
+    /// Extract the WASAPI/PipeWire device target from this source's
+    /// `device_id` (issue #229: `wasapi-out:<id>` render-loopback /
+    /// `wasapi-in:<id>` capture endpoints; issue #231: `pw-src:<node>`
+    /// source nodes / `pw-mon:<node>` sink monitors). [`None`] for every
+    /// other convention.
     pub fn wasapi_device(&self) -> Option<DeviceTarget> {
         device_target(&self.device_id)
     }
@@ -1075,6 +1092,37 @@ mod tests {
     }
 
     #[test]
+    fn device_target_parses_pipewire_conventions() {
+        // Issue #231: PipeWire source-node and sink-monitor conventions
+        // round-trip; the node id is a positive decimal number.
+        let src = DeviceTarget::parse("pw-src:42").expect("pw-src id parses");
+        assert_eq!(src, DeviceTarget::PwSource(42));
+        assert!(!src.is_output(), "a source node is an input-kind target");
+        assert_eq!(src.device_id(), "pw-src:42", "round-trip is stable");
+
+        let mon = DeviceTarget::parse("pw-mon:7").expect("pw-mon id parses");
+        assert_eq!(mon, DeviceTarget::PwMonitor(7));
+        assert!(
+            mon.is_output(),
+            "a sink monitor carries what an output plays"
+        );
+        assert_eq!(mon.device_id(), "pw-mon:7");
+
+        // Node id 0 is PipeWire's ID_ANY — never a capturable target.
+        assert_eq!(DeviceTarget::parse("pw-src:0"), None);
+        assert_eq!(DeviceTarget::parse("pw-mon:0"), None);
+        // Malformed or negative ids do not parse.
+        assert_eq!(DeviceTarget::parse("pw-src:"), None);
+        assert_eq!(DeviceTarget::parse("pw-src:   "), None);
+        assert_eq!(DeviceTarget::parse("pw-src:abc"), None);
+        assert_eq!(DeviceTarget::parse("pw-src:-1"), None);
+        assert_eq!(DeviceTarget::parse("pw-src:4.2"), None);
+        // Prefixes are case sensitive and prefix-distinct.
+        assert_eq!(DeviceTarget::parse("PW-SRC:42"), None);
+        assert_eq!(DeviceTarget::parse("pw"), None);
+    }
+
+    #[test]
     fn audio_source_wasapi_device_delegates() {
         let out = AudioSource::output_device(
             "Sonar Stream",
@@ -1098,5 +1146,16 @@ mod tests {
         assert_eq!(AudioSource::microphone_default().wasapi_device(), None);
         let app = AudioSource::application("Game", "pid:42");
         assert_eq!(app.wasapi_device(), None);
+    }
+
+    #[test]
+    fn wasapi_device_accessor_carries_pipewire_ids() {
+        // Issue #231: the same accessor carries the PipeWire conventions,
+        // so the GUI picker/lifecycle wiring stays platform-agnostic.
+        let mic = AudioSource::input_device("USB Mic", "pw-src:42");
+        assert_eq!(mic.wasapi_device(), Some(DeviceTarget::PwSource(42)));
+
+        let desktop = AudioSource::output_device("Desktop", "pw-mon:7");
+        assert_eq!(desktop.wasapi_device(), Some(DeviceTarget::PwMonitor(7)));
     }
 }

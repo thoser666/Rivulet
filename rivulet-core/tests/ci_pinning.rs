@@ -6570,6 +6570,10 @@ fn wasapi_device_capture_surface_is_pinned() {
         "pub enum DeviceTarget",
         "wasapi-out:",
         "wasapi-in:",
+        // Issue #231: the PipeWire sibling conventions ride on the same
+        // DeviceTarget carrier.
+        "pw-src:",
+        "pw-mon:",
         "pub fn device_target",
         "pub fn wasapi_device",
     ] {
@@ -6608,6 +6612,47 @@ fn wasapi_device_capture_surface_is_pinned() {
         );
     }
 
+    // Issue #231: the Linux device picker/capture lifecycle must stay
+    // un-gated — same wiring on `cfg(any(windows, linux))` as the per-app
+    // path, and the tick must drive the device lifecycle on Linux too.
+    let pw = read("rivulet-audio/src/device_capture_pw.rs");
+    for needle in [
+        "pub fn list_audio_devices",
+        "pub struct AudioDeviceCapture",
+        "pub fn start_for_target",
+        "TARGET_OBJECT",
+        "STREAM_CAPTURE_SINK",
+        // Enumeration classification (daemon-free CI coverage).
+        "Stream/Input/Audio",
+        "Audio/Sink",
+        "fn is_source_media_class",
+        "fn is_sink_media_class",
+        "fn node_display_label",
+        "fn default_name_from_metadata",
+        "default.audio.sink",
+        "default.audio.source",
+        // Fixed 48 kHz stereo f32 — the engine's routed appsrc caps.
+        "PW_CAPTURE_RATE",
+        // Ordered teardown: listener dropped before disconnect.
+        "stream.disconnect()",
+    ] {
+        assert!(
+            pw.contains(needle),
+            "PipeWire device backend must pin {needle}"
+        );
+    }
+    let audio_lib = read("rivulet-audio/src/lib.rs");
+    for required in [
+        "#[cfg(target_os = \"linux\")]",
+        "pub mod device_capture_pw",
+        "pub use device_capture_pw::{list_audio_devices, AudioDeviceCapture, AudioDeviceInfo}",
+    ] {
+        assert!(
+            audio_lib.contains(required),
+            "rivulet-audio lib.rs must pin {required}"
+        );
+    }
+
     let i18n = read("rivulet-core/src/i18n.rs");
     assert!(
         i18n.contains("\"audio_source_pick_device\""),
@@ -6618,5 +6663,9 @@ fn wasapi_device_capture_surface_is_pinned() {
     assert!(
         spec.contains("WASAPI device capture — issue"),
         "m6 spec must document the device-capture workstream"
+    );
+    assert!(
+        spec.contains("PipeWire device capture — issue"),
+        "m6 spec must document the Linux device-capture parity"
     );
 }

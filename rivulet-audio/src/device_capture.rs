@@ -231,11 +231,15 @@ pub fn list_audio_devices() -> Vec<AudioDeviceInfo> {
 
 /// Resolve a [`DeviceTarget`] to its WASAPI endpoint string. Returns the
 /// endpoint id verbatim — the capture thread resolves it to the `IMMDevice`
-/// at start time.
+/// at start time. PipeWire node targets (issue #231) are not WASAPI
+/// endpoints; the PipeWire backend (`device_capture_pw`) handles them.
 fn resolve_target(target: &DeviceTarget) -> Result<(String, bool)> {
     match target {
         DeviceTarget::Output(id) => Ok((id.clone(), true)),
         DeviceTarget::Input(id) => Ok((id.clone(), false)),
+        DeviceTarget::PwSource(_) | DeviceTarget::PwMonitor(_) => {
+            bail!("pw-src:/pw-mon: targets are handled by the PipeWire device backend, not WASAPI")
+        }
     }
 }
 
