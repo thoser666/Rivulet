@@ -72,7 +72,12 @@ pub mod camera;
 pub use camera::{CameraConfig, CameraDevice, CameraFrame};
 
 pub mod game_capture;
+pub mod game_detection;
 pub use game_capture::{GameCaptureConfig, GameCaptureFrame, GameWindow};
+pub use game_detection::{
+    detect_running_game, list_installed_games, GameIdentity, LauncherKind, RunningGameCandidate,
+    Score,
+};
 
 pub mod autoclip;
 pub use autoclip::{AutoClipConfig, SpikeDetector};

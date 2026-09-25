@@ -55,6 +55,7 @@ once_cell = "1.19.0"
 
 # Linux-specific dependencies (game capture via xcap)
 [target.'cfg(target_os = "linux")'.dependencies]
+
 xcap = "=0.9.8"
 libc = "0.2"
 # Native keyring backend (kernel keyutils) so StreamKeyStore/ChatTokenStore
@@ -62,6 +63,9 @@ libc = "0.2"
 keyring = { version = "3.6", default-features = false, features = ["linux-native"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+# Steam running-game registry signal + install discovery (issue #239):
+# HKCU SteamPath + HKLM Apps\<appid> Running value, read locally only.
+winreg = "0.55"
 # Windows credential vault backend for StreamKeyStore/ChatTokenStore.
 keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
 # winapi modules are enabled per consumer to keep the attack surface minimal:

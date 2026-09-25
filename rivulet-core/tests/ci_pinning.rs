@@ -6709,3 +6709,91 @@ fn wasapi_device_capture_surface_is_pinned() {
         "m6 spec must document the Linux device-capture parity"
     );
 }
+
+#[test]
+fn steam_game_detection_surface_is_pinned() {
+    // Issue #239 (Steam slice): launcher-based game identification must
+    // stay local-only (registry + manifest files, no transport, no process
+    // memory), Windows-gated, and fixture-testable without Steam installed.
+    let detection = read("rivulet-core/src/game_detection.rs");
+    for needle in [
+        "pub struct GameIdentity",
+        "pub fn device_id",
+        "game:{}:{}",
+        "pub enum LauncherKind",
+        "pub enum Score",
+        "pub struct RunningGameCandidate",
+        "pub fn parse_vdf_key_value",
+        "pub fn parse_appmanifest",
+        "pub fn parse_libraryfolders",
+        "pub fn list_installed_games",
+        "pub fn detect_running_game",
+        "state_flags.map(|flags| flags & 4 == 0)",
+        // Windows gating: the registry readers must not compile elsewhere.
+        "cfg(target_os = \"windows\")",
+        // Privacy invariants: only local sources.
+        "HKEY_CURRENT_USER",
+        "HKEY_LOCAL_MACHINE",
+    ] {
+        assert!(
+            detection.contains(needle),
+            "game_detection.rs must pin {needle}"
+        );
+    }
+    // No transport in the detection module (local reads only).
+    for banned in [
+        "ureq",
+        "reqwest",
+        "http://",
+        "https://",
+        "ReadProcessMemory",
+    ] {
+        assert!(
+            !detection.contains(banned),
+            "game_detection.rs must stay transport-free (found {banned})"
+        );
+    }
+
+    let lib = read("rivulet-core/src/lib.rs");
+    for required in [
+        "pub mod game_detection",
+        "pub use game_detection::{",
+        "GameIdentity, LauncherKind, RunningGameCandidate",
+    ] {
+        assert!(
+            lib.contains(required),
+            "rivulet-core lib.rs must pin {required}"
+        );
+    }
+
+    let cargo = read("rivulet-core/Cargo.toml");
+    assert!(
+        cargo.contains("[target.'cfg(target_os = \"windows\")'.dependencies]")
+            && cargo.contains("winreg"),
+        "winreg must stay a Windows-only dependency"
+    );
+
+    let gui = read("rivulet-gui/src/app.rs");
+    for needle in [
+        "fn refresh_installed_games",
+        "list_installed_games()",
+        "detect_running_game()",
+        "game_detection_running_marker",
+    ] {
+        assert!(gui.contains(needle), "GUI must pin {needle}");
+    }
+
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.contains("\"game_detection_running_marker\""),
+        "i18n must pin the running-game marker (EN + DE)"
+    );
+
+    let docs = read("docs/game-detection.md");
+    for fragment in ["local reads only", "game:steam:", "Launcher matrix"] {
+        assert!(
+            docs.contains(fragment),
+            "game-detection doc must pin {fragment}"
+        );
+    }
+}
