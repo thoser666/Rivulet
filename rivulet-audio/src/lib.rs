@@ -13,6 +13,10 @@ pub mod app_audio_pw;
 pub mod capture;
 #[cfg(target_os = "windows")]
 pub mod device_capture;
+// PipeWire device capture (issue #231): the Linux mirror of the WASAPI
+// device backend above.
+#[cfg(target_os = "linux")]
+pub mod device_capture_pw;
 pub(crate) mod messages;
 #[cfg(target_os = "windows")]
 pub mod process_loopback;
@@ -24,6 +28,8 @@ pub use app_audio_pw::{list_audio_processes, AppAudioCapture, AppAudioProcess};
 pub use capture::{AudioCapture, AudioConfig, AudioFilters};
 #[cfg(target_os = "windows")]
 pub use device_capture::{list_audio_devices, AudioDeviceCapture, AudioDeviceInfo};
+#[cfg(target_os = "linux")]
+pub use device_capture_pw::{list_audio_devices, AudioDeviceCapture, AudioDeviceInfo};
 #[cfg(target_os = "windows")]
 pub use process_loopback::{list_audio_processes, AppAudioCapture, AppAudioProcess};
 pub use rivulet_core::SkippedFilter;

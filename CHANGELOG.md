@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+- feat(audio): **PipeWire-Geräte-Capture (Issue #231, Linux-Slice)** —
+  die Linux-Parität zum WASAPI-Geräte-Capture (#229): `pw-src:<node>`/
+  `pw-mon:<node>` als geschwisterliche Device-ID-Konventionen am selben
+  `DeviceTarget`-Carrier (rivulet-core; Node-IDs sind session-scoped,
+  persistierte Konfigs degradieren wie unter Windows: Picker löscht die
+  Auswahl, Legacy-Placeholder bleiben). rivulet-audio gewinnt das
+  Linux-Modul `device_capture_pw`: `list_audio_devices()` entnimmt der
+  PipeWire-Registry quellbare Nodes (Sinks/`Audio/Sink` zuerst, dann
+  `Stream/Input/Audio`-Quellen, Session-Defaults zuerst, Friendly Names
+  via `node.description`), die Default-Marker kommen best-effort aus dem
+  `default`-Metadata-Objekt (`default.audio.sink`/`default.audio.source`,
+  JSON-`name`-Payload — ohne wireplumber-Metadata funktioniert der Picker
+  nur ohne Marker). `AudioDeviceCapture` streamt einen Node als 48 kHz
+  stereo f32 über eine Capture-Stream mit `target.object = <node id>` —
+  Monitor-Capture zusätzlich mit `stream.capture.sink = true` — aus
+  privatem Loop/Context/Connection pro Quelle (Per-App-Muster, Teardown
+  stört keine andere Capture). GUI: Device-Picker und
+  `sync_device_audio_captures`-Lifecycle auf `cfg(any(windows, linux))`
+  entgated — der Linux-Mixer zeigt denselben Picker (Friendly Names,
+  2-s-Live-Refresh, Auswahl wird bei verschwundenem Node gelöscht),
+  geroutete Device-Quellen bekommen je eine Capture-Thread, Strips zeigen
+  den Node-Namen; ohne Auswahl bleiben die Legacy-Placeholder aktiv.
+  Tests: parse/round-trip + Klassifikation daemon-frei, GUI-
+  Linux-Tests für Targets/Strip-Labels, ci_pinning-Guard erweitert;
+  m6-Spec und README S8 dokumentieren die Parität.
+
 - fix(gui): **WebView2Loader.dll wird beim Build automatisch neben die GUI-Exe kopiert** —
   seit dem Browser-Adapter (#227) importiert das GUI-Binary die
   WebView2-Loader-DLL; Windows löst Import-DLLs aber nur neben der Exe oder
