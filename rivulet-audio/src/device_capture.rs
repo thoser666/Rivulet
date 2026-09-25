@@ -240,6 +240,9 @@ fn resolve_target(target: &DeviceTarget) -> Result<(String, bool)> {
         DeviceTarget::PwSource(_) | DeviceTarget::PwMonitor(_) => {
             bail!("pw-src:/pw-mon: targets are handled by the PipeWire device backend, not WASAPI")
         }
+        DeviceTarget::CoreAudioInput(_) => {
+            bail!("core-audio-in: targets are handled by the Core Audio device backend, not WASAPI")
+        }
     }
 }
 
