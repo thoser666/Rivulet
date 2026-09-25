@@ -102,6 +102,9 @@ pub use encoder::{
 };
 pub use video_effects::VideoEffects;
 
+pub mod clock;
+pub use clock::{ClockMode, EngineClock, SharedClock, SystemClock, VirtualClock};
+
 pub mod health;
 pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 
@@ -313,6 +316,14 @@ pub struct RivuletEngine {
     /// video as an NDI source (`ndisink` from the GStreamer `ndi` plugin).
     /// Off by default so a feed is never announced unintentionally.
     ndi_output: Option<NdiOutput>,
+    /// Injectable time source for video PTS stamping (M7 W2a, issue #187).
+    /// Defaults to the system clock; a virtual clock makes a session fully
+    /// time-scriptable. Must be set before the session starts.
+    clock: clock::SharedClock,
+    /// Clock reading captured at session start (`start_local_recording` /
+    /// `start_streaming`); video PTS are stamped as
+    /// `clock.now_ns() - session_clock_base_ns`.
+    session_clock_base_ns: Option<u64>,
 }
 
 /// GStreamer objects and per-session state detached from the engine when a
@@ -376,6 +387,8 @@ impl Default for RivuletEngine {
             show_overlay: false,
             replay: None,
             ndi_output: None,
+            clock: clock::SharedClock::system(),
+            session_clock_base_ns: None,
         }
     }
 }
@@ -765,6 +778,47 @@ impl RivuletEngine {
     /// The currently selected video encoder.
     pub fn video_encoder(&self) -> VideoEncoder {
         self.video_encoder
+    }
+
+    /// Inject the clock used for video PTS stamping (M7 W2a, issue #187).
+    ///
+    /// Must be called before the session starts; swapping the clock while a
+    /// session is running is rejected so timestamps never jump mid-stream
+    /// (after a stop, a new clock applies to the next session). The default
+    /// is the wall-clock [`SystemClock`](clock::SystemClock), which keeps
+    /// today's `do-timestamp` behavior; a [`VirtualClock`](clock::VirtualClock)
+    /// replaces real-time pacing with explicit, exactly frame-spaced PTS so a
+    /// run is time-scriptable and reproducible.
+    pub fn set_clock(&mut self, clock: impl EngineClock + 'static) {
+        if self.is_recording {
+            self.set_error(
+                "set_clock must be called before the session starts; the running session keeps its clock.",
+            );
+            return;
+        }
+        self.clock = clock::SharedClock::new(Arc::new(clock));
+    }
+
+    /// Which clock mode is configured (run-report surface).
+    pub fn clock_mode(&self) -> clock::ClockMode {
+        self.clock.mode()
+    }
+
+    /// How video PTS are produced in the configured mode: explicit clock
+    /// stamping under the virtual clock, `do-timestamp` under the system
+    /// clock (run-report surface).
+    pub fn pts_source(&self) -> &'static str {
+        match self.clock.mode() {
+            clock::ClockMode::Virtual => "clock-driven",
+            clock::ClockMode::System => "do-timestamp",
+        }
+    }
+
+    /// The virtual clock, when one is configured. Driver surface for tests
+    /// and rendering: advance/step/hold between frame pushes to script the
+    /// session time.
+    pub fn virtual_clock(&self) -> Option<&clock::VirtualClock> {
+        self.clock.as_virtual()
     }
 
     /// Select the video codec for recording.
@@ -1673,7 +1727,13 @@ impl RivuletEngine {
         appsrc.set_caps(Some(&video_info.to_caps().unwrap()));
         appsrc.set_property("format", gst::Format::Time);
         appsrc.set_property("is-live", true);
-        appsrc.set_property("do-timestamp", true);
+        // M7 W2a (issue #187): the system clock keeps `do-timestamp`
+        // wall-clock stamping; the virtual clock stamps PTS explicitly in
+        // `process_raw_frame`, so appsrc stamping must stay off.
+        appsrc.set_property(
+            "do-timestamp",
+            self.clock.mode() == clock::ClockMode::System,
+        );
 
         if self.audio_enabled {
             let routed = !self.audio_sources.is_empty();
@@ -2221,6 +2281,9 @@ impl RivuletEngine {
         }
         tracing::info!("Streaming prepared.");
         self.is_recording = true;
+        // Capture the clock base so video PTS follow the injected clock
+        // relative to the session start (M7 W2a, issue #187).
+        self.session_clock_base_ns = Some(self.clock.now_ns());
 
         // Initialize the stream health monitor. Defaults match the
         // engine encoding configuration (30 FPS, 5000 kbit/s).
@@ -2243,6 +2306,9 @@ impl RivuletEngine {
         tracing::info!(path = ?path, "Recording prepared");
         self.output_path = Some(path);
         self.is_recording = true;
+        // Capture the clock base so video PTS follow the injected clock
+        // relative to the session start (M7 W2a, issue #187).
+        self.session_clock_base_ns = Some(self.clock.now_ns());
 
         // Initialize the stream health monitor as soon as a stream target
         // (stream-only or dual output) is configured. Defaults match the
@@ -2328,6 +2394,7 @@ impl RivuletEngine {
         self.reconnect_started = None;
         self.delay_supervisors.clear();
         self.is_recording = false;
+        self.session_clock_base_ns = None;
         parts
     }
 
@@ -2470,18 +2537,27 @@ impl RivuletEngine {
                 buffer
             };
 
+            // M7 W2a (issue #187): under the virtual clock the buffer is
+            // stamped explicitly at `session base + clock.now_ns()` (the
+            // appsrc's `do-timestamp` is disabled for that mode); the system
+            // clock keeps the wall-clock stamping (`None` = let appsrc stamp).
+            let stamp_pts = match self.clock.mode() {
+                clock::ClockMode::System => None,
+                clock::ClockMode::Virtual => video_pts_ns(&self.clock, self.session_clock_base_ns),
+            };
+
             // The first frame starts the pipeline lazily; if it races the
             // state change to PLAYING the push can fail transiently (slow
             // starts under load or coverage instrumentation). Retry briefly
             // instead of treating a flush/flow hiccup as fatal.
-            let mut result = appsrc.push_buffer(make_buffer());
+            let mut result = appsrc.push_buffer(stamp_video_buffer(make_buffer(), stamp_pts));
             if result.is_err() {
                 for _ in 0..3 {
                     if !self.is_recording || self.pipeline.is_none() {
                         break;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(25));
-                    result = appsrc.push_buffer(make_buffer());
+                    result = appsrc.push_buffer(stamp_video_buffer(make_buffer(), stamp_pts));
                     if result.is_ok() {
                         break;
                     }
@@ -2665,6 +2741,29 @@ const AUDIO_MIXER_INPUT_CAPS: &str =
 
 /// Copy an [`AudioFrame`] into a writable GStreamer buffer and push it into
 /// the given appsrc.
+/// Video PTS of a pushed frame under the engine's clock (M7 W2a, issue #187):
+/// `session base + clock.now_ns()`. `None` before a session starts lets the
+/// appsrc's `do-timestamp` stamp from the wall clock (system mode).
+fn video_pts_ns(
+    clock: &clock::SharedClock,
+    session_base_ns: Option<u64>,
+) -> Option<gst::ClockTime> {
+    let base = session_base_ns?;
+    let elapsed = clock.now_ns().saturating_sub(base);
+    Some(gst::ClockTime::from_nseconds(elapsed))
+}
+
+/// Stamp an explicit PTS on a video buffer (`None` leaves the buffer
+/// untouched so the appsrc's `do-timestamp` stays in charge).
+fn stamp_video_buffer(mut buffer: gst::Buffer, pts: Option<gst::ClockTime>) -> gst::Buffer {
+    if let Some(pts) = pts {
+        if let Some(buffer_ref) = buffer.get_mut() {
+            buffer_ref.set_pts(pts);
+        }
+    }
+    buffer
+}
+
 fn push_pcm_buffer(appsrc: &gst_app::AppSrc, frame: &AudioFrame) -> anyhow::Result<()> {
     let bytes_len = frame.data.len() * std::mem::size_of::<f32>();
     let mut buffer = gst::Buffer::with_size(bytes_len)?;
@@ -4699,6 +4798,94 @@ mod tests {
             audio_streams.len()
         );
         let _ = std::fs::remove_file(&path);
+    }
+
+    // ── M7 W2a (issue #187): injectable engine clock ────────────────────
+
+    fn clock_test_frame(width: u32, height: u32) -> Vec<u8> {
+        vec![0u8; (width * height * 4) as usize]
+    }
+
+    #[test]
+    fn engine_defaults_to_the_system_clock() {
+        let engine = RivuletEngine::default();
+        assert_eq!(engine.clock_mode(), clock::ClockMode::System);
+        assert_eq!(engine.pts_source(), "do-timestamp");
+        assert!(engine.virtual_clock().is_none());
+    }
+
+    #[test]
+    fn set_clock_accepts_a_virtual_clock_before_the_session() {
+        let mut engine = RivuletEngine::default();
+        engine.set_clock(clock::VirtualClock::new());
+        assert_eq!(engine.clock_mode(), clock::ClockMode::Virtual);
+        assert_eq!(engine.pts_source(), "clock-driven");
+        assert!(engine.virtual_clock().is_some());
+    }
+
+    #[test]
+    fn set_clock_during_an_active_session_is_rejected_and_recovers_after_stop() {
+        let mut engine = RivuletEngine::default();
+        let path =
+            std::env::temp_dir().join(format!("rivulet_clock_swap_{}.mp4", std::process::id()));
+        engine.start_local_recording(path.clone());
+        engine.process_raw_frame(&clock_test_frame(320, 240), 320, 240);
+
+        engine.set_clock(clock::VirtualClock::new());
+        assert!(
+            engine.take_error().is_some(),
+            "a mid-session clock swap must surface an engine error"
+        );
+        assert_eq!(engine.clock_mode(), clock::ClockMode::System);
+
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+
+        // After the stop the swap is legal again and applies to the next
+        // session.
+        engine.set_clock(clock::VirtualClock::new());
+        assert_eq!(engine.clock_mode(), clock::ClockMode::Virtual);
+    }
+
+    #[test]
+    fn virtual_clock_disables_do_timestamp_on_the_video_appsrc() {
+        let mut engine = RivuletEngine::default();
+        engine.set_clock(clock::VirtualClock::new());
+        let path =
+            std::env::temp_dir().join(format!("rivulet_clock_dt_off_{}.mp4", std::process::id()));
+        engine.start_local_recording(path.clone());
+        engine.process_raw_frame(&clock_test_frame(320, 240), 320, 240);
+        let do_timestamp = engine
+            .appsrc
+            .as_ref()
+            .map(|src| src.property::<bool>("do-timestamp"));
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            do_timestamp,
+            Some(false),
+            "virtual mode stamps PTS explicitly, so appsrc stamping must be off"
+        );
+    }
+
+    #[test]
+    fn system_clock_keeps_do_timestamp_on_the_video_appsrc() {
+        let mut engine = RivuletEngine::default();
+        let path =
+            std::env::temp_dir().join(format!("rivulet_clock_dt_on_{}.mp4", std::process::id()));
+        engine.start_local_recording(path.clone());
+        engine.process_raw_frame(&clock_test_frame(320, 240), 320, 240);
+        let do_timestamp = engine
+            .appsrc
+            .as_ref()
+            .map(|src| src.property::<bool>("do-timestamp"));
+        engine.stop_recording();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            do_timestamp,
+            Some(true),
+            "the system clock must preserve today's do-timestamp behavior"
+        );
     }
 
     #[test]
