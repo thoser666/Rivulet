@@ -154,11 +154,12 @@ pub fn list_audio_devices() -> Vec<AudioDeviceInfo> {
             continue;
         }
         let is_loopback = is_loopback_device_name(Some(name.as_str()));
+        let is_default = !default_name.is_empty() && default_name == name;
         let info = AudioDeviceInfo {
             endpoint_id: name.clone(),
             name,
             is_output: is_loopback,
-            is_default: !default_name.is_empty() && default_name == name,
+            is_default,
             is_loopback,
         };
         if is_loopback {
