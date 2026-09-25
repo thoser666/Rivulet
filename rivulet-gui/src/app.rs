@@ -1761,6 +1761,14 @@ pub struct RivuletApp {
     // Game capture source
     #[serde(skip)]
     game_windows: Vec<rivulet_core::GameWindow>,
+    /// Installed games from launcher manifests (issue #239). Empty when no
+    /// supported launcher is installed or on non-Windows platforms.
+    #[cfg(target_os = "windows")]
+    installed_games: Vec<rivulet_core::GameIdentity>,
+    /// High-confidence running-game candidates (launcher signals, issue
+    /// #239) captured with the last catalog refresh.
+    #[cfg(target_os = "windows")]
+    running_games: Vec<rivulet_core::RunningGameCandidate>,
     #[serde(skip)]
     selected_game_window_idx: Option<usize>,
     /// Live thumbnail of the selected game window (refreshed while the
@@ -2189,6 +2197,10 @@ impl Default for RivuletApp {
 
             // Game capture
             game_windows: Vec::new(),
+            #[cfg(target_os = "windows")]
+            installed_games: Vec::new(),
+            #[cfg(target_os = "windows")]
+            running_games: Vec::new(),
             selected_game_window_idx: None,
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             game_preview: None,
@@ -3027,6 +3039,15 @@ impl RivuletApp {
 
         self.selected_monitor_idx = None;
         self.selected_window_idx = None;
+    }
+
+    /// Refresh the installed-game table (launcher-based identification,
+    /// issue #239). Windows-only in this slice; the local read degrades to
+    /// an empty list when no launcher is installed.
+    #[cfg(target_os = "windows")]
+    fn refresh_installed_games(&mut self) {
+        self.installed_games = rivulet_core::game_detection::list_installed_games();
+        self.running_games = rivulet_core::game_detection::detect_running_game();
     }
 
     /// Refresh the list of available camera devices.
@@ -5238,11 +5259,45 @@ impl RivuletApp {
                     (camera.name.clone(), format!("camera:{id}"))
                 })
                 .collect(),
-            rivulet_core::SourceKind::GameCapture => self
-                .game_windows
-                .iter()
-                .map(|window| (window.title.clone(), format!("game:{}", window.id)))
-                .collect(),
+            rivulet_core::SourceKind::GameCapture => {
+                // Issue #239: installed games first (launcher-identified,
+                // `game:<launcher>:<id>`), the running game on top; raw
+                // game-like windows follow as the heuristic fallback.
+                #[allow(unused_mut)]
+                let mut entries: Vec<(String, String)> = Vec::new();
+                #[cfg(target_os = "windows")]
+                {
+                    let running_ids: std::collections::HashSet<&str> = self
+                        .running_games
+                        .iter()
+                        .map(|candidate| candidate.identity.game_id.as_str())
+                        .collect();
+                    // High-confidence running game first (spec: "offer it
+                    // first"), with the localized running marker.
+                    for candidate in &self.running_games {
+                        entries.push((
+                            format!(
+                                "{} — {}",
+                                candidate.identity.display_name,
+                                self.tr("game_detection_running_marker")
+                            ),
+                            candidate.identity.device_id(),
+                        ));
+                    }
+                    for game in &self.installed_games {
+                        if running_ids.contains(game.game_id.as_str()) {
+                            continue;
+                        }
+                        entries.push((game.display_name.clone(), game.device_id()));
+                    }
+                }
+                entries.extend(
+                    self.game_windows
+                        .iter()
+                        .map(|window| (window.title.clone(), format!("game:{}", window.id))),
+                );
+                entries
+            }
             rivulet_core::SourceKind::ScreenCapture => self.scene_monitor_entries(),
             _ => Vec::new(),
         }
@@ -10575,6 +10630,10 @@ impl RivuletApp {
         #[cfg(target_os = "windows")]
         {
             app.refresh_capture_sources();
+            // Launcher-based game identification (issue #239): populate the
+            // installed-game table once at startup (cheap local reads; the
+            // picker falls back to the window heuristic when it stays empty).
+            app.refresh_installed_games();
         }
         #[cfg(target_os = "linux")]
         {
@@ -11167,6 +11226,8 @@ impl eframe::App for RivuletApp {
                                     self.refresh_capture_sources();
                                     self.refresh_camera_devices();
                                     self.refresh_game_windows();
+                                    #[cfg(target_os = "windows")]
+                                    self.refresh_installed_games();
                                 }
                             });
                             // Camera source selection
@@ -16542,6 +16603,40 @@ mod tests {
         let game_entries = app.scene_device_entries(&rivulet_core::SourceKind::GameCapture);
         assert_eq!(game_entries.len(), 1);
         assert_eq!(game_entries[0].1, "game:42");
+
+        // Issue #239 (Windows): the installed-game table feeds the same
+        // picker; the running game is offered first with its marker.
+        #[cfg(target_os = "windows")]
+        {
+            app.installed_games = vec![rivulet_core::GameIdentity {
+                launcher: rivulet_core::LauncherKind::Steam,
+                game_id: "730".to_owned(),
+                display_name: "Counter-Strike 2".to_owned(),
+                install_dir: None,
+                executables: Vec::new(),
+            }];
+            app.running_games = vec![rivulet_core::RunningGameCandidate {
+                identity: rivulet_core::GameIdentity {
+                    launcher: rivulet_core::LauncherKind::Steam,
+                    game_id: "570".to_owned(),
+                    display_name: "Dota 2".to_owned(),
+                    install_dir: None,
+                    executables: Vec::new(),
+                },
+                score: rivulet_core::Score::High,
+            }];
+            let launcher_entries = app.scene_device_entries(&rivulet_core::SourceKind::GameCapture);
+            assert_eq!(
+                launcher_entries.len(),
+                3,
+                "running game + installed games + heuristic windows"
+            );
+            assert_eq!(launcher_entries[0].1, "game:steam:570");
+            assert_eq!(launcher_entries[1].1, "game:steam:730");
+            assert_eq!(launcher_entries[2].1, "game:42");
+            app.installed_games.clear();
+            app.running_games.clear();
+        }
 
         // Non-capture kinds never offer a device list.
         assert!(app

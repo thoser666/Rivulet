@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+- feat(game-capture): **Launcher-basierte Spiel-Erkennung — Steam-Slice
+  (Issue #239)** — erste echte Spiel-Identifikation für den Game-Capture-
+  Picker statt reiner Fenstergrößen-Heuristik. Neu:
+  `rivulet-core/src/game_detection.rs` — `GameIdentity` (Launcher,
+  stabile Game-ID, Anzeigename, Install-Dir) mit der Device-ID-Konvention
+  `game:steam:<appid>` (Muster `camera:`/`monitor:` aus #216),
+  Launcher-Kind (`Steam`, Reserven für Epic/GOG/Origin/EA app/Battle.net
+  in Folgeslices) und Confidence-Score (High = Launcher-Signal,
+  Medium = Vordergrund-Fenster-Match, Low = Heuristik). Steam wird
+  ausschließlich lokal gelesen (Privacy-Posture wie die Telemetrie):
+  `HKCU\SOFTWARE\Valve\Steam` → `SteamPath`, `steamapps\libraryfolders.vdf`
+  (alle Bibliotheken, `\\`-Unescaping), pro Spiel
+  `appmanifest_<appid>.acf` (`name`, `installdir`, `StateFlags`-Bit 2 =
+  installiert), laufendes Spiel via
+  `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\Apps\<appid>` → `Running = 1`.
+  Parser sind pur (VDF-Key/Value, appmanifest, libraryfolders) und
+  fixture-getestet ohne Steam-Installation; fehlende Quellen degradieren
+  zu leerer Liste statt Fehler; Modul ist Windows-gated
+  (`winreg` nur Windows-Dependency), andere Plattformen behalten die
+  bisherige Heuristik. `detect_running_game()` liefert gerankte
+  Kandidaten (Steam-Signal = High); `list_installed_games()` den Katalog
+  für den Picker. Docs: `docs/game-detection.md` (Launcher-Matrix,
+  Privacy-Posture).
+
 - feat(m7): **Injectable Engine-Clock (Issue #187, Slice A)** —
   erster Schritt des Deterministic-Pipeline-Workstreams (W2a):
   `rivulet-core/src/clock.rs` mit dem `EngineClock`-Trait (`now_ns()`,
