@@ -458,7 +458,7 @@ pub fn list_audio_devices() -> Vec<AudioDeviceInfo> {
                     // pw-mon examples do. The listener is parked in
                     // `metadata_listener` so it survives the closure.
                     if let Ok(metadata) =
-                        registry_for_metadata.bind::<pipewire::metadata::Metadata>(global)
+                        registry_for_metadata.bind::<pipewire::metadata::Metadata, _>(global)
                     {
                         let sink = default_sink_for_meta.clone();
                         let source = default_source_for_meta.clone();
