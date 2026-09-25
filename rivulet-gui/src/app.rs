@@ -19384,19 +19384,17 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         );
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(target_os = "windows")]
     #[test]
-    fn device_source_shows_friendly_name_with_id_fallback() {
-        // Strips resolve a device source through the device list; a vanished
-        // device falls back to the raw device id, and legacy sources keep
-        // their stored name. Uses the platform-agnostic fields; the id shape
-        // differs per platform but the resolution contract is shared.
-        #[allow(clippy::needless_update)]
+    fn wasapi_device_source_shows_friendly_name_with_id_fallback() {
+        // Windows strip-label contract: WASAPI device sources resolve
+        // through the endpoint list; a vanished endpoint falls back to the
+        // raw device id, legacy sources keep their stored name. (The Linux
+        // mirror lives in pipewire_device_source_shows_friendly_name_with_id
+        //_fallback — AudioDeviceInfo::device_id() is platform-shaped.)
         let devices = vec![rivulet_audio::AudioDeviceInfo {
             endpoint_id: "{0.0.0.00000000}.{abc}".to_owned(),
             name: "Speakers (Sonar Stream)".to_owned(),
-            #[cfg(target_os = "linux")]
-            node_name: String::new(),
             is_output: true,
             is_default: false,
         }];
