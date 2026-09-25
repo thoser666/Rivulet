@@ -398,6 +398,61 @@ impl Default for RivuletEngine {
     }
 }
 
+/// Human-readable pipeline-construction failure, carrying the GStreamer error
+/// domain and code alongside the message so a lone `syntax error` line in the
+/// log can be traced to the specific parser failure.
+fn pipeline_parse_failure_message(err: &gst::glib::Error) -> String {
+    format!(
+        "Could not create the recording pipeline: {} (GStreamer domain {:?}, code {})",
+        err.message(),
+        err.domain(),
+        err.code()
+    )
+}
+
+/// Mask stream-embedded secrets before a pipeline description is written to
+/// the log. The RTMP(S) ingest URLs in `rtmp2sink`/`rtmpsink` locations embed
+/// the stream key (`location="rtmps://live/…/app/KEY"`), which must never
+/// reach the daily log; the URL value is replaced by a placeholder while the
+/// rest of the pipeline stays intact for debugging.
+fn redact_pipeline_for_log(pipeline: &str) -> String {
+    let mut out = String::with_capacity(pipeline.len());
+    let mut rest = pipeline;
+    loop {
+        // Stream URLs only appear inside sink `location` values, so matching
+        // the scheme is safe: it cannot hit encoder names, muxers, or pipes.
+        let start = [
+            rest.find("rtmps://"),
+            rest.find("rtmpt://"),
+            rest.find("rtmp://"),
+        ]
+        .into_iter()
+        .flatten()
+        .min();
+        let Some(index) = start else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..index]);
+        let tail = &rest[index..];
+        // The quoted value is terminated by a `"` in both the escaped (`\"`)
+        // and plain (`"`) forms GStreamer accepts. Keep a backslash right
+        // before the closing quote so the escaped `\"` form survives redaction.
+        let Some(terminator) = tail.find('"') else {
+            out.push_str(tail);
+            break;
+        };
+        let keep = if terminator > 0 && tail.as_bytes()[terminator - 1] == b'\\' {
+            terminator - 1
+        } else {
+            terminator
+        };
+        out.push_str("<redacted stream URL>");
+        rest = &tail[keep..];
+    }
+    out
+}
+
 impl RivuletEngine {
     pub fn new() -> Self {
         tracing::info!("GStreamer ready.");
@@ -1702,7 +1757,14 @@ impl RivuletEngine {
                     if self.try_encoder_fallback(&mut pipeline_str, &e.to_string()) {
                         continue;
                     }
-                    self.set_error(format!("Could not create the recording pipeline: {}", e));
+                    tracing::error!(
+                        pipeline = %redact_pipeline_for_log(&pipeline_str),
+                        gst_domain = ?e.domain(),
+                        gst_code = e.code(),
+                        "Recording pipeline parse failed: {}",
+                        e.message()
+                    );
+                    self.set_error(pipeline_parse_failure_message(&e));
                     return;
                 }
             };
@@ -1711,7 +1773,12 @@ impl RivuletEngine {
                 if self.try_encoder_fallback(&mut pipeline_str, &e.to_string()) {
                     continue;
                 }
-                self.set_error(format!("Could not start the recording pipeline: {}", e));
+                tracing::error!(
+                    pipeline = %redact_pipeline_for_log(&pipeline_str),
+                    gst_error = ?e,
+                    "Recording pipeline failed to enter Playing state"
+                );
+                self.set_error(format!("Could not start the recording pipeline: {e}"));
                 return;
             }
             break pipeline;
@@ -3046,6 +3113,115 @@ mod tests {
             engine.take_error().is_none(),
             "error must be consumed exactly once"
         );
+    }
+
+    #[test]
+    fn pipeline_parse_failure_message_carries_domain_and_code() {
+        let err = gst::glib::Error::with_domain(
+            gst::glib::Quark::from_str("gst-parse-error"),
+            4,
+            "syntax error",
+        );
+        let msg = pipeline_parse_failure_message(&err);
+        assert!(
+            msg.contains("Could not create the recording pipeline"),
+            "unexpected prefix: {msg}"
+        );
+        assert!(
+            msg.contains("syntax error"),
+            "message must include the GStreamer message: {msg}"
+        );
+        assert!(
+            msg.contains("gst-parse-error"),
+            "message must include the error domain: {msg}"
+        );
+        assert!(
+            msg.contains("code 4"),
+            "message must include the error code: {msg}"
+        );
+    }
+
+    #[test]
+    fn real_parse_failure_message_carries_domain_and_code() {
+        // A real GStreamer parse failure (not a synthetic glib error) must
+        // also flow through the formatter with domain + code intact, so the
+        // engine error surface is actually diagnosable.
+        let _ = gst::init();
+        let err = gst::parse::launch("!! not parseable !!").unwrap_err();
+        let msg = pipeline_parse_failure_message(&err);
+        assert!(
+            msg.contains("Could not create the recording pipeline"),
+            "unexpected prefix: {msg}"
+        );
+        assert!(
+            msg.contains("(GStreamer domain"),
+            "message must include the domain marker: {msg}"
+        );
+        assert!(
+            msg.contains("code"),
+            "message must include a code marker: {msg}"
+        );
+    }
+
+    #[test]
+    fn redaction_masks_stream_keys_in_plain_location() {
+        let pipeline = "appsrc name=rivulet_src ! videoconvert ! flvmux name=mux streamable=true \
+             ! rtmp2sink location=\"rtmps://live.twitch.tv/app/testkey123\"";
+        let redacted = redact_pipeline_for_log(pipeline);
+        assert!(redacted.contains("<redacted stream URL>"));
+        assert!(
+            !redacted.contains("testkey123"),
+            "stream key leaked: {redacted}"
+        );
+        assert!(
+            redacted.starts_with("appsrc name=rivulet_src"),
+            "pipeline head must stay intact: {redacted}"
+        );
+        assert!(
+            redacted.ends_with("location=\"<redacted stream URL>\""),
+            "location leg must stay intact: {redacted}"
+        );
+    }
+
+    #[test]
+    fn redaction_masks_stream_keys_in_escaped_location() {
+        let pipeline =
+            "flvmux name=mux_stream streamable=true ! rtmp2sink location=\\\"rtmps://a.rtmp.youtube.com/live2/secret-key\\\"";
+        let redacted = redact_pipeline_for_log(pipeline);
+        assert!(redacted.contains("<redacted stream URL>"));
+        assert!(
+            !redacted.contains("secret-key"),
+            "stream key leaked: {redacted}"
+        );
+        assert!(
+            redacted.contains("rtmp2sink location=\\\"<redacted stream URL>\\\""),
+            "escaped location leg must stay intact: {redacted}"
+        );
+    }
+
+    #[test]
+    fn redaction_masks_plain_rtmp_keys() {
+        let pipeline =
+            "appsrc ! videoconvert ! flvmux ! rtmp2sink location=\"rtmp://localhost/live/k\"";
+        let redacted = redact_pipeline_for_log(pipeline);
+        assert!(redacted.contains("<redacted stream URL>"));
+        assert!(!redacted.contains("rtmp://localhost/live/k"));
+    }
+
+    #[test]
+    fn redaction_leaves_non_stream_pipeline_untouched() {
+        let pipeline = "appsrc name=rivulet_src ! videoconvert ! x264enc ! mp4mux ! filesink \
+             location=\"file:///tmp/recording.mp4\"";
+        assert_eq!(redact_pipeline_for_log(pipeline), pipeline);
+        // Plain RTMP element names (without an ingest URL) must survive.
+        let binary = "appsrc ! videoconvert ! flvmux ! fakesink";
+        assert_eq!(redact_pipeline_for_log(binary), binary);
+    }
+
+    #[test]
+    fn redaction_handles_empty_and_quote_free_remainder() {
+        assert_eq!(redact_pipeline_for_log(""), "");
+        assert_eq!(redact_pipeline_for_log("no urls here"), "no urls here");
     }
 
     /// End-to-end test for separate audio tracks: both tracks are pushed into
