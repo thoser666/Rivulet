@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+- feat(m7): **Injectable Engine-Clock (Issue #187, Slice A)** —
+  erster Schritt des Deterministic-Pipeline-Workstreams (W2a):
+  `rivulet-core/src/clock.rs` mit dem `EngineClock`-Trait (`now_ns()`,
+  `mode()`, Downcast-Support), `SystemClock` (Wall-Clock-Default, exakt
+  das bisherige Verhalten) und `VirtualClock` (skriptbar per
+  `advance_ns`/`step_frames(n, fps)`/`hold`, exakte Frame-Intervalle aus
+  rationaler FPS in Integer-Nanosekunden — deterministisch über
+  Rechner und Läufe, strikt monoton durch Sättigung). Am Engine-
+  Eintrittspunkt `RivuletEngine::set_clock(...)` wird die Clock vor
+  Session-Start injiziert; ein Wechsel während einer laufenden Session
+  wird abgelehnt (Engine-Fehler, kein PTS-Sprung). Unter der virtuellen
+  Clock werden Video-PTS explizit als `Session-Base + now_ns()`
+  gestempelt (Appsrc-`do-timestamp` aus), unter der System-Clock bleibt
+  alles beim Wall-Clock-`do-timestamp`; Audio-PTS bleiben aus
+  Sample-Counts abgeleitet und damit clock-unabhängig.
+  Run-Report-Flächen: `clock_mode()` (`system`/`virtual`) und
+  `pts_source()` (`do-timestamp`/`clock-driven`); der Driver-Handle
+  `virtual_clock()` erlaubt Tests/Rendern das Zeit-Scripting zwischen
+  Frame-Pushes. Unit-Tests: 12 Clock-Tests plus 5 Engine-Tests
+  (Default-Modus, Vor-Session-Injection, Mid-Session-Ablehnung,
+  `do-timestamp`-Umschaltung in beiden Modi). Spec:
+  docs/m7-automation.md § W2a.
+
 - feat(audio): **Core-Audio-Geräte-Capture (Issue #231, macOS-Slice)** —
   der macOS-Teil der Geräte-Parität, über cpal: `core-audio-in:<name>`
   als dritte geschwisterliche Device-ID-Konvention am `DeviceTarget`
