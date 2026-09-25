@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+- feat(audio): **Core-Audio-Geräte-Capture (Issue #231, macOS-Slice)** —
+  der macOS-Teil der Geräte-Parität, über cpal: `core-audio-in:<name>`
+  als dritte geschwisterliche Device-ID-Konvention am `DeviceTarget`
+  (der cpal-gemeldete Gerätename — die stabile ID, die cpals öffentliche
+  API hergibt; Core-Audio-UIDs sind über cpal nicht erreichbar).
+  rivulet-audio gewinnt das macOS-Modul `device_capture_macos`:
+  `list_audio_devices()` enumeriert Input-Geräte — loopback-fähige
+  virtuelle Treiber (BlackHole, Soundflower, Loopback, VB-Cable, dieselbe
+  Keyword-Liste wie das Per-App-Fallback) sortiert zuerst, System-Default
+  markiert. `AudioDeviceCapture` streamt ein Input-Gerät als 48 kHz
+  stereo f32 und konvertiert das native Sample-Format/Kanäle/Rate auf dem
+  Worker-Thread (das `app_audio_macos`-DSP-Muster). Ehrliche
+  `OutputDevice`-Semantik: macOS hat keine Render-Loopback-API, ein
+  `OutputDevice`-Source ist nur über einen virtuellen Loopback-Treiber
+  quellbar — der Picker zeigt den lokalisierten Install-Hint
+  (`audio_source_output_device_loopback_hint`), und eine Capture für eine
+  Nicht-Loopback-Auswahl scheitert mit beschreibendem Fehler, statt
+  stille Stille aufzunehmen. GUI: Device-Picker und Lifecycle auf
+  `cfg(any(windows, linux, macos))` entgated, macOS-Tick treibt die
+  Device-Lifecycle, ohne Auswahl bleiben die Legacy-Placeholder aktiv.
+  Damit ist #231s Vorschlagsliste vollständig: Geräte-Capture deckt
+  Windows, Linux und macOS ab. Tests: Klassifikation/Sortierung/ID-
+  Round-Trip gerätefrei, macOS-GUI-Tests für Targets/Strip-Labels,
+  ci_pinning-Guard erweitert; m6-Spec und README S8 dokumentieren die
+  Parität.
+
 - feat(audio): **PipeWire-Geräte-Capture (Issue #231, Linux-Slice)** —
   die Linux-Parität zum WASAPI-Geräte-Capture (#229): `pw-src:<node>`/
   `pw-mon:<node>` als geschwisterliche Device-ID-Konventionen am selben

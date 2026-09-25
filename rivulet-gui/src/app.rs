@@ -45,8 +45,8 @@ use {
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use rivulet_audio::{AppAudioCapture, AppAudioProcess};
 
-// --- Device endpoints (issue #229 WASAPI / issue #231 PipeWire) ---
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+// --- Device endpoints (issue #229 WASAPI / issue #231 PipeWire + Core Audio) ---
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 use rivulet_audio::{list_audio_devices, AudioDeviceCapture};
 
 // --- Windows imports (for windows-capture v1.5.0) ---
@@ -1438,29 +1438,30 @@ pub struct RivuletApp {
     #[serde(skip)]
     audio_mixer_new_source_pid: Option<u32>,
     /// Cache of the device list for the device picker (issue #229 WASAPI
-    /// endpoints / issue #231 PipeWire nodes), refreshed when the picker is
-    /// opened or refreshed (an enumeration on every frame would be wasteful).
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    /// endpoints / issue #231 PipeWire nodes + Core Audio devices),
+    /// refreshed when the picker is opened or refreshed (an enumeration on
+    /// every frame would be wasteful).
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[serde(skip)]
     audio_device_list: Option<Vec<rivulet_audio::AudioDeviceInfo>>,
     /// When the device list was last enumerated — drives the picker's
     /// bounded auto-refresh (same pattern as `game_windows_last_refresh`).
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[serde(skip)]
     audio_device_list_last_refresh: Option<std::time::Instant>,
     /// Device-id selection for the source being added (Input/Output kind).
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[serde(skip)]
     audio_mixer_new_source_device_id: Option<String>,
-    /// Live device captures (issue #229 / #231): one thread per routed
+    /// Live device captures (issues #229/#231): one thread per routed
     /// device source, keyed by source id and device id so a re-target
     /// restarts the capture; dropped when the source disappears or is
     /// unrouted.
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[serde(skip)]
     device_audio_captures: Vec<(uuid::Uuid, String, AudioDeviceCapture)>,
     /// Frame channels for the live device captures; drained on the UI tick.
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[serde(skip)]
     device_audio_frame_receivers: Vec<(
         uuid::Uuid,
@@ -2152,15 +2153,15 @@ impl Default for RivuletApp {
             app_audio_processes_last_refresh: None,
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             audio_mixer_new_source_pid: None,
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             audio_device_list: None,
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             audio_device_list_last_refresh: None,
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             audio_mixer_new_source_device_id: None,
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             device_audio_captures: Vec::new(),
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             device_audio_frame_receivers: Vec::new(),
 
             ndi_output_enabled: false,
@@ -2328,8 +2329,9 @@ impl RivuletApp {
     }
     /// Cache accessor for the device list (issues #229/#231): lazily
     /// enumerated once, then reused so strips and pickers share one snapshot
-    /// (WASAPI endpoints on Windows, PipeWire nodes on Linux).
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    /// (WASAPI endpoints on Windows, PipeWire nodes on Linux, Core Audio
+    /// devices on macOS).
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     fn audio_device_list(&mut self) -> Vec<rivulet_audio::AudioDeviceInfo> {
         if self.audio_device_list.is_none() {
             self.audio_device_list = Some(list_audio_devices());
@@ -2339,12 +2341,12 @@ impl RivuletApp {
     }
 
     /// Re-enumerate the device list in place (issue #229 follow-up, issue
-    /// #231 Linux): a newly plugged or unplugged device appears or
+    /// #231 Linux + macOS): a newly plugged or unplugged device appears or
     /// disappears without a restart. The current device-id selection
     /// survives when the device still exists; when it vanished, the
     /// selection is cleared so the pending-device hint shows and the add
     /// button cannot silently target a dead device.
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     fn refresh_audio_devices_live(&mut self) {
         self.audio_device_list = Some(list_audio_devices());
         self.audio_device_list_last_refresh = Some(std::time::Instant::now());
@@ -2363,7 +2365,7 @@ impl RivuletApp {
     /// Whether the device list is due for a live refresh: never enumerated,
     /// or the bounded interval has elapsed. Pure so the contract is testable
     /// on every platform (the enumeration itself is platform-backed).
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     fn audio_devices_refresh_due(&self, now: std::time::Instant) -> bool {
         self.audio_device_list_last_refresh
             .map(|last| now.duration_since(last) >= AUDIO_DEVICES_REFRESH_INTERVAL)
@@ -2371,11 +2373,12 @@ impl RivuletApp {
     }
 
     /// Start/stop the device captures for the routed device sources
-    /// (issue #229 WASAPI / issue #231 PipeWire): every Input/Output-kind
-    /// source with a `wasapi-out:<id>` / `wasapi-in:<id>` / `pw-src:<node>` /
-    /// `pw-mon:<node>` device id that is routed to at least one output gets
-    /// a capture thread, mirroring the per-app capture lifecycle.
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    /// (issue #229 WASAPI / issue #231 PipeWire + Core Audio): every
+    /// Input/Output-kind source with a `wasapi-out:<id>` / `wasapi-in:<id>` /
+    /// `pw-src:<node>` / `pw-mon:<node>` / `core-audio-in:<name>` device id
+    /// that is routed to at least one output gets a capture thread,
+    /// mirroring the per-app capture lifecycle.
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     fn sync_device_audio_captures(&mut self) {
         let session_active = self.is_recording_active() || self.engine.is_streaming();
         if !session_active {
@@ -2428,7 +2431,7 @@ impl RivuletApp {
 
     /// Drain the device capture channels into the engine's routed appsrcs.
     /// Runs on the UI thread once per tick while a session is active.
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     fn drain_device_audio_frames(&mut self) {
         if self.device_audio_frame_receivers.is_empty() {
             return;
@@ -2477,10 +2480,11 @@ impl RivuletApp {
         ui.push_id(id, |ui| {
             ui.horizontal(|ui| {
                 // Issue #229 / #231: device sources show the friendly
-                // device name, not the raw `wasapi-out:`/`pw-mon:` id.
-                #[cfg(any(target_os = "windows", target_os = "linux"))]
+                // device name, not the raw
+                // `wasapi-out:`/`pw-mon:`/`core-audio-in:` id.
+                #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                 let display_name = audio_device_strip_label(source, &self.audio_device_list());
-                #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
                 let display_name = source.name.clone();
                 ui.label(format!("{} {}", source.kind.icon(), display_name));
                 ui.add_space(4.0);
@@ -2657,29 +2661,46 @@ impl RivuletApp {
                         )))]
                         #[allow(unused_variables)]
                         rivulet_core::AudioSourceKind::Application => "pending_app".to_owned(),
-                        // Issue #229 / #231: on Windows and Linux the
-                        // Input/Output pickers select a concrete device
+                        // Issue #229 / #231: on Windows, Linux and macOS
+                        // the Input/Output pickers select a concrete device
                         // ("wasapi-out:<id>" / "wasapi-in:<id>" endpoints,
-                        // "pw-src:<node>" / "pw-mon:<node>" nodes); without
-                        // a selection the legacy placeholders keep the old
+                        // "pw-src:<node>" / "pw-mon:<node>" nodes,
+                        // "core-audio-in:<name>" devices); without a
+                        // selection the legacy placeholders keep the old
                         // behavior. Other platforms stay on the placeholders.
-                        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                        #[cfg(not(any(
+                            target_os = "windows",
+                            target_os = "linux",
+                            target_os = "macos"
+                        )))]
                         rivulet_core::AudioSourceKind::InputDevice => "default_input".to_owned(),
-                        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                        #[cfg(not(any(
+                            target_os = "windows",
+                            target_os = "linux",
+                            target_os = "macos"
+                        )))]
                         rivulet_core::AudioSourceKind::OutputDevice => "system_loopback".to_owned(),
-                        #[cfg(any(target_os = "windows", target_os = "linux"))]
+                        #[cfg(any(
+                            target_os = "windows",
+                            target_os = "linux",
+                            target_os = "macos"
+                        ))]
                         rivulet_core::AudioSourceKind::InputDevice => self
                             .audio_mixer_new_source_device_id
                             .clone()
                             .unwrap_or_else(|| "default_input".to_owned()),
-                        #[cfg(any(target_os = "windows", target_os = "linux"))]
+                        #[cfg(any(
+                            target_os = "windows",
+                            target_os = "linux",
+                            target_os = "macos"
+                        ))]
                         rivulet_core::AudioSourceKind::OutputDevice => self
                             .audio_mixer_new_source_device_id
                             .clone()
                             .unwrap_or_else(|| "system_loopback".to_owned()),
                         rivulet_core::AudioSourceKind::Mixed => "mixed".to_owned(),
                     };
-                    #[cfg(any(target_os = "windows", target_os = "linux"))]
+                    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
                     {
                         if self.audio_mixer_new_source_kind == 0 {
                             self.audio_mixer_new_source_pid = None;
@@ -2769,13 +2790,13 @@ impl RivuletApp {
             ui.label(egui::RichText::new(self.tr("audio_app_fallback_hint")).weak());
         }
         // Issue #229 / #231: device picker for Input/Output-kind sources
-        // (Windows WASAPI endpoints, Linux PipeWire nodes). Lists active
-        // devices with friendly names; the defaults are marked. Mirrors the
-        // process picker above: cached list, manual refresh,
-        // pending-selection hint — plus a bounded live refresh so
+        // (Windows WASAPI endpoints, Linux PipeWire nodes, macOS Core Audio
+        // devices). Lists active devices with friendly names; the defaults
+        // are marked. Mirrors the process picker above: cached list, manual
+        // refresh, pending-selection hint — plus a bounded live refresh so
         // plugged/unplugged devices appear or drop out without a restart
         // (same pattern as the game-window list).
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         if self.audio_mixer_new_source_kind == 1 || self.audio_mixer_new_source_kind == 2 {
             ui.horizontal(|ui| {
                 ui.label(self.tr("audio_source_pick_device"));
@@ -2820,6 +2841,16 @@ impl RivuletApp {
             });
             if self.audio_mixer_new_source_device_id.is_none() {
                 ui.label(egui::RichText::new(self.tr("audio_source_device_required")).weak());
+            }
+            // Issue #231 (macOS): honest OutputDevice semantics — macOS has
+            // no render-loopback API, so an OutputDevice source needs a
+            // virtual loopback driver (BlackHole & co). Show the install
+            // hint instead of silently recording silence.
+            #[cfg(target_os = "macos")]
+            if self.audio_mixer_new_source_kind == 2 {
+                ui.label(
+                    egui::RichText::new(self.tr("audio_source_output_device_loopback_hint")).weak(),
+                );
             }
         }
         if self.audio_sources.is_empty() {
@@ -10906,6 +10937,9 @@ impl eframe::App for RivuletApp {
             // ── Phase 5: per-application audio fallback capture (issue #154) ──
             self.sync_app_audio_captures();
             self.drain_app_audio_frames();
+            // ── Issue #231: Core Audio device capture ──
+            self.sync_device_audio_captures();
+            self.drain_device_audio_frames();
         }
 
         self.update_recording_preview(ctx);
@@ -13091,7 +13125,7 @@ fn routed_application_targets(sources: &[AudioSource]) -> Vec<(uuid::Uuid, u32)>
 /// Label for one device in the device picker (issues #229/#231): the
 /// friendly name plus the localized default marker for the flow's default
 /// device. Pure so the picker contract is testable.
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn audio_device_picker_label(
     device: &rivulet_audio::AudioDeviceInfo,
     default_marker: &str,
@@ -13107,7 +13141,7 @@ fn audio_device_picker_label(
 /// shows its friendly device name (resolved from the current device list,
 /// falling back to the raw device id) instead of the cryptic device id;
 /// every other source keeps its stored name.
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn audio_device_strip_label(
     source: &AudioSource,
     devices: &[rivulet_audio::AudioDeviceInfo],
@@ -13124,10 +13158,10 @@ fn audio_device_strip_label(
 
 /// The capture targets for the device backend (issues #229/#231): every
 /// Input/Output-kind source carrying a parseable `wasapi-out:`/`wasapi-in:`
-/// (Windows) or `pw-src:`/`pw-mon:` (Linux) device id that is routed to at
-/// least one output. Pure so the mirror contract is testable; the capture
-/// lifecycle itself is platform-backed.
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+/// (Windows), `pw-src:`/`pw-mon:` (Linux) or `core-audio-in:` (macOS) device
+/// id that is routed to at least one output. Pure so the mirror contract is
+/// testable; the capture lifecycle itself is platform-backed.
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 fn routed_device_targets(sources: &[AudioSource]) -> Vec<(uuid::Uuid, String)> {
     sources
         .iter()
@@ -19301,7 +19335,7 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
 
     // ── Device capture (issue #229 WASAPI, issue #231 PipeWire) ─────
 
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[test]
     fn routed_device_targets_selects_only_routed_device_sources() {
         // Exactly the contract `sync_device_audio_captures` implements:
@@ -19323,7 +19357,7 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         assert_eq!(targets[1].1, "wasapi-in:{0.0.1.00000000}.{def}");
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[test]
     fn routed_device_targets_is_empty_without_device_sources() {
         // Legacy placeholders and pid sources never reach the device backend.
@@ -19384,6 +19418,56 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         );
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn coreaudio_device_source_shows_friendly_name_with_id_fallback() {
+        // Strips resolve a `core-audio-in:` device source through the device
+        // list; a vanished device falls back to the raw device id.
+        let devices = vec![rivulet_audio::AudioDeviceInfo {
+            endpoint_id: "BlackHole 2ch".to_owned(),
+            name: "BlackHole 2ch".to_owned(),
+            is_output: true,
+            is_default: false,
+            is_loopback: true,
+        }];
+        let source = AudioSource::output_device("Desktop", "core-audio-in:BlackHole 2ch");
+        assert_eq!(audio_device_strip_label(&source, &devices), "BlackHole 2ch");
+        assert_eq!(
+            audio_device_strip_label(
+                &AudioSource::output_device("Gone", "core-audio-in:Gone Device"),
+                &devices
+            ),
+            "core-audio-in:Gone Device",
+            "a vanished device must not render as a different device"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn routed_device_targets_selects_routed_coreaudio_sources() {
+        // Issue #231 (macOS): routed sources with `core-audio-in:` ids go to
+        // the Core Audio device backend, placeholders and pids do not.
+        let sources = vec![
+            AudioSource::input_device("Mic", "core-audio-in:MacBook Pro Microphone"),
+            AudioSource::output_device("Loopback", "core-audio-in:BlackHole 2ch"),
+            AudioSource::output_device("Idle", "core-audio-in:Gone")
+                .with_routing(AudioRouting::NONE),
+            AudioSource::output_device("System", "system_loopback"),
+        ];
+        let targets = routed_device_targets(&sources);
+        assert_eq!(
+            targets,
+            vec![
+                (
+                    sources[0].id,
+                    "core-audio-in:MacBook Pro Microphone".to_owned()
+                ),
+                (sources[1].id, "core-audio-in:BlackHole 2ch".to_owned()),
+            ],
+            "only routed Core Audio device sources are captured"
+        );
+    }
+
     #[cfg(target_os = "windows")]
     #[test]
     fn wasapi_device_source_shows_friendly_name_with_id_fallback() {
@@ -19419,7 +19503,7 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         );
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[test]
     fn device_picker_label_marks_the_default_device() {
         #[allow(clippy::needless_update)]
@@ -19428,6 +19512,8 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
             name: "Speakers".to_owned(),
             #[cfg(target_os = "linux")]
             node_name: String::new(),
+            #[cfg(target_os = "macos")]
+            is_loopback: false,
             is_output: true,
             is_default: true,
         };
@@ -19440,7 +19526,7 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         assert_eq!(audio_device_picker_label(&other, "(default)"), "Speakers");
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[test]
     fn audio_devices_refresh_due_is_bounded_by_interval() {
         // Same bounded-polling contract as the game-window list: a never
@@ -19471,7 +19557,7 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         );
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[test]
     fn refresh_audio_devices_live_keeps_selection_and_clears_vanished() {
         // A selection whose endpoint still exists survives the live refresh;
@@ -19513,7 +19599,7 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         assert!(app.audio_device_list_last_refresh.is_some());
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     #[test]
     fn device_picker_ui_is_wired() {
         // The Mixer's Input/Output rows show the device picker; the selected

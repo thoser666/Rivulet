@@ -166,6 +166,9 @@ impl AudioDeviceCapture {
             DeviceTarget::Output(_) | DeviceTarget::Input(_) => {
                 bail!("target.object capture needs a pw-src:/pw-mon: node id")
             }
+            DeviceTarget::CoreAudioInput(_) => bail!(
+                "core-audio-in: targets are handled by the Core Audio device backend, not PipeWire"
+            ),
         };
         if node_id == 0 {
             bail!("node id 0 (ID_ANY) cannot be captured");

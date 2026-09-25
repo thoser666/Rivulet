@@ -6574,6 +6574,8 @@ fn wasapi_device_capture_surface_is_pinned() {
         // DeviceTarget carrier.
         "pw-src:",
         "pw-mon:",
+        // Issue #231: the macOS cpal convention rides the same carrier.
+        "core-audio-in:",
         "pub fn device_target",
         "pub fn wasapi_device",
     ] {
@@ -6653,10 +6655,48 @@ fn wasapi_device_capture_surface_is_pinned() {
         );
     }
 
+    // Issue #231 (macOS slice): the Core Audio device backend must stay
+    // pinned — enumeration shape, cpal capture surface, and the honest
+    // OutputDevice semantics (no silent silence).
+    let mac = read("rivulet-audio/src/device_capture_macos.rs");
+    for needle in [
+        "pub fn list_audio_devices",
+        "pub struct AudioDeviceCapture",
+        "pub fn start_for_target",
+        "LOOPBACK_DEVICE_KEYWORDS",
+        "fn is_loopback_device_name",
+        "pub fn picker_sort_rank",
+        "pub fn output_loopback_unavailable_error",
+        "build_input_stream",
+        ".play()",
+        // Fixed 48 kHz stereo f32 — the engine's routed appsrc caps.
+        "MACOS_CAPTURE_RATE",
+        "dsp_resample",
+    ] {
+        assert!(
+            mac.contains(needle),
+            "Core Audio device backend must pin {needle}"
+        );
+    }
+    for required in [
+        "#[cfg(target_os = \"macos\")]",
+        "pub mod device_capture_macos",
+        "pub use device_capture_macos::{list_audio_devices, AudioDeviceCapture, AudioDeviceInfo}",
+    ] {
+        assert!(
+            audio_lib.contains(required),
+            "rivulet-audio lib.rs must pin {required}"
+        );
+    }
+
     let i18n = read("rivulet-core/src/i18n.rs");
     assert!(
         i18n.contains("\"audio_source_pick_device\""),
         "i18n must pin the device-picker keys"
+    );
+    assert!(
+        i18n.contains("\"audio_source_output_device_loopback_hint\""),
+        "i18n must pin the macOS OutputDevice loopback hint"
     );
 
     let spec = read("docs/m6-audio-routing.md");

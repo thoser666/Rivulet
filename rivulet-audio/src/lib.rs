@@ -11,8 +11,12 @@ pub mod app_audio_macos;
 #[cfg(target_os = "linux")]
 pub mod app_audio_pw;
 pub mod capture;
+// Core Audio device capture (issue #231): the macOS mirror of the WASAPI
+// device backend below.
 #[cfg(target_os = "windows")]
 pub mod device_capture;
+#[cfg(target_os = "macos")]
+pub mod device_capture_macos;
 // PipeWire device capture (issue #231): the Linux mirror of the WASAPI
 // device backend above.
 #[cfg(target_os = "linux")]
@@ -28,6 +32,8 @@ pub use app_audio_pw::{list_audio_processes, AppAudioCapture, AppAudioProcess};
 pub use capture::{AudioCapture, AudioConfig, AudioFilters};
 #[cfg(target_os = "windows")]
 pub use device_capture::{list_audio_devices, AudioDeviceCapture, AudioDeviceInfo};
+#[cfg(target_os = "macos")]
+pub use device_capture_macos::{list_audio_devices, AudioDeviceCapture, AudioDeviceInfo};
 #[cfg(target_os = "linux")]
 pub use device_capture_pw::{list_audio_devices, AudioDeviceCapture, AudioDeviceInfo};
 #[cfg(target_os = "windows")]

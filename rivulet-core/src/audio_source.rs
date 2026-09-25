@@ -285,9 +285,12 @@ pub fn device_pid(device_id: &str) -> Option<u32> {
 /// loopback mode (what that output device plays), `wasapi-in:<endpoint id>`
 /// a Windows capture endpoint (microphone). On Linux, `pw-src:<node id>`
 /// selects a PipeWire *source* node (microphone, virtual device) and
-/// `pw-mon:<node id>` a sink *monitor* (what that sink plays). The id after
-/// the prefix is the platform-stable target (`pw_metadata`-style node ids on
-/// Linux); friendly names live only in the picker.
+/// `pw-mon:<node id>` a sink *monitor* (what that sink plays). On macOS,
+/// `core-audio-in:<name>` selects a Core Audio input device by its
+/// cpal-reported name — the stable identifier cpal exposes (Core Audio
+/// device UIDs are not available through cpal's public API). The id after
+/// the prefix is the platform-stable target; friendly names live only in
+/// the picker.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeviceTarget {
     /// A render endpoint captured in loopback mode.
@@ -298,6 +301,8 @@ pub enum DeviceTarget {
     PwSource(u32),
     /// A PipeWire sink monitor captured in monitor mode (issue #231).
     PwMonitor(u32),
+    /// A Core Audio input device addressed by name (issue #231).
+    CoreAudioInput(String),
 }
 
 impl DeviceTarget {
@@ -316,6 +321,9 @@ impl DeviceTarget {
         } else if let Some(rest) = device_id.strip_prefix("pw-mon:") {
             let id = rest.trim().parse::<u32>().ok().filter(|id| *id != 0);
             id.map(Self::PwMonitor)
+        } else if let Some(rest) = device_id.strip_prefix("core-audio-in:") {
+            let name = rest.trim();
+            (!name.is_empty()).then(|| Self::CoreAudioInput(name.to_owned()))
         } else {
             None
         }
@@ -328,6 +336,7 @@ impl DeviceTarget {
             Self::Input(id) => format!("wasapi-in:{id}"),
             Self::PwSource(id) => format!("pw-src:{id}"),
             Self::PwMonitor(id) => format!("pw-mon:{id}"),
+            Self::CoreAudioInput(name) => format!("core-audio-in:{name}"),
         }
     }
 
@@ -1092,6 +1101,35 @@ mod tests {
     }
 
     #[test]
+    fn device_target_parses_coreaudio_convention() {
+        // Issue #231: the macOS convention addresses input devices by name
+        // (cpal's stable public identifier) and round-trips.
+        let mic =
+            DeviceTarget::parse("core-audio-in:BlackHole 2ch").expect("core-audio-in id parses");
+        assert_eq!(
+            mic,
+            DeviceTarget::CoreAudioInput("BlackHole 2ch".to_owned())
+        );
+        assert!(!mic.is_output(), "an input device is input-kind");
+        assert_eq!(
+            mic.device_id(),
+            "core-audio-in:BlackHole 2ch",
+            "round-trip is stable (names may contain spaces)"
+        );
+        // Names are trimmed; empty names are meaningless selections.
+        assert_eq!(
+            DeviceTarget::parse("core-audio-in:  MacBook Pro Microphone  "),
+            Some(DeviceTarget::CoreAudioInput(
+                "MacBook Pro Microphone".to_owned()
+            ))
+        );
+        assert_eq!(DeviceTarget::parse("core-audio-in:"), None);
+        assert_eq!(DeviceTarget::parse("core-audio-in:   "), None);
+        assert_eq!(DeviceTarget::parse("CORE-AUDIO-IN:x"), None);
+        assert_eq!(DeviceTarget::parse("core-audio"), None);
+    }
+
+    #[test]
     fn device_target_parses_pipewire_conventions() {
         // Issue #231: PipeWire source-node and sink-monitor conventions
         // round-trip; the node id is a positive decimal number.
@@ -1157,5 +1195,17 @@ mod tests {
 
         let desktop = AudioSource::output_device("Desktop", "pw-mon:7");
         assert_eq!(desktop.wasapi_device(), Some(DeviceTarget::PwMonitor(7)));
+    }
+
+    #[test]
+    fn wasapi_device_accessor_carries_coreaudio_ids() {
+        // Issue #231: the macOS convention rides the same accessor.
+        let mic = AudioSource::input_device("Podcast Mic", "core-audio-in:MacBook Pro Microphone");
+        assert_eq!(
+            mic.wasapi_device(),
+            Some(DeviceTarget::CoreAudioInput(
+                "MacBook Pro Microphone".to_owned()
+            ))
+        );
     }
 }
