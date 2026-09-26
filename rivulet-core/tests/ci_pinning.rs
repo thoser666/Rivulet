@@ -6875,3 +6875,40 @@ fn steam_game_detection_surface_is_pinned() {
         );
     }
 }
+
+#[test]
+fn track_model_container_remux_parity_is_pinned() {
+    // Issue #242 (slice 3): every container's track-model recording must
+    // survive the crash-safe remux with all its audio tracks, and the remux
+    // must not re-encode. The engine TS gate (PMT completeness) and the
+    // remux pad-claim strategy are the load-bearing invariants.
+    let lib = read("rivulet-core/src/lib.rs");
+    for needle in [
+        "fn install_ts_pmt_alignment",
+        "const MPEGTS_PID_BASE: usize = 0x100 + 1",
+    ] {
+        assert!(
+            lib.contains(needle),
+            "engine TS-PMT alignment surface must pin {needle}"
+        );
+    }
+
+    let container = read("rivulet-core/src/container.rs");
+    for needle in [
+        "fn remux_to_mp4",
+        "BLOCK_DOWNSTREAM",
+        "request_pad_simple",
+        "aacparse",
+        "h264parse",
+    ] {
+        assert!(
+            container.contains(needle),
+            "container remux surface must pin {needle}"
+        );
+    }
+    // The PMT/PID collision rationale must stay documented.
+    assert!(
+        lib.contains("0x100 itself stays free"),
+        "the TS PID base rationale must stay documented"
+    );
+}

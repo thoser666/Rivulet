@@ -6,6 +6,7 @@ use gstreamer_video as gst_video;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -1156,6 +1157,9 @@ impl RivuletEngine {
     /// the `h264parse` that converts the encoder's byte-stream to AVC, which
     /// FLV requires at runtime).
     fn video_mux_leg(&self, mux_name: &str, flv: bool) -> String {
+        if !flv && !self.audio_sources.is_empty() && self.uses_track_model() {
+            return self.track_video_mux_leg(mux_name);
+        }
         if flv {
             format!(" ! queue ! {mux_name}.video")
         } else {
@@ -1171,6 +1175,47 @@ impl RivuletEngine {
             format!(" ! queue ! {mux_name}.audio")
         } else {
             format!(" ! queue ! {mux_name}.")
+        }
+    }
+
+    /// Number of track-model audio branches a recording pipeline builds
+    /// (enabled buses that have member sources). Used to hand the video
+    /// branch a non-clashing named request pad on muxers with generic pads.
+    fn track_branch_count(&self) -> usize {
+        self.enabled_track_ids()
+            .iter()
+            .filter(|&&bus| !self.track_member_sources(bus).is_empty())
+            .count()
+    }
+
+    /// The named audio request pad of the recording muxer for branch `index`.
+    ///
+    /// mp4mux/qtmux/matroskamux expose typed templates (`audio_<n>`);
+    /// mpegtsmux only has generic `sink_<n>` pads. Named pads are required:
+    /// the positional `mux.` request picks the muxer's *first* request
+    /// template, which on qtmux silently attached the video branch to an
+    /// audio pad and dropped the video track (issue #242, slice 3).
+    fn track_audio_mux_leg(&self, mux_name: &str, index: usize) -> String {
+        if self.recording_container == RecordingContainer::MpegTs {
+            // mpegtsmux maps the pad number directly to the elementary
+            // stream PID; values below 0x100 collide with reserved PIDs.
+            format!(" ! queue ! {mux_name}.sink_{}", MPEGTS_PID_BASE + index)
+        } else {
+            format!(" ! queue ! {mux_name}.audio_{index}")
+        }
+    }
+
+    /// The named video request pad of the recording muxer (track model).
+    /// On generic-pad muxers (TS) the video branch takes the pad *after*
+    /// all audio branches (`track_branch_count`).
+    fn track_video_mux_leg(&self, mux_name: &str) -> String {
+        if self.recording_container == RecordingContainer::MpegTs {
+            format!(
+                " ! queue ! {mux_name}.sink_{}",
+                MPEGTS_PID_BASE + self.track_branch_count()
+            )
+        } else {
+            format!(" ! queue ! {mux_name}.video_0")
         }
     }
 
@@ -1491,15 +1536,18 @@ impl RivuletEngine {
         let send = self.audio_track_config.send_track;
         let mut s = String::new();
         let mut replay_idx = 0usize;
+        let mut branch_idx = 0usize;
         for bus in self.enabled_track_ids() {
             let mix = self.track_bus_mix(bus);
             if mix.is_empty() {
                 continue;
             }
             let bus_send = bus == send;
+            let branch_index = branch_idx;
+            branch_idx += 1;
             match (rec_mux, flv_mux) {
                 (Some(rec_mux), Some(flv_mux)) => {
-                    let leg = self.audio_mux_leg(rec_mux, false);
+                    let leg = self.track_audio_mux_leg(rec_mux, branch_index);
                     s.push_str(&format!("{mix} ! tee name=bus{bus}_tee "));
                     if self.replay.is_some() {
                         let idx = replay_idx;
@@ -1518,7 +1566,7 @@ impl RivuletEngine {
                     }
                 }
                 (Some(rec_mux), None) => {
-                    let leg = self.audio_mux_leg(rec_mux, false);
+                    let leg = self.track_audio_mux_leg(rec_mux, branch_index);
                     if self.replay.is_some() {
                         let idx = replay_idx;
                         replay_idx += 1;
@@ -2080,6 +2128,19 @@ impl RivuletEngine {
         self.pipeline = Some(pipeline);
         self.appsrc = Some(appsrc);
         self.install_performance_probes();
+        // Track-model TS recordings: mpegtsmux writes the PMT from the first
+        // elementary buffer it sees. Audio sources usually deliver before the
+        // first encoded video access unit, so the initial PMT would list only
+        // the audio PIDs and demuxers (tsdemux during remux, players alike)
+        // discard the H.264 bytes arriving before the PMT update — the remuxed
+        // MP4 loses the leading SPS/PPS access units (issue #242, slice 3).
+        // Dropping audio buffers until video arrives keeps the first PMT
+        // complete; sub-second startup audio loss is inaudible for a recording.
+        if self.uses_track_model() && self.recording_container == RecordingContainer::MpegTs {
+            if let Some(pipeline) = self.pipeline.as_ref() {
+                self.install_ts_pmt_alignment(pipeline);
+            }
+        }
         if self.is_dual_output() {
             tracing::info!("Dual-output pipeline running.");
         } else if self.is_streaming() {
@@ -2182,6 +2243,52 @@ impl RivuletEngine {
     /// The probes run on the GStreamer streaming thread and only write to the
     /// shared `Arc<Mutex<RecordingStatsMonitor>>`; the app thread reads it
     /// through [`RivuletEngine::recording_stats`].
+    /// Track-model TS recordings: hold audio buffers at the muxer pads until
+    /// the first video buffer has passed, so the PMT mpegtsmux writes from
+    /// that first elementary buffer already lists every stream (see the call
+    /// site for the full motivation; issue #242, slice 3).
+    ///
+    /// The gate lives on the `track_<n>_vol` elements' src pads — one master
+    /// chain per bus exists in every track-model pipeline — with a shared
+    /// `AtomicBool` released by a probe on the encoded-video branch (the
+    /// `video_enc` src pad). A capped drop counter guards against a video-less
+    /// session pinning the audio forever: after 5 s worth of audio the gate
+    /// opens regardless (the PMT then updates mid-stream exactly as it would
+    /// without the gate — remux handles the older file shapes).
+    fn install_ts_pmt_alignment(&self, pipeline: &gst::Pipeline) {
+        let video_seen = Arc::new(AtomicBool::new(false));
+        if let Some(video_enc) = pipeline.by_name("video_enc") {
+            if let Some(src_pad) = video_enc.static_pad("src") {
+                let video_seen = Arc::clone(&video_seen);
+                src_pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
+                    video_seen.store(true, Ordering::Release);
+                    gst::PadProbeReturn::Ok
+                });
+            }
+        }
+        let dropped = Arc::new(AtomicU64::new(0));
+        for bus in self.enabled_track_ids() {
+            let Some(vol) = pipeline
+                .by_name(&format!("track_{bus}_vol"))
+                .and_then(|el| el.static_pad("src"))
+            else {
+                continue;
+            };
+            let video_seen = Arc::clone(&video_seen);
+            let dropped = Arc::clone(&dropped);
+            vol.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
+                if !video_seen.load(Ordering::Acquire) {
+                    // ~10 ms @48 kHz stereo F32: 480 samples × 2 ch × 4 B.
+                    let n = dropped.fetch_add(1, Ordering::Relaxed);
+                    if n <= 500 {
+                        return gst::PadProbeReturn::Drop;
+                    }
+                }
+                gst::PadProbeReturn::Ok
+            });
+        }
+    }
+
     fn install_performance_probes(&mut self) {
         let Some(metrics) = self.recording_metrics.clone() else {
             return;
@@ -3075,6 +3182,18 @@ pub fn audio_caps() -> gst::Caps {
 /// (`stream_audio_mixer.sink<N>`), so every leg carries them explicitly as a
 /// bare caps filter (same parser class as the flvmux/H.264 strictness
 /// documented on the video branch).
+/// Base elementary-stream PID for mpegtsmux request pads in the track
+/// model. mpegtsmux maps the request-pad number to the PID directly, and
+/// PIDs below 0x100 are reserved by the MPEG-TS spec (PAT/CAT/…), so pads
+/// start here (`sink_257`, `sink_258`, …).
+///
+/// 0x100 itself stays free: mpegtsmux places the PMT (and the PCR stream)
+/// on 0x100 by default. Elementaries on 0x100 collide with it — tsdemux
+/// then applies its PMT filter to the audio ES, drops the PMT-carried
+/// stream, and remux pipelines lose the leading video access units
+/// (issue #242, slice 3).
+const MPEGTS_PID_BASE: usize = 0x100 + 1;
+
 const AUDIO_MIXER_INPUT_CAPS: &str =
     "audio/x-raw,format=F32LE,layout=interleaved,channels=2,rate=48000";
 
@@ -5225,6 +5344,108 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), 3, "{:?}", names);
+    }
+
+    /// Issue #242, slice 3: the per-track model must produce a complete
+    /// multi-track recording for **every** supported container (MP4/MKV/MOV/
+    /// TS). Two bus tracks are recorded for real and the file is inspected
+    /// with the Discoverer; for the crash-safe intermediates the remux (the
+    /// same code path the auto-remux uses) must carry both audio tracks into
+    /// the final MP4. The remux is invoked explicitly so its result — unlike
+    /// the asynchronous auto-remux — is assertable.
+    #[test]
+    fn track_model_records_all_audio_tracks_into_every_container() {
+        use gstreamer_pbutils as gst_pbutils;
+        if gst::init().is_err() || gst::ElementFactory::find("avenc_aac").is_none() {
+            return;
+        }
+        let discoverer = gst_pbutils::Discoverer::new(gst::ClockTime::from_seconds(5))
+            .expect("Discoverer should be creatable");
+        for container in [
+            RecordingContainer::Mp4,
+            RecordingContainer::Mkv,
+            RecordingContainer::Mov,
+            RecordingContainer::MpegTs,
+        ] {
+            let mut engine = RivuletEngine::default();
+            engine.set_audio_enabled(true);
+            engine.set_recording_container(container);
+            engine.set_auto_remux(false);
+            let game = engine.add_audio_source(routing_test_source("Game", AudioRouting::NONE));
+            let music = engine.add_audio_source(routing_test_source("Music", AudioRouting::NONE));
+            engine.set_audio_source_track_members(game, vec![1]);
+            engine.set_audio_source_track_members(music, vec![2]);
+
+            let path = std::env::temp_dir().join(format!(
+                "rivulet_tracks_{}_{:?}.{}",
+                std::process::id(),
+                container,
+                container.file_extension()
+            ));
+            let _ = std::fs::remove_file(&path);
+            engine.start_local_recording(path.clone());
+
+            // Live-session pacing: `do-timestamp` stamps at push time, so
+            // un-paced bursts produce duplicate PTS and mp4/quicktime muxers
+            // drop the affected tracks (issue #242, slice 3).
+            let (width, height) = (320u32, 240u32);
+            // Moving pattern instead of black frames: all-zero NVENC input
+            // compresses to degenerate 7-byte slices that h264parse (rightly)
+            // rejects during remux, which no real session would produce.
+            let mut video = vec![0u8; (width * height * 4) as usize];
+            let audio = AudioFrame::new(vec![0.0f32; 4800], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
+            for i in 0..12 {
+                for (p, b) in video.iter_mut().enumerate() {
+                    *b = ((p / 97 + i * 7) % 256) as u8;
+                }
+                engine.process_raw_frame(&video, width, height);
+                if i % 3 == 0 {
+                    let _ = engine.push_audio_source(game, &audio);
+                    let _ = engine.push_audio_source(music, &audio);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(33));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            engine.stop_recording();
+
+            // Crash-safe intermediates are remuxed to a sibling MP4 through
+            // the same `remux_to_mp4` path the auto-remux uses.
+            let inspect = if container.is_crash_safe() {
+                let remuxed = path.with_extension("mp4");
+                let plan = RemuxPlan {
+                    source_path: path.display().to_string(),
+                    output_path: remuxed.display().to_string(),
+                    source: container,
+                    target: RecordingContainer::Mp4,
+                };
+                match remux_to_mp4(&plan) {
+                    Ok(RemuxOutcome::Success { .. }) => {}
+                    other => {
+                        let engine_error = engine.take_error();
+                        panic!(
+                            "{}: remux must succeed, got {other:?} (engine error: {engine_error:?})",
+                            container.label()
+                        );
+                    }
+                }
+                remuxed
+            } else {
+                path.clone()
+            };
+            assert!(inspect.exists(), "{}: no output file", container.label());
+            let info = discoverer
+                .discover_uri(&file_uri(&inspect))
+                .unwrap_or_else(|e| panic!("{}: file should be readable: {e}", container.label()));
+            assert_eq!(
+                info.audio_streams().len(),
+                2,
+                "{}: both bus tracks must survive recording (+ remux)",
+                container.label()
+            );
+
+            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_file(&inspect);
+        }
     }
 
     #[test]
