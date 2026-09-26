@@ -863,12 +863,33 @@ fn m6_audio_track_model_surface_is_pinned() {
     for required in [
         "pub fn audio_track_config(&self) -> &AudioTrackConfig",
         "pub fn set_audio_track_config(&mut self, config: AudioTrackConfig)",
+        "pub fn set_audio_bus_gain(&mut self, bus: u8, gain_db: f64) -> bool",
+        "pub fn set_audio_bus_muted(&mut self, bus: u8, muted: bool) -> bool",
+        "pub fn set_audio_source_track_members(&mut self, id: Uuid, members: Vec<u8>) -> bool",
     ] {
         assert!(
             lib.contains(required),
             "engine audio-track API must pin {required}"
         );
     }
+
+    // Per-track pipeline composition (issue #242, slice 2): the branch
+    // builder, the live master chains and the legacy-compat gate exist.
+    for required in [
+        "fn uses_track_model(&self)",
+        "fn track_audio_branch_str(&self, rec_mux: Option<&str>, flv_mux: Option<&str>) -> String",
+        "fn track_bus_mix(&self, bus: u8) -> String",
+        "fn audio_source_appsrc_names(&self, flv: bool) -> Vec<(Uuid, String)>",
+    ] {
+        assert!(
+            lib.contains(required),
+            "audio-track pipeline surface must pin {required}"
+        );
+    }
+    assert!(
+        lib.contains("track_{bus}_vol"),
+        "track master volume elements must follow the track_<n>_vol convention"
+    );
 
     // The pipeline must stay transport-free; the track model adds no I/O.
     for banned in ["ureq", "reqwest", "ReadProcessMemory"] {
