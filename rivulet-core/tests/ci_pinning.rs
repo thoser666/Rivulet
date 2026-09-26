@@ -851,12 +851,11 @@ fn m6_audio_track_model_surface_is_pinned() {
     }
 
     // Source-side membership field (additive over audio_routing_v1).
+    // The field must carry a serde default; normalize line endings first so
+    // the multi-line match also holds on CRLF checkouts.
+    let source_lf = source.replace("\r\n", "\n");
     assert!(
-        source.contains("pub track_members: Vec<u8>"),
-        "AudioSource must carry the bus membership field"
-    );
-    assert!(
-        source.contains("#[serde(default)]\n    pub track_members: Vec<u8>"),
+        source_lf.contains("#[serde(default)]\n    pub track_members: Vec<u8>"),
         "track_members must default for legacy audio_routing_v1 JSON"
     );
 
