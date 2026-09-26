@@ -257,6 +257,10 @@ pub struct RivuletEngine {
     /// the pipeline builder consumes it in a later slice, until then the
     /// legacy record/stream routing stays authoritative.
     audio_track_config: AudioTrackConfig,
+    /// Live `volume` elements of the track master chains of the running
+    /// session (`track_<n>_vol`), addressed by 1-based bus id. Mirrors
+    /// `audio_source_volumes`.
+    audio_track_volumes: Vec<(u8, gst::Element)>,
     /// Live appsrcs for the routed sources of the running session. One source
     /// can own several appsrcs (the record branch and the streaming mix leg
     /// are separate elements); every entry receives the pushed frames.
@@ -370,6 +374,7 @@ impl Default for RivuletEngine {
             audio_mic_enabled: true,
             audio_sources: Vec::new(),
             audio_track_config: AudioTrackConfig::default(),
+            audio_track_volumes: Vec::new(),
             audio_source_appsrcs: Vec::new(),
             audio_source_volumes: Vec::new(),
             is_recording: false,
@@ -1291,6 +1296,14 @@ impl RivuletEngine {
             return String::new();
         }
         if !self.audio_sources.is_empty() {
+            if self.uses_track_model() {
+                let (rec, flv) = if flv {
+                    (None, Some(mux_name))
+                } else {
+                    (Some(mux_name), None)
+                };
+                return self.track_audio_branch_str(rec, flv);
+            }
             return self.routed_audio_branch_str(mux_name, flv, force_mixed);
         }
         let replay_enabled = self.replay.is_some();
@@ -1390,6 +1403,142 @@ impl RivuletEngine {
         } else {
             format!(" ! avenc_aac{leg}")
         }
+    }
+
+    /// Whether the per-track bus model (issue #242) drives the pipeline:
+    /// any source with explicit bus membership opts the session in. Sources
+    /// with empty membership keep the legacy record/stream routing
+    /// authoritative, so `audio_routing_v1` configs behave exactly as before.
+    fn uses_track_model(&self) -> bool {
+        self.audio_sources
+            .iter()
+            .any(|s| !s.track_members.is_empty())
+    }
+
+    /// The configured bus with the given 1-based id, if any.
+    fn audio_bus(&self, bus: u8) -> Option<&AudioBus> {
+        self.audio_track_config.tracks.iter().find(|b| b.id == bus)
+    }
+
+    /// All enabled bus ids in track order.
+    fn enabled_track_ids(&self) -> Vec<u8> {
+        self.audio_track_config
+            .tracks
+            .iter()
+            .filter(|bus| bus.enabled)
+            .map(|bus| bus.id)
+            .collect()
+    }
+
+    /// Sources feeding one bus (in config order), via the per-track model.
+    fn track_member_sources(&self, bus: u8) -> Vec<&AudioSource> {
+        self.audio_sources
+            .iter()
+            .filter(|s| s.track_members.contains(&bus))
+            .collect()
+    }
+
+    /// The head of one bus mix: the member sources' heads (each with its own
+    /// volume and filters) fanned into the bus, followed by the bus master
+    /// `volume` element (`track_<n>_vol`) so gain/mute edits apply live
+    /// without a pipeline restart. A single member connects directly;
+    /// larger memberships mix through an adder (explicit input caps for the
+    /// strict 1.24 parser, same as the legacy stream mix).
+    fn track_bus_mix(&self, bus: u8) -> String {
+        let sources = self.track_member_sources(bus);
+        let Some(config) = self.audio_bus(bus) else {
+            return String::new();
+        };
+        let master = format!(
+            " ! volume name=track_{bus}_vol volume={:.4} ! audioconvert ! audioresample",
+            config.effective_volume()
+        );
+        match sources.len() {
+            0 => String::new(),
+            1 => format!(
+                "{}{master}",
+                self.routed_source_head(sources[0], &format!("audio_src_bus{bus}_0"))
+            ),
+            _ => {
+                let mut s = format!("audiomixer name=bus{bus}_mixer");
+                for (i, source) in sources.iter().enumerate() {
+                    s.push_str(&format!(
+                        " {} ! queue ! audioconvert ! audioresample ! {AUDIO_MIXER_INPUT_CAPS} ! bus{bus}_mixer.sink_{i}",
+                        self.routed_source_head(source, &format!("audio_src_bus{bus}_{i}"))
+                    ));
+                }
+                format!("{s} bus{bus}_mixer.{master}")
+            }
+        }
+    }
+
+    /// The per-track audio branch (issue #242). Every enabled bus becomes an
+    /// independently editable mix with its own AAC branch; which muxers see
+    /// it is selected by the arguments:
+    ///
+    /// - recording only (`rec_mux`, no `flv_mux`): one AAC track per enabled
+    ///   bus with members,
+    /// - streaming only (`flv_mux`, no `rec_mux`): only the send bus is
+    ///   encoded into the single FLV audio track,
+    /// - dual output (both): the bus mix fans through a tee into the
+    ///   recording encoder **and** the stream encoder, so both outputs reuse
+    ///   the same live-editable chain (no duplicated routing logic).
+    ///
+    /// The recording mux legs are positional request pads (`<mux>.`), and
+    /// the replay tee taps the AAC stream before the mux (one
+    /// `replay_audio_sink_<i>` appsink per branch, positionally named).
+    fn track_audio_branch_str(&self, rec_mux: Option<&str>, flv_mux: Option<&str>) -> String {
+        let send = self.audio_track_config.send_track;
+        let mut s = String::new();
+        let mut replay_idx = 0usize;
+        for bus in self.enabled_track_ids() {
+            let mix = self.track_bus_mix(bus);
+            if mix.is_empty() {
+                continue;
+            }
+            let bus_send = bus == send;
+            match (rec_mux, flv_mux) {
+                (Some(rec_mux), Some(flv_mux)) => {
+                    let leg = self.audio_mux_leg(rec_mux, false);
+                    s.push_str(&format!("{mix} ! tee name=bus{bus}_tee "));
+                    if self.replay.is_some() {
+                        let idx = replay_idx;
+                        replay_idx += 1;
+                        s.push_str(&format!(
+                            "bus{bus}_tee. ! queue ! avenc_aac ! tee name=replay_atee{idx}{leg} \
+                             replay_atee{idx}. ! queue ! appsink name=replay_audio_sink_{idx} "
+                        ));
+                    } else {
+                        s.push_str(&format!("bus{bus}_tee. ! queue ! avenc_aac{leg} "));
+                    }
+                    if bus_send {
+                        s.push_str(&format!(
+                            "bus{bus}_tee. ! queue ! avenc_aac ! queue ! {flv_mux}.audio "
+                        ));
+                    }
+                }
+                (Some(rec_mux), None) => {
+                    let leg = self.audio_mux_leg(rec_mux, false);
+                    if self.replay.is_some() {
+                        let idx = replay_idx;
+                        replay_idx += 1;
+                        s.push_str(&format!(
+                            "{mix} ! avenc_aac ! tee name=replay_atee{idx}{leg} \
+                             replay_atee{idx}. ! queue ! appsink name=replay_audio_sink_{idx} "
+                        ));
+                    } else {
+                        s.push_str(&format!("{mix} ! avenc_aac{leg} "));
+                    }
+                }
+                (None, Some(flv_mux)) => {
+                    if bus_send {
+                        s.push_str(&format!("{mix} ! avenc_aac ! queue ! {flv_mux}.audio "));
+                    }
+                }
+                (None, None) => {}
+            }
+        }
+        s
     }
 
     /// The multi-track audio routing branch (issue #154). Every source with
@@ -1496,6 +1645,18 @@ impl RivuletEngine {
     /// appsrcs (the record branch and the streaming mix leg are separate
     /// elements fed the same PCM).
     fn audio_source_appsrc_names(&self, flv: bool) -> Vec<(Uuid, String)> {
+        if self.uses_track_model() {
+            let mut names = Vec::new();
+            for bus in self.enabled_track_ids() {
+                if flv && bus != self.audio_track_config.send_track {
+                    continue;
+                }
+                for (i, source) in self.track_member_sources(bus).into_iter().enumerate() {
+                    names.push((source.id, format!("audio_src_bus{bus}_{i}")));
+                }
+            }
+            return names;
+        }
         let mut names = Vec::new();
         if flv {
             let stream_sources: Vec<&AudioSource> = self
@@ -1695,7 +1856,11 @@ impl RivuletEngine {
         }
         if self.audio_enabled {
             if !self.audio_sources.is_empty() {
-                s.push_str(&self.routed_dual_audio_str("mux_rec", "mux_stream"));
+                if self.uses_track_model() {
+                    s.push_str(&self.track_audio_branch_str(Some("mux_rec"), Some("mux_stream")));
+                } else {
+                    s.push_str(&self.routed_dual_audio_str("mux_rec", "mux_stream"));
+                }
             } else {
                 s.push_str(
                     "appsrc name=audio_src format=time is-live=true do-timestamp=true \
@@ -1848,6 +2013,11 @@ impl RivuletEngine {
                 } else {
                     wanted.extend(self.audio_source_appsrc_names(false));
                 }
+                // Track-model dual output names a source's appsrc identically
+                // on the record and stream legs (the same bus tee feeds both
+                // encoders), so the union can contain duplicates.
+                wanted.sort_unstable();
+                wanted.dedup();
                 for (id, name) in wanted {
                     let app = pipeline
                         .by_name(&name)
@@ -1866,6 +2036,16 @@ impl RivuletEngine {
                         .and_then(|el| el.downcast::<gst::Element>().ok())
                     {
                         self.audio_source_volumes.push((id, vol_el));
+                    }
+                }
+                // Track master chains (`track_<n>_vol`) for live bus
+                // gain/mute edits (issue #242).
+                for bus in self.enabled_track_ids() {
+                    if let Some(vol_el) = pipeline
+                        .by_name(&format!("track_{bus}_vol"))
+                        .and_then(|el| el.downcast::<gst::Element>().ok())
+                    {
+                        self.audio_track_volumes.push((bus, vol_el));
                     }
                 }
             } else {
@@ -2226,6 +2406,74 @@ impl RivuletEngine {
             return false;
         };
         source.filters = filters;
+        true
+    }
+
+    /// Apply a live gain/mute change of one bus to the running pipeline.
+    /// Returns false when the bus has no master element in the running
+    /// session (unknown bus, disabled, no members, or pipeline not built).
+    fn apply_track_live_volume(&self, bus: u8) -> bool {
+        let Some(element) = self
+            .audio_track_volumes
+            .iter()
+            .find(|(id, _)| *id == bus)
+            .map(|(_, el)| el)
+        else {
+            return false;
+        };
+        let Some(config) = self.audio_bus(bus) else {
+            return false;
+        };
+        element.set_property("volume", config.effective_volume());
+        true
+    }
+
+    /// Set the master gain (dB, clamped to ±30) of one audio bus. Returns
+    /// false when the bus is unknown. Applies live to the running pipeline
+    /// when one exists (no restart).
+    pub fn set_audio_bus_gain(&mut self, bus: u8, gain_db: f64) -> bool {
+        let Some(config) = self
+            .audio_track_config
+            .tracks
+            .iter_mut()
+            .find(|b| b.id == bus)
+        else {
+            return false;
+        };
+        config.gain_db = gain_db.clamp(-30.0, 30.0);
+        self.apply_track_live_volume(bus);
+        true
+    }
+
+    /// Mute or unmute one audio bus. Returns false when the bus is unknown.
+    /// Applies live to the running pipeline when one exists (no restart).
+    pub fn set_audio_bus_muted(&mut self, bus: u8, muted: bool) -> bool {
+        let Some(config) = self
+            .audio_track_config
+            .tracks
+            .iter_mut()
+            .find(|b| b.id == bus)
+        else {
+            return false;
+        };
+        config.muted = muted;
+        self.apply_track_live_volume(bus);
+        true
+    }
+
+    /// Set the bus membership of one source. Ids outside `1..=AUDIO_TRACK_MAX`
+    /// are dropped and duplicates removed; the order is normalized to track
+    /// order. Returns false when the source id is unknown. Membership changes
+    /// apply on the next pipeline build.
+    pub fn set_audio_source_track_members(&mut self, id: Uuid, members: Vec<u8>) -> bool {
+        let Some(source) = self.audio_sources.iter_mut().find(|s| s.id == id) else {
+            return false;
+        };
+        let mut unique = members;
+        unique.retain(|b| (1..=AUDIO_TRACK_MAX).contains(b));
+        unique.sort_unstable();
+        unique.dedup();
+        source.track_members = unique;
         true
     }
 
@@ -4810,6 +5058,206 @@ mod tests {
             AUDIO_TRACK_MAX as usize
         );
         assert_eq!(engine.audio_track_config().send_track, 1);
+    }
+
+    // ── Per-track engine branches, Slice 2 (issue #242) ─────────────
+
+    #[test]
+    fn track_model_off_by_default_keeps_legacy_routing() {
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.add_audio_source(routing_test_source("Game", AudioRouting::RECORD_ONLY));
+
+        assert!(!engine.uses_track_model());
+        let recording = engine.build_recording_pipeline_str("/tmp/out.mp4");
+        assert!(recording.contains("audio_src_rec_0"), "{}", recording);
+        assert!(!recording.contains("track_1_vol"), "{}", recording);
+    }
+
+    #[test]
+    fn track_model_memberships_drive_recording_branches() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        let both = engine.add_audio_source(routing_test_source("Game", AudioRouting::NONE));
+        let music = engine.add_audio_source(routing_test_source("Music", AudioRouting::NONE));
+        // Game → buses 1+3, Music → bus 3 only.
+        assert!(engine.set_audio_source_track_members(both, vec![1, 3]));
+        assert!(engine.set_audio_source_track_members(music, vec![3]));
+        assert!(engine.uses_track_model());
+
+        let recording = engine.build_recording_pipeline_str("/tmp/out.mp4");
+        // Bus 1 has a single member (direct chain + master volume).
+        assert!(
+            recording.contains("appsrc name=audio_src_bus1_0"),
+            "{}",
+            recording
+        );
+        assert!(
+            recording.contains("volume name=track_1_vol volume=1.0000"),
+            "{}",
+            recording
+        );
+        // Bus 3 mixes two members through an adder with explicit caps.
+        assert!(
+            recording.contains("audiomixer name=bus3_mixer"),
+            "{}",
+            recording
+        );
+        assert!(
+            recording.contains("appsrc name=audio_src_bus3_0"),
+            "{}",
+            recording
+        );
+        assert!(
+            recording.contains("appsrc name=audio_src_bus3_1"),
+            "{}",
+            recording
+        );
+        assert!(
+            recording.contains("volume name=track_3_vol"),
+            "{}",
+            recording
+        );
+        // Each bus encodes its own AAC track into the recording mux.
+        assert_eq!(recording.matches("avenc_aac").count(), 2, "{}", recording);
+        // Legacy routed names must not appear.
+        assert!(!recording.contains("audio_src_rec_"), "{}", recording);
+
+        // Appsrc ownership: record legs expose every member appsrc, the FLV
+        // leg only the send bus.
+        let record_names = engine.audio_source_appsrc_names(false);
+        assert_eq!(record_names.len(), 3, "{:?}", record_names);
+        let stream_names = engine.audio_source_appsrc_names(true);
+        assert_eq!(
+            stream_names,
+            vec![(both, "audio_src_bus1_0".to_string())],
+            "{:?}",
+            stream_names
+        );
+    }
+
+    #[test]
+    fn track_model_respects_disabled_and_empty_buses() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        let id = engine.add_audio_source(routing_test_source("Game", AudioRouting::NONE));
+        engine.set_audio_source_track_members(id, vec![1]);
+        let mut config = AudioTrackConfig::new();
+        config.tracks[1].enabled = false;
+        engine.set_audio_track_config(config);
+
+        let recording = engine.build_recording_pipeline_str("/tmp/out.mp4");
+        assert!(recording.contains("track_1_vol"), "{}", recording);
+        assert!(!recording.contains("track_2_vol"), "{}", recording);
+        assert!(
+            !recording.contains("track_4_vol"),
+            "empty bus must not build: {}",
+            recording
+        );
+        assert_eq!(recording.matches("avenc_aac").count(), 1, "{}", recording);
+        assert_eq!(engine.audio_source_appsrc_names(false).len(), 1);
+    }
+
+    #[test]
+    fn track_model_streaming_encodes_only_send_bus() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        let both = engine.add_audio_source(routing_test_source("Game", AudioRouting::NONE));
+        let music = engine.add_audio_source(routing_test_source("Music", AudioRouting::NONE));
+        engine.set_audio_source_track_members(both, vec![1, 3]);
+        engine.set_audio_source_track_members(music, vec![3]);
+        engine.set_stream_settings(Some(StreamSettings::twitch("k")));
+
+        let streaming = engine.build_streaming_pipeline_str();
+        // Only the send bus (1) reaches the FLV muxer.
+        assert!(
+            streaming.contains("appsrc name=audio_src_bus1_0"),
+            "{}",
+            streaming
+        );
+        assert!(
+            streaming.contains("! avenc_aac ! queue ! mux.audio"),
+            "{}",
+            streaming
+        );
+        assert!(!streaming.contains("audio_src_bus3"), "{}", streaming);
+        assert!(!streaming.contains("track_3_vol"), "{}", streaming);
+        assert!(!streaming.contains("audio_src_rec_"), "{}", streaming);
+    }
+
+    #[test]
+    fn track_model_dual_output_reuses_bus_tee_for_both_outputs() {
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        let both = engine.add_audio_source(routing_test_source("Game", AudioRouting::NONE));
+        let music = engine.add_audio_source(routing_test_source("Music", AudioRouting::NONE));
+        engine.set_audio_source_track_members(both, vec![1, 3]);
+        engine.set_audio_source_track_members(music, vec![3]);
+        engine.set_stream_settings(Some(StreamSettings::twitch("dualkey")));
+
+        let path = std::env::temp_dir().join("rivulet_track_dual.mp4");
+        engine.start_local_recording(path);
+
+        let dual = engine.build_dual_output_pipeline_str();
+        // Both buses are live-editable (master chains exist exactly once).
+        assert!(dual.contains("volume name=track_1_vol"), "{}", dual);
+        assert!(dual.contains("volume name=track_3_vol"), "{}", dual);
+        // The send bus fans through its tee into the stream encoder; bus 3
+        // only feeds the recording encoder.
+        assert!(dual.contains("bus1_tee"), "{}", dual);
+        assert_eq!(
+            dual.matches("! avenc_aac ! queue ! mux_stream.audio")
+                .count(),
+            1,
+            "{}",
+            dual
+        );
+        assert!(dual.contains("! avenc_aac ! queue ! mux_rec."), "{}", dual);
+        // 3 AAC branches: bus 1 (rec+stream) and bus 3 (rec).
+        assert_eq!(dual.matches("avenc_aac").count(), 3, "{}", dual);
+        // No duplicated appsrc ownership despite the shared bus tee.
+        let mut names = engine.audio_source_appsrc_names(false);
+        names.extend(engine.audio_source_appsrc_names(true));
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), 3, "{:?}", names);
+    }
+
+    #[test]
+    fn audio_bus_gain_and_mute_apply_to_config_with_clamping() {
+        let mut engine = RivuletEngine::default();
+        assert!(engine.set_audio_bus_gain(2, -6.0));
+        assert_eq!(engine.audio_track_config().tracks[1].gain_db, -6.0);
+        assert!(engine.set_audio_bus_gain(2, 100.0));
+        assert_eq!(
+            engine.audio_track_config().tracks[1].gain_db,
+            30.0,
+            "clamped"
+        );
+        assert!(engine.set_audio_bus_muted(1, true));
+        assert_eq!(
+            engine.audio_track_config().tracks[0].effective_volume(),
+            0.0
+        );
+        assert!(!engine.set_audio_bus_gain(9, 0.0), "unknown bus");
+        assert!(!engine.set_audio_bus_muted(9, false), "unknown bus");
+    }
+
+    #[test]
+    fn set_audio_source_track_members_normalizes_input() {
+        let mut engine = RivuletEngine::default();
+        let id = engine.add_audio_source(routing_test_source("Game", AudioRouting::NONE));
+        assert!(engine.set_audio_source_track_members(id, vec![3, 1, 1, 0, 99]));
+        assert_eq!(
+            engine.audio_sources()[0].track_members,
+            vec![1, 3],
+            "out-of-range dropped, duplicates removed, order normalized"
+        );
+        assert!(!engine.set_audio_source_track_members(uuid::Uuid::new_v4(), vec![1]));
     }
 
     #[test]

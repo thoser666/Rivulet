@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+- feat(audio): **Per-Track-Audio-Modell — Engine-Branches, Slice 2
+  (Issue #242)** — die Pipeline konsumiert das Bus-Modell: Quellen mit
+  `track_members` werden pro aktivem Bus gemischt (eine Quelle in Bus
+  1+3 erscheint in beiden AAC-Tracks), jeder Bus erhält eine eigene
+  Master-Kette (`track_<n>_vol`), sodass Gain/Mute live ohne Pipeline-
+  Restart greifen (`set_audio_bus_gain`/`set_audio_bus_muted`), das
+  Recording encodiert einen AAC-Track pro Bus, der Stream encodiert
+  ausschließlich den Send-Bus (FLV-Einzelspur), und Dual-Output nutzt
+  denselben Bus-Tee für beide Muxer (kein dupliziertes Routing).
+  `set_audio_source_track_members` normalisiert Memberships (Range
+  1..=6, Duplikate, Reihenfolge). Kompatibilität: Quellen mit leerer
+  Membership verhalten sich exakt wie zuvor (Legacy-
+  Record/Stream-Routing bleibt maßgeblich) — `audio_routing_v1`-
+  Konfigurationen sind unverändert gültig. 7 neue Tests (Legacy-
+  Gate, Fan-out, Disabled/Empty-Buses, Send-Bus-Only, Dual-Tee,
+  Gain-Clamping, Membership-Normalisierung); ci_pinning pinnt die
+  Branch-Builder und Live-API.
+
 - feat(audio): **Per-Track-Audio-Modell — Modell + Migration, Slice 1
   (Issue #242)** — Typen und Persistenz für das OBS-artige Bus-Modell:
   `AudioBus` (id, enabled, Master-Gain dB, Mute) und
