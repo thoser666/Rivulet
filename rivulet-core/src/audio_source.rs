@@ -421,6 +421,11 @@ pub struct AudioSource {
     /// Which outputs receive this source.
     #[serde(default)]
     pub routing: AudioRouting,
+    /// The audio buses this source feeds (issue #242, per-track model):
+    /// 1-based bus ids; a source feeds every bus it belongs to. An empty
+    /// list keeps the legacy record/stream booleans authoritative.
+    #[serde(default)]
+    pub track_members: Vec<u8>,
     /// Per-source filter chain.
     #[serde(default)]
     pub filters: AudioFilterConfig,
@@ -442,6 +447,7 @@ impl AudioSource {
             muted: false,
             active: false,
             routing: AudioRouting::default(),
+            track_members: Vec::new(),
             filters: AudioFilterConfig::default(),
         }
     }
@@ -501,6 +507,12 @@ impl AudioSource {
     /// Builder: set the routing decision.
     pub fn with_routing(mut self, routing: AudioRouting) -> Self {
         self.routing = routing;
+        self
+    }
+
+    /// Builder: set the audio-bus membership (issue #242).
+    pub fn with_track_members(mut self, members: Vec<u8>) -> Self {
+        self.track_members = members;
         self
     }
 
@@ -623,6 +635,179 @@ impl AudioRoutingConfig {
         }
         Ok(config)
     }
+}
+
+// ── Per-track audio model (issue #242) ───────────────────────
+
+/// Schema version of [`AudioTrackConfig`]. Bump on breaking changes and
+/// add a migration; old versions are rejected rather than silently misread.
+pub const AUDIO_TRACK_SCHEMA_VERSION: u32 = 1;
+
+/// The maximum number of audio buses a session can configure (OBS parity).
+pub const AUDIO_TRACK_MAX: u8 = 6;
+
+/// One mixing bus ("track") of the per-track audio model (issue #242).
+///
+/// Sources feed every bus they are a member of
+/// (`AudioSource::track_members`); each bus is edited independently — its
+/// own master gain and mute — and the recording mux receives every enabled
+/// bus while the stream encodes the send bus
+/// ([`AudioTrackConfig::send_track`]).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AudioBus {
+    /// Stable identity within the track list (1-based track number).
+    pub id: u8,
+    /// Disabled buses are not built into any output pipeline.
+    pub enabled: bool,
+    /// Master gain in decibels (`-30.0..=30.0`).
+    pub gain_db: f64,
+    /// Whether the whole bus is muted.
+    pub muted: bool,
+}
+
+impl AudioBus {
+    /// A default bus with the given 1-based id: enabled, unity gain.
+    pub fn new(id: u8) -> Self {
+        Self {
+            id,
+            enabled: true,
+            gain_db: 0.0,
+            muted: false,
+        }
+    }
+
+    /// The effective linear volume factor of this bus: `0.0` when muted,
+    /// otherwise the dB gain converted to the `volume` element scale.
+    pub fn effective_volume(&self) -> f64 {
+        if self.muted {
+            0.0
+        } else {
+            10.0_f64.powf(self.gain_db / 20.0)
+        }
+    }
+}
+
+/// The per-track audio configuration (issue #242).
+///
+/// Serialized as JSON (`audio_tracks_v1` in the app storage). Complements
+/// [`AudioRoutingConfig`]: the source list stays there, while this struct
+/// carries the bus list and the streaming send-bus selection.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioTrackConfig {
+    pub version: u32,
+    /// The mixing buses in track order (track 1 is `tracks[0]`).
+    pub tracks: Vec<AudioBus>,
+    /// 1-based index of the bus encoded into the streaming output (FLV/RTMP
+    /// carries a single audio track).
+    pub send_track: u8,
+}
+
+/// Errors from [`AudioTrackConfig::from_json`].
+#[derive(Debug)]
+pub enum AudioTrackConfigError {
+    /// The JSON could not be parsed.
+    Parse(serde_json::Error),
+    /// The document declares a schema version this build does not understand.
+    UnknownVersion { found: u32, supported: u32 },
+}
+
+impl std::fmt::Display for AudioTrackConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Parse(e) => write!(f, "invalid audio track config JSON: {e}"),
+            Self::UnknownVersion { found, supported } => write!(
+                f,
+                "audio track config schema v{found} is not supported (this build supports v{supported})"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AudioTrackConfigError {}
+
+impl Default for AudioTrackConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AudioTrackConfig {
+    /// The default config: four enabled, unity-gain buses and track 1 as the
+    /// streaming send bus (OBS defaults).
+    pub fn new() -> Self {
+        Self {
+            version: AUDIO_TRACK_SCHEMA_VERSION,
+            tracks: (1..=4).map(AudioBus::new).collect(),
+            send_track: 1,
+        }
+    }
+
+    /// Clamp the track count to [`AUDIO_TRACK_MAX`] and keep `send_track`
+    /// inside the remaining range. An empty bus list resets to the default
+    /// four buses.
+    pub fn sanitized(mut self) -> Self {
+        if self.tracks.len() > AUDIO_TRACK_MAX as usize {
+            self.tracks.truncate(AUDIO_TRACK_MAX as usize);
+        }
+        if self.tracks.is_empty() {
+            return Self::new();
+        }
+        if self.send_track == 0 || self.send_track as usize > self.tracks.len() {
+            self.send_track = 1;
+        }
+        self
+    }
+
+    /// The currently selected send bus, if any.
+    pub fn send_bus(&self) -> Option<&AudioBus> {
+        self.tracks.get(self.send_track.checked_sub(1)? as usize)
+    }
+
+    /// Serialize to JSON.
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).expect("audio track config serializes")
+    }
+
+    /// Parse from JSON, rejecting unknown schema versions instead of
+    /// silently misreading them.
+    pub fn from_json(json: &str) -> Result<Self, AudioTrackConfigError> {
+        let config: Self = serde_json::from_str(json).map_err(AudioTrackConfigError::Parse)?;
+        if config.version != AUDIO_TRACK_SCHEMA_VERSION {
+            return Err(AudioTrackConfigError::UnknownVersion {
+                found: config.version,
+                supported: AUDIO_TRACK_SCHEMA_VERSION,
+            });
+        }
+        Ok(config)
+    }
+}
+
+/// Migrate a legacy `audio_routing_v1` config to the per-track model
+/// (issue #242): sources with `routing.record` join track 1, sources with
+/// `routing.stream` join the send track, sources routed to neither keep an
+/// empty membership (they stay silent everywhere, as before). Each matching
+/// source's `track_members` is updated in place; the legacy booleans remain
+/// authoritative until the pipeline builder consumes the track model.
+pub fn migrate_routing_to_tracks(
+    routing: &AudioRoutingConfig,
+    sources: &mut [AudioSource],
+) -> AudioTrackConfig {
+    let config = AudioTrackConfig::new();
+    let send = config.send_track;
+    for source in sources.iter_mut() {
+        let Some(saved) = routing.sources.iter().find(|s| s.id == source.id) else {
+            continue;
+        };
+        let mut members = Vec::new();
+        if saved.routing.record {
+            members.push(1);
+        }
+        if saved.routing.stream && !members.contains(&send) {
+            members.push(send);
+        }
+        source.track_members = members;
+    }
+    config
 }
 
 #[cfg(test)]
@@ -1207,5 +1392,135 @@ mod tests {
                 "MacBook Pro Microphone".to_owned()
             ))
         );
+    }
+
+    // ── Per-track audio model (issue #242) ───────────────────────
+
+    #[test]
+    fn audio_track_config_defaults_match_obs() {
+        let config = AudioTrackConfig::new();
+        assert_eq!(config.version, 1);
+        assert_eq!(config.tracks.len(), 4);
+        assert_eq!(config.send_track, 1);
+        for (i, bus) in config.tracks.iter().enumerate() {
+            assert_eq!(bus.id as usize, i + 1);
+            assert!(bus.enabled);
+            assert_eq!(bus.gain_db, 0.0);
+            assert!(!bus.muted);
+        }
+        assert_eq!(config.send_bus().map(|b| b.id), Some(1));
+    }
+
+    #[test]
+    fn audio_bus_gain_converts_to_linear_volume() {
+        let mut bus = AudioBus::new(1);
+        assert_eq!(bus.effective_volume(), 1.0);
+        bus.gain_db = 6.0;
+        assert!((bus.effective_volume() - 10.0_f64.powf(0.3)).abs() < 1e-9);
+        bus.gain_db = -6.0;
+        assert!((bus.effective_volume() - 10.0_f64.powf(-0.3)).abs() < 1e-9);
+        bus.muted = true;
+        assert_eq!(bus.effective_volume(), 0.0);
+    }
+
+    #[test]
+    fn audio_track_config_sanitizes_count_and_send_track() {
+        let mut config = AudioTrackConfig::new();
+        for id in 5..=9u8 {
+            config.tracks.push(AudioBus::new(id));
+        }
+        config.send_track = 9;
+        let config = config.sanitized();
+        assert_eq!(config.tracks.len(), AUDIO_TRACK_MAX as usize);
+        assert_eq!(config.send_track, 1, "out-of-range send track resets");
+
+        let mut empty = AudioTrackConfig::new();
+        empty.tracks.clear();
+        empty.send_track = 3;
+        let empty = empty.sanitized();
+        assert_eq!(empty.tracks.len(), 4, "empty bus list resets to default");
+        assert_eq!(empty.send_track, 1);
+
+        let mut zero = AudioTrackConfig::new();
+        zero.send_track = 0;
+        assert_eq!(zero.sanitized().send_track, 1);
+    }
+
+    #[test]
+    fn audio_track_config_json_round_trip_and_version_guard() {
+        let mut config = AudioTrackConfig::new();
+        config.tracks[0].gain_db = -3.5;
+        config.tracks[1].muted = true;
+        config.send_track = 2;
+        let restored = AudioTrackConfig::from_json(&config.to_json()).expect("round-trip parses");
+        assert_eq!(restored, config);
+
+        let future = config.to_json().replace("\"version\":1", "\"version\":99");
+        let err = AudioTrackConfig::from_json(&future).expect_err("unknown version rejected");
+        assert!(matches!(
+            err,
+            AudioTrackConfigError::UnknownVersion {
+                found: 99,
+                supported: 1
+            }
+        ));
+        assert!(AudioTrackConfig::from_json("not json").is_err());
+    }
+
+    #[test]
+    fn migration_maps_routing_bools_onto_track_members() {
+        let mut routing = AudioRoutingConfig::legacy_defaults();
+        let game =
+            AudioSource::application("Game", "pid:42").with_routing(AudioRouting::RECORD_ONLY);
+        routing.sources.push(game);
+        let silent = AudioSource::output_device("Silent", "system_loopback")
+            .with_routing(AudioRouting::NONE);
+        routing.sources.push(silent);
+
+        let mut sources = routing.sources.clone();
+        let config = migrate_routing_to_tracks(&routing, &mut sources);
+
+        assert_eq!(config.tracks.len(), 4);
+        assert_eq!(config.send_track, 1);
+        // BOTH: record track == send track → single membership.
+        assert_eq!(sources[0].track_members, vec![1]);
+        assert_eq!(sources[1].track_members, vec![1]);
+        // RECORD_ONLY: record track only.
+        assert_eq!(sources[2].track_members, vec![1]);
+        // NONE: stays silent everywhere.
+        assert!(sources[3].track_members.is_empty());
+
+        // Ids without a persisted counterpart are left alone.
+        let mut partial = vec![AudioSource::application("New", "pid:7")];
+        migrate_routing_to_tracks(&routing, &mut partial);
+        assert!(partial[0].track_members.is_empty());
+    }
+
+    #[test]
+    fn track_members_field_is_additive_over_audio_routing_v1() {
+        // Old configs (no `track_members` key) keep parsing with an empty
+        // membership; new configs round-trip the field.
+        let source = AudioSource::application("Game", "pid:42");
+        let json = AudioRoutingConfig {
+            version: 1,
+            sources: vec![source],
+        }
+        .to_json();
+        let stripped = json.replace(",\"track_members\":[]", "");
+        assert_ne!(stripped, json, "track_members serializes by default");
+        let parsed =
+            AudioRoutingConfig::from_json(&stripped).expect("v1 JSON without track_members parses");
+        assert!(parsed.sources[0].track_members.is_empty());
+
+        let member = AudioSource::application("Game", "pid:42").with_track_members(vec![1, 3]);
+        let round = AudioRoutingConfig::from_json(
+            &AudioRoutingConfig {
+                version: 1,
+                sources: vec![member],
+            }
+            .to_json(),
+        )
+        .expect("round-trip parses");
+        assert_eq!(round.sources[0].track_members, vec![1, 3]);
     }
 }
