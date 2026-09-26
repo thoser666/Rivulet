@@ -823,6 +823,64 @@ fn m6_audio_routing_phase1_engine_surface_is_pinned() {
 }
 
 #[test]
+fn m6_audio_track_model_surface_is_pinned() {
+    // Issue #242 (per-track audio model): the bus types, the versioned
+    // `audio_tracks_v1` schema, the `track_members` field on sources and the
+    // migration from `audio_routing_v1` are contract. The engine stores the
+    // config now and consumes it in the pipeline slice.
+    let lib = read("rivulet-core/src/lib.rs");
+    let source = read("rivulet-core/src/audio_source.rs");
+
+    for required in [
+        "pub const AUDIO_TRACK_SCHEMA_VERSION: u32 = 1",
+        "pub const AUDIO_TRACK_MAX: u8 = 6",
+        "pub struct AudioBus",
+        "pub struct AudioTrackConfig",
+        "pub enum AudioTrackConfigError",
+        "UnknownVersion { found: u32, supported: u32 }",
+        "pub fn new() -> Self",
+        "pub fn sanitized(mut self) -> Self",
+        "pub fn send_bus(&self) -> Option<&AudioBus>",
+        "pub fn effective_volume(&self) -> f64",
+        "pub fn migrate_routing_to_tracks(",
+    ] {
+        assert!(
+            source.contains(required),
+            "audio track model schema must pin {required}"
+        );
+    }
+
+    // Source-side membership field (additive over audio_routing_v1).
+    assert!(
+        source.contains("pub track_members: Vec<u8>"),
+        "AudioSource must carry the bus membership field"
+    );
+    assert!(
+        source.contains("#[serde(default)]\n    pub track_members: Vec<u8>"),
+        "track_members must default for legacy audio_routing_v1 JSON"
+    );
+
+    // Engine API surface (the GUI/pipeline slices build on these names).
+    for required in [
+        "pub fn audio_track_config(&self) -> &AudioTrackConfig",
+        "pub fn set_audio_track_config(&mut self, config: AudioTrackConfig)",
+    ] {
+        assert!(
+            lib.contains(required),
+            "engine audio-track API must pin {required}"
+        );
+    }
+
+    // The pipeline must stay transport-free; the track model adds no I/O.
+    for banned in ["ureq", "reqwest", "ReadProcessMemory"] {
+        assert!(
+            !source.contains(banned),
+            "audio_source.rs must not contain {banned}"
+        );
+    }
+}
+
+#[test]
 fn m3_vod_track_recording_branch_is_pinned() {
     // Issue #78 (Z78-1/2): an active VodTrack in a dual-output session adds a
     // third, independent audio branch into the recording muxer via the

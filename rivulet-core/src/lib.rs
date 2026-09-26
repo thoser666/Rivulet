@@ -206,8 +206,9 @@ pub use media_source::{MediaSource, MediaType, PlaybackMode};
 
 pub mod audio_source;
 pub use audio_source::{
-    device_target, AudioFilterConfig, AudioRouting, AudioRoutingConfig, AudioSource,
-    AudioSourceKind, DeviceTarget,
+    device_target, migrate_routing_to_tracks, AudioBus, AudioFilterConfig, AudioRouting,
+    AudioRoutingConfig, AudioSource, AudioSourceKind, AudioTrackConfig, AudioTrackConfigError,
+    DeviceTarget, AUDIO_TRACK_MAX, AUDIO_TRACK_SCHEMA_VERSION,
 };
 
 pub mod browser_source;
@@ -252,6 +253,10 @@ pub struct RivuletEngine {
     /// the pipeline is built from these sources and their record/stream
     /// routing decisions instead of the legacy System/Microphone pair.
     audio_sources: Vec<AudioSource>,
+    /// Per-track audio configuration (issue #242). Stored and queryable;
+    /// the pipeline builder consumes it in a later slice, until then the
+    /// legacy record/stream routing stays authoritative.
+    audio_track_config: AudioTrackConfig,
     /// Live appsrcs for the routed sources of the running session. One source
     /// can own several appsrcs (the record branch and the streaming mix leg
     /// are separate elements); every entry receives the pushed frames.
@@ -364,6 +369,7 @@ impl Default for RivuletEngine {
             audio_sys_enabled: true,
             audio_mic_enabled: true,
             audio_sources: Vec::new(),
+            audio_track_config: AudioTrackConfig::default(),
             audio_source_appsrcs: Vec::new(),
             audio_source_volumes: Vec::new(),
             is_recording: false,
@@ -2150,6 +2156,19 @@ impl RivuletEngine {
     /// The configured audio sources (multi-track routing mode).
     pub fn audio_sources(&self) -> &[AudioSource] {
         &self.audio_sources
+    }
+
+    /// The per-track audio configuration (issue #242).
+    pub fn audio_track_config(&self) -> &AudioTrackConfig {
+        &self.audio_track_config
+    }
+
+    /// Replace the per-track audio configuration (issue #242). The config is
+    /// sanitized (bus count clamped to [`AUDIO_TRACK_MAX`], send track kept
+    /// in range) instead of rejected, so persisted configs always apply.
+    /// Must be called before recording starts.
+    pub fn set_audio_track_config(&mut self, config: AudioTrackConfig) {
+        self.audio_track_config = config.sanitized();
     }
 
     /// Add one source (returns its id; assigned when it was nil). Must be
@@ -4762,6 +4781,35 @@ mod tests {
         engine.set_audio_sources(batch);
         assert!(!engine.audio_sources()[0].id.is_nil());
         assert_eq!(engine.audio_sources().len(), 1);
+    }
+
+    #[test]
+    fn audio_track_config_api_stores_sanitized_config() {
+        let mut engine = RivuletEngine::default();
+        assert_eq!(engine.audio_track_config().tracks.len(), 4);
+
+        let mut config = AudioTrackConfig::new();
+        config.tracks[0].gain_db = -6.0;
+        config.send_track = 3;
+        engine.set_audio_track_config(config.clone());
+        assert_eq!(engine.audio_track_config(), &config);
+        assert_eq!(
+            engine.audio_track_config().send_bus().map(|b| b.id),
+            Some(3)
+        );
+
+        // Overlong bus lists and out-of-range send tracks are clamped.
+        let mut bad = AudioTrackConfig::new();
+        for id in 5..=8u8 {
+            bad.tracks.push(AudioBus::new(id));
+        }
+        bad.send_track = 42;
+        engine.set_audio_track_config(bad);
+        assert_eq!(
+            engine.audio_track_config().tracks.len(),
+            AUDIO_TRACK_MAX as usize
+        );
+        assert_eq!(engine.audio_track_config().send_track, 1);
     }
 
     #[test]

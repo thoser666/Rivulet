@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+- feat(audio): **Per-Track-Audio-Modell — Modell + Migration, Slice 1
+  (Issue #242)** — Typen und Persistenz für das OBS-artige Bus-Modell:
+  `AudioBus` (id, enabled, Master-Gain dB, Mute) und
+  `AudioTrackConfig` (4 Buses als Default, max 6, `send_track` für den
+  FLV-Stream) mit versionierter `audio_tracks_v1`-JSON-Persistenz
+  (Round-Trip, Unknown-Version-Abweisung — gleiches Muster wie
+  `audio_routing_v1`). `AudioSource` trägt neu `track_members: Vec<u8>`
+  (serde-default, additiv — bestehende `audio_routing_v1`-Configs
+  parsen weiter). Migration `audio_routing_v1 → audio_tracks_v1`:
+  `routing.record` → Bus 1, `routing.stream` → Send-Bus, leer bleibt
+  stumm (Round-Trip-Tests). Engine-API `audio_track_config()` /
+  `set_audio_track_config()` (sanitized: Bus-Anzahl auf 6 geklemmt,
+  Send-Track in Range); die Pipeline baut die Buses erst im
+  Folgeslice, bis dahin bleibt die Record/Stream-Routing maßgeblich.
+  Neue Unit-Tests für Defaults, Gain→Linear-Umrechnung, Sanitizing,
+  JSON-Round-Trip, Migration und Feld-Additivität; ci_pinning-Test
+  pinnt die Modell-Oberfläche.
+
 - feat(game-capture): **Launcher-basierte Spiel-Erkennung — Steam-Slice
   (Issue #239)** — erste echte Spiel-Identifikation für den Game-Capture-
   Picker statt reiner Fenstergrößen-Heuristik. Neu:
