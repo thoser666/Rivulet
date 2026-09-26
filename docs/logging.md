@@ -91,6 +91,25 @@ and the Windows Error Reporting entry in that case. Otherwise check:
 > present) or the capture thread logged `Starting capture thread (...)` —
 > with neither entry the Record button was never enabled (no source
 > selected).
+
+## Pipeline construction errors
+
+When GStreamer rejects the recording/streaming pipeline, the GUI shows a short
+error (`Could not create the recording pipeline: <message>`). The daily log
+keeps the full diagnostic:
+
+- the GStreamer error **domain and code** (e.g. a bare `syntax error` from
+  `parse_launch` becomes `(GStreamer domain gst-parse-error, code 4)` so the
+  exact parser failure is identifiable), and
+- the **redacted pipeline description** under the `pipeline` log field.
+
+Pipeline descriptions can embed the RTMP(S) ingest URL *including the stream
+key* (`rtmp2sink location="rtmps://host/app/KEY"`). Such values are replaced
+with `<redacted stream URL>` before logging, so stream keys never reach the
+daily log; the rest of the pipeline stays intact for debugging. A pipeline that
+refuses to parse is therefore diagnosable from the log alone without leaking
+credentials.
+
 4. If file logging cannot be initialized, startup continues and a
    `RIVULET CRASH` block is written to the intended path when possible; the
    bootstrap error is also sent to stderr.
