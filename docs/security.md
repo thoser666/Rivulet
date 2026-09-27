@@ -239,9 +239,18 @@ lists **no bypass actors** (no `RepositoryRole` administrator exception), so eve
 repository administrators cannot push to `develop` directly — every change
 lands as a pull request whose required status checks must pass. Because this is
 a single-maintainer repository the ruleset does not require a second human
-approval; the automated checks are treated as the review (see the Code Review
-Policy in `CONTRIBUTING.md`). The ruleset also prevents deletions and
-non-fast-forward updates.
+approval (count 0); the automated checks are treated as the review (see the
+Code Review Policy in `CONTRIBUTING.md`). The ruleset also prevents deletions
+and non-fast-forward updates.
+
+The review requirement is **staged**: when a second maintainer gets access,
+the ruleset flips to `required_approving_review_count: 1` and the ruleset
+checker switches to `--team-mode` (it then *fails* unless the live ruleset
+requires a human approval). The exact, ordered procedure — including why the
+flip must never happen while the repo is still single-maintainer — is the
+runbook in [`docs/team-onboarding-runbook.md`](team-onboarding-runbook.md);
+the account/workspace hygiene behind it is
+[`docs/clean-desk.md`](clean-desk.md).
 
 The release workflow still uses `GITHUB_TOKEN` to push generated version commits
 and tags — but only to `release/<tag>` branches and tags, never to `develop`, so

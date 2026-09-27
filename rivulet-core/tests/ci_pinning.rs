@@ -6982,3 +6982,64 @@ fn track_model_gui_surface_is_pinned() {
         assert!(doc.contains(needle), "m6 audio doc must pin {needle}");
     }
 }
+
+#[test]
+fn team_readiness_surface_is_pinned() {
+    // Issue #242 team-readiness: CODEOWNERS routes critical paths, the
+    // staged review model (solo now, >= 1 approval after the runbook flip)
+    // is documented in three places, and the ruleset guard understands
+    // both modes. Renames or removals must fail CI, not drift silently.
+    let owners = read(".github/CODEOWNERS");
+    for needle in [
+        "/rivulet-core/src/container.rs",
+        "/rivulet-gui/src/app.rs",
+        "/.github/workflows/release.yml",
+        "/scripts/check-develop-ruleset.py",
+        "/rivulet-core/tests/ci_pinning.rs",
+        "/docs/team-onboarding-runbook.md",
+        "docs/team-onboarding-runbook.md step 2",
+    ] {
+        assert!(owners.contains(needle), "CODEOWNERS must pin {needle}");
+    }
+
+    let contributing = read("CONTRIBUTING.md");
+    for needle in [
+        "Human review is a staged flip, not a settings change",
+        "docs/team-onboarding-runbook.md",
+        "docs/clean-desk.md",
+    ] {
+        assert!(
+            contributing.contains(needle),
+            "CONTRIBUTING.md must pin the staged review model: {needle}"
+        );
+    }
+
+    let security = read("docs/security.md");
+    assert!(
+        security.contains("team-onboarding-runbook.md") && security.contains("--team-mode"),
+        "docs/security.md must document the staged review flip"
+    );
+
+    // The runbook itself: the flip is step-ordered, verifies with the
+    // guard, and never suggests a bypass actor.
+    let runbook = read("docs/team-onboarding-runbook.md");
+    for needle in [
+        "required_approving_review_count: 1",
+        "--team-mode",
+        "never a ruleset\n      bypass actor",
+    ] {
+        assert!(
+            runbook.contains(needle),
+            "onboarding runbook must pin {needle}"
+        );
+    }
+
+    // Clean desk: account hygiene is the documented backdoor defense.
+    let clean_desk = read("docs/clean-desk.md");
+    for needle in ["Personal access tokens", "team-onboarding-runbook.md"] {
+        assert!(
+            clean_desk.contains(needle),
+            "clean-desk doc must pin {needle}"
+        );
+    }
+}
