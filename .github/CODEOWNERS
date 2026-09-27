@@ -1,0 +1,56 @@
+# CODEOWNERS — who must review what (issue #242 team-readiness).
+#
+# GitHub evaluates this file on pull requests: the owners of every touched
+# path are automatically requested as reviewers. This file is intentionally
+# explicit — every critical path is listed individually so adding a second
+# maintainer later means adding ONE line per person here plus the team
+# assignment in the onboarding runbook (docs/team-onboarding-runbook.md),
+# not a rewrite.
+#
+# The default owner for everything not listed below. Currently the solo
+# maintainer; becomes `@rivulet-maintainers` in the team mode flip
+# (docs/team-onboarding-runbook.md step 2).
+*                               @thoser666
+
+# ── Recording pipeline core (the remux fan-in lives here) ─────────────
+/rivulet-core/src/container.rs  @thoser666
+/rivulet-core/src/lib.rs        @thoser666
+/rivulet-core/src/audio_source.rs @thoser666
+/rivulet-core/src/clock.rs      @thoser666
+
+# ── Engine-adjacent audio crates ──────────────────────────────────────
+/rivulet-audio/                 @thoser666
+
+# ── Capture layer (screen/window/hook internals) ──────────────────────
+/rivulet-capture/               @thoser666
+
+# ── GUI state container (single 20k-line file, high blast radius) ────
+/rivulet-gui/src/app.rs         @thoser666
+
+# ── Release + signing pipeline (artifact trust chain) ─────────────────
+/.github/workflows/release.yml      @thoser666
+/.github/workflows/build-package.yml @thoser666
+/.github/workflows/security.yml     @thoser666
+/.github/workflows/scorecard.yml    @thoser666
+/.github/workflows/ruleset-guard.yml @thoser666
+/scripts/code-signing/          @thoser666
+/docs/code-signing.md           @thoser666
+
+# ── Supply-chain guards (changing the guards is itself guarded) ──────
+/.github/workflows/ci.yml       @thoser666
+/.github/workflows/ruleset-guard.yml @thoser666
+/scripts/check-develop-ruleset.py  @thoser666
+/scripts/check-action-pins.py   @thoser666
+/scripts/check-dco.py           @thoser666
+/scripts/generate-action-pins.py @thoser666
+/rivulet-core/tests/ci_pinning.rs @thoser666
+
+# ── Governance + security docs ────────────────────────────────────────
+/SECURITY.md                    @thoser666
+/docs/security.md               @thoser666
+/CODE_OF_CONDUCT.md             @thoser666
+/GOVERNANCE.md                  @thoser666
+/CONTRIBUTING.md                @thoser666
+/docs/team-onboarding-runbook.md @thoser666
+/docs/clean-desk.md             @thoser666
+/CODEOWNERS                     @thoser666

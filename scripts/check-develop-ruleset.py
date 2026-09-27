@@ -21,8 +21,18 @@ authentication for a public repository (Metadata read is enough); a token
 from `GITHUB_TOKEN`/`GH_TOKEN` is used when present.
 
 Usage:
-    python3 scripts/check-develop-ruleset.py            # live check
+    python3 scripts/check-develop-ruleset.py            # live check (solo mode)
     python3 scripts/check-develop-ruleset.py --self-test  # offline logic test
+    python3 scripts/check-develop-ruleset.py --team-mode  # live check, team mode
+
+Solo vs. team mode (staged review rollout, see docs/team-onboarding-runbook.md):
+
+- **solo** (default): the `pull_request` rule must require 0 approving
+  reviews — the automated checks are the review, and a count >= 1 would
+  hard-block every merge because a maintainer cannot approve their own PR.
+- **team**: the `pull_request` rule must require >= 1 approving review.
+  Flip the mode in the same session that raises the live approval count
+  (runbook step 4); until then the guard keeps enforcing the solo state.
 """
 
 import json
@@ -80,7 +90,7 @@ def _ruleset_payloads(token: str | None) -> list[dict]:
     return details
 
 
-def evaluate(payloads: list[dict]) -> bool:
+def evaluate(payloads: list[dict], team_mode: bool = False) -> bool:
     """Validate the given ruleset payloads; returns True when compliant."""
     develop = None
     for rs in payloads:
@@ -118,7 +128,15 @@ def evaluate(payloads: list[dict]) -> bool:
     for rule in develop.get("rules", []):
         if rule.get("type") == "pull_request":
             pr_params = rule.get("parameters", {})
-    if "pull_request" in rule_types and pr_params.get("required_approving_review_count") != 0:
+    if "pull_request" in rule_types and team_mode:
+        if (pr_params.get("required_approving_review_count") or 0) < 1:
+            fail(
+                "pull_request rule requires >= 1 approving review in team mode "
+                f"(have {pr_params.get('required_approving_review_count')})"
+            )
+        else:
+            ok("pull_request rule requires a human approving review (team mode)")
+    elif "pull_request" in rule_types and pr_params.get("required_approving_review_count") != 0:
         fail(
             "pull_request rule must not require a second human approval "
             "(single-maintainer repo; automated checks are the review)"
@@ -141,8 +159,12 @@ def evaluate(payloads: list[dict]) -> bool:
 
 
 def run_live() -> int:
+    team_mode = "--team-mode" in sys.argv
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    print(f"Checking rulesets for {REPO} ({'authenticated' if token else 'anonymous'})")
+    print(
+        f"Checking rulesets for {REPO} ({'team' if team_mode else 'solo'} mode, "
+        f"{'authenticated' if token else 'anonymous'})"
+    )
     try:
         payloads = _ruleset_payloads(token)
     except urllib.error.HTTPError as exc:
@@ -162,9 +184,9 @@ def run_live() -> int:
     if not payloads:
         print("FATAL: no repository rulesets found")
         return 2
-    evaluate(payloads)
+    evaluate(payloads, team_mode=team_mode)
     if FAILURES:
-        print("\nRESULT: FAIL - the develop ruleset does NOT block direct pushes")
+        print("\nRESULT: FAIL - the develop ruleset does NOT match the expected review policy")
         return 1
     print("\nRESULT: PASS - the develop ruleset blocks direct pushes (no bypass actors)")
     return 0
@@ -196,18 +218,38 @@ def self_test() -> int:
         base.update(overrides)
         return base
 
+    def ruleset_with(approval_count: int) -> dict:
+        return ruleset(
+            rules=[
+                {"type": "deletion"},
+                {"type": "non_fast_forward"},
+                {"type": "pull_request", "parameters": {"required_approving_review_count": approval_count}},
+                {
+                    "type": "required_status_checks",
+                    "parameters": {
+                        "required_status_checks": [
+                            {"context": c} for c in REQUIRED_CHECKS
+                        ]
+                    },
+                },
+            ]
+        )
+
     scenarios = [
-        ("compliant ruleset passes", [ruleset()], True),
-        ("admin bypass actor fails", [ruleset(bypass_actors=[{"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"}])], False),
-        ("disabled enforcement fails", [ruleset(enforcement="disabled")], False),
-        ("pull_request rule removed fails", [ruleset(rules=[{"type": "deletion"}, {"type": "non_fast_forward"}, {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": c} for c in REQUIRED_CHECKS]}}])], False),
-        ("wrong branch rule ignored", [ruleset(conditions={"ref_name": {"exclude": [], "include": ["refs/heads/other"]}})], False),
-        ("no ruleset at all fails", [], False),
+        ("compliant ruleset passes", [ruleset()], True, False),
+        ("admin bypass actor fails", [ruleset(bypass_actors=[{"actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"}])], False, False),
+        ("disabled enforcement fails", [ruleset(enforcement="disabled")], False, False),
+        ("pull_request rule removed fails", [ruleset(rules=[{"type": "deletion"}, {"type": "non_fast_forward"}, {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": c} for c in REQUIRED_CHECKS]}}])], False, False),
+        ("wrong branch rule ignored", [ruleset(conditions={"ref_name": {"exclude": [], "include": ["refs/heads/other"]}})], False, False),
+        ("no ruleset at all fails", [], False, False),
+        ("solo mode: approval count 1 fails", [ruleset_with(1)], False, False),
+        ("team mode: approval count 1 passes", [ruleset_with(1)], True, True),
+        ("team mode: approval count 0 fails", [ruleset()], False, True),
     ]
     failed = 0
-    for label, payloads, expect_pass in scenarios:
+    for label, payloads, expect_pass, team_mode in scenarios:
         FAILURES.clear()
-        got = evaluate(payloads)
+        got = evaluate(payloads, team_mode=team_mode)
         status = "ok" if got == expect_pass else "WRONG"
         if got != expect_pass:
             failed += 1

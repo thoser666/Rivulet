@@ -282,7 +282,9 @@ Every change to `develop` passes a review before it lands:
 3. **Sensitive changes always get a PR.** Changes to workflows, packaging,
    signing, the release pipeline, security policy, and shared-memory/capture
    security code are reviewed as pull requests with an approving review
-   before merge whenever a second reviewer is available.
+   before merge whenever a second reviewer is available. These paths are
+   listed explicitly in [`.github/CODEOWNERS`](.github/CODEOWNERS), which
+   routes reviewers automatically.
 4. **Automated review is part of review.** Because much of this repository is
    single-maintainer, the executable checks are treated as reviewers too:
    fmt, clippy `-D warnings`, the full test suite, the ci_pinning supply-
@@ -290,6 +292,16 @@ Every change to `develop` passes a review before it lands:
    green before the change is considered reviewed. Release artifacts are
    additionally verified (notes completeness, `SHA256SUMS`) as described in
    the [Release Strategy](#release-strategy).
+5. **Human review is a staged flip, not a settings change.** The ruleset
+   currently requires **zero** approving reviews (a maintainer cannot
+   approve their own PR, so requiring one would hard-block every merge).
+   The moment a second maintainer gets access, the review gate flips to
+   **>= 1 approving review** by the runbook in
+   [`docs/team-onboarding-runbook.md`](docs/team-onboarding-runbook.md) —
+   ruleset first, guard flag (`check-develop-ruleset.py --team-mode`)
+   in the same session, docs in the same PR. Workspace and account
+   hygiene expectations for both maintainers live in
+   [`docs/clean-desk.md`](docs/clean-desk.md).
 
 ---
 

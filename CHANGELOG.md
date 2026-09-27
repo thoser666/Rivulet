@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- chore(security): **Team-Readiness — CODEOWNERS, staged Review-Gate,
+  Clean-Desk-Konzept** — kritische Pfade (Remux-Kern, Capture, Release-
+  Pipeline, Supply-Chain-Guards, Security-Docs) sind in
+  `.github/CODEOWNERS` explizit gelistet und requesten Owner automatisch
+  als Reviewer. Der Review-Gate wird **gestuft** geschaltet: solange das
+  Repo single-maintainer ist, bleibt `required_approving_review_count: 0`
+  (Selbst-Approval ist unmöglich, sonst würde jeder Merge blockieren);
+  der Wechsel auf ≥1 Approval folgt dem Runbook
+  `docs/team-onboarding-runbook.md` (Ruleset-Flip + Guard-Flag
+  `check-develop-ruleset.py --team-mode` in derselben Session). Der
+  Ruleset-Checker versteht jetzt beide Modi (9 Self-Test-Szenarien).
+  `docs/clean-desk.md` dokumentiert Account-/Session-Hygiene als
+  Backdoor-Verteidigung (PAT-Audits, Session-Révokes, Passkeys) und den
+  Solo→Team-Übergang als Checkliste.
+
 - fix(ci): **CodeQL-Action-Pins auf v4.38.2 gehoben** — der
   Stale-Pin-Job (check-action-pins) meldete die vier
   `github/codeql-action`-Pins (init/autobuild/analyze/upload-sarif in
