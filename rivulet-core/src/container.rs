@@ -15,7 +15,6 @@ use gst::prelude::*;
 use gstreamer as gst;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Recording container formats supported for local capture.
@@ -294,19 +293,21 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
     // stream materializing before the PMT, then the real one). All pads of
     // one PID carry one logical track and must share a single chain, or the
     // continuation pad feeds a context-less parser that drops every frame.
-    let track_chains: Arc<Mutex<HashMap<String, gst::Pad>>> = Arc::new(Mutex::new(HashMap::new()));
-    let claim_started = Arc::new(AtomicBool::new(false));
-    let shutdown = Arc::new(AtomicBool::new(false));
-    // (pad, probe id) of every downstream block installed for a track chain.
-    let block_probes: Arc<Mutex<Vec<(gst::Pad, gst::PadProbeId)>>> =
-        Arc::new(Mutex::new(Vec::new()));
-
+    // The chain head is a `funnel`: a pad has exactly one peer, so late
+    // duplicate pads cannot link onto the parser/queue sink of the first
+    // wave — each duplicate gets its own funnel sink pad and fans into the
+    // single downstream leg (N:1, no data loss).
+    let track_chains: Arc<Mutex<HashMap<String, gst::Element>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    // Pre-claimed muxer request pads, grouped by kind (filled by the PMT
+    // scan for TS sources). `pad-added` assigns chains from here first.
+    let pad_pool: Arc<Mutex<HashMap<&'static str, Vec<gst::Pad>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
     demuxer.connect_pad_added({
         let muxer_for_pads = muxer.clone();
         let pipeline_for_pads = pipeline.clone();
         let track_chains = Arc::clone(&track_chains);
-        let claim_started = Arc::clone(&claim_started);
-        let block_probes = Arc::clone(&block_probes);
+        let pad_pool = Arc::clone(&pad_pool);
         move |_demux, src_pad| {
             let pad_name = src_pad.name().to_string();
             let segments: Vec<&str> = pad_name.split('_').collect();
@@ -315,15 +316,31 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
             } else {
                 pad_name.clone()
             };
-            // A later pad version of a known PID joins the existing chain.
-            if let Some(head) = track_chains
+            // A later pad version of a known PID joins the existing chain:
+            // it requests its own sink pad on the chain's funnel (the first
+            // sink pad is already taken by the initial demux pad) and feeds
+            // the same parser/queue/mux leg through the fan-in.
+            if let Some(funnel) = track_chains
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .get(&chain_key)
                 .cloned()
             {
-                if let Err(e) = src_pad.link(&head) {
-                    tracing::warn!(error = %e, "remux: duplicate-pad link failed");
+                if debug {
+                    eprintln!("RIVULET_REMUX duplicate pad {pad_name} joins chain {chain_key}");
+                }
+                match funnel.request_pad_simple("sink_%u") {
+                    Some(extra_sink) => {
+                        if let Err(e) = src_pad.link(&extra_sink) {
+                            if debug {
+                                eprintln!("RIVULET_REMUX duplicate-pad link FAILED: {e}");
+                            }
+                            tracing::warn!(error = %e, "remux: duplicate-pad link failed");
+                        }
+                    }
+                    None => {
+                        tracing::warn!("remux: funnel refused a sink pad, duplicate pad dropped");
+                    }
                 }
                 return;
             }
@@ -367,10 +384,22 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
                 None
             };
 
-            // Chain: demux -> [parser ->] queue. Build it fully (add to
-            // pipeline, link parser to queue, sync states) BEFORE linking the
-            // demux pad — a running demuxer pushes immediately, and data must
-            // never reach an element that is still in NULL state.
+            // Chain: demux -> funnel -> [parser ->] queue -> mux pad. Build
+            // it fully (add to pipeline, link parser to queue, sync states)
+            // BEFORE linking the demux pad — a running demuxer pushes
+            // immediately, and data must never reach an element that is
+            // still in NULL state.
+            let funnel = match gst::ElementFactory::make("funnel").build() {
+                Ok(funnel) => funnel,
+                Err(e) => {
+                    tracing::warn!(error = %e, "remux: could not create funnel, track skipped");
+                    return;
+                }
+            };
+            if let Err(e) = pipeline_for_pads.add(&funnel) {
+                tracing::warn!(error = %e, "remux: could not add funnel, track skipped");
+                return;
+            }
             let queue = match gst::ElementFactory::make("queue").build() {
                 Ok(queue) => queue,
                 Err(e) => {
@@ -385,7 +414,7 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
                 tracing::warn!(error = %e, "remux: could not add track queue, track skipped");
                 return;
             }
-            let head = if let Some(parse) = &parser {
+            let downstream_sink = if let Some(parse) = &parser {
                 if let Err(e) = pipeline_for_pads.add(parse) {
                     tracing::warn!(
                         error = %e,
@@ -416,24 +445,40 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
                 let _ = queue.sync_state_with_parent();
                 queue_sink
             };
+            let Some(funnel_src) = funnel.static_pad("src") else {
+                return;
+            };
+            if funnel_src.link(&downstream_sink).is_err() {
+                tracing::warn!("remux: funnel to parser/queue link failed, track skipped");
+                return;
+            }
+            let _ = funnel.sync_state_with_parent();
+            // Entry point of the chain: this first demux pad takes one
+            // funnel sink pad; later duplicate versions request their own.
+            let Some(head) = funnel.request_pad_simple("sink_%u") else {
+                tracing::warn!("remux: funnel refused an entry pad, track skipped");
+                return;
+            };
             let Some(queue_src) = queue.static_pad("src") else {
                 return;
             };
-            // Claim the muxer request pad IMMEDIATELY: qtmux/mp4mux refuse
-            // request pads once the first stream has been *configured*, but
-            // nothing is configured while every chain's downstream is still
-            // blocked (see probe below). Claiming up front means the pads
-            // all exist regardless of the demuxer's pad-wave timing; the
-            // block guarantees the muxer sees no caps/data until every
-            // request pad exists.
-            let request_template = if media.starts_with("audio/") {
+            // Assignment order: pre-claimed pool pads (from the PMT scan)
+            // first, then a fresh claim — which works because the pool
+            // covers the full stream count, so the muxer has never seen
+            // data when a fresh claim is even attempted.
+            let request_template: &'static str = if media.starts_with("audio/") {
                 "audio_%u"
             } else if media.starts_with("video/") {
                 "video_%u"
             } else {
                 "subtitle_%u"
             };
-            let mux_pad = muxer_for_pads.request_pad_simple(request_template);
+            let mux_pad = pad_pool
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get_mut(request_template)
+                .and_then(|pads| pads.pop())
+                .or_else(|| muxer_for_pads.request_pad_simple(request_template));
             let Some(mux_pad) = mux_pad else {
                 if debug {
                     eprintln!("RIVULET_REMUX no request pad for {media:?} — parking on fakesink");
@@ -457,61 +502,6 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
                 tracing::warn!("remux: queue to muxer link failed, track skipped");
                 return;
             }
-            // Timestamp hygiene: sources recorded with DTS-only video
-            // buffers (hardware encoders with B-frame reordering) or
-            // otherwise PTS-less buffers make mp4mux fail with "Buffer has
-            // no PTS". Recover by carrying DTS over as PTS, or interpolating
-            // from the previous buffer.
-            {
-                let last_pts_ns = std::sync::atomic::AtomicU64::new(u64::MAX);
-                mux_pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, info| {
-                    use std::sync::atomic::Ordering;
-                    if let Some(buffer) = info.buffer_mut() {
-                        let buffer = buffer.make_mut();
-                        if buffer.pts().is_none() {
-                            let fallback = buffer.dts().map(|dts| dts.nseconds()).or_else(|| {
-                                let prev = last_pts_ns.load(Ordering::Relaxed);
-                                (prev != u64::MAX).then(|| {
-                                    prev + buffer
-                                        .duration()
-                                        .map(|d| d.nseconds())
-                                        .unwrap_or(33_000_000)
-                                })
-                            });
-                            if let Some(ns) = fallback {
-                                buffer.set_pts(gst::ClockTime::from_nseconds(ns));
-                            }
-                        }
-                        if let Some(pts) = buffer.pts() {
-                            last_pts_ns.store(pts.nseconds(), Ordering::Relaxed);
-                        }
-                    }
-                    gst::PadProbeReturn::Ok
-                });
-            }
-
-            // Hold data (and events) back until the demuxer has exposed all
-            // its pads (batch release on no-more-pads + grace): the muxer
-            // must not see the first stream configured before every request
-            // pad has been claimed. The block is released by removing the
-            // probe (a BLOCK_DOWNSTREAM probe stays active as long as the
-            // callback returns Ok; dropping the data flow requires removal).
-            let claimed = Arc::clone(&claim_started);
-            if let Some(probe_id) = queue_src.add_probe(
-                gst::PadProbeType::BLOCK_DOWNSTREAM | gst::PadProbeType::BUFFER,
-                move |_pad, _info| {
-                    if !claimed.load(Ordering::Acquire) {
-                        // Keep the block: park this item until removal.
-                        return gst::PadProbeReturn::Handled;
-                    }
-                    gst::PadProbeReturn::Ok
-                },
-            ) {
-                block_probes
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .push((queue_src, probe_id));
-            }
 
             if src_pad.link(&head).is_err() {
                 tracing::warn!("remux: demux link failed, track skipped");
@@ -520,48 +510,42 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
             track_chains
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .insert(chain_key, head);
+                .insert(chain_key, funnel);
         }
     });
 
-    // Batch release: `no-more-pads` fires when the demuxer has exposed its
-    // first wave of pads; later pad waves (the PMT update in TS) still
-    // follow. The claim thread releases the block on all currently wired
-    // chains after a short grace period and then keeps watching until the
-    // pipeline ends, so chains from later waves are unblocked as they
-    // appear. All request pads were claimed up front (see pad-added).
-    //
-    // The wait MUST happen off the streaming thread: sleeping in this
-    // callback would block the demuxer itself — it could then never expose
-    // the later pad waves, and every audio track would hang.
-    demuxer.connect_no_more_pads({
-        let claim_started = Arc::clone(&claim_started);
-        let shutdown = Arc::clone(&shutdown);
-        move |_demux| {
-            if claim_started.swap(true, Ordering::SeqCst) {
-                return;
-            }
-            let shutdown = Arc::clone(&shutdown);
-            let claim_started = Arc::clone(&claim_started);
-            let block_probes = Arc::clone(&block_probes);
-            std::thread::spawn(move || {
-                // Grace period: the PMT update (and with it the real pad
-                // wave) lands well within it for short recordings. Only
-                // after it the chains are released, so the muxer sees no
-                // stream configured before every request pad exists.
-                std::thread::sleep(std::time::Duration::from_millis(300));
-                claim_started.store(true, Ordering::Release);
-                for (pad, probe_id) in block_probes
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .drain(..)
-                {
-                    pad.remove_probe(probe_id);
-                }
-                drop(shutdown);
-            });
+    // Pre-claim: for TS sources the PMT is scanned straight from the file
+    // (pure byte parsing, no GStreamer), so EVERY request pad exists before
+    // the pipeline starts. This removes the whole claim-ordering race:
+    // tsdemux's pad waves, the muxer's "configured" heuristic and the
+    // speculative duplicate pads all collapse into simple pad assignment
+    // inside pad-added. MKV/MOV demuxers expose their pads in one wave, so
+    // the lazy in-callback claim is fine for them.
+    if plan.source == RecordingContainer::MpegTs {
+        let stream_counts = scan_mpegts_stream_kinds(&plan.source_path);
+        let total = stream_counts.audio + stream_counts.video;
+        if debug {
+            eprintln!(
+                "RIVULET_REMUX PMT scan: audio={} video={} total={total}",
+                stream_counts.audio, stream_counts.video
+            );
         }
-    });
+        if total > 0 {
+            let mut pool = pad_pool.lock().unwrap_or_else(|e| e.into_inner());
+            for _ in 0..stream_counts.audio {
+                match muxer.request_pad_simple("audio_%u") {
+                    Some(pad) => pool.entry("audio_%u").or_default().push(pad),
+                    None => return Err("mp4 target has no audio pad template".to_string()),
+                }
+            }
+            for _ in 0..stream_counts.video {
+                match muxer.request_pad_simple("video_%u") {
+                    Some(pad) => pool.entry("video_%u").or_default().push(pad),
+                    None => return Err("mp4 target has no video pad template".to_string()),
+                }
+            }
+        }
+    }
 
     pipeline
         .set_state(gst::State::Playing)
@@ -572,8 +556,6 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
         gst::ClockTime::from_seconds(60),
         &[gst::MessageType::Eos, gst::MessageType::Error],
     );
-    let shutdown_flag = Arc::clone(&shutdown);
-    shutdown_flag.store(true, Ordering::Release);
     let _ = pipeline.set_state(gst::State::Null);
 
     match outcome {
@@ -591,6 +573,124 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
         }
         _ => Err("remux timed out before EOS".to_string()),
     }
+}
+
+/// Elementary-stream kinds counted from a transport stream's PMT (issue
+/// #242, slice 3). Used to pre-claim muxer request pads before the remux
+/// pipeline starts so pad assignment in `pad-added` cannot race the
+/// muxer's "refuse pads once configured" rule.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct TsStreamCounts {
+    audio: usize,
+    video: usize,
+}
+
+/// Scans `path` for the PAT and the (first) PMT and counts the distinct
+/// elementary-stream PIDs by kind. Best-effort: any parse problem yields
+/// the counts found so far (an empty result simply skips pre-claiming).
+///
+/// Only enough of the ISO 13818-1 syntax to walk PAT/PMT sections is
+/// implemented: 188-byte packets, pointer_field, section-length bounds,
+/// and PMT stream entries (`stream_type` + `elementary_PID` + ES_info
+/// length skip). Program- and stream-type values follow the spec (and
+/// H.222 extension): 0x0f/0x11 AAC, 0x1b/0x24 H.264/H.265, 0x02/0x10
+/// MPEG video.
+fn scan_mpegts_stream_kinds(path: &str) -> TsStreamCounts {
+    let mut counts = TsStreamCounts::default();
+    let Ok(data) = std::fs::read(path) else {
+        return counts;
+    };
+
+    // PAT: PID 0x0000 -> program number -> PMT PID.
+    let mut pmt_pid: Option<u16> = None;
+    let mut pmt: Option<&[u8]> = None;
+    let mut offset = 0;
+    while offset + 188 <= data.len() {
+        let pkt = &data[offset..offset + 188];
+        offset += 188;
+        if pkt[0] != 0x47 {
+            continue; // sync byte: not a TS packet (resync would be nicer,
+                      // but our own muxer writes clean 188-byte packets)
+        }
+        let pid = (u16::from(pkt[1] & 0x1f) << 8) | u16::from(pkt[2]);
+        let payload_unit_start = pkt[1] & 0x40 != 0;
+        if !payload_unit_start {
+            continue;
+        }
+        // Payload after the adaptation field: byte 4 is the AF length, the
+        // AF itself (if any) follows, then the payload.
+        let af_len = usize::from(pkt[4]);
+        if 5 + af_len >= 188 {
+            continue;
+        }
+        let payload = &pkt[5 + af_len..];
+        if payload.is_empty() {
+            continue;
+        }
+        let pointer = usize::from(payload[0]);
+        let Some(section) = payload.get(1 + pointer..) else {
+            continue;
+        };
+        if section.is_empty() {
+            continue;
+        }
+        let table_id = section[0];
+        if pmt_pid.is_none() && pid == 0x0000 && table_id == 0x00 && section.len() >= 12 {
+            // PAT: section_length bounds the section; programs start at 8.
+            let section_len = (usize::from(section[1] & 0x03) << 8) | usize::from(section[2]);
+            let end = section_len.min(section.len() - 3);
+            let mut i = 8;
+            while i + 4 <= end {
+                let program = (u16::from(section[i]) << 8) | u16::from(section[i + 1]);
+                let pid = ((u16::from(section[i + 2]) & 0x1f) << 8) | u16::from(section[i + 3]);
+                if program != 0 && pid != 0 {
+                    pmt_pid = Some(pid);
+                    break;
+                }
+                i += 4;
+            }
+        } else if pid == pmt_pid.unwrap_or(u16::MAX) && table_id == 0x02 {
+            // mpegtsmux rewrites the PMT as streams materialize: the first
+            // version may list only the video PID (audio ES info arrives
+            // with the PMT update later in the file). Parse every PMT and
+            // let the LAST one (the most complete) decide the counts; the
+            // scan caps at a few MB so a truncated file cannot spin.
+            pmt = Some(section);
+            if offset > 8 * 1024 * 1024 {
+                break;
+            }
+        }
+    }
+
+    let Some(pmt) = pmt else {
+        return counts;
+    };
+    if pmt.len() < 12 {
+        return counts;
+    }
+    let section_len = (usize::from(pmt[1] & 0x03) << 8) | usize::from(pmt[2]);
+    let end = section_len.min(pmt.len() - 3).saturating_sub(4); // minus CRC32
+                                                                // program_info_length sits at bytes 10-11; the stream entries follow it.
+    let prog_info_len = ((usize::from(pmt[10]) & 0x0f) << 8) | usize::from(pmt[11]);
+    let mut i = 12 + prog_info_len;
+    let mut seen_pids: Vec<u16> = Vec::new();
+    while i + 5 <= end {
+        let stream_type = pmt[i];
+        let es_pid = ((u16::from(pmt[i + 1]) & 0x1f) << 8) | u16::from(pmt[i + 2]);
+        let es_info_len = ((usize::from(pmt[i + 3]) & 0x0f) << 8) | usize::from(pmt[i + 4]);
+        if es_pid != 0 && !seen_pids.contains(&es_pid) {
+            seen_pids.push(es_pid);
+            match stream_type {
+                // AAC (ADTS/raw), MPEG-1/2 audio, AC-3, DTS, Opus
+                0x0f | 0x11 | 0x03 | 0x04 | 0x81 | 0x82 | 0x85 | 0x90 => counts.audio += 1,
+                // MPEG-1/2 video, H.264, H.265, AV1
+                0x01 | 0x02 | 0x10 | 0x1b | 0x24 | 0x25 => counts.video += 1,
+                _ => {}
+            }
+        }
+        i += 5 + es_info_len;
+    }
+    counts
 }
 
 #[cfg(test)]

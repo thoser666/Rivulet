@@ -5367,7 +5367,10 @@ mod tests {
             RecordingContainer::Mov,
             RecordingContainer::MpegTs,
         ] {
+            // Software encoder on purpose: the CI runners have no GPU, and
+            // the muxing parity must not depend on NVENC timing quirks.
             let mut engine = RivuletEngine::default();
+            engine.set_video_encoder(VideoEncoder::Software);
             engine.set_audio_enabled(true);
             engine.set_recording_container(container);
             engine.set_auto_remux(false);

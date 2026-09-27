@@ -6896,7 +6896,7 @@ fn track_model_container_remux_parity_is_pinned() {
     let container = read("rivulet-core/src/container.rs");
     for needle in [
         "fn remux_to_mp4",
-        "BLOCK_DOWNSTREAM",
+        "funnel",
         "request_pad_simple",
         "aacparse",
         "h264parse",
