@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- fix(ci): **CodeQL-Action-Pins auf v4.38.2 gehoben** — der
+  Stale-Pin-Job (check-action-pins) meldete die vier
+  `github/codeql-action`-Pins (init/autobuild/analyze/upload-sarif in
+  security.yml + scorecard.yml) als outdated innerhalb der v4-Linie;
+  SHA + `# v4.38.2`-Kommentar und die Pin-Tabelle in
+  `docs/ci-action-pins.md` sind wieder aktuell.
+
 - feat(audio): **Per-Track-Audio-Modell — GUI, Persistenz & i18n, Slice 4
   (Issue #242)** — das OBS-artige Bus-Modell ist im Mixer steuerbar: ein
   Tracks-Panel pro Bus (Enable, Master-Gain -30..+30 dB, Mute,
