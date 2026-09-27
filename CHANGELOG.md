@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+- feat(audio): **Per-Track-Audio-Modell — GUI, Persistenz & i18n, Slice 4
+  (Issue #242)** — das OBS-artige Bus-Modell ist im Mixer steuerbar: ein
+  Tracks-Panel pro Bus (Enable, Master-Gain -30..+30 dB, Mute,
+  Send-Track-Radio für den FLV-Stream), Mitgliedschafts-Toggles pro Quelle
+  (sichtbar sobald eine Quelle explizite Bus-Mitgliedschaft hat — sonst
+  bleibt die Legacy-Routing-UI maßgeblich). Die Bus-Liste + Send-Track
+  persistieren unter dem eigenen versionierten Storage-Key
+  `audio_tracks_v1` (getrennt vom App-Blob und `audio_routing_v1`);
+  korrupte oder unbekannte Schema-Versionen fallen auf die
+  Default-Konfiguration zurück, statt den Restore zu brechen. GUI-Edits
+  laufen über `set_audio_track_config` (Engine sanitiziert Bus-Anzahl,
+  Send-Track und jetzt auch den Gain auf ±30 dB) und spiegeln das
+  sanitizierte Ergebnis zurück in die UI. 9 neue i18n-Keys (EN+DE),
+  4 GUI-Tests (Persistenz-Roundtrip, Fallbacks, Sanitize-Mirror,
+  Membership-Flow), ci_pinning pinnt Panel, Storage-Key und Keys,
+  Doku in `docs/m6-audio-routing.md`.
+
+- fix(audio): **Gain-Clamping in `AudioTrackConfig::sanitized`** —
+  Master-Gains außerhalb ±30 dB werden beim Setzen der Konfiguration
+  geklemmt (deckungsgleich mit `set_audio_bus_gain`), statt nur im
+  Live-Pfad.
+
 - feat(audio): **Per-Track-Audio-Modell — Container/Remux-Parität, Slice 3
   (Issue #242)** — Multi-Track-Recordings überleben jetzt jeden Container
   inklusive Crash-Safe-Remux: Der Test `track_model_records_all_audio_tracks_into_every_container`

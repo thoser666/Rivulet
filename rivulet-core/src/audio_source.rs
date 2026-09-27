@@ -742,9 +742,10 @@ impl AudioTrackConfig {
         }
     }
 
-    /// Clamp the track count to [`AUDIO_TRACK_MAX`] and keep `send_track`
-    /// inside the remaining range. An empty bus list resets to the default
-    /// four buses.
+    /// Clamp the track count to [`AUDIO_TRACK_MAX`], keep `send_track`
+    /// inside the remaining range and clamp every master gain to the same
+    /// ±30 dB window [`crate::RivuletEngine::set_audio_bus_gain`] enforces.
+    /// An empty bus list resets to the default four buses.
     pub fn sanitized(mut self) -> Self {
         if self.tracks.len() > AUDIO_TRACK_MAX as usize {
             self.tracks.truncate(AUDIO_TRACK_MAX as usize);
@@ -754,6 +755,9 @@ impl AudioTrackConfig {
         }
         if self.send_track == 0 || self.send_track as usize > self.tracks.len() {
             self.send_track = 1;
+        }
+        for bus in &mut self.tracks {
+            bus.gain_db = bus.gain_db.clamp(-30.0, 30.0);
         }
         self
     }

@@ -816,6 +816,10 @@ impl RestreamTargetConfig {
     }
 }
 
+/// Storage key of the per-track bus config (`audio_tracks_v1`, issue #242).
+/// Lives outside the main app blob so schema bumps stay isolated.
+const AUDIO_TRACKS_STORAGE_KEY: &str = "audio_tracks_v1";
+
 /// The main application structure.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -1717,6 +1721,15 @@ pub struct RivuletApp {
     #[serde(skip)]
     audio_mixer_needs_sync: bool,
 
+    // Per-track audio model (issue #242, slice 4). Bus list + streaming send
+    // track, persisted under the dedicated `audio_tracks_v1` storage key;
+    // the GUI mirrors the engine's sanitized config after every edit.
+    audio_track_config: rivulet_core::AudioTrackConfig,
+    /// Set by the track-panel edits; cleared once the GUI copy matches the
+    /// engine's (sanitized) config again.
+    #[serde(skip)]
+    audio_track_needs_sync: bool,
+
     // NDI (LAN) monitor feed: when enabled, every recording/streaming session
     // additionally publishes the encoded H.264 video as an NDI source (M5
     // #77). Applied to the engine before every session start.
@@ -2151,6 +2164,8 @@ impl Default for RivuletApp {
             audio_mixer_new_source_name: String::new(),
             audio_mixer_new_source_kind: 0,
             audio_mixer_needs_sync: false,
+            audio_track_config: rivulet_core::AudioTrackConfig::default(),
+            audio_track_needs_sync: false,
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
             app_audio_captures: Vec::new(),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
@@ -2226,6 +2241,30 @@ impl RivuletApp {
             self.engine.set_audio_sources(self.audio_sources.clone());
             self.audio_mixer_needs_sync = false;
         }
+        // Per-track bus model (issue #242): push bus/send-track edits into
+        // the engine and mirror its sanitized config back so the UI always
+        // renders what a session will actually use.
+        if self.audio_track_needs_sync {
+            self.engine
+                .set_audio_track_config(self.audio_track_config.clone());
+            self.audio_track_config = self.engine.audio_track_config().clone();
+            self.audio_track_needs_sync = false;
+        }
+    }
+
+    /// Flags the per-track bus config as dirty and pushes it into the engine
+    /// on the next frame (`sync_audio_routing`).
+    fn mark_audio_tracks_dirty(&mut self) {
+        self.audio_track_needs_sync = true;
+    }
+
+    /// Whether the per-track bus model drives the sessions: any source with
+    /// explicit bus membership opts the mixer into the track model (mirrors
+    /// the engine gate; the GUI shows membership toggles only then).
+    fn uses_track_model(&self) -> bool {
+        self.audio_sources
+            .iter()
+            .any(|s| !s.track_members.is_empty())
     }
 
     /// Start or stop the WASAPI per-application captures so they exactly
@@ -2528,6 +2567,50 @@ impl RivuletApp {
                 }
             });
         });
+
+        // Per-track membership (issue #242): one toggle per bus, shown only
+        // when the session drives the bus model (any source has members).
+        if self.uses_track_model() {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(self.tr("audio_tracks_members")).weak());
+                let mut dirty = false;
+                for bus in &self.audio_track_config.tracks {
+                    if !bus.enabled {
+                        continue;
+                    }
+                    let mut member = source.track_members.contains(&bus.id);
+                    if ui
+                        .toggle_value(
+                            &mut member,
+                            format!("{} {}", bus.id, self.tr("audio_tracks_track")),
+                        )
+                        .on_hover_text(self.tr("audio_tracks_membership_hint"))
+                        .changed()
+                    {
+                        let mut members = source.track_members.clone();
+                        if member {
+                            members.push(bus.id);
+                        } else {
+                            members.retain(|b| *b != bus.id);
+                        }
+                        let _ = self.engine.set_audio_source_track_members(id, members);
+                        dirty = true;
+                    }
+                }
+                if dirty {
+                    if let Some(s) = self.audio_sources.iter_mut().find(|s| s.id == id) {
+                        s.track_members = self
+                            .engine
+                            .audio_sources()
+                            .iter()
+                            .find(|e| e.id == id)
+                            .map(|e| e.track_members.clone())
+                            .unwrap_or_default();
+                    }
+                    self.audio_mixer_needs_sync = true;
+                }
+            });
+        }
 
         let routing_changed = record != source.routing.record || stream != source.routing.stream;
         if routing_changed {
@@ -2868,6 +2951,7 @@ impl RivuletApp {
         if self.audio_sources.is_empty() {
             ui.label(egui::RichText::new(self.tr("audio_routing_legacy_active")).weak());
         }
+        self.draw_audio_tracks_panel(ui);
         let mut remove_id: Option<uuid::Uuid> = None;
         egui::Grid::new("audio_routing_matrix")
             .num_columns(4)
@@ -2895,6 +2979,62 @@ impl RivuletApp {
             self.remove_audio_source(id);
         }
         self.draw_audio_source_filter_panel(ui);
+    }
+
+    /// The per-track bus panel (issue #242): one row per bus with enable,
+    /// master gain (dB) and mute, plus the streaming send-track selector.
+    /// Edits update the GUI copy and flag `audio_track_needs_sync`; the
+    /// engine mirror happens in `sync_audio_routing`.
+    fn draw_audio_tracks_panel(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.label(egui::RichText::new(self.tr("audio_tracks_panel_title")).strong());
+        ui.label(egui::RichText::new(self.tr("audio_tracks_hint")).weak());
+        let send_track = self.audio_track_config.send_track;
+        let mut config = self.audio_track_config.clone();
+        let mut changed = false;
+        egui::Grid::new("audio_tracks_grid")
+            .num_columns(5)
+            .spacing([12.0, 4.0])
+            .show(ui, |ui| {
+                ui.strong(self.tr("audio_tracks_track"));
+                ui.strong(self.tr("audio_tracks_enabled"));
+                ui.strong(self.tr("audio_tracks_gain"));
+                ui.strong(self.tr("audio_source_mute"));
+                ui.strong(self.tr("audio_tracks_send"));
+                ui.end_row();
+                for bus in &mut config.tracks {
+                    ui.label(format!("{} {}", bus.id, self.tr("audio_tracks_track")));
+                    if ui.checkbox(&mut bus.enabled, "").changed() {
+                        changed = true;
+                    }
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut bus.gain_db, -30.0..=30.0)
+                                .suffix(" dB")
+                                .show_value(true),
+                        )
+                        .changed()
+                    {
+                        changed = true;
+                    }
+                    if ui.toggle_value(&mut bus.muted, "🔇").changed() {
+                        changed = true;
+                    }
+                    if ui
+                        .radio(send_track == bus.id, "")
+                        .on_hover_text(self.tr("audio_tracks_send_hint"))
+                        .clicked()
+                    {
+                        config.send_track = bus.id;
+                        changed = true;
+                    }
+                    ui.end_row();
+                }
+            });
+        if changed {
+            self.audio_track_config = config;
+            self.mark_audio_tracks_dirty();
+        }
     }
 
     /// The compact inline mixer strip (Record/Stream views): shared per-source
@@ -10584,6 +10724,27 @@ impl RivuletApp {
                 .set_audio_sources(restored.audio_sources.clone());
             restored.audio_mixer_needs_sync = false;
         }
+        // Per-track bus model (issue #242): restore `audio_tracks_v1` from
+        // its dedicated storage key (missing key = default config) and seed
+        // the engine with the sanitized config.
+        if let Some(json) = storage?.get_string(AUDIO_TRACKS_STORAGE_KEY) {
+            match rivulet_core::AudioTrackConfig::from_json(&json) {
+                Ok(config) => {
+                    restored.audio_track_config = config;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "audio_tracks_v1 could not be parsed; using defaults"
+                    );
+                }
+            }
+        }
+        restored
+            .engine
+            .set_audio_track_config(restored.audio_track_config.clone());
+        restored.audio_track_config = restored.engine.audio_track_config().clone();
+        restored.audio_track_needs_sync = false;
         Some(restored)
     }
 
@@ -10658,6 +10819,9 @@ impl RivuletApp {
 impl eframe::App for RivuletApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
+        // The per-track bus config lives under its own versioned key so a
+        // schema bump never has to touch the main app blob (issue #242).
+        storage.set_string(AUDIO_TRACKS_STORAGE_KEY, self.audio_track_config.to_json());
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -19203,6 +19367,128 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
     }
 
     // ── Multi-track audio routing, Phase 2 GUI (issue #154) ───────────
+
+    // ── Per-track audio model GUI (issue #242 slice 4) ─────────────
+
+    #[test]
+    fn audio_tracks_config_persists_under_dedicated_storage_key() {
+        // audio_tracks_v1 lives outside the main app blob: a schema bump
+        // must never have to migrate the whole RivuletApp state.
+        let mut app = RivuletApp::default();
+        let mut config = rivulet_core::AudioTrackConfig::new();
+        config.tracks[1].gain_db = -3.5;
+        config.tracks[1].muted = true;
+        config.tracks[3].enabled = false;
+        config.send_track = 2;
+        app.audio_track_config = config;
+        app.audio_track_needs_sync = true;
+        app.sync_audio_routing();
+        assert!(!app.audio_track_needs_sync, "sync must clear the flag");
+        assert_eq!(app.engine.audio_track_config().send_track, 2);
+        assert!((app.engine.audio_track_config().tracks[1].gain_db - -3.5).abs() < f64::EPSILON);
+
+        let mut storage = MemoryStorage::default();
+        eframe::App::save(&mut app, &mut storage);
+        let raw = eframe::Storage::get_string(&storage, AUDIO_TRACKS_STORAGE_KEY)
+            .expect("audio_tracks_v1 must be persisted under its own key");
+        let parsed =
+            rivulet_core::AudioTrackConfig::from_json(&raw).expect("persisted config must parse");
+        assert_eq!(parsed.send_track, 2);
+        assert!(!parsed.tracks[3].enabled);
+
+        // The restore path reads the key back, seeds the engine and mirrors
+        // the sanitized config into the GUI copy.
+        let restored = RivuletApp::restore_from_storage(Some(&storage))
+            .expect("persisted app state must be restored");
+        assert_eq!(restored.audio_track_config.send_track, 2);
+        assert!(!restored.audio_track_needs_sync);
+        assert_eq!(restored.engine.audio_track_config().send_track, 2);
+    }
+
+    #[test]
+    fn audio_tracks_restore_falls_back_to_defaults_when_key_is_missing_or_corrupt() {
+        // No key (fresh install or pre-#242 config): defaults, engine seeded.
+        let mut storage = MemoryStorage::default();
+        eframe::set_value(&mut storage, eframe::APP_KEY, &RivuletApp::default());
+        let restored = RivuletApp::restore_from_storage(Some(&storage))
+            .expect("persisted app state must be restored");
+        assert_eq!(
+            restored.audio_track_config,
+            rivulet_core::AudioTrackConfig::default()
+        );
+        assert!(!restored.audio_track_needs_sync);
+
+        // A corrupt payload must not take the whole restore down.
+        eframe::Storage::set_string(
+            &mut storage,
+            AUDIO_TRACKS_STORAGE_KEY,
+            "{not json".to_owned(),
+        );
+        let restored = RivuletApp::restore_from_storage(Some(&storage))
+            .expect("persisted app state must be restored");
+        assert_eq!(
+            restored.audio_track_config,
+            rivulet_core::AudioTrackConfig::default()
+        );
+
+        // An unknown schema version is rejected too.
+        eframe::Storage::set_string(
+            &mut storage,
+            AUDIO_TRACKS_STORAGE_KEY,
+            r#"{"version":99,"tracks":[],"send_track":1}"#.to_owned(),
+        );
+        let restored = RivuletApp::restore_from_storage(Some(&storage))
+            .expect("persisted app state must be restored");
+        assert_eq!(
+            restored.audio_track_config,
+            rivulet_core::AudioTrackConfig::default()
+        );
+    }
+
+    #[test]
+    fn audio_tracks_panel_edits_reach_the_engine_sanitized() {
+        // Out-of-range edits are clamped by the engine's sanitize step, so
+        // the GUI copy after sync always matches what a session will use.
+        let mut app = RivuletApp::default();
+        let mut config = rivulet_core::AudioTrackConfig::new();
+        config.tracks[0].gain_db = 45.0; // above the +30 dB cap
+        config.send_track = 9; // outside the bus count
+        app.audio_track_config = config;
+        app.audio_track_needs_sync = true;
+        app.sync_audio_routing();
+        let engine_config = app.engine.audio_track_config();
+        assert!((engine_config.tracks[0].gain_db - 30.0).abs() < f64::EPSILON);
+        assert_eq!(engine_config.send_track, 1);
+        // The GUI copy is mirrored back from the engine after the sync.
+        assert_eq!(app.audio_track_config, *engine_config);
+    }
+
+    #[test]
+    fn audio_source_track_membership_edits_flow_into_the_engine() {
+        let mut app = RivuletApp::default();
+        let source = AudioSource::application("Music", "pending_app");
+        let id = app.engine.add_audio_source(source.clone());
+        app.audio_sources.push(source);
+        assert!(app.engine.set_audio_source_track_members(id, vec![1, 3]));
+        // Mirror the engine state into the GUI list the way the strip
+        // handler does after an edit.
+        app.audio_sources[0].track_members = vec![1, 3];
+        assert!(
+            app.uses_track_model(),
+            "membership opts the mixer into the track model"
+        );
+        app.audio_mixer_needs_sync = true;
+        app.sync_audio_routing();
+        let stored = app
+            .engine
+            .audio_sources()
+            .iter()
+            .find(|s| s.id == id)
+            .expect("source exists")
+            .track_members
+            .clone();
+        assert_eq!(stored, vec![1, 3]);
+    }
 
     #[test]
     fn audio_routing_badges_cover_all_four_routing_states() {
