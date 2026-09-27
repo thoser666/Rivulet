@@ -6898,6 +6898,8 @@ fn track_model_container_remux_parity_is_pinned() {
         "fn remux_to_mp4",
         "funnel",
         "request_pad_simple",
+        "fn attach_pad",
+        "first_wave_pads",
         "aacparse",
         "h264parse",
     ] {
