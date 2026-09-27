@@ -165,10 +165,32 @@ This also fixes the macOS gap: with per-source volume/filters becoming part of
 the M6 routing feature, the macOS mixer must ship the same controls as
 Windows/Linux (closing the M5 mixer follow-up from `docs/macos-recording.md`).
 
+### Per-track buses (issue #242)
+
+The OBS-style per-track model layers **mixing buses (tracks)** on top of the
+per-source routing:
+
+- **Tracks panel** (Mixer view): one row per bus with an enable checkbox, a
+  master-gain slider (-30..+30 dB), a mute toggle, and a radio button for the
+  streaming **send track** (the single bus encoded into FLV/RTMP).
+- **Membership toggles:** every source strip shows one `N Track` toggle per
+  enabled bus once any source has explicit membership (the track-model gate).
+  A source feeds every bus it is a member of; empty membership keeps the
+  legacy record/stream routing authoritative.
+- **Persistence:** the bus list + send track live under their own versioned
+  storage key `audio_tracks_v1` (separate from the main app blob and from
+  `audio_routing_v1`). Corrupt or unknown-schema payloads fall back to the
+  default four-bus config instead of breaking the restore.
+- **Engine mirror:** GUI edits flag the config dirty; the next frame pushes
+  it through `set_audio_track_config` (sanitized: bus count, send track and
+  gain are clamped) and mirrors the sanitized result back into the UI.
+
 ### Settings
 
 - Persisted in `eframe::Storage` under a versioned JSON schema:
   `audio_routing_v1: { sources: [...], routing: [...] }`
+- Per-track buses (issue #242) persist separately as
+  `audio_tracks_v1: { version, tracks: [...], send_track }`.
 - Secrets / tokens are never stored here (same rule as M11 P1).
 
 ## i18n keys (new)
@@ -184,6 +206,15 @@ Windows/Linux (closing the M5 mixer follow-up from `docs/macos-recording.md`).
 | `audio_filter_per_source` | Filters for {name} | Filter für {name} |
 | `audio_capture_app_select` | Select application audio | Anwendungs-Audio auswählen |
 | `audio_capture_loopback_hint` | System loopback required — install BlackHole (macOS) or configure PipeWire (Linux) | System-Loopback erforderlich — installiere BlackHole (macOS) oder konfiguriere PipeWire (Linux) |
+| `audio_tracks_panel_title` | Tracks | Tracks |
+| `audio_tracks_hint` | Sources feed every track they are members of; the recording gets one track per track. The stream encodes the send track. | Quellen speisen jeden Track, in dem sie Mitglied sind; die Aufnahme erhält einen Track pro Track. Der Stream kodiert den Send-Track. |
+| `audio_tracks_track` | Track | Track |
+| `audio_tracks_enabled` | Enabled | Aktiv |
+| `audio_tracks_gain` | Master gain | Master-Pegel |
+| `audio_tracks_send` | Send | Send |
+| `audio_tracks_send_hint` | Encode this track into the stream | Diesen Track in den Stream kodieren |
+| `audio_tracks_members` | Member of | Mitglied von |
+| `audio_tracks_membership_hint` | Feed this source into the track | Diese Quelle in den Track einspeisen |
 
 ## Quality gate (M6-specific)
 
@@ -210,6 +241,10 @@ The following M6-specific checks must pass before this feature ships:
   `N/A` here (G5's capture-side gate, synthetic video feed).
 - [x] i18n parity: every new key exists in EN and DE locale files
   (`ci_pinning` guard).
+- [x] Per-track buses (issue #242): bus config + send track survive the
+  eframe storage round trip under the dedicated `audio_tracks_v1` key;
+  corrupt or unknown-schema payloads restore the default config, and the
+  engine receives the sanitized config (unit tests in the GUI crate).
 
 ## Out of scope (this feature)
 

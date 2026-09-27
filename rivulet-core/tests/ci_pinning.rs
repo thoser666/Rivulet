@@ -6912,3 +6912,71 @@ fn track_model_container_remux_parity_is_pinned() {
         "the TS PID base rationale must stay documented"
     );
 }
+
+#[test]
+fn track_model_gui_surface_is_pinned() {
+    // Issue #242 (slice 4): the OBS-style per-track model ships its GUI
+    // surface — tracks panel (enable/gain/mute/send), per-source membership
+    // toggles, the dedicated `audio_tracks_v1` persistence key with a
+    // corrupt-payload fallback, and the i18n keys. Renames or removals must
+    // fail CI, not drift silently.
+    let gui = read("rivulet-gui/src/app.rs");
+    for needle in [
+        "fn draw_audio_tracks_panel",
+        "fn uses_track_model",
+        "fn mark_audio_tracks_dirty",
+        "audio_track_needs_sync",
+        "AUDIO_TRACKS_STORAGE_KEY",
+        "set_audio_source_track_members",
+        "set_audio_track_config",
+        "engine.audio_track_config()",
+        // The restore path must not trust unparseable payloads.
+        "audio_tracks_v1 could not be parsed; using defaults",
+    ] {
+        assert!(
+            gui.contains(needle),
+            "track-model GUI surface must pin {needle}"
+        );
+    }
+
+    // Persistence: the save path writes the versioned JSON next to the main
+    // app blob, and the sanitized config is what gets stored.
+    let core = read("rivulet-core/src/audio_source.rs");
+    for needle in [
+        "pub fn sanitized(mut self) -> Self",
+        "pub fn to_json(&self)",
+        "pub fn from_json(json: &str)",
+    ] {
+        assert!(
+            core.contains(needle),
+            "audio track config surface must pin {needle}"
+        );
+    }
+
+    // i18n keys in both locales (EN and DE are one array each).
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in [
+        "audio_tracks_panel_title",
+        "audio_tracks_hint",
+        "audio_tracks_track",
+        "audio_tracks_enabled",
+        "audio_tracks_gain",
+        "audio_tracks_send",
+        "audio_tracks_send_hint",
+        "audio_tracks_members",
+        "audio_tracks_membership_hint",
+    ] {
+        assert_eq!(
+            i18n.matches(&format!("(\"{key}\"")).count(),
+            2,
+            "i18n key {key} must exist in EN and DE"
+        );
+    }
+
+    // Docs: the tracks-panel section and the storage-key split are
+    // documented, and the quality gate records the persistence round trip.
+    let doc = read("docs/m6-audio-routing.md");
+    for needle in ["### Per-track buses (issue #242)", "audio_tracks_v1"] {
+        assert!(doc.contains(needle), "m6 audio doc must pin {needle}");
+    }
+}
