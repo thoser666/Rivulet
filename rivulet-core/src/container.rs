@@ -299,6 +299,10 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
     // single downstream leg (N:1, no data loss).
     let track_chains: Arc<Mutex<HashMap<String, gst::Element>>> =
         Arc::new(Mutex::new(HashMap::new()));
+    // Chains whose first-wave funnel sink has already been retired (only
+    // the FIRST duplicate join retires it — later waves just add pads).
+    let retired_first_wave: Arc<Mutex<std::collections::HashSet<String>>> =
+        Arc::new(Mutex::new(std::collections::HashSet::new()));
     // Pre-claimed muxer request pads, grouped by kind (filled by the PMT
     // scan for TS sources). `pad-added` assigns chains from here first.
     let pad_pool: Arc<Mutex<HashMap<&'static str, Vec<gst::Pad>>>> =
@@ -328,6 +332,24 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
             {
                 if debug {
                     eprintln!("RIVULET_REMUX duplicate pad {pad_name} joins chain {chain_key}");
+                }
+                // Once a duplicate pad appears, the first-wave pad of this
+                // PID is dead — unlink and release its funnel sink. Funnel
+                // only forwards EOS once *every* sink pad reported EOS, so
+                // a retired first-wave pad that never sees EOS (speculative
+                // pads carry no data) would hold the downstream EOS back
+                // forever and stall the remux until the bus timeout.
+                if retired_first_wave
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(chain_key.clone())
+                {
+                    if let Some(first) = funnel.static_pad("sink_0") {
+                        if let Some(dead_src) = first.peer() {
+                            let _ = dead_src.unlink(&first);
+                        }
+                        funnel.release_request_pad(&first);
+                    }
                 }
                 match funnel.request_pad_simple("sink_%u") {
                     Some(extra_sink) => {
@@ -501,6 +523,39 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
             if queue_src.link(&mux_pad).is_err() {
                 tracing::warn!("remux: queue to muxer link failed, track skipped");
                 return;
+            }
+
+            // Timestamp hygiene: sources recorded with DTS-only video
+            // buffers (hardware encoders with B-frame reordering) or
+            // otherwise PTS-less buffers make mp4mux fail with "Buffer has
+            // no PTS". Recover by carrying DTS over as PTS, or interpolating
+            // from the previous buffer.
+            {
+                let last_pts_ns = std::sync::atomic::AtomicU64::new(u64::MAX);
+                mux_pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, info| {
+                    use std::sync::atomic::Ordering;
+                    if let Some(buffer) = info.buffer_mut() {
+                        let buffer = buffer.make_mut();
+                        if buffer.pts().is_none() {
+                            let fallback = buffer.dts().map(|dts| dts.nseconds()).or_else(|| {
+                                let prev = last_pts_ns.load(Ordering::Relaxed);
+                                (prev != u64::MAX).then(|| {
+                                    prev + buffer
+                                        .duration()
+                                        .map(|d| d.nseconds())
+                                        .unwrap_or(33_000_000)
+                                })
+                            });
+                            if let Some(ns) = fallback {
+                                buffer.set_pts(gst::ClockTime::from_nseconds(ns));
+                            }
+                        }
+                        if let Some(pts) = buffer.pts() {
+                            last_pts_ns.store(pts.nseconds(), Ordering::Relaxed);
+                        }
+                    }
+                    gst::PadProbeReturn::Ok
+                });
             }
 
             if src_pad.link(&head).is_err() {
