@@ -529,33 +529,52 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
             // buffers (hardware encoders with B-frame reordering) or
             // otherwise PTS-less buffers make mp4mux fail with "Buffer has
             // no PTS". Recover by carrying DTS over as PTS, or interpolating
-            // from the previous buffer.
+            // from the previous buffer. The probe must ALSO cover buffer
+            // lists: parsers (h264parse) can push lists downstream, and a
+            // BUFFER-only probe never fires for list pushes — exactly the
+            // buffers most likely to be DTS-only.
             {
-                let last_pts_ns = std::sync::atomic::AtomicU64::new(u64::MAX);
-                mux_pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, info| {
+                fn fix_pts(
+                    buffer: &mut gst::BufferRef,
+                    last_pts_ns: &std::sync::atomic::AtomicU64,
+                ) {
                     use std::sync::atomic::Ordering;
-                    if let Some(buffer) = info.buffer_mut() {
-                        let buffer = buffer.make_mut();
-                        if buffer.pts().is_none() {
-                            let fallback = buffer.dts().map(|dts| dts.nseconds()).or_else(|| {
-                                let prev = last_pts_ns.load(Ordering::Relaxed);
-                                (prev != u64::MAX).then(|| {
-                                    prev + buffer
-                                        .duration()
-                                        .map(|d| d.nseconds())
-                                        .unwrap_or(33_000_000)
-                                })
-                            });
-                            if let Some(ns) = fallback {
-                                buffer.set_pts(gst::ClockTime::from_nseconds(ns));
+                    if buffer.pts().is_none() {
+                        // DTS carryover, then interpolation from the previous
+                        // PTS, then t=0 for a stream's very first PTS-less
+                        // buffer — mp4mux must never see "Buffer has no PTS".
+                        let fallback = buffer.dts().map(|dts| dts.nseconds()).or_else(|| {
+                            let prev = last_pts_ns.load(Ordering::Relaxed);
+                            (prev != u64::MAX).then(|| {
+                                prev + buffer
+                                    .duration()
+                                    .map(|d| d.nseconds())
+                                    .unwrap_or(33_000_000)
+                            })
+                        });
+                        buffer.set_pts(gst::ClockTime::from_nseconds(fallback.unwrap_or(0)));
+                    }
+                    if let Some(pts) = buffer.pts() {
+                        last_pts_ns.store(pts.nseconds(), Ordering::Relaxed);
+                    }
+                }
+                let last_pts_ns = std::sync::atomic::AtomicU64::new(u64::MAX);
+                mux_pad.add_probe(
+                    gst::PadProbeType::BUFFER | gst::PadProbeType::BUFFER_LIST,
+                    move |_pad, info| {
+                        if let Some(buffer) = info.buffer_mut() {
+                            fix_pts(buffer.make_mut(), &last_pts_ns);
+                        } else if let Some(list) = info.buffer_list_mut() {
+                            let list = list.make_mut();
+                            for idx in 0..list.len() {
+                                if let Some(buffer) = list.get_mut(idx) {
+                                    fix_pts(buffer, &last_pts_ns);
+                                }
                             }
                         }
-                        if let Some(pts) = buffer.pts() {
-                            last_pts_ns.store(pts.nseconds(), Ordering::Relaxed);
-                        }
-                    }
-                    gst::PadProbeReturn::Ok
-                });
+                        gst::PadProbeReturn::Ok
+                    },
+                );
             }
 
             if src_pad.link(&head).is_err() {

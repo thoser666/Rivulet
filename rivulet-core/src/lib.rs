@@ -5371,6 +5371,9 @@ mod tests {
             // the muxing parity must not depend on NVENC timing quirks.
             let mut engine = RivuletEngine::default();
             engine.set_video_encoder(VideoEncoder::Software);
+            // Remux pad diagnostics on CI: failures there must show which
+            // pads/duplicates the remux saw, not just the bare timeout.
+            std::env::set_var("RIVULET_REMUX_DEBUG", "1");
             engine.set_audio_enabled(true);
             engine.set_recording_container(container);
             engine.set_auto_remux(false);
