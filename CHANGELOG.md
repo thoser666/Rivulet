@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+- feat(audio): **Per-Track-Audio-Modell — Container/Remux-Parität, Slice 3
+  (Issue #242)** — Multi-Track-Recordings überleben jetzt jeden Container
+  inklusive Crash-Safe-Remux: Der Test `track_model_records_all_audio_tracks_into_every_container`
+  nimmt für MP4/MKV/MOV/TS echte 2-Bus-Recordings auf und verifiziert
+  per Discoverer, dass beide Audio-Tracks (+ Video) im finalen MP4
+  landen. Dafür zwei Root-Cause-Fixes: (1) mpegtsmapper schreibt die
+  initiale PMT aus dem ersten Elementary-Buffer — die Engine hält
+  Audio-Buffers an den Bus-Mastern an, bis das erste Video-AU da ist
+  (`install_ts_pmt_alignment`), damit die PMT alle PIDs listet, und
+  die ES-PIDs starten bei 0x101 (0x100 = PMT/PCR-Kollision); (2) der
+  Remux (`remux_to_mp4`) fordert alle Muxer-Request-Pads sofort an und
+  blockiert den Downstream (`BLOCK_DOWNSTREAM`), bis der Demuxer alle
+  Pad-Wellen (tsdemux: spekulativ vor PMT-Update, real danach) fertig
+  hat — Lazy-Claims verloren sonst Audio-Tracks, und tsdemux-Pad-
+  Versionen derselben PID teilen sich eine Chain (Kein Kontext-loss
+  beim Parser). h264parse/aacparse konvertieren ADTS/Annex-B →
+  AVC/raw on-the-fly. Kein Re-Encoding.
+
 - feat(audio): **Per-Track-Audio-Modell — Engine-Branches, Slice 2
   (Issue #242)** — die Pipeline konsumiert das Bus-Modell: Quellen mit
   `track_members` werden pro aktivem Bus gemischt (eine Quelle in Bus
