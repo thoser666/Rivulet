@@ -207,26 +207,398 @@ pub enum RemuxOutcome {
     Skipped(String),
 }
 
+/// The pad-wiring state shared between the remux pipeline and the
+/// `pad-added` handler. Extracted from `remux_to_mp4` so the tsdemux
+/// duplicate-pad behavior (funnel fan-in, first-wave retirement) is
+/// directly unit-testable without a recorded file (issue #242).
+struct RemuxChainWiring {
+    /// One chain per logical stream (chain key = PID hex for TS pads).
+    track_chains: Arc<Mutex<HashMap<String, gst::Element>>>,
+    /// The first-wave funnel sink per chain, kept for retirement. Request
+    /// pads are NOT findable by `static_pad("sink_0")`: modern GStreamer
+    /// names generated request pads `funnelpad0`-style, so the pad handle
+    /// must be stored at build time.
+    first_wave_pads: Arc<Mutex<HashMap<String, gst::Pad>>>,
+    /// Chains whose first-wave funnel sink was already retired.
+    retired_first_wave: Arc<Mutex<std::collections::HashSet<String>>>,
+    /// Pre-claimed muxer request pads, grouped by kind (TS PMT scan).
+    pad_pool: Arc<Mutex<HashMap<&'static str, Vec<gst::Pad>>>>,
+}
+
+impl RemuxChainWiring {
+    /// Cheap handle clone (all fields are `Arc`s) for the `pad-added`
+    /// closure, which needs its own copy of the shared state.
+    fn clone_wiring(&self) -> Self {
+        Self {
+            track_chains: Arc::clone(&self.track_chains),
+            first_wave_pads: Arc::clone(&self.first_wave_pads),
+            retired_first_wave: Arc::clone(&self.retired_first_wave),
+            pad_pool: Arc::clone(&self.pad_pool),
+        }
+    }
+
+    fn new() -> Self {
+        Self {
+            track_chains: Arc::new(Mutex::new(HashMap::new())),
+            first_wave_pads: Arc::new(Mutex::new(HashMap::new())),
+            retired_first_wave: Arc::new(Mutex::new(std::collections::HashSet::new())),
+            pad_pool: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// The chain key for a demux pad: tsdemux names pads
+    /// `<kind>_<version>_<pid-hex>` (e.g. `audio_2_0101`), so the third
+    /// segment (the PID) identifies the logical stream and duplicate pad
+    /// versions of one PID must share a chain. Other demuxers expose unique
+    /// pad names, which map 1:1 to their own chain.
+    fn chain_key_for_pad(pad_name: &str) -> String {
+        let segments: Vec<&str> = pad_name.split('_').collect();
+        if segments.len() == 3 {
+            segments[2].to_string()
+        } else {
+            pad_name.to_string()
+        }
+    }
+
+    /// Attach one demux source pad to its chain. First wave: build the
+    /// `funnel -> [parser ->] queue -> mux request pad` leg and take one
+    /// funnel sink. Later waves (same chain key): request their own funnel
+    /// sink pad and fan into the shared downstream leg; the dead first-wave
+    /// sink is unlinked and released on the FIRST duplicate join (funnel
+    /// forwards EOS only once every sink pad reported EOS — a retired pad
+    /// that never sees EOS would stall the remux until the bus timeout).
+    ///
+    /// Returns the state that was reached:
+    /// - `Joined` — duplicate pad wired into the existing chain's funnel.
+    /// - `Built` — new chain built and wired end-to-end.
+    /// - `Failed(reason)` — the track could not be wired and is skipped.
+    #[allow(clippy::too_many_arguments)]
+    fn attach_pad(
+        &self,
+        pipeline: &gst::Pipeline,
+        muxer: &gst::Element,
+        src_pad: &gst::Pad,
+        media: &str,
+        pad_name: &str,
+        debug: bool,
+    ) -> AttachResult {
+        let chain_key = Self::chain_key_for_pad(pad_name);
+        // A later pad version of a known PID joins the existing chain:
+        // it requests its own sink pad on the chain's funnel (the first
+        // sink pad is already taken by the initial demux pad) and feeds
+        // the same parser/queue/mux leg through the fan-in.
+        if let Some(funnel) = self
+            .track_chains
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&chain_key)
+            .cloned()
+        {
+            if debug {
+                eprintln!("RIVULET_REMUX duplicate pad {pad_name} joins chain {chain_key}");
+            }
+            // Once a duplicate pad appears, the first-wave pad of this
+            // PID is dead — unlink and release its funnel sink. Funnel
+            // only forwards EOS once *every* sink pad reported EOS, so
+            // a retired first-wave pad that never sees EOS (speculative
+            // pads carry no data) would hold the downstream EOS back
+            // forever and stall the remux until the bus timeout. The
+            // handle was stored at build time: generated request pads are
+            // named `funnelpad0`-style, so a name lookup cannot find them.
+            if self
+                .retired_first_wave
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(chain_key.clone())
+            {
+                if let Some(head) = self
+                    .first_wave_pads
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&chain_key)
+                {
+                    if let Some(dead_src) = head.peer() {
+                        let _ = dead_src.unlink(&head);
+                    }
+                    funnel.release_request_pad(&head);
+                }
+            }
+            return match funnel.request_pad_simple("sink_%u") {
+                Some(extra_sink) => {
+                    if let Err(e) = src_pad.link(&extra_sink) {
+                        if debug {
+                            eprintln!("RIVULET_REMUX duplicate-pad link FAILED: {e}");
+                        }
+                        tracing::warn!(error = %e, "remux: duplicate-pad link failed");
+                        return AttachResult::Failed(e.to_string());
+                    }
+                    AttachResult::Joined
+                }
+                None => {
+                    tracing::warn!("remux: funnel refused a sink pad, duplicate pad dropped");
+                    AttachResult::Failed("funnel refused a duplicate pad".to_string())
+                }
+            };
+        }
+
+        // Transport intermediates (TS) carry stream formats MP4 cannot
+        // mux: AAC as ADTS instead of raw frames with codec_data, H.264/
+        // H.265 as Annex-B byte-stream instead of AVC/HVC1. A parse
+        // element converts on the fly (negotiation-driven) without
+        // re-encoding; for already-conformant inputs it passes through.
+        let parser = if media.starts_with("audio/") {
+            gst::ElementFactory::make("aacparse").build().ok()
+        } else if media == "video/x-h264" {
+            gst::ElementFactory::make("h264parse").build().ok()
+        } else if media == "video/x-h265" {
+            gst::ElementFactory::make("h265parse").build().ok()
+        } else {
+            None
+        };
+
+        // Chain: demux -> funnel -> [parser ->] queue -> mux pad. Build
+        // it fully (add to pipeline, link parser to queue, sync states)
+        // BEFORE linking the demux pad — a running demuxer pushes
+        // immediately, and data must never reach an element that is
+        // still in NULL state.
+        let funnel = match gst::ElementFactory::make("funnel").build() {
+            Ok(funnel) => funnel,
+            Err(e) => {
+                tracing::warn!(error = %e, "remux: could not create funnel, track skipped");
+                return AttachResult::Failed(e.to_string());
+            }
+        };
+        if let Err(e) = pipeline.add(&funnel) {
+            tracing::warn!(error = %e, "remux: could not add funnel, track skipped");
+            return AttachResult::Failed(e.to_string());
+        }
+        let queue = match gst::ElementFactory::make("queue").build() {
+            Ok(queue) => queue,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "remux: could not create track queue, track skipped"
+                );
+                return AttachResult::Failed(e.to_string());
+            }
+        };
+        if let Err(e) = pipeline.add(&queue) {
+            tracing::warn!(error = %e, "remux: could not add track queue, track skipped");
+            return AttachResult::Failed(e.to_string());
+        }
+        let downstream_sink = if let Some(parse) = &parser {
+            if let Err(e) = pipeline.add(parse) {
+                tracing::warn!(
+                    error = %e,
+                    "remux: could not add parse element, track skipped"
+                );
+                return AttachResult::Failed(e.to_string());
+            }
+            let Some(parse_src) = parse.static_pad("src") else {
+                return AttachResult::Failed("parser has no src pad".to_string());
+            };
+            let Some(parse_sink) = parse.static_pad("sink") else {
+                return AttachResult::Failed("parser has no sink pad".to_string());
+            };
+            let Some(queue_sink) = queue.static_pad("sink") else {
+                return AttachResult::Failed("queue has no sink pad".to_string());
+            };
+            if parse_src.link(&queue_sink).is_err() {
+                tracing::warn!("remux: parse to queue link failed, track skipped");
+                return AttachResult::Failed("parse-to-queue link failed".to_string());
+            }
+            let _ = parse.sync_state_with_parent();
+            let _ = queue.sync_state_with_parent();
+            parse_sink
+        } else {
+            let Some(queue_sink) = queue.static_pad("sink") else {
+                return AttachResult::Failed("queue has no sink pad".to_string());
+            };
+            let _ = queue.sync_state_with_parent();
+            queue_sink
+        };
+        let Some(funnel_src) = funnel.static_pad("src") else {
+            return AttachResult::Failed("funnel has no src pad".to_string());
+        };
+        if funnel_src.link(&downstream_sink).is_err() {
+            tracing::warn!("remux: funnel to parser/queue link failed, track skipped");
+            return AttachResult::Failed("funnel-to-downstream link failed".to_string());
+        }
+        let _ = funnel.sync_state_with_parent();
+        // Entry point of the chain: this first demux pad takes one
+        // funnel sink pad; later duplicate versions request their own.
+        // The handle is kept for retirement — generated request pads are
+        // named `funnelpad0`-style, so they cannot be re-found by name.
+        let Some(head) = funnel.request_pad_simple("sink_%u") else {
+            tracing::warn!("remux: funnel refused an entry pad, track skipped");
+            return AttachResult::Failed("funnel refused an entry pad".to_string());
+        };
+        self.first_wave_pads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(chain_key.clone(), head.clone());
+        let Some(queue_src) = queue.static_pad("src") else {
+            return AttachResult::Failed("queue has no src pad".to_string());
+        };
+        // Assignment order: pre-claimed pool pads (from the PMT scan)
+        // first, then a fresh claim — which works because the pool
+        // covers the full stream count, so the muxer has never seen
+        // data when a fresh claim is even attempted.
+        let request_template: &'static str = if media.starts_with("audio/") {
+            "audio_%u"
+        } else if media.starts_with("video/") {
+            "video_%u"
+        } else {
+            "subtitle_%u"
+        };
+        let mux_pad = self
+            .pad_pool
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(request_template)
+            .and_then(|pads| pads.pop())
+            .or_else(|| muxer.request_pad_simple(request_template));
+        let Some(mux_pad) = mux_pad else {
+            if debug {
+                eprintln!("RIVULET_REMUX no request pad for {media:?} — parking on fakesink");
+            }
+            if let Ok(fake) = gst::ElementFactory::make("fakesink")
+                .property("sync", false)
+                .build()
+            {
+                let _ = pipeline.add(&fake);
+                if let Some(sink) = fake.static_pad("sink") {
+                    let _ = queue_src.link(&sink);
+                }
+                let _ = fake.sync_state_with_parent();
+            }
+            if src_pad.link(&head).is_err() {
+                tracing::warn!("remux: demux link failed, track skipped");
+                return AttachResult::Failed("demux link failed".to_string());
+            }
+            self.track_chains
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(chain_key, funnel);
+            return AttachResult::Built;
+        };
+        if queue_src.link(&mux_pad).is_err() {
+            tracing::warn!("remux: queue to muxer link failed, track skipped");
+            return AttachResult::Failed("queue-to-muxer link failed".to_string());
+        }
+
+        // Timestamp hygiene: sources recorded with DTS-only video
+        // buffers (hardware encoders with B-frame reordering) or
+        // otherwise PTS-less buffers make mp4mux fail with "Buffer has
+        // no PTS". Recover by carrying DTS over as PTS, or interpolating
+        // from the previous buffer. The probe must ALSO cover buffer
+        // lists: parsers (h264parse) can push lists downstream, and a
+        // BUFFER-only probe never fires for list pushes — exactly the
+        // buffers most likely to be DTS-only.
+        {
+            fn fix_pts(buffer: &mut gst::BufferRef, last_pts_ns: &std::sync::atomic::AtomicU64) {
+                use std::sync::atomic::Ordering;
+                if buffer.pts().is_none() {
+                    // DTS carryover, then interpolation from the previous
+                    // PTS, then t=0 for a stream's very first PTS-less
+                    // buffer — mp4mux must never see "Buffer has no PTS".
+                    let fallback = buffer.dts().map(|dts| dts.nseconds()).or_else(|| {
+                        let prev = last_pts_ns.load(Ordering::Relaxed);
+                        (prev != u64::MAX).then(|| {
+                            prev + buffer
+                                .duration()
+                                .map(|d| d.nseconds())
+                                .unwrap_or(33_000_000)
+                        })
+                    });
+                    buffer.set_pts(gst::ClockTime::from_nseconds(fallback.unwrap_or(0)));
+                }
+                if let Some(pts) = buffer.pts() {
+                    last_pts_ns.store(pts.nseconds(), Ordering::Relaxed);
+                }
+            }
+            let last_pts_ns = std::sync::atomic::AtomicU64::new(u64::MAX);
+            mux_pad.add_probe(
+                gst::PadProbeType::BUFFER | gst::PadProbeType::BUFFER_LIST,
+                move |_pad, info| {
+                    if let Some(buffer) = info.buffer_mut() {
+                        fix_pts(buffer.make_mut(), &last_pts_ns);
+                    } else if let Some(list) = info.buffer_list_mut() {
+                        let list = list.make_mut();
+                        for idx in 0..list.len() {
+                            if let Some(buffer) = list.get_mut(idx) {
+                                fix_pts(buffer, &last_pts_ns);
+                            }
+                        }
+                    }
+                    gst::PadProbeReturn::Ok
+                },
+            );
+        }
+
+        if src_pad.link(&head).is_err() {
+            tracing::warn!("remux: demux link failed, track skipped");
+            return AttachResult::Failed("demux link failed".to_string());
+        }
+        self.track_chains
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(chain_key, funnel);
+        AttachResult::Built
+    }
+
+    /// Pre-claim `count` muxer request pads of one kind into the pool (the
+    /// TS PMT scan fills this before the pipeline starts so pad assignment
+    /// in `attach_pad` cannot race the muxer's "refuse pads once
+    /// configured" rule). Returns false when the muxer refused.
+    fn preclaim_ts_pads(&self, muxer: &gst::Element, template: &'static str, count: usize) -> bool {
+        let mut pool = self.pad_pool.lock().unwrap_or_else(|e| e.into_inner());
+        for _ in 0..count {
+            match muxer.request_pad_simple(template) {
+                Some(pad) => pool.entry(template).or_default().push(pad),
+                None => return false,
+            }
+        }
+        true
+    }
+}
+
+/// Outcome of [`RemuxChainWiring::attach_pad`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AttachResult {
+    /// Duplicate pad joined the existing chain's funnel.
+    Joined,
+    /// New chain built and wired end-to-end.
+    Built,
+    /// Track could not be wired (skipped, reason for diagnostics).
+    Failed(String),
+}
+
 /// Remuxes a crash-safe intermediate recording (MKV/MOV/TS) to MP4 **without
 /// re-encoding** (issue #71).
 ///
-/// Runs a `filesrc -> demuxer -> muxer -> filesink` pipeline. Demuxer pads are
-/// dynamic (one per contained track), so every demux src pad is linked on
-/// `pad-added` — through its own queue — to a *request* sink pad of the muxer
-/// (the canonical GStreamer remux pattern). Request pads instead of any-pad
-/// syntax are essential: the old single `demux.` branch silently dropped
-/// every track beyond the first, which lost audio tracks > 1 in the finished
-/// MP4 (issue #242, slice 3). The encoded video/audio streams pass through
-/// unchanged.
+/// Runs a `filesrc -> demuxer -> muxer -> filesink` pipeline. Demuxer pads
+/// are dynamic (one per contained track), so every demux src pad is wired on
+/// `pad-added` through [`RemuxChainWiring::attach_pad`]: one chain per
+/// logical stream (`funnel -> [aacparse|h264parse|h265parse] -> queue -> mux
+/// request pad`). The chain head is a funnel so tsdemux's duplicate pad
+/// waves (a speculative pad before the PMT update, the real pad after)
+/// fan into the same downstream leg instead of fighting over a single
+/// peer, and the dead first-wave funnel sink is released on the first
+/// duplicate join (funnel forwards EOS only once every sink pad reported
+/// EOS — a never-EOS pad would stall the remux until the bus timeout).
 ///
-/// Request pads are claimed in **one batch** after the demuxer has signalled
-/// `no-more-pads` (plus a short grace period): qtmux/mp4mux stop handing out
-/// request pads once the first stream has been configured, and tsdemux
-/// exposes its pads in several waves (a speculative stream before the PMT
-/// update, then the real ones), so lazily claiming pads on `pad-added` can
-/// lose audio tracks on TS->MP4 remuxes. Until the batch has run, every
-/// chain is held with a BLOCK probe on its demux pad; nothing reaches the
-/// muxer before all pads exist (issue #242, slice 3).
+/// For TS sources the PMT is scanned straight from the file (pure byte
+/// parsing, no GStreamer) and every muxer request pad is pre-claimed before
+/// the pipeline starts; tsdemux's pad waves, the muxer's "refuse pads once
+/// configured" rule and the speculative duplicate pads collapse into simple
+/// pad assignment inside `pad-added`. MKV/MOV demuxers expose their pads in
+/// one wave, so the lazy in-callback claim is fine for them.
+///
+/// The encoded video/audio streams pass through unchanged; only the
+/// transport format is converted on the fly (ADTS -> raw AAC,
+/// Annex-B -> AVC/HVC1). PTS-less buffers (DTS-only hardware encoders)
+/// are repaired on the mux pads for both buffer and buffer-list pushes.
 ///
 /// Returns `RemuxOutcome::Skipped` when a required element is unavailable so
 /// an environment without the full GStreamer plugins can degrade gracefully
@@ -288,85 +660,15 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
         .link(&filesink)
         .map_err(|e| format!("could not link {muxer_name} to filesink: {e}"))?;
 
-    // tsdemux names pads `<kind>_<version>_<pid-hex>` and can expose a new
-    // pad *version* for the same PID after a PMT update (a speculative
-    // stream materializing before the PMT, then the real one). All pads of
-    // one PID carry one logical track and must share a single chain, or the
-    // continuation pad feeds a context-less parser that drops every frame.
-    // The chain head is a `funnel`: a pad has exactly one peer, so late
-    // duplicate pads cannot link onto the parser/queue sink of the first
-    // wave — each duplicate gets its own funnel sink pad and fans into the
-    // single downstream leg (N:1, no data loss).
-    let track_chains: Arc<Mutex<HashMap<String, gst::Element>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-    // Chains whose first-wave funnel sink has already been retired (only
-    // the FIRST duplicate join retires it — later waves just add pads).
-    let retired_first_wave: Arc<Mutex<std::collections::HashSet<String>>> =
-        Arc::new(Mutex::new(std::collections::HashSet::new()));
-    // Pre-claimed muxer request pads, grouped by kind (filled by the PMT
-    // scan for TS sources). `pad-added` assigns chains from here first.
-    let pad_pool: Arc<Mutex<HashMap<&'static str, Vec<gst::Pad>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let wiring = RemuxChainWiring::new();
     demuxer.connect_pad_added({
         let muxer_for_pads = muxer.clone();
         let pipeline_for_pads = pipeline.clone();
-        let track_chains = Arc::clone(&track_chains);
-        let pad_pool = Arc::clone(&pad_pool);
+        let wiring = wiring.clone_wiring();
         move |_demux, src_pad| {
             let pad_name = src_pad.name().to_string();
+            let chain_key = RemuxChainWiring::chain_key_for_pad(&pad_name);
             let segments: Vec<&str> = pad_name.split('_').collect();
-            let chain_key: String = if segments.len() == 3 {
-                segments[2].to_string()
-            } else {
-                pad_name.clone()
-            };
-            // A later pad version of a known PID joins the existing chain:
-            // it requests its own sink pad on the chain's funnel (the first
-            // sink pad is already taken by the initial demux pad) and feeds
-            // the same parser/queue/mux leg through the fan-in.
-            if let Some(funnel) = track_chains
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(&chain_key)
-                .cloned()
-            {
-                if debug {
-                    eprintln!("RIVULET_REMUX duplicate pad {pad_name} joins chain {chain_key}");
-                }
-                // Once a duplicate pad appears, the first-wave pad of this
-                // PID is dead — unlink and release its funnel sink. Funnel
-                // only forwards EOS once *every* sink pad reported EOS, so
-                // a retired first-wave pad that never sees EOS (speculative
-                // pads carry no data) would hold the downstream EOS back
-                // forever and stall the remux until the bus timeout.
-                if retired_first_wave
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(chain_key.clone())
-                {
-                    if let Some(first) = funnel.static_pad("sink_0") {
-                        if let Some(dead_src) = first.peer() {
-                            let _ = dead_src.unlink(&first);
-                        }
-                        funnel.release_request_pad(&first);
-                    }
-                }
-                match funnel.request_pad_simple("sink_%u") {
-                    Some(extra_sink) => {
-                        if let Err(e) = src_pad.link(&extra_sink) {
-                            if debug {
-                                eprintln!("RIVULET_REMUX duplicate-pad link FAILED: {e}");
-                            }
-                            tracing::warn!(error = %e, "remux: duplicate-pad link failed");
-                        }
-                    }
-                    None => {
-                        tracing::warn!("remux: funnel refused a sink pad, duplicate pad dropped");
-                    }
-                }
-                return;
-            }
-
             // Media type: prefer the pad's current caps (present for MKV/MOV
             // and for TS pads exposed from a PMT that was already scanned);
             // fall back to the template caps (generic ANY for TS speculative
@@ -391,200 +693,17 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
                 eprintln!("RIVULET_REMUX pad={pad_name} media={media:?} chain={chain_key}");
             }
 
-            // Transport intermediates (TS) carry stream formats MP4 cannot
-            // mux: AAC as ADTS instead of raw frames with codec_data, H.264/
-            // H.265 as Annex-B byte-stream instead of AVC/HVC1. A parse
-            // element converts on the fly (negotiation-driven) without
-            // re-encoding; for already-conformant inputs it passes through.
-            let parser = if media.starts_with("audio/") {
-                gst::ElementFactory::make("aacparse").build().ok()
-            } else if media == "video/x-h264" {
-                gst::ElementFactory::make("h264parse").build().ok()
-            } else if media == "video/x-h265" {
-                gst::ElementFactory::make("h265parse").build().ok()
-            } else {
-                None
-            };
-
-            // Chain: demux -> funnel -> [parser ->] queue -> mux pad. Build
-            // it fully (add to pipeline, link parser to queue, sync states)
-            // BEFORE linking the demux pad — a running demuxer pushes
-            // immediately, and data must never reach an element that is
-            // still in NULL state.
-            let funnel = match gst::ElementFactory::make("funnel").build() {
-                Ok(funnel) => funnel,
-                Err(e) => {
-                    tracing::warn!(error = %e, "remux: could not create funnel, track skipped");
-                    return;
-                }
-            };
-            if let Err(e) = pipeline_for_pads.add(&funnel) {
-                tracing::warn!(error = %e, "remux: could not add funnel, track skipped");
-                return;
-            }
-            let queue = match gst::ElementFactory::make("queue").build() {
-                Ok(queue) => queue,
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "remux: could not create track queue, track skipped"
-                    );
-                    return;
-                }
-            };
-            if let Err(e) = pipeline_for_pads.add(&queue) {
-                tracing::warn!(error = %e, "remux: could not add track queue, track skipped");
-                return;
-            }
-            let downstream_sink = if let Some(parse) = &parser {
-                if let Err(e) = pipeline_for_pads.add(parse) {
-                    tracing::warn!(
-                        error = %e,
-                        "remux: could not add parse element, track skipped"
-                    );
-                    return;
-                }
-                let Some(parse_src) = parse.static_pad("src") else {
-                    return;
-                };
-                let Some(parse_sink) = parse.static_pad("sink") else {
-                    return;
-                };
-                let Some(queue_sink) = queue.static_pad("sink") else {
-                    return;
-                };
-                if parse_src.link(&queue_sink).is_err() {
-                    tracing::warn!("remux: parse to queue link failed, track skipped");
-                    return;
-                }
-                let _ = parse.sync_state_with_parent();
-                let _ = queue.sync_state_with_parent();
-                parse_sink
-            } else {
-                let Some(queue_sink) = queue.static_pad("sink") else {
-                    return;
-                };
-                let _ = queue.sync_state_with_parent();
-                queue_sink
-            };
-            let Some(funnel_src) = funnel.static_pad("src") else {
-                return;
-            };
-            if funnel_src.link(&downstream_sink).is_err() {
-                tracing::warn!("remux: funnel to parser/queue link failed, track skipped");
-                return;
-            }
-            let _ = funnel.sync_state_with_parent();
-            // Entry point of the chain: this first demux pad takes one
-            // funnel sink pad; later duplicate versions request their own.
-            let Some(head) = funnel.request_pad_simple("sink_%u") else {
-                tracing::warn!("remux: funnel refused an entry pad, track skipped");
-                return;
-            };
-            let Some(queue_src) = queue.static_pad("src") else {
-                return;
-            };
-            // Assignment order: pre-claimed pool pads (from the PMT scan)
-            // first, then a fresh claim — which works because the pool
-            // covers the full stream count, so the muxer has never seen
-            // data when a fresh claim is even attempted.
-            let request_template: &'static str = if media.starts_with("audio/") {
-                "audio_%u"
-            } else if media.starts_with("video/") {
-                "video_%u"
-            } else {
-                "subtitle_%u"
-            };
-            let mux_pad = pad_pool
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get_mut(request_template)
-                .and_then(|pads| pads.pop())
-                .or_else(|| muxer_for_pads.request_pad_simple(request_template));
-            let Some(mux_pad) = mux_pad else {
-                if debug {
-                    eprintln!("RIVULET_REMUX no request pad for {media:?} — parking on fakesink");
-                }
-                if let Ok(fake) = gst::ElementFactory::make("fakesink")
-                    .property("sync", false)
-                    .build()
-                {
-                    let _ = pipeline_for_pads.add(&fake);
-                    if let Some(sink) = fake.static_pad("sink") {
-                        let _ = queue_src.link(&sink);
-                    }
-                    let _ = fake.sync_state_with_parent();
-                }
-                if src_pad.link(&head).is_err() {
-                    tracing::warn!("remux: demux link failed, track skipped");
-                }
-                return;
-            };
-            if queue_src.link(&mux_pad).is_err() {
-                tracing::warn!("remux: queue to muxer link failed, track skipped");
-                return;
-            }
-
-            // Timestamp hygiene: sources recorded with DTS-only video
-            // buffers (hardware encoders with B-frame reordering) or
-            // otherwise PTS-less buffers make mp4mux fail with "Buffer has
-            // no PTS". Recover by carrying DTS over as PTS, or interpolating
-            // from the previous buffer. The probe must ALSO cover buffer
-            // lists: parsers (h264parse) can push lists downstream, and a
-            // BUFFER-only probe never fires for list pushes — exactly the
-            // buffers most likely to be DTS-only.
-            {
-                fn fix_pts(
-                    buffer: &mut gst::BufferRef,
-                    last_pts_ns: &std::sync::atomic::AtomicU64,
-                ) {
-                    use std::sync::atomic::Ordering;
-                    if buffer.pts().is_none() {
-                        // DTS carryover, then interpolation from the previous
-                        // PTS, then t=0 for a stream's very first PTS-less
-                        // buffer — mp4mux must never see "Buffer has no PTS".
-                        let fallback = buffer.dts().map(|dts| dts.nseconds()).or_else(|| {
-                            let prev = last_pts_ns.load(Ordering::Relaxed);
-                            (prev != u64::MAX).then(|| {
-                                prev + buffer
-                                    .duration()
-                                    .map(|d| d.nseconds())
-                                    .unwrap_or(33_000_000)
-                            })
-                        });
-                        buffer.set_pts(gst::ClockTime::from_nseconds(fallback.unwrap_or(0)));
-                    }
-                    if let Some(pts) = buffer.pts() {
-                        last_pts_ns.store(pts.nseconds(), Ordering::Relaxed);
-                    }
-                }
-                let last_pts_ns = std::sync::atomic::AtomicU64::new(u64::MAX);
-                mux_pad.add_probe(
-                    gst::PadProbeType::BUFFER | gst::PadProbeType::BUFFER_LIST,
-                    move |_pad, info| {
-                        if let Some(buffer) = info.buffer_mut() {
-                            fix_pts(buffer.make_mut(), &last_pts_ns);
-                        } else if let Some(list) = info.buffer_list_mut() {
-                            let list = list.make_mut();
-                            for idx in 0..list.len() {
-                                if let Some(buffer) = list.get_mut(idx) {
-                                    fix_pts(buffer, &last_pts_ns);
-                                }
-                            }
-                        }
-                        gst::PadProbeReturn::Ok
-                    },
-                );
-            }
-
-            if src_pad.link(&head).is_err() {
-                tracing::warn!("remux: demux link failed, track skipped");
-                return;
-            }
-            track_chains
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(chain_key, funnel);
+            // Everything else — chain construction, duplicate-pad fan-in,
+            // first-wave retirement, pad assignment and the PTS probe —
+            // lives in RemuxChainWiring so it stays unit-testable.
+            let _ = wiring.attach_pad(
+                &pipeline_for_pads,
+                &muxer_for_pads,
+                src_pad,
+                &media,
+                &pad_name,
+                debug,
+            );
         }
     });
 
@@ -605,18 +724,11 @@ pub fn remux_to_mp4(plan: &RemuxPlan) -> Result<RemuxOutcome, String> {
             );
         }
         if total > 0 {
-            let mut pool = pad_pool.lock().unwrap_or_else(|e| e.into_inner());
-            for _ in 0..stream_counts.audio {
-                match muxer.request_pad_simple("audio_%u") {
-                    Some(pad) => pool.entry("audio_%u").or_default().push(pad),
-                    None => return Err("mp4 target has no audio pad template".to_string()),
-                }
+            if !wiring.preclaim_ts_pads(&muxer, "audio_%u", stream_counts.audio) {
+                return Err("mp4 target has no audio pad template".to_string());
             }
-            for _ in 0..stream_counts.video {
-                match muxer.request_pad_simple("video_%u") {
-                    Some(pad) => pool.entry("video_%u").or_default().push(pad),
-                    None => return Err("mp4 target has no video pad template".to_string()),
-                }
+            if !wiring.preclaim_ts_pads(&muxer, "video_%u", stream_counts.video) {
+                return Err("mp4 target has no video pad template".to_string());
             }
         }
     }
@@ -967,5 +1079,363 @@ mod tests {
         // Missing source is reported before element availability.
         let err = remux_to_mp4(&plan).unwrap_err();
         assert!(err.contains("not found"));
+    }
+
+    // ── Funnel fan-in unit tests (issue #242): the tsdemux duplicate-pad
+    // waves are simulated with plain pads instead of a recorded file, so
+    // the wiring invariants fail here and not only in CI's parity test.
+
+    /// A demux-side src pad named like a tsdemux pad wave entry.
+    fn wave_pad(name: &str) -> gst::Pad {
+        gst::Pad::builder(gst::PadDirection::Src).name(name).build()
+    }
+
+    /// The minimal muxer double for `attach_pad`: a real mp4mux is not
+    /// needed to exercise the fan-in, only *a* muxer-shaped element whose
+    /// request pads exist.
+    fn mux_double() -> gst::Element {
+        gst::ElementFactory::make("fakesink")
+            .property("sync", false)
+            .build()
+            .expect("fakesink exists in every GStreamer build")
+    }
+
+    #[test]
+    fn chain_key_uses_the_tsdemux_pid_segment() {
+        assert_eq!(RemuxChainWiring::chain_key_for_pad("video_0_0103"), "0103");
+        assert_eq!(RemuxChainWiring::chain_key_for_pad("audio_2_0101"), "0101");
+        // Non-tsdemux pad names (mkvdemux/mp4demux expose unique names)
+        // map to their own chain.
+        assert_eq!(RemuxChainWiring::chain_key_for_pad("video_0"), "video_0");
+    }
+
+    #[test]
+    fn duplicate_pad_waves_fan_into_the_chain_funnel() {
+        gst::init().expect("gstreamer initializes");
+        let wiring = RemuxChainWiring::new();
+        let pipeline = gst::Pipeline::default();
+        let muxer = mux_double();
+
+        // Wave 1: the speculative pad builds the chain.
+        let first = wave_pad("video_0_0103");
+        assert_eq!(
+            wiring.attach_pad(
+                &pipeline,
+                &muxer,
+                &first,
+                "video/x-h264",
+                "video_0_0103",
+                false,
+            ),
+            AttachResult::Built
+        );
+        let funnel = wiring
+            .track_chains
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get("0103")
+            .cloned()
+            .expect("chain registered for the PID");
+        assert_eq!(funnel.num_sink_pads(), 1, "one funnel sink for wave 1");
+
+        // Wave 2 (the PMT update re-exposes the PID): must join the SAME
+        // chain through its own funnel sink — the exact spot where the old
+        // single-peer head link failed with "Pad was already linked" and
+        // dropped the real stream, corrupting the MP4.
+        let second = wave_pad("video_1_0103");
+        assert_eq!(
+            wiring.attach_pad(
+                &pipeline,
+                &muxer,
+                &second,
+                "video/x-h264",
+                "video_1_0103",
+                false,
+            ),
+            AttachResult::Joined
+        );
+        assert_eq!(
+            funnel.num_sink_pads(),
+            1,
+            "first-wave sink was retired; the duplicate owns the fan-in now"
+        );
+        let second_peer = second.peer().expect("duplicate pad must be linked");
+        assert_eq!(
+            second_peer.parent().map(|p| p.name()),
+            Some(funnel.name()),
+            "duplicate pad must be linked into the chain funnel"
+        );
+        assert_eq!(
+            first.peer(),
+            None,
+            "retired first-wave pad must be unlinked from the funnel"
+        );
+
+        // Wave 3 adds another sink without retiring anything again.
+        let third = wave_pad("video_2_0103");
+        assert_eq!(
+            wiring.attach_pad(
+                &pipeline,
+                &muxer,
+                &third,
+                "video/x-h264",
+                "video_2_0103",
+                false,
+            ),
+            AttachResult::Joined
+        );
+        assert_eq!(funnel.num_sink_pads(), 2, "waves 2+3 each own one sink");
+
+        // Distinct PIDs never share a chain.
+        let other = wave_pad("audio_0_0101");
+        assert_eq!(
+            wiring.attach_pad(
+                &pipeline,
+                &muxer,
+                &other,
+                "audio/mpeg",
+                "audio_0_0101",
+                false,
+            ),
+            AttachResult::Built
+        );
+        let chains = wiring
+            .track_chains
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        assert_eq!(chains.len(), 2, "one chain per PID");
+    }
+
+    #[test]
+    fn first_wave_retirement_happens_exactly_once_per_chain() {
+        gst::init().expect("gstreamer initializes");
+        let wiring = RemuxChainWiring::new();
+        let pipeline = gst::Pipeline::default();
+        let muxer = mux_double();
+
+        let first = wave_pad("audio_0_0101");
+        wiring.attach_pad(
+            &pipeline,
+            &muxer,
+            &first,
+            "audio/mpeg",
+            "audio_0_0101",
+            false,
+        );
+        let second = wave_pad("audio_1_0101");
+        wiring.attach_pad(
+            &pipeline,
+            &muxer,
+            &second,
+            "audio/mpeg",
+            "audio_1_0101",
+            false,
+        );
+        let third = wave_pad("audio_2_0101");
+        wiring.attach_pad(
+            &pipeline,
+            &muxer,
+            &third,
+            "audio/mpeg",
+            "audio_2_0101",
+            false,
+        );
+
+        let retired = wiring
+            .retired_first_wave
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            retired.len(),
+            1,
+            "the retire guard must mark the chain exactly once regardless of wave count"
+        );
+        assert!(retired.contains("0101"));
+    }
+
+    #[test]
+    fn preclaimed_pool_pads_are_consumed_before_fresh_claims() {
+        gst::init().expect("gstreamer initializes");
+        let wiring = RemuxChainWiring::new();
+        let pipeline = gst::Pipeline::default();
+        let muxer = gst::ElementFactory::make("mp4mux")
+            .build()
+            .expect("mp4mux available for remux tests");
+        // Pad links require both parents to share a bin hierarchy — in the
+        // real remux the muxer is part of the pipeline, and so it is here.
+        pipeline.add(&muxer).expect("muxer joins the test pipeline");
+
+        assert!(wiring.preclaim_ts_pads(&muxer, "audio_%u", 2));
+        assert_eq!(
+            wiring.pad_pool.lock().unwrap_or_else(|e| e.into_inner())["audio_%u"].len(),
+            2
+        );
+
+        let first = wave_pad("audio_0_0101");
+        assert_eq!(
+            wiring.attach_pad(
+                &pipeline,
+                &muxer,
+                &first,
+                "audio/mpeg",
+                "audio_0_0101",
+                false,
+            ),
+            AttachResult::Built
+        );
+        assert_eq!(
+            wiring.pad_pool.lock().unwrap_or_else(|e| e.into_inner())["audio_%u"].len(),
+            1,
+            "first chain consumed one pre-claimed pad"
+        );
+
+        let second = wave_pad("audio_1_0102");
+        assert_eq!(
+            wiring.attach_pad(
+                &pipeline,
+                &muxer,
+                &second,
+                "audio/mpeg",
+                "audio_1_0102",
+                false,
+            ),
+            AttachResult::Built
+        );
+        assert!(
+            wiring.pad_pool.lock().unwrap_or_else(|e| e.into_inner())["audio_%u"].is_empty(),
+            "second chain drained the pool before any fresh claim"
+        );
+    }
+
+    #[test]
+    fn funnel_eos_gating_after_retirement_reaches_downstream_eos() {
+        // The macOS CI stall, reproduced at unit level: funnel forwards EOS
+        // only once EVERY sink pad reported EOS. After the first-wave sink
+        // is retired (it will never see EOS — speculative pads carry no
+        // data) the remaining duplicate sink must be able to drive the
+        // downstream EOS alone.
+        gst::init().expect("gstreamer initializes");
+        let wiring = RemuxChainWiring::new();
+        let pipeline = gst::Pipeline::default();
+        let muxer = mux_double();
+
+        // video/x-raw keeps the chain parser-free (funnel -> queue only):
+        // the fan-in and EOS behavior under test is the funnel's, not a
+        // parser's reaction to synthetic stream data.
+        let first = wave_pad("video_0_0103");
+        wiring.attach_pad(
+            &pipeline,
+            &muxer,
+            &first,
+            "video/x-raw",
+            "video_0_0103",
+            false,
+        );
+        let second = wave_pad("video_1_0103");
+        wiring.attach_pad(
+            &pipeline,
+            &muxer,
+            &second,
+            "video/x-raw",
+            "video_1_0103",
+            false,
+        );
+
+        let funnel = wiring
+            .track_chains
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get("0103")
+            .cloned()
+            .expect("chain registered");
+        assert_eq!(funnel.num_sink_pads(), 1);
+
+        // Walk the wiring downstream: funnel src -> queue sink.
+        let funnel_src = funnel.static_pad("src").expect("funnel src pad");
+        let downstream = funnel_src.peer().expect("funnel wired downstream");
+        assert!(
+            downstream.name().starts_with("sink"),
+            "funnel feeds the parser/queue sink, got {}",
+            downstream.name()
+        );
+
+        // Push a buffer + EOS through the surviving duplicate pad (src
+        // direction — events/buffers flow downstream to the funnel sink)
+        // and observe them arrive at the funnel src.
+        let received = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let eos_seen = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        {
+            let received = Arc::clone(&received);
+            funnel_src.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
+                received.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                gst::PadProbeReturn::Ok
+            });
+        }
+        {
+            let eos_seen = Arc::clone(&eos_seen);
+            funnel_src.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |_pad, info| {
+                if let Some(event) = info.event() {
+                    if matches!(event.view(), gst::EventView::Eos(_)) {
+                        eos_seen.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+                gst::PadProbeReturn::Ok
+            });
+        }
+
+        pipeline
+            .set_state(gst::State::Playing)
+            .expect("mini pipeline plays");
+        // The wave pad has no parent element that would activate it during
+        // the state change — activate it into pushing mode by hand.
+        second
+            .set_active(true)
+            .expect("wave pad activates for pushing");
+        let mut buffer = gst::Buffer::with_size(16).unwrap();
+        {
+            let buf = buffer.get_mut().unwrap();
+            buf.set_pts(gst::ClockTime::from_nseconds(0));
+        }
+        // The demux double pushes the standard stream-start/segment/caps
+        // prelude + a buffer + EOS like tsdemux would on its surviving
+        // (duplicate) pad — buffers error out downstream without a segment.
+        assert!(
+            second.push_event(gst::event::StreamStart::new("dup-wave")),
+            "stream-start rejected"
+        );
+        assert!(
+            second.push_event(gst::event::Segment::new(&gst::FormattedSegment::<
+                gst::ClockTime,
+            >::default(),)),
+            "segment rejected"
+        );
+        let caps = gst::Caps::builder("video/x-raw").build();
+        assert!(
+            second.push_event(gst::event::Caps::new(&caps)),
+            "caps rejected"
+        );
+        second
+            .push(buffer)
+            .expect("buffer must flow through the fan-in");
+        assert!(
+            second.push_event(gst::event::Eos::new()),
+            "EOS from the surviving pad must be accepted"
+        );
+        // Give the streaming threads a moment, then assert.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while std::time::Instant::now() < deadline
+            && !eos_seen.load(std::sync::atomic::Ordering::SeqCst)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        pipeline.set_state(gst::State::Null).ok();
+        assert!(
+            received.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "the buffer pushed into the duplicate funnel sink must reach the funnel src"
+        );
+        assert!(
+            eos_seen.load(std::sync::atomic::Ordering::SeqCst),
+            "EOS must propagate after retirement — the exact regression that stalled macOS CI"
+        );
     }
 }
