@@ -150,6 +150,75 @@ is published (this is also what satisfies the OpenSSF Best Practices
 
 ## Development Workflow
 
+### The contribution flow (step by step)
+
+Every change lands through the same loop — this is what the rulesets, hooks
+and CI jobs above enforce, and what maintainers and contributors practice:
+
+```bash
+# 1. Branch from up-to-date develop. Name it <type>/<topic> (+ issue ref
+#    when one exists):
+git checkout develop && git pull --ff-only
+git checkout -b feat/audio-track-gui-242
+
+# 2. Commit with the conventional format and a DCO sign-off (-s). One
+#    logical change per commit; the subject follows Conventional Commits
+#    (see above). AI-assisted commits carry the generated-with footer:
+git commit -s -m "feat(gui): add tracks panel to the mixer
+
+<why this change exists, what it does>
+
+Part of #242
+
+🤖 Generated with Codebuff
+Co-Authored-By: Codebuff <noreply@codebuff.com>"
+
+# 3. Push and open the PR against develop (never against main):
+git push -u origin feat/audio-track-gui-242
+gh pr create --base develop --fill-first
+```
+
+**PR body conventions:**
+
+- Link the tracking issue with **`Part of #N`** — deliberately *not*
+  `Closes #N` when the issue is a multi-slice effort whose remaining slices
+  would otherwise auto-close at merge time. Single-PR issues may use
+  `Closes #N`.
+- Include a short **Summary** (what + why) and a **Test plan** checklist
+  stating which suites were run locally (`cargo test -p rivulet-core --lib`,
+  `ci_pinning`, GUI tests, clippy/fmt) and what CI still has to prove.
+
+**Merging:**
+
+```bash
+# 4. Wait for every required check to go green — the ruleset blocks the
+#    merge until then. Keep polling instead of merging on a hunch:
+sleep 300; gh pr checks <PR-number> | grep -vE 'pass|skipping'
+
+# 5. Squash-merge (the repo convention: one squashed commit per PR on
+#    develop, so every release-relevant change is exactly one conventional
+#    commit) and let GitHub delete the branch:
+gh pr merge <PR-number> --squash --delete-branch
+
+# 6. Bring develop back in sync — fast-forward only, no local merge commits:
+git checkout develop && git pull --ff-only
+```
+
+**Multi-slice issues:** after each merged slice, post a progress comment on
+the tracking issue in a fixed form — `**Slice N/M — <topic>: shipped** in
+PR #X (squash `<hash>` on `develop`)`, followed by what landed and the
+remaining-slices checklist. The issue is only closed when the last slice's
+comment says so.
+
+The ruleset enforces the invariants of this flow: squash/rebase merges only
+(no merge commits), required status checks green, branch up to date,
+no direct pushes, no bypass actors (see
+[Code Review Policy](#code-review-policy)). The pre-push hook mirrors the
+lint suite locally so step 4 rarely surprises anyone (see
+[Local pre-push checks](#local-pre-push-checks)).
+
+### At a glance
+
 1. Create a feature branch from `develop`
 2. Make changes with conventional commits
 3. Push and open a PR against `develop`
