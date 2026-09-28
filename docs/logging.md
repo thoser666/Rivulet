@@ -110,6 +110,19 @@ daily log; the rest of the pipeline stays intact for debugging. A pipeline that
 refuses to parse is therefore diagnosable from the log alone without leaking
 credentials.
 
+> **A failed pipeline build is reported once, not once per frame.** The pipeline
+> is constructed lazily from the first video frame. When construction fails
+> (parse failure or the pipeline refusing to enter `Playing`), the engine
+> **arms a retry guard** and ends the session: the error is surfaced exactly
+> once and subsequent frames stop attempting to rebuild the same broken
+> pipeline. Otherwise every frame of an active capture would re-run
+> `parse_launch` against the identical string, flooding the daily log with one
+> identical `Could not create the recording pipeline: ...` line per frame (a
+> 21-line storm in under a second in real logs). The user starts a new session
+> explicitly once the configuration is corrected — that explicit start clears
+> the guard, so the next frame gets exactly one fresh attempt whose result is
+> reported once.
+
 4. If file logging cannot be initialized, startup continues and a
    `RIVULET CRASH` block is written to the intended path when possible; the
    bootstrap error is also sent to stderr.
