@@ -5488,6 +5488,179 @@ mod tests {
     }
 
     #[test]
+    fn track_model_bus_master_volume_reflects_live_gain_and_mute() {
+        // Issue #242: each bus master chain (`track_<n>_vol`) carries that
+        // bus's own effective volume, and editing one bus must never touch the
+        // master chains of the others (independent track editing, no restart).
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        let game = engine.add_audio_source(routing_test_source("Game", AudioRouting::NONE));
+        let music = engine.add_audio_source(routing_test_source("Music", AudioRouting::NONE));
+        let mic = engine.add_audio_source(routing_test_source("Mic", AudioRouting::NONE));
+        engine.set_audio_source_track_members(game, vec![1]);
+        engine.set_audio_source_track_members(music, vec![2]);
+        engine.set_audio_source_track_members(mic, vec![3]);
+        // Bus 1 at -6 dB (≈0.5012 linear), bus 2 muted (0.0), bus 3 untouched.
+        assert!(engine.set_audio_bus_gain(1, -6.0));
+        assert!(engine.set_audio_bus_muted(2, true));
+        let recording = engine.build_recording_pipeline_str("/tmp/out.mp4");
+        assert!(
+            recording.contains("volume name=track_1_vol volume=0.5012"),
+            "{recording}"
+        );
+        assert!(
+            recording.contains("volume name=track_2_vol volume=0.0000"),
+            "{recording}"
+        );
+        assert!(
+            recording.contains("volume name=track_3_vol volume=1.0000"),
+            "{recording}"
+        );
+        // Editing one bus must not disturb the master chains of the others:
+        // raise bus 3 to +6 dB and re-check that bus 1 (-6 dB) and bus 2
+        // (muted) stay exactly as they were.
+        assert!(engine.set_audio_bus_gain(3, 6.0));
+        let edited = engine.build_recording_pipeline_str("/tmp/out.mp4");
+        assert!(
+            edited.contains("volume name=track_1_vol volume=0.5012"),
+            "{edited}"
+        );
+        assert!(
+            edited.contains("volume name=track_2_vol volume=0.0000"),
+            "{edited}"
+        );
+        assert!(
+            edited.contains("volume name=track_3_vol volume=1.9953"),
+            "{edited}"
+        );
+    }
+
+    #[test]
+    fn track_model_mixer_legs_carry_explicit_input_caps() {
+        // Multi-member buses mix through `audiomixer` with the same explicit
+        // input caps as the legacy stream mix (strict 1.24 parser / pad-link).
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        let a = engine.add_audio_source(routing_test_source("A", AudioRouting::NONE));
+        let b = engine.add_audio_source(routing_test_source("B", AudioRouting::NONE));
+        engine.set_audio_source_track_members(a, vec![3]);
+        engine.set_audio_source_track_members(b, vec![3]);
+        let recording = engine.build_recording_pipeline_str("/tmp/out.mp4");
+        // The caps fragment must precede each mixer sink pad of the bus leg.
+        assert!(
+            recording.contains(&format!(" ! {AUDIO_MIXER_INPUT_CAPS} ! bus3_mixer.sink_0")),
+            "{recording}"
+        );
+        assert!(
+            recording.contains(&format!(" ! {AUDIO_MIXER_INPUT_CAPS} ! bus3_mixer.sink_1")),
+            "{recording}"
+        );
+    }
+
+    #[test]
+    fn track_model_recording_uses_named_request_pads_per_container() {
+        // Issue #242, slice 3: per-track branches must target the muxer's
+        // *named* request pads so the video branch can never attach to an
+        // audio pad. Container muxers expose typed `audio_<n>`/`video_0`
+        // pads; mpegtsmux only generic `sink_<n>` mapped to ES PIDs above the
+        // reserved range (the video branch follows all audio branches).
+        let _ = gst::init();
+        for container in [
+            RecordingContainer::Mp4,
+            RecordingContainer::Mkv,
+            RecordingContainer::Mov,
+        ] {
+            let mut engine = RivuletEngine::default();
+            engine.set_audio_enabled(true);
+            engine.set_recording_container(container);
+            let game = engine.add_audio_source(routing_test_source("Game", AudioRouting::NONE));
+            let music = engine.add_audio_source(routing_test_source("Music", AudioRouting::NONE));
+            engine.set_audio_source_track_members(game, vec![1]);
+            engine.set_audio_source_track_members(music, vec![2]);
+            let rec = engine
+                .build_recording_pipeline_str(&format!("/tmp/out.{}", container.file_extension()));
+            assert!(
+                rec.contains("! queue ! mux.audio_0"),
+                "{}: {rec}",
+                container.label()
+            );
+            assert!(
+                rec.contains("! queue ! mux.audio_1"),
+                "{}: {rec}",
+                container.label()
+            );
+            assert!(
+                rec.contains("! queue ! mux.video_0"),
+                "{}: {rec}",
+                container.label()
+            );
+        }
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        engine.set_recording_container(RecordingContainer::MpegTs);
+        let game = engine.add_audio_source(routing_test_source("Game", AudioRouting::NONE));
+        let music = engine.add_audio_source(routing_test_source("Music", AudioRouting::NONE));
+        engine.set_audio_source_track_members(game, vec![1]);
+        engine.set_audio_source_track_members(music, vec![2]);
+        let rec = engine.build_recording_pipeline_str("/tmp/out.ts");
+        // mpegtsmux names its generic request pads after the ES PIDs
+        // (`sink_257` = 0x101 + 0, `sink_258` = 0x101 + 1); the video branch
+        // takes the PID after all audio branches (`sink_259` = 0x101 + 2).
+        assert!(rec.contains("! queue ! mux.sink_257"), "{rec}");
+        assert!(rec.contains("! queue ! mux.sink_258"), "{rec}");
+        assert!(rec.contains("! queue ! mux.sink_259"), "{rec}");
+    }
+
+    #[test]
+    fn track_model_streaming_honors_custom_send_track() {
+        // The FLV path encodes exactly the configured send bus; switching the
+        // send track (not the default 1) must move the streaming mix.
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        let game = engine.add_audio_source(routing_test_source("Game", AudioRouting::NONE));
+        let music = engine.add_audio_source(routing_test_source("Music", AudioRouting::NONE));
+        engine.set_audio_source_track_members(game, vec![1]);
+        engine.set_audio_source_track_members(music, vec![3]);
+        let mut config = AudioTrackConfig::new();
+        config.send_track = 3;
+        engine.set_audio_track_config(config);
+        engine.set_stream_settings(Some(StreamSettings::twitch("k")));
+
+        let streaming = engine.build_streaming_pipeline_str();
+        assert!(
+            streaming.contains("appsrc name=audio_src_bus3_0"),
+            "{streaming}"
+        );
+        assert!(streaming.contains("volume name=track_3_vol"), "{streaming}");
+        assert!(!streaming.contains("audio_src_bus1"), "{streaming}");
+        assert!(!streaming.contains("track_1_vol"), "{streaming}");
+    }
+
+    #[test]
+    fn track_model_records_one_aac_branch_per_member_bus() {
+        // More than the two-bus E2E case: every member bus we configure is
+        // encoded as its own AAC track, regardless of how many buses are used.
+        let _ = gst::init();
+        let mut engine = RivuletEngine::default();
+        engine.set_audio_enabled(true);
+        let a = engine.add_audio_source(routing_test_source("A", AudioRouting::NONE));
+        let b = engine.add_audio_source(routing_test_source("B", AudioRouting::NONE));
+        let c = engine.add_audio_source(routing_test_source("C", AudioRouting::NONE));
+        engine.set_audio_source_track_members(a, vec![1]);
+        engine.set_audio_source_track_members(b, vec![2]);
+        engine.set_audio_source_track_members(c, vec![4]);
+        let recording = engine.build_recording_pipeline_str("/tmp/out.mp4");
+        assert_eq!(recording.matches("avenc_aac").count(), 3, "{recording}");
+        assert!(
+            recording.contains("volume name=track_4_vol"),
+            "bus 4 must have its own master chain: {recording}"
+        );
+    }
+
+    #[test]
     fn audio_routing_warning_zero_record_routed_sources() {
         let mut engine = RivuletEngine::default();
         assert!(
