@@ -13,10 +13,12 @@
   Once-per-Session-Guard gelöscht). Fix: `video_branch_str` fügt im
   Nicht-FLV-H.265-Pfad ein `h265parse` hinter den Encoder (analog zum
   `h264parse` im FLV-Pfad), das den Byte-Stream auf `stream-format=avc`/
-  `codec_data` normalisiert. Ein neuer Regressionstest: NVENC +
-  Software-Fallback parsen in allen Audio-Varianten (Video-only,
-  Mono-Audio, Routed-Audio; Element-Guard pro Backend, wenn die
-  Distribution das jeweilige Vendor-Element nicht mitbringt).
+  `codec_data` normalisiert. Regressionstests: (1) NVENC + Software-
+  Fallback parsen in allen Audio-Varianten (Video-only, Mono-Audio,
+  Routed-Audio), (2) echter End-to-End-Lauf mit Software-`x265enc`
+  (Video-only + Single-Track-Audio), dessen Datei der Discoverer als
+  `video/x-h265` identifiziert — beide mit Element-Guard pro Backend, wenn
+  die Distribution das jeweilige Vendor-Element nicht mitbringt.
 
 - test(audio): **Per-Track-Modell — Test- & Doku-Härtung (Issue #242)** —
   die Kernel-Behauptungen des Bus-Modells sind jetzt auf String- und

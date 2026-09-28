@@ -4534,6 +4534,86 @@ mod tests {
         }
     }
 
+    /// End-to-end: a real H.265 recording through the engine (software x265,
+    /// as CI has no GPU) must produce a file whose video stream the discoverer
+    /// identifies as HEVC. Without `h265parse` behind the encoder the pipeline
+    /// never starts (`syntax error`), so this guards the full path from
+    /// `start_local_recording` to a decodable file — not just the parser.
+    #[test]
+    fn records_h265_stream_with_software_encoder() {
+        use gstreamer_pbutils as gst_pbutils;
+        use gstreamer_pbutils::prelude::DiscovererStreamInfoExt;
+        if gst::init().is_err() || gst::ElementFactory::find("x265enc").is_none() {
+            return;
+        }
+        let has_aac = gst::ElementFactory::find("avenc_aac").is_some();
+        let discoverer = gst_pbutils::Discoverer::new(gst::ClockTime::from_seconds(5))
+            .expect("Discoverer should be creatable");
+        for sublabel in ["video-only", "with-audio"] {
+            if sublabel == "with-audio" && !has_aac {
+                continue;
+            }
+            let mut engine = RivuletEngine::default();
+            engine.set_video_codec(VideoCodec::H265);
+            engine.set_video_encoder(VideoEncoder::Software);
+            engine.set_auto_remux(false);
+            if sublabel == "with-audio" {
+                engine.set_audio_enabled(true);
+                engine.set_separate_audio_tracks(true);
+                engine.set_audio_track_enabled(AudioTrack::Microphone, false);
+            }
+
+            let path = std::env::temp_dir().join(format!(
+                "rivulet_h265_{}_{}.mp4",
+                std::process::id(),
+                sublabel
+            ));
+            let _ = std::fs::remove_file(&path);
+            engine.start_local_recording(path.clone());
+
+            // Live-session pacing, moving pattern (see the container parity
+            // test: all-zero NVENC input compresses to degenerate slices that
+            // parsers/muxers reject).
+            let (width, height) = (320u32, 240u32);
+            let mut video = vec![0u8; (width * height * 4) as usize];
+            let audio = AudioFrame::new(vec![0.0f32; 4800], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
+            for i in 0..12 {
+                for (p, b) in video.iter_mut().enumerate() {
+                    *b = ((p / 97 + i * 7) % 256) as u8;
+                }
+                engine.process_raw_frame(&video, width, height);
+                if sublabel == "with-audio" && i % 3 == 0 {
+                    let _ = engine.push_audio_track(&audio, AudioTrack::System);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(33));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            engine.stop_recording();
+            assert!(engine.take_error().is_none(), "{sublabel}: no engine error");
+
+            assert!(path.exists(), "{sublabel}: H.265 file must exist");
+            let info = discoverer
+                .discover_uri(&file_uri(&path))
+                .unwrap_or_else(|e| panic!("{sublabel}: file should be readable: {e}"));
+            let video_caps = info
+                .video_streams()
+                .first()
+                .expect("{sublabel}: must contain a video stream")
+                .caps()
+                .expect("{sublabel}: video stream must expose caps")
+                .to_string();
+            assert!(
+                video_caps.contains("video/x-h265"),
+                "{sublabel}: expected HEVC stream, got {video_caps}"
+            );
+            if sublabel == "with-audio" {
+                assert_eq!(info.audio_streams().len(), 1);
+            }
+
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
     /// Video effects are inserted between `videoconvert` and the encoder-input
     /// caps, and disappear again once the effects are reset.
     #[test]

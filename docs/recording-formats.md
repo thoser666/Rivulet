@@ -40,6 +40,27 @@ encoder from the muxer's request pads — the link fails with
 already inserts `h264parse` for H.264). See `video_branch_str` in
 `rivulet-core/src/lib.rs`.
 
+Streaming/dual-output note: the dual-output builder always links H.264
+through a fixed `h264parse` and RTMP/FLV only carries H.264 anyway
+(`VideoCodec::is_rtmp_compatible` is H.264-only), so the byte-stream H.265
+problem is confined to the local-recording branch. The H.265-capable
+containers (MP4/MKV/MOV) never carry a stream branch.
+
+Regression coverage (both in `rivulet-core/src/lib.rs`):
+
+- `recording_pipeline_h265_parses_with_parse_behind_encoder` — the built
+  pipeline for NVENC **and** the x265 software fallback, in all audio
+  variants (video-only, mono audio, routed audio), must embed `h265parse`
+  and parse.
+- `records_h265_stream_with_software_encoder` — end-to-end: a real H.265
+  recording through the engine (software `x265enc`, video-only plus a
+  single-track-audio variant) must produce a file the GStreamer discoverer
+  identifies as `video/x-h265`. This guards the full path from
+  `start_local_recording` to a decodable file, not just the pipeline parser.
+
+Both tests are guarded on `x265enc` availability, matching the CI runner
+convention (software encoders only, no GPU).
+
 ## Remux (issue #71)
 
 `RemuxPlan` validates that a source container is a crash-safe intermediate and
