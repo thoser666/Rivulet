@@ -1316,8 +1316,19 @@ impl RivuletEngine {
         let tail = self.video_tail_fragment(mux_name, flv);
         // FLV muxers need an explicit AVC stream: h264parse converts the
         // encoder's (possibly byte-stream) H.264 so every downstream leg
-        // parses and muxes on GStreamer >= 1.20 (incl. NVENC sources).
-        let parse = if flv { self.h264_parse_fragment() } else { "" };
+        // parses and muxes on GStreamer >= 1.20 (incl. NVENC sources). The
+        // H.265 recording path needs the same treatment with h265parse: a
+        // byte-stream H.265 encoder (NVENC or x265enc) trips the pipeline
+        // parser's cap inference once a queue/tee sits in the way, so the
+        // link into the mp4mux request pad fails (GST_PARSE_ERROR_SYNTAX,
+        // "syntax error" / "could not link queueN to mux").
+        let parse = if flv {
+            self.h264_parse_fragment()
+        } else if self.video_codec == VideoCodec::H265 {
+            " ! h265parse "
+        } else {
+            ""
+        };
         if transform.is_empty() {
             format!(
                 "appsrc name=rivulet_src format=time is-live=true do-timestamp=true \
@@ -4473,6 +4484,54 @@ mod tests {
             pipeline_str
         );
         gst::parse::launch(&pipeline_str).expect("pipeline with x264 should parse");
+    }
+
+    /// The H.265 recording pipeline parses on the engine's builder (NVENC and
+    /// the x265 software fallback). `h265parse` must sit behind the encoder:
+    /// a byte-stream H.265 source trips `parse::launch`'s caps inference once
+    /// a queue/tee separates it from the mp4mux request pads (`GST_PARSE_ERROR_SYNTAX`,
+    /// reported to the user as `syntax error` / `could not link queueN to mux`).
+    /// This guards the exact configuration from the crash report
+    /// (`encoder=Nvenc codec=H265`, then the x265 software fallback).
+    #[test]
+    fn recording_pipeline_h265_parses_with_parse_behind_encoder() {
+        let _ = gst::init();
+        if gst::ElementFactory::find("x265enc").is_none() {
+            return;
+        }
+        for (label, encoder) in [
+            ("nvenc", VideoEncoder::Nvenc),
+            ("x265-software", VideoEncoder::Software),
+        ] {
+            for sublabel in ["video-only", "with-audio", "with-routed-audio"] {
+                let mut engine = RivuletEngine::default();
+                engine.set_video_codec(VideoCodec::H265);
+                engine.set_video_encoder(encoder);
+                match sublabel {
+                    "video-only" => {}
+                    "with-audio" => engine.set_audio_enabled(true),
+                    "with-routed-audio" => {
+                        engine.set_audio_enabled(true);
+                        engine.set_audio_sources(vec![AudioSource {
+                            routing: AudioRouting::RECORD_ONLY,
+                            ..Default::default()
+                        }]);
+                    }
+                    _ => unreachable!(),
+                }
+                let pipeline_str = engine.build_recording_pipeline_str("/tmp/h265.mp4");
+                assert!(
+                    pipeline_str.contains("h265parse"),
+                    "{label}/{sublabel} pipeline must embed h265parse: {pipeline_str}"
+                );
+                gst::parse::launch(&pipeline_str).unwrap_or_else(|e| {
+                    panic!(
+                        "{label}/{sublabel} pipeline should parse: {} -- {pipeline_str}",
+                        e.message()
+                    )
+                });
+            }
+        }
     }
 
     /// Video effects are inserted between `videoconvert` and the encoder-input

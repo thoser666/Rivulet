@@ -28,6 +28,18 @@ and VP9 keeps `webmmux` — so existing behavior is unchanged unless a user
 explicitly chooses a crash-safe intermediate. The GUI exposes a container
 picker next to the video-codec picker.
 
+### H.265 recording and `h265parse`
+
+The H.265 recording branch puts an `h265parse` right behind the encoder. NVENC
+(`nvh265enc`) and the software fallback (`x265enc`) emit *byte-stream* H.265,
+whose caps `parse::launch` cannot infer once a `queue`/`tee` separates the
+encoder from the muxer's request pads — the link fails with
+`GST_PARSE_ERROR_SYNTAX` (reported as `syntax error` /
+`could not link queueN to mux`). `h265parse` normalizes the stream to
+`stream-format=avc` with `codec_data` (the same reason the FLV/streaming path
+already inserts `h264parse` for H.264). See `video_branch_str` in
+`rivulet-core/src/lib.rs`.
+
 ## Remux (issue #71)
 
 `RemuxPlan` validates that a source container is a crash-safe intermediate and
