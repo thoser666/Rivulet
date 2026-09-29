@@ -92,6 +92,10 @@ keyring = { version = "3.6", default-features = false, features = ["apple-native
 
 [dev-dependencies]
 tempfile = "3"
+# In-memory log capture for the Discord worker contract test
+# (src/discord.rs::test_log_capture): formats real worker `tracing` events
+# into a buffer. Same minor line as the GUI's subscriber; no new lock entry.
+tracing-subscriber = { version = "0.3.18", default-features = false, features = ["fmt"] }
 # Used by the ci_pinning test suite to validate .bestpractices.json (the
 # OpenSSF badge automation-proposal file). Already in Cargo.lock via the
 # workspace; adding it as a dev-dependency changes no locked version.
