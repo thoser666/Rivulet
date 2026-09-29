@@ -4496,13 +4496,18 @@ mod tests {
     #[test]
     fn recording_pipeline_h265_parses_with_parse_behind_encoder() {
         let _ = gst::init();
-        if gst::ElementFactory::find("x265enc").is_none() {
-            return;
-        }
+        let mut covered = false;
         for (label, encoder) in [
             ("nvenc", VideoEncoder::Nvenc),
             ("x265-software", VideoEncoder::Software),
         ] {
+            // Each backend needs its own element present; a CI runner without
+            // the vendor plugin must not fail on the missing one.
+            if gst::ElementFactory::find(encoder.element_name_for_codec(VideoCodec::H265)).is_none()
+            {
+                continue;
+            }
+            covered = true;
             for sublabel in ["video-only", "with-audio", "with-routed-audio"] {
                 let mut engine = RivuletEngine::default();
                 engine.set_video_codec(VideoCodec::H265);
@@ -4532,6 +4537,11 @@ mod tests {
                 });
             }
         }
+        assert!(
+            covered,
+            "no H.265 encoder element (nvh265enc/x265enc) is installed, \
+             so this regression test would prove nothing"
+        );
     }
 
     /// End-to-end: a real H.265 recording through the engine (software x265,
