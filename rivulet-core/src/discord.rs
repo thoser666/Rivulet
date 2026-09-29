@@ -940,6 +940,13 @@ mod tests {
         let _ = read_frame(&mut conn).expect("set_activity frame");
         wait_until(|| presence.connection_state() == DiscordConnState::Connected);
         presence.disconnect();
+        // The worker flips the shared state *before* formatting the delivery
+        // log line, so wait_until(Connected) can win that race under load —
+        // poll the buffer for the info line instead of reading it once.
+        wait_until(|| {
+            crate::discord::test_log_capture::logs()
+                .contains("Discord Rich Presence SET_ACTIVITY delivered")
+        });
         let logs = crate::discord::test_log_capture::logs();
         assert!(
             logs.contains("Discord Rich Presence SET_ACTIVITY delivered"),

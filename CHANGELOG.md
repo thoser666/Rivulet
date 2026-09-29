@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- chore(deps): wasmtime-Familie 48.0.2 → 48.0.3 (Patch-Bump, gleiche Minor-
+  Linie) — schließt drei RustSec-Advisories (Fuel-Amplification via
+  `call_ref`/`catch`, Record-Lifting-Allokation jenseits des Hostcall-Fuel-
+  Limits, Host-Panic durch Filesystem-Datetime-Overflow), die CI Cargo
+  Audit/Deny auf develop blockiert hätten; erkannt durch die Supply-Chain-
+  Gates, nicht durch einen Quelltext-Pin.
+
 - refactor(ci): **Pinning-Suite geschlankt (Phase 1+2), 130 → 126 Tests** —
   reine Detail-Pins entfernt, deren echte Verträge bereits am Ursprungsort
   unit-getestet sind: responsive-Layout (Contract lebt in
