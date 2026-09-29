@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+- test(audio): **Per-Track-Modell — Test- & Doku-Härtung (Issue #242)** —
+  die Kernel-Behauptungen des Bus-Modells sind jetzt auf String- und
+  Verhaltensebene abgesichert: Bus-Master-Volumes reflektieren Live-Gain/
+  -Mute pro Track isoliert (`track_<n>_vol` mit effektivem linear-pegel,
+  ein Bus-Edit berührt die anderen Buses nicht), Multi-Member-Mixe tragen
+  die expliziten ␣Audio-Mixer-Input-Caps in jeder `bus<n>_mixer.sink_i`-
+  Leg, die Recording-Legs targetieren pro Container die benannten
+  Request-Pads (`mux.audio_<n>`/`mux.video_0`, mpegtsmux `mux.sink_257..`
+  mit ES-PIDs ab 0x101 – Video hinter allen Audio-Branches), der Stream
+  encodiert auch bei umgestelltem Send-Track ausschließlich diesen, und
+  jeder Member-Bus wird unabhängig von der Bus-Anzahl als eigener
+  AAC-Track gebaut. Doku: `docs/m6-audio-routing.md` dokumentiert jetzt
+  `AudioBus`/`AudioTrackConfig`/`track_members`, die Migration
+  `audio_routing_v1 → audio_tracks_v1`, die Live-API
+  (`set_audio_bus_gain`/`set_audio_bus_muted`/
+  `set_audio_source_track_members`) und die Slice-3-Parität;
+  README-M6-Bullet nennt das Bus-Modell.
+
 - chore(deps): wasmtime-Familie 48.0.2 → 48.0.3 (Patch-Bump, gleiche Minor-
   Linie) — schließt drei RustSec-Advisories (Fuel-Amplification via
   `call_ref`/`catch`, Record-Lifting-Allokation jenseits des Hostcall-Fuel-

@@ -185,6 +185,78 @@ per-source routing:
   it through `set_audio_track_config` (sanitized: bus count, send track and
   gain are clamped) and mirrors the sanitized result back into the UI.
 
+**Core model** (`rivulet-core/src/audio_source.rs`):
+
+```rust
+/// The maximum number of mixing buses a session can configure (OBS parity).
+pub const AUDIO_TRACK_MAX: u8 = 6;
+
+/// One mixing bus ("track"): stable 1-based id, enabled flag, master gain
+/// in dB (-30..+30) and a mute toggle. `effective_volume()` converts the
+/// pair to the linear `volume` element scale (0.0 when muted).
+pub struct AudioBus { pub id: u8, pub enabled: bool, pub gain_db: f64, pub muted: bool }
+
+/// The persisted per-track configuration (`audio_tracks_v1`): the bus list
+/// in track order plus the 1-based streaming send track.
+pub struct AudioTrackConfig { pub version: u32, pub tracks: Vec<AudioBus>, pub send_track: u8 }
+```
+
+`AudioSource` carries **track membership** (`pub track_members: Vec<u8>`,
+additive over the legacy `routing` booleans via `#[serde(default)]`); a
+source feeds every bus whose id is in the list. The engine opts into the
+track model as soon as **any** source has non-empty membership
+(`uses_track_model`); with all-empty membership the legacy record/stream
+routing stays authoritative, so existing `audio_routing_v1` configs behave
+exactly as before.
+
+**Migration:** `migrate_routing_to_tracks(routing, sources)` builds a
+default `AudioTrackConfig` and maps a legacy `audio_routing_v1` config onto
+membership — `routing.record` → member of track 1, `routing.stream` → member
+of the send track, neither → empty membership (silent everywhere, as before).
+It is a pure, round-trip-safe transform: the legacy booleans remain in the
+payload and stay authoritative until the pipeline builder consumes the track
+model.
+
+**Engine API additions** (`rivulet-core/src/lib.rs`):
+
+```rust
+impl RivuletEngine {
+    pub fn audio_track_config(&self) -> &AudioTrackConfig;                    // sanitized view
+    pub fn set_audio_track_config(&mut self, config: AudioTrackConfig);       // sanitized (count/send/gain)
+    pub fn set_audio_bus_gain(&mut self, bus: u8, gain_db: f64) -> bool;      // ±30 dB, live
+    pub fn set_audio_bus_muted(&mut self, bus: u8, muted: bool) -> bool;      // live
+    pub fn set_audio_source_track_members(&mut self, id: Uuid, members: Vec<u8>) -> bool;
+}
+```
+
+Gain/mute changes apply **live** to the running pipeline without a restart:
+each bus mix ends in a named `volume name=track_<n>_vol` element whose
+`volume` property is re-set via `apply_track_live_volume` (a failed lookup —
+unknown/disabled/empty bus or no built pipeline — returns `false`).
+
+**Pipeline changes:** every enabled bus with at least one member becomes its
+own independently editable mix (`track_bus_mix`: single-member direct chain,
+multi-member through an `audiomixer` with the explicit F32/2ch/48 kHz input
+caps) feeding its own `avenc_aac` branch. Which muxers see a bus is selected
+by the caller:
+
+- *recording only* — one AAC track per member bus,
+- *streaming only (FLV/RTMP, single audio track)* — only the send bus is
+  encoded,
+- *dual output* — the bus mix fans through a `bus<n>_tee` into the recording
+  encoder **and** the stream encoder, so both outputs reuse the same
+  live-editable chain (no duplicated routing logic).
+
+Slice 3 (container/remux parity): per-track branches target the muxer's
+**named** request pads so the video branch can never attach to an audio pad —
+`mux.audio_<n>`/`mux.video_0` on mp4mux/qtmux/matroskamux, and on mpegtsmux
+the generic `mux.sink_<pid>` pads where the pid is `0x101 + index` (the video
+branch takes the pid after all audio branches; 0x100 itself is reserved for
+the PMT/PCR). The recording therefore carries all audio tracks from MP4, MKV,
+MOV and TS **and** through the crash-safe intermediate remux
+(`remux_to_mp4`, `RemuxPlan`) to the final MP4 — verified E2E for all four
+`RecordingContainer` values with a Discoverer assertion.
+
 ### Settings
 
 - Persisted in `eframe::Storage` under a versioned JSON schema:
