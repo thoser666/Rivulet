@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+- feat(cli): **`rivulet inspect` — Pipeline-Inspektor/-Diagnose (M7 W5,
+  Issue #191)** — `rivulet inspect --config recording.toml [--json]` gibt den
+  Pipeline-String aus, den der Engine für die Config bauen *würde*, ohne
+  aufzunehmen und ohne die Ausgabedatei anzulegen; `--json` liefert den
+  maschinenlesbaren Report (Pipeline + Capability-Report), und
+  `rivulet record --dry-run` druckt dieselbe Pipeline über den Record-Pfad
+  und beendet mit Exit 0. Die Pipeline stammt aus dem neuen
+  `RivuletEngine::pipeline_description()`, das an denselben privaten
+  `build_pipeline_str()` delegiert, den der First-Frame-Pfad benutzt — der
+  inspizierte String kann nicht vom gebauten abweichen (per Test gepinnt) —
+  und der bereits über `redact_pipeline_for_log()` maskiert ist, sodass ein
+  eingebetteter Stream-Key auch in der Inspect-Ausgabe als
+  `<redacted stream URL>` erscheint. Die Feature-Erkennung liegt in
+  `rivulet_core::FeatureReport` (neues Modul `rivulet-core/src/inspect.rs`),
+  nicht in der CLI: Verfügbarkeit ist eine Eigenschaft der lokalen
+  GStreamer-Installation, und nur core linkt sie. Der Report listet Encoder
+  (pro Backend und Codec, inkl. `hardware`), Container (inkl. `crash_safe`),
+  Capture-Backends und Audio-Filter mit festem Schlüssel- und
+  Listenreihenfolge, damit zwei Reports sauber diffbar sind. Aufnahme- und
+  Aufbereitungs-Flags (`--duration`, `--width`, `--height`, `--fps`,
+  `--dry-run`) werden unter `inspect` mit Exit 2 abgelehnt, statt still
+  ignoriert zu werden.
+
+- fix(cli): **`--container` wurde validiert, aber nie angewendet** — W1 hat
+  `mp4`/`mkv`/`mov`/`mpegts` geprüft und dokumentiert, das Mapping auf
+  `set_recording_container()` fehlte jedoch, sodass *jedes* Container-Format
+  MP4 erzeugte. Beide Befehle teilen sich jetzt das eine
+  Config→Engine-Mapping `rivulet_cli::engine_for()`, das den Container
+  anwendet; das behebt die Lücke und ist zugleich die Voraussetzung dafür,
+  dass `inspect` genau den Muxer meldet, den ein echter Lauf verwendet.
+
 - fix(audio): **H.265-Aufnahme scheitert nicht mehr mit `syntax error`** —
   die H.265-Recording-Pipeline scheiterte deterministisch am
   Pipeline-Parser, sobald der Encoder einen Byte-Stream ausgibt (NVENC

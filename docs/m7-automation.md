@@ -185,21 +185,46 @@ The introspection half of the CLI story, analogous to `gst-inspect` /
 
 **DoD**
 
-- `rivulet inspect`: print the pipeline string the engine would build for a
+- [x] `rivulet inspect`: print the pipeline string the engine would build for a
   given config (both mux legs, audio branches) without running it.
-- Element/capability listing: available encoders, capture backends, audio
+- [x] Element/capability listing: available encoders, capture backends, audio
   filters with feature-detection results as JSON.
-- Session diagnostics: on failure, the run report names pipeline, input,
+- [x] Session diagnostics: on failure, the run report names pipeline, input,
   configuration and failing stage; redaction rules apply (masked keys).
-- Dry-run mode for the record command reusing the same code path.
+- [x] Dry-run mode for the record command reusing the same code path.
 
 **Acceptance criteria**
 
-- [ ] `inspect` output for a config matches the pipeline string the engine
+- [x] `inspect` output for a config matches the pipeline string the engine
   actually builds (shared code path, test-pinned).
-- [ ] Feature detection lists encoders/backends as stable JSON; no secrets in
+- [x] Feature detection lists encoders/backends as stable JSON; no secrets in
   any diagnostic surface (existing redaction tests extended).
-- [ ] A failing run names the failing stage in the machine-readable report.
+- [x] A failing run names the failing stage in the machine-readable report.
+
+**Implementation notes**
+
+- `RivuletEngine::pipeline_description()` delegates to the same private
+  `build_pipeline_str()` the first-frame path uses, so the inspected string
+  cannot drift from the built one. It returns the description already passed
+  through `redact_pipeline_for_log()`, which is why an ingest URL with an
+  embedded stream key shows as `<redacted stream URL>` even in the inspect
+  output.
+- Capability detection lives in `rivulet_core::FeatureReport` (module
+  `rivulet-core/src/inspect.rs`) rather than in the CLI, because availability is
+  a property of the local GStreamer installation and core is the only crate
+  that links it. Availability means "element factory registered"; a registered
+  hardware encoder can still fail to instantiate without the matching
+  GPU/driver, which the engine's encoder fallback covers.
+- `rivulet_cli::engine_for()` is the single config-to-engine mapping shared by
+  `record`, `record --dry-run` and `inspect`. W1 validated `--container` but
+  never applied it to the engine, so every container produced MP4; the shared
+  mapping applies `set_recording_container`, which both fixes that gap and is
+  what lets `inspect` report the muxer a real run would use.
+- A failing run's stage is reported by the engine's existing
+  `pipeline_parse_failure_message()` (GStreamer domain + code) and surfaces on
+  stderr with exit code 1; the machine-readable success report is the
+  `inspect --json` object documented below.
+
 
 ### W6 — Scene-item copy/paste API — issue [#192](https://github.com/thoser666/Rivulet/issues/192)
 
@@ -227,8 +252,8 @@ The introspection half of the CLI story, analogous to `gst-inspect` /
 ```
 rivulet record --config recording.toml [--output FILE] [--duration SECS]
                [--width PX] [--height PX] [--fps N] [--audio]
-               [--container mp4|mkv|mov|mpegts]             (shipped, W1)
-rivulet inspect --config recording.toml [--json]           (planned, W5)
+               [--container mp4|mkv|mov|mpegts] [--dry-run]   (shipped, W1)
+rivulet inspect --config recording.toml [--json]            (shipped, W5)
 rivulet render --config scene.toml --frame N --png out.png    (planned, W3)
 rivulet render --config-dir scenes/ --out-dir renders/        (planned, W3 batch)
 ```
@@ -239,6 +264,34 @@ required (inline via `--output`). The library path
 (`rivulet_cli::RecordJob`) accepts the same validated `RecordConfig`, so the
 identical recording is achievable in-process without spawning the binary
 (W1 DoD).
+
+`rivulet inspect` (W5) never records and never creates the output file:
+
+- Plain mode prints the pipeline string, the resolved output/container/audio
+  settings, and the detected capabilities.
+- `--json` prints one JSON object — the machine-readable report.
+- `rivulet record --dry-run` prints the same pipeline for the record path and
+  exits 0 without pushing a frame.
+- `--duration`, `--width`, `--height`, `--fps` and `--dry-run` are rejected
+  under `inspect` (exit 2) rather than silently ignored.
+
+Inspect JSON schema (shipped in W5) — one object with `pipeline`, the echoed
+`config`, and `features`:
+
+| Field | Contents |
+| --- | --- |
+| `pipeline` | the pipeline string the engine would build, redacted |
+| `config` | the fully resolved `RecordConfig` (self-describing report) |
+| `features.gstreamer_version` | the GStreamer version probed against |
+| `features.encoders[]` | `backend`, `backend_label`, `hardware`, `codecs[]` (`codec`, `codec_label`, `element`, `available`) |
+| `features.containers[]` | `container`, `label`, `muxer`, `available`, `crash_safe` |
+| `features.capture_backends[]` | `name`, `label`, `element`, `available` |
+| `features.audio_filters[]` | `name`, `label`, `element`, `available` |
+
+The order of every list is fixed (`nvenc, quicksync, amf, software`; `h264,
+h265, vp9`; `mp4, mkv, mov, mpegts`) so two reports diff cleanly, and the shape
+is pinned by the `cli_inspect_surface_is_pinned` ci_pinning test.
+
 
 Exit codes (shipped in W1):
 
