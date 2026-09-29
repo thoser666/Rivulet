@@ -11,16 +11,18 @@
 //! around this module.
 
 pub mod config;
+pub mod inspect;
 pub mod source;
 
 pub use config::{describe, AudioConfig, OutputConfig, RecordConfig, StatusEvent, VideoConfig};
+pub use inspect::{inspect, inspect_json, inspect_with_features, InspectReport};
 pub use source::{silence_frame, SilenceSource, TestVideoSource};
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use rivulet_core::RivuletEngine;
+use rivulet_core::{RecordingContainer, RivuletEngine};
 
 /// Exit codes documented in the M7 spec (§ CLI surface reference).
 pub mod exit_code {
@@ -30,6 +32,44 @@ pub mod exit_code {
     pub const USAGE: i32 = 2;
     /// The recording failed at runtime (engine error, IO error).
     pub const RUNTIME: i32 = 1;
+}
+
+/// Map a validated `output.container` name onto the engine's container enum.
+///
+/// `None` means the config left it unset, so the engine default (MP4) applies.
+/// `RecordConfig::validate` has already rejected any other spelling, so an
+/// unknown value here can only come from a caller that skipped validation and
+/// is reported as an error rather than silently defaulting.
+pub fn recording_container(name: Option<&str>) -> Result<RecordingContainer> {
+    match name {
+        None | Some("mp4") => Ok(RecordingContainer::Mp4),
+        Some("mkv") => Ok(RecordingContainer::Mkv),
+        Some("mov") => Ok(RecordingContainer::Mov),
+        Some("mpegts") => Ok(RecordingContainer::MpegTs),
+        Some(other) => anyhow::bail!(
+            "output.container: unknown container {other:?} (expected mp4, mkv, mov, or mpegts)"
+        ),
+    }
+}
+
+/// Build a configured-but-not-yet-started engine for a recording config.
+///
+/// This is the single config-to-engine mapping shared by `record` and
+/// `inspect`, so the pipeline `inspect` reports is the pipeline `record` builds
+/// (M7 W5 acceptance criterion: shared code path). In particular the container
+/// is applied here, which is why `--container mkv` now really records Matroska.
+pub fn engine_for(config: &RecordConfig) -> Result<RivuletEngine> {
+    let output_path =
+        config.output.path.clone().ok_or_else(|| {
+            anyhow::anyhow!("output.path: required (no recording output path set)")
+        })?;
+    let container = recording_container(config.output.container.as_deref())?;
+
+    let mut engine = RivuletEngine::new();
+    engine.set_recording_container(container);
+    engine.set_audio_enabled(config.audio.enabled);
+    engine.start_local_recording(output_path);
+    Ok(engine)
 }
 
 /// One headless recording run: config in, finalized container out.
@@ -102,9 +142,7 @@ impl RecordJob {
             }
         }
 
-        let mut engine = RivuletEngine::new();
-        engine.set_audio_enabled(audio_enabled);
-        engine.start_local_recording(output_path.clone());
+        let mut engine = engine_for(&self.config)?;
 
         self.emit(StatusEvent::Started {
             width,
@@ -215,6 +253,18 @@ impl RecordJob {
             frames_pushed
         ));
         Ok(output_path)
+    }
+
+    /// Validate the config and report the pipeline the run would build, without
+    /// recording anything (M7 W5 dry-run).
+    ///
+    /// Shares [`engine_for`] with [`RecordJob::run`], so the dry-run and a real
+    /// run cannot disagree about the pipeline. No frame is pushed, so the
+    /// output path is never created.
+    pub fn dry_run(&self) -> Result<InspectReport> {
+        self.config.validate().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let engine = engine_for(&self.config)?;
+        Ok(InspectReport::from_engine(&self.config, &engine))
     }
 }
 

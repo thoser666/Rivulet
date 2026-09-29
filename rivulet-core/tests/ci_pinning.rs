@@ -6460,6 +6460,119 @@ fn cli_mvp_schema_and_docs_are_pinned() {
 }
 
 #[test]
+fn cli_inspect_surface_is_pinned() {
+    // Issue #191 (M7 W5): the pipeline inspector. The point of `rivulet
+    // inspect` is that it reports what the engine *would* build, so the
+    // shared-code-path guarantee is the contract worth pinning: the accessor
+    // must delegate to the engine's own builder, and the config-to-engine
+    // mapping (including the container) must be shared with `record`.
+    let core = read("rivulet-core/src/lib.rs");
+    for needle in [
+        "pub fn pipeline_description",
+        "pub fn redact_pipeline_for_log",
+    ] {
+        assert!(
+            core.contains(needle),
+            "core must expose the inspect surface: {needle}"
+        );
+    }
+    // The description must be built by the same private builder the first
+    // frame uses, not a parallel reimplementation.
+    let accessor = core
+        .split("pub fn pipeline_description")
+        .nth(1)
+        .expect("accessor present")
+        .chars()
+        .take(400)
+        .collect::<String>();
+    assert!(
+        accessor.contains("build_pipeline_str"),
+        "pipeline_description must delegate to build_pipeline_str (shared code path)"
+    );
+    assert!(
+        accessor.contains("redact_pipeline_for_log"),
+        "pipeline_description must redact before handing the string out"
+    );
+
+    // Capability detection lives in core next to the elements it probes.
+    let inspect_mod = read("rivulet-core/src/inspect.rs");
+    for needle in [
+        "pub struct FeatureReport",
+        "pub fn detect",
+        "gstreamer_version",
+        "encoders",
+        "containers",
+        "capture_backends",
+        "audio_filters",
+    ] {
+        assert!(
+            inspect_mod.contains(needle),
+            "feature report must pin {needle}"
+        );
+    }
+    assert!(
+        core.contains("pub use inspect::") && core.contains("FeatureReport"),
+        "core must re-export FeatureReport for the CLI"
+    );
+
+    // The CLI keeps both commands on one config-to-engine mapping; without
+    // that, `--container` silently does nothing (the W1 bug) and inspect would
+    // describe a pipeline record never builds.
+    let cli_lib = read("rivulet-cli/src/lib.rs");
+    for needle in [
+        "pub fn engine_for",
+        "set_recording_container",
+        "pub fn dry_run",
+    ] {
+        assert!(
+            cli_lib.contains(needle),
+            "rivulet-cli must share the engine mapping: {needle}"
+        );
+    }
+    let cli_inspect = read("rivulet-cli/src/inspect.rs");
+    for needle in [
+        "pub fn inspect(",
+        "pub fn inspect_json",
+        "pub struct InspectReport",
+        "pipeline_description",
+    ] {
+        assert!(
+            cli_inspect.contains(needle),
+            "rivulet-cli/src/inspect.rs must pin {needle}"
+        );
+    }
+
+    // The binary must document both subcommands and the dry-run/json flags.
+    let main = read("rivulet-cli/src/main.rs");
+    for fragment in [
+        "rivulet inspect",
+        "rivulet record",
+        "--dry-run",
+        "--json",
+        "run_inspect",
+    ] {
+        assert!(
+            main.contains(fragment),
+            "binary usage must document {fragment}"
+        );
+    }
+
+    // The spec must move W5 from planned to shipped and document the report.
+    let spec = read("docs/m7-automation.md");
+    for fragment in [
+        "rivulet inspect",
+        "shipped, W5",
+        "pipeline",
+        "gstreamer_version",
+    ] {
+        assert!(
+            spec.contains(fragment),
+            "m7 spec must document the inspect surface: {fragment}"
+        );
+    }
+}
+
+#[test]
 fn scene_item_copy_paste_surface_is_pinned() {
     // Issue #192 (M7 W6): the scene-item copy/paste API is the OBS 32.2
     // frontend-parity item. Pin the full vertical slice — core clipboard

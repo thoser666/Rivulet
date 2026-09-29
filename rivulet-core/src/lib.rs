@@ -117,6 +117,9 @@ pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 pub mod container;
 pub use container::{remux_to_mp4, RecordingContainer, RemuxOutcome, RemuxPlan, RemuxSettings};
 
+pub mod inspect;
+pub use inspect::{CodecFeature, ContainerFeature, ElementFeature, EncoderFeature, FeatureReport};
+
 pub mod file_management;
 pub use file_management::{
     FileNamePattern, PatternToken, PatternValues, RecordingFileSettings, RecordingSession, SplitBy,
@@ -435,7 +438,10 @@ fn pipeline_parse_failure_message(err: &gst::glib::Error) -> String {
 /// the stream key (`location="rtmps://live/…/app/KEY"`), which must never
 /// reach the daily log; the URL value is replaced by a placeholder while the
 /// rest of the pipeline stays intact for debugging.
-fn redact_pipeline_for_log(pipeline: &str) -> String {
+///
+/// Public so the CLI's `rivulet inspect` (M7 W5, issue #191) can guarantee the
+/// pipeline description it prints obeys the same redaction rule as the log.
+pub fn redact_pipeline_for_log(pipeline: &str) -> String {
     let mut out = String::with_capacity(pipeline.len());
     let mut rest = pipeline;
     loop {
@@ -1977,6 +1983,22 @@ impl RivuletEngine {
             tracing::info!(location = %location, "Initializing recording pipeline");
             Some(self.build_recording_pipeline_str(location))
         }
+    }
+
+    /// The pipeline string this engine would build for its current
+    /// configuration, without running it.
+    ///
+    /// Delegates to the same [`Self::build_pipeline_str`] the first-frame
+    /// pipeline construction uses, so an inspector (M7 W5 `rivulet inspect`)
+    /// can never drift from what the engine actually builds. Returns `None`
+    /// when no output is configured, or when the local recording leg is
+    /// selected but no output path has been set.
+    ///
+    /// The result is redacted: stream-embedded keys are masked by
+    /// [`redact_pipeline_for_log`], so it is safe to print.
+    pub fn pipeline_description(&self) -> Option<String> {
+        self.build_pipeline_str()
+            .map(|p| redact_pipeline_for_log(&p))
     }
 
     fn initialize_and_start_pipeline(&mut self, width: u32, height: u32) {
@@ -3731,6 +3753,51 @@ mod tests {
     fn redaction_handles_empty_and_quote_free_remainder() {
         assert_eq!(redact_pipeline_for_log(""), "");
         assert_eq!(redact_pipeline_for_log("no urls here"), "no urls here");
+    }
+
+    /// The M7 W5 acceptance criterion: `rivulet inspect` must print exactly the
+    /// pipeline the engine builds, so the accessor has to delegate to the same
+    /// private builder the first-frame path uses. Pinned here (rather than only
+    /// in the CLI) so the shared code path cannot silently drift.
+    #[test]
+    fn pipeline_description_matches_the_engine_build_path() {
+        let mut engine = RivuletEngine::default();
+        let path = std::env::temp_dir().join("rivulet_inspect_parity.mp4");
+        engine.start_local_recording(path.clone());
+
+        let described = engine
+            .pipeline_description()
+            .expect("a recording output path is configured, so a description exists");
+        let built = engine
+            .build_pipeline_str()
+            .expect("same configuration must build through the engine path");
+
+        // A local recording carries no stream URL, so redaction is a no-op and
+        // the two strings must be byte-identical.
+        assert_eq!(described, built);
+        assert!(described.contains("mp4mux"), "description: {described}");
+    }
+
+    #[test]
+    fn pipeline_description_is_none_without_any_output() {
+        let engine = RivuletEngine::default();
+        assert_eq!(engine.pipeline_description(), None);
+    }
+
+    /// The streaming leg embeds the ingest URL, so the description must be
+    /// redacted even though the engine itself builds it in the clear.
+    #[test]
+    fn pipeline_description_redacts_stream_urls() {
+        let mut engine = RivuletEngine::default();
+        engine.set_stream_settings(Some(StreamSettings::twitch("super-secret-key")));
+        let described = engine
+            .pipeline_description()
+            .expect("streaming settings are configured, so a description exists");
+        assert!(
+            !described.contains("super-secret-key"),
+            "stream key must not survive into the inspectable description: {described}"
+        );
+        assert!(described.contains("<redacted stream URL>"), "{described}");
     }
 
     /// End-to-end test for separate audio tracks: both tracks are pushed into
