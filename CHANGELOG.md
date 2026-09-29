@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- refactor(ci): **Pinning-Suite geschlankt (Phase 1+2), 130 → 126 Tests** —
+  reine Detail-Pins entfernt, deren echte Verträge bereits am Ursprungsort
+  unit-getestet sind: responsive-Layout (Contract lebt in
+  `rivulet-gui/tests/ui_smoke.rs`/`ui_accessibility.rs`/`ui_regression.rs`),
+  Daily-Logging-Filter (Unit-Test in `rivulet-gui/src/logging.rs`),
+  Discord-Wire-Framing (End-to-End-Opcod-Asserts in
+  `rivulet-core/src/discord.rs`) und File-Selection-Cancel-Logging (neuer
+  Crash-Log-Vertrags-Unit-Test: der Presence-Worker warnt bei IPC-Fehlern
+  und loggt Deliveries — via in-memory `tracing`-Capture am Ursprungsort
+  statt per Quelltext-Zählen in der GUI). Der Discord-Errors-Pin behält nur
+  den GUI-Surfacing-Vertrag. Evidenz: Detail-Pins mussten bei legitimen
+  Refactors zweimal nachgezogen werden, ein Bug wurde nie von einem
+  gefunden — Supply-Chain- und OpenSSF-Pins bleiben unangetastet.
+
 - chore(security): **Team-Readiness — CODEOWNERS, staged Review-Gate,
   Clean-Desk-Konzept** — kritische Pfade (Remux-Kern, Capture, Release-
   Pipeline, Supply-Chain-Guards, Security-Docs) sind in

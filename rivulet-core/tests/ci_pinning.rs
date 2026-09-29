@@ -2794,27 +2794,6 @@ fn m6_remote_companion_is_wired_up_and_pinned() {
 }
 
 #[test]
-fn responsive_layout_contract_is_pinned_in_the_gui() {
-    // Shrinking the window must never clip controls without a way to reach
-    // them: the central view content and the sidebar live in scroll areas and
-    // the window has a minimum inner size (guards in main.rs).
-    let app = read("rivulet-gui/src/app.rs");
-    let main = read("rivulet-gui/src/main.rs");
-    assert!(app.contains("egui::ScrollArea::vertical()"));
-    assert!(app.contains("auto_shrink([false, false])"));
-    assert!(app.contains("nav_panel"));
-    assert!(main.contains("with_min_inner_size"));
-    // The source-contract tests must stay wired to these guarantees.
-    let smoke = read("rivulet-gui/tests/ui_smoke.rs");
-    assert!(smoke.contains("responsive_contract_keeps_controls_reachable_on_narrow_windows"));
-    let accessibility = read("rivulet-gui/tests/ui_accessibility.rs");
-    assert!(accessibility.contains("fn narrow_layout_is_responsive"));
-    let regression = read("rivulet-gui/tests/ui_regression.rs");
-    assert!(regression.contains("640, 480"), "640x480 must be covered");
-    assert!(regression.contains("content=scrollable"));
-}
-
-#[test]
 fn discord_presence_tracks_record_state_from_every_view() {
     // The Discord adapter must stay in sync with recording/streaming
     // transitions regardless of which view is open: the per-frame reconcile
@@ -2933,45 +2912,6 @@ fn discord_presence_error_state_is_wired_into_the_status_model() {
     assert!(presence.contains("Self::Error => \"presence_error\""));
     let i18n = read("rivulet-core/src/i18n.rs");
     assert!(i18n.matches("\"presence_error\"").count() >= 2);
-}
-
-#[test]
-fn discord_framing_uses_the_opcode_length_header() {
-    // Regression: the adapter framed every IPC message with only a 4-byte
-    // length prefix, but Discord v1 requires the 8-byte header
-    // `[opcode:u32][length:u32]` (op 0 = HANDSHAKE, op 1 = FRAME). Discord
-    // rejected the old framing with `{"code":1003,"message":"protocol
-    // error"}` and closed the connection, so the presence never appeared
-    // even though the client id and pipe were correct.
-    let discord = read("rivulet-core/src/discord.rs");
-    assert!(
-        discord.contains("pub const HANDSHAKE: u32 = 0;"),
-        "opcode table must define HANDSHAKE"
-    );
-    assert!(
-        discord.contains("pub const FRAME: u32 = 1;"),
-        "opcode table must define FRAME"
-    );
-    assert!(
-        discord.contains("write_frame(w, op::HANDSHAKE, &bytes)"),
-        "handshake must be sent with the HANDSHAKE opcode"
-    );
-    assert!(
-        discord.contains("write_frame(w, op::FRAME, &bytes)"),
-        "SET_ACTIVITY must be sent with the FRAME opcode"
-    );
-    // The writer must emit the 8-byte header (opcode first, then length).
-    let write = discord
-        .split_once("fn write_frame")
-        .map(|(_, rest)| rest)
-        .expect("write_frame must exist");
-    assert!(
-        write.contains("opcode.to_le_bytes()") && write.contains("len.to_le_bytes()"),
-        "write_frame must write opcode then length"
-    );
-    // The wire tests must assert the opcodes end to end.
-    assert!(discord.contains("handshake must use the HANDSHAKE opcode"));
-    assert!(discord.contains("SET_ACTIVITY must use the FRAME opcode"));
 }
 
 #[test]
@@ -3169,25 +3109,12 @@ fn discord_presence_uses_obs_style_assets_and_composed_title() {
 fn discord_presence_errors_are_logged_and_connection_state_is_exposed() {
     // Regression: the presence worker swallowed IPC failures silently, so the
     // GUI showed the desired status while Discord displayed only the plain
-    // "Playing Rivulet" game card. The worker must log (crash-log feature)
-    // and expose a shared connection state that the Stream view renders.
-    let discord = read("rivulet-core/src/discord.rs");
-    assert!(discord.contains("pub enum DiscordConnState"));
-    assert!(discord.contains("pub fn connection_state"));
-    assert!(
-        discord.contains("tracing::warn!(")
-            && discord.contains("Discord Rich Presence IPC unavailable"),
-        "IPC failures must be logged for the crash logs"
-    );
-    assert!(
-        discord.contains("tracing::info!") && discord.contains("SET_ACTIVITY delivered"),
-        "successful delivery must be logged at info level (visible with the default RUST_LOG)"
-    );
-    assert!(
-        discord.contains("DiscordConnState::Connected"),
-        "worker must flip to Connected"
-    );
-
+    // "Playing Rivulet" game card. The core contract (warn on IPC failure,
+    // info on delivery, shared connection state flipping to Connected) is
+    // unit-tested at the origin in rivulet-core/src/discord.rs
+    // (worker_logs_ipc_failures_and_deliveries_and_flips_connection_state);
+    // the GUI surfacing is covered by
+    // discord_presence_connection_state_is_surfaced_in_the_stream_view there.
     let gui = read("rivulet-gui/src/app.rs");
     assert!(
         gui.contains("p.connection_state()"),
@@ -4812,59 +4739,6 @@ fn build_caches_do_not_restore_stale_target_artifacts() {
             "{workflow} must not restore an unrelated old Cargo cache"
         );
     }
-}
-
-#[test]
-fn daily_logging_defaults_to_info_not_empty_filter() {
-    // Regression: logging init used EnvFilter::from_default_env(), which with
-    // RUST_LOG unset filters out everything — the daily crash log stayed empty
-    // and Discord/engine diagnostics were invisible. The init must resolve a
-    // user-friendly default (info) and the fallback must be unit-tested.
-    let logging = read("rivulet-gui/src/logging.rs");
-    // Only the *production* init code must not use from_default_env; a doc
-    // comment mentioning the old bug is fine and expected.
-    let production = logging
-        .split_once("pub fn init(")
-        .map(|(_, rest)| {
-            rest.split_once("#[cfg(test)]")
-                .map(|(head, _)| head)
-                .unwrap_or(rest)
-        })
-        .expect("init() must exist");
-    assert!(
-        !production.contains("EnvFilter::from_default_env()"),
-        "unset RUST_LOG must not silently disable all logging"
-    );
-    assert!(
-        production.contains("resolve_filter_spec(std::env::var(\"RUST_LOG\").ok())"),
-        "init must resolve the filter from the env with an info fallback"
-    );
-    assert!(
-        logging.contains("filter_spec_defaults_to_info_when_rust_log_unset"),
-        "the fallback rule must be covered by a unit test"
-    );
-}
-
-#[test]
-fn cancelled_file_dialog_is_logged_at_info_level() {
-    // Regression: cancelling the recording save dialog was logged at debug
-    // level, which the daily log (default filter `info`) never showed. A user
-    // who pressed Record but cancelled the dialog saw nothing in the log and
-    // concluded the recording silently failed — while the real reason was a
-    // cancelled dialog. The cancellation must be visible in the daily log.
-    let app = read("rivulet-gui/src/app.rs");
-    let occurrences = app
-        .matches("tracing::info!(\"File selection cancelled\")")
-        .count();
-    assert!(
-        occurrences >= 3,
-        "every recording save-dialog path must log the cancellation at info \
-         level (found {occurrences}, expected >= 3)"
-    );
-    assert!(
-        !app.contains("tracing::debug!(\"File selection cancelled\")"),
-        "no recording save-dialog path may keep the debug-level cancellation log"
-    );
 }
 
 #[test]

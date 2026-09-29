@@ -3235,7 +3235,7 @@ impl RivuletApp {
             .save_file();
 
         let Some(path) = file_path else {
-            tracing::info!("File selection cancelled");
+            on_file_dialog_cancelled();
             return;
         };
 
@@ -3751,7 +3751,7 @@ impl RivuletApp {
             .set_file_name(self.default_recording_filename())
             .save_file()
         else {
-            tracing::info!("File selection cancelled");
+            on_file_dialog_cancelled();
             return false;
         };
 
@@ -3893,7 +3893,7 @@ impl RivuletApp {
             .set_file_name(self.default_recording_filename())
             .save_file()
         else {
-            tracing::info!("File selection cancelled");
+            on_file_dialog_cancelled();
             return;
         };
 
@@ -4255,7 +4255,7 @@ impl RivuletApp {
             .set_file_name(self.default_recording_filename())
             .save_file()
         else {
-            tracing::info!("File selection cancelled");
+            on_file_dialog_cancelled();
             return;
         };
 
@@ -13947,9 +13947,88 @@ fn detect_os_locale() -> Locale {
     Locale::En
 }
 
+/// Shared handler for a cancelled recording save dialog: every
+/// platform-specific `start_*_recording` path funnels here, so the
+/// cancellation is logged at info level (the daily log's default filter) and
+/// the user never mistakes a cancelled dialog for a silently failed
+/// recording.
+fn on_file_dialog_cancelled() {
+    tracing::info!("File selection cancelled");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Minimal in-memory log capture for the dialog-cancel contract test:
+    /// installs a process-wide subscriber buffering formatted events, runs
+    /// `run`, and returns the accumulated text. Tests in this binary never
+    /// install another global subscriber, so this is uncontended.
+    fn capture_log_lines<F: FnOnce()>(run: F) -> String {
+        use std::io::Write;
+        use std::sync::{Arc, Mutex, Once, OnceLock};
+
+        static BUFFER: OnceLock<Arc<Mutex<Vec<u8>>>> = OnceLock::new();
+        static INSTALL: Once = Once::new();
+        let buffer = BUFFER
+            .get_or_init(|| Arc::new(Mutex::new(Vec::new())))
+            .clone();
+        INSTALL.call_once(|| {
+            struct BufferWriter(Arc<Mutex<Vec<u8>>>);
+
+            impl Write for BufferWriter {
+                fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                    self.0
+                        .lock()
+                        .expect("log buffer lock")
+                        .extend_from_slice(buf);
+                    Ok(buf.len())
+                }
+                fn flush(&mut self) -> std::io::Result<()> {
+                    Ok(())
+                }
+            }
+
+            impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for BufferWriter {
+                type Writer = BufferWriter;
+
+                fn make_writer(&'a self) -> Self::Writer {
+                    BufferWriter(Arc::clone(&self.0))
+                }
+            }
+
+            let subscriber = tracing_subscriber::fmt()
+                .with_ansi(false)
+                .with_writer(BufferWriter(buffer.clone()))
+                .finish();
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("capture subscriber must be the only global subscriber in tests");
+        });
+        buffer.lock().expect("log buffer lock").clear();
+        run();
+        let captured = buffer.lock().expect("log buffer lock").clone();
+        String::from_utf8_lossy(&captured).into_owned()
+    }
+
+    #[test]
+    fn cancelled_file_dialog_logs_at_info_level_for_the_daily_log() {
+        // Regression: cancelling the recording save dialog was logged at
+        // debug level, which the daily log (default filter `info`) never
+        // showed — a user who pressed Record but cancelled the dialog saw
+        // nothing in the log and concluded the recording silently failed.
+        // The shared handler must emit the info-level line (rendered as
+        // "INFO" by the subscriber) with the canonical message so the
+        // cancellation is visible in the daily log.
+        let logs = capture_log_lines(on_file_dialog_cancelled);
+        assert!(
+            logs.contains("INFO"),
+            "cancellation must be logged at info level; got: {logs:?}"
+        );
+        assert!(
+            logs.contains("File selection cancelled"),
+            "cancellation must use the canonical message; got: {logs:?}"
+        );
+    }
     use std::fs;
     use std::sync::atomic::AtomicBool;
 

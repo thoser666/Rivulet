@@ -391,6 +391,16 @@ fn worker_loop(
     }
 }
 
+/// Crash-log contract for the presence worker: IPC failures must surface as
+/// warnings and successful deliveries as info lines, both in the daily log
+/// (default filter `info`). The unit test below captures the real worker's
+/// output and checks for these exact messages.
+#[cfg(all(test, unix))]
+fn assert_delivery_log_contract(logs: &str) -> bool {
+    logs.contains("Discord Rich Presence IPC unavailable")
+        && logs.contains("Discord Rich Presence SET_ACTIVITY delivered")
+}
+
 fn ensure_connected(
     stream: &mut Option<Box<dyn IpcStream>>,
     client_id: &str,
@@ -747,6 +757,72 @@ mod winipc {
     }
 }
 
+/// Minimal in-memory log capture for worker-contract tests: a process-wide
+/// `tracing` subscriber buffering formatted events so the real worker
+/// thread's output can be asserted. Workers do not inherit thread-local
+/// dispatchers, so the capture installs itself as the *global* default
+/// (tests never install another subscriber, so this is uncontended).
+#[cfg(test)]
+mod test_log_capture {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex, Once, OnceLock};
+
+    fn buffer() -> Arc<Mutex<Vec<u8>>> {
+        static BUFFER: OnceLock<Arc<Mutex<Vec<u8>>>> = OnceLock::new();
+        BUFFER
+            .get_or_init(|| Arc::new(Mutex::new(Vec::new())))
+            .clone()
+    }
+
+    /// A writer handle that appends every formatted event line into the
+    /// global buffer; the fmt layer asks for a fresh writer per event.
+    struct BufferWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for BufferWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .expect("log buffer lock")
+                .extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for BufferWriter {
+        type Writer = BufferWriter;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            BufferWriter(Arc::clone(&self.0))
+        }
+    }
+
+    fn install_global() {
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            let subscriber = tracing_subscriber::fmt()
+                .with_ansi(false)
+                .with_writer(BufferWriter(buffer()))
+                .finish();
+            tracing::subscriber::set_global_default(subscriber)
+                .expect("capture subscriber must be the only global subscriber in tests");
+        });
+    }
+
+    /// Ensure the global capture subscriber is installed and start with an
+    /// empty buffer.
+    pub fn capture() {
+        install_global();
+        buffer().lock().expect("log buffer lock").clear();
+    }
+
+    pub fn logs() -> String {
+        String::from_utf8_lossy(&buffer().lock().expect("log buffer lock")).into_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -800,6 +876,115 @@ mod tests {
         // connected.
         std::thread::sleep(Duration::from_millis(600));
         assert_ne!(presence.connection_state(), DiscordConnState::Connected);
+        presence.disconnect();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worker_logs_ipc_failures_and_deliveries_and_flips_connection_state() {
+        // Regression: the presence worker swallowed IPC failures silently, so
+        // the GUI showed the desired status while Discord displayed only the
+        // plain "Playing Rivulet" game card. The worker must log failures for
+        // the crash logs (the daily log defaults to `info`, so a warn is
+        // always visible) and deliveries at info level, and it must flip the
+        // shared connection state to Connected on success so the GUI can show
+        // whether Discord accepted the presence.
+        // 1. Failure path: a connect that can never succeed keeps the worker
+        //    in the error path; it must warn and never report success.
+        crate::discord::test_log_capture::capture();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let missing = dir.path().join("rivulet-missing-discord-ipc");
+        let cfg = DiscordPresenceConfig {
+            enabled: true,
+            client_id: "log-contract-client".to_owned(),
+            ipc_socket_path: Some(missing),
+            ..Default::default()
+        };
+        let mut presence = DiscordPresence::new(&cfg);
+        assert!(presence.enabled());
+        presence.set_activity(&status());
+        // The worker backs off exponentially (1s, 2s, ...) after a failure,
+        // so ~2.3s reliably covers the first failure and its warn log.
+        std::thread::sleep(Duration::from_millis(2300));
+        let logs = crate::discord::test_log_capture::logs();
+        assert!(
+            logs.contains("Discord Rich Presence IPC unavailable"),
+            "the worker must warn on IPC failures so the daily log explains \
+             why no presence is showing; captured: {logs:?}"
+        );
+        assert_ne!(
+            presence.connection_state(),
+            DiscordConnState::Connected,
+            "a failed handshake must never report success"
+        );
+        presence.disconnect();
+
+        // 2. Delivery path: a real local listener completes handshake and
+        //    SET_ACTIVITY; the worker must log the delivery at info level
+        //    (visible with the default RUST_LOG) and flip to Connected.
+        let listener_dir = tempfile::tempdir().expect("temp dir");
+        let sock_path = listener_dir.path().join("discord-ipc-0");
+        let listener = std::os::unix::net::UnixListener::bind(&sock_path).expect("bind listener");
+        let cfg = DiscordPresenceConfig {
+            enabled: true,
+            client_id: "log-contract-delivery".to_owned(),
+            ipc_socket_path: Some(sock_path),
+            ..Default::default()
+        };
+        let mut presence = DiscordPresence::new(&cfg);
+        assert!(presence.set_activity(&status()));
+        let (mut conn, _) = listener.accept().expect("accept worker connection");
+        conn.set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        let _ = read_frame(&mut conn).expect("handshake frame");
+        let _ = read_frame(&mut conn).expect("set_activity frame");
+        wait_until(|| presence.connection_state() == DiscordConnState::Connected);
+        presence.disconnect();
+        let logs = crate::discord::test_log_capture::logs();
+        assert!(
+            logs.contains("Discord Rich Presence SET_ACTIVITY delivered"),
+            "successful delivery must be logged at info level; captured: {logs:?}"
+        );
+        assert!(
+            assert_delivery_log_contract(&logs),
+            "the crash-log contract must hold for the real worker output"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn worker_logs_ipc_failures_and_flips_state_off() {
+        // Windows variant of the crash-log contract: the missing-pipe connect
+        // must warn (visible in the daily log with its default `info` filter)
+        // and never report success. The delivery log is exercised by the
+        // named-pipe smoke test, which flips the shared state to Connected
+        // against a real local pipe.
+        crate::discord::test_log_capture::capture();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let missing = dir.path().join("rivulet-missing-discord-pipe");
+        let cfg = DiscordPresenceConfig {
+            enabled: true,
+            client_id: "log-contract-client".to_owned(),
+            ipc_socket_path: Some(missing),
+            ..Default::default()
+        };
+        let mut presence = DiscordPresence::new(&cfg);
+        assert!(presence.enabled());
+        presence.set_activity(&status());
+        // The worker backs off exponentially (1s, 2s, ...) after a failure,
+        // so ~2.3s reliably covers the first failure and its warn log.
+        std::thread::sleep(Duration::from_millis(2300));
+        let logs = crate::discord::test_log_capture::logs();
+        assert!(
+            logs.contains("Discord Rich Presence IPC unavailable"),
+            "the worker must warn on IPC failures so the daily log explains \
+             why no presence is showing; captured: {logs:?}"
+        );
+        assert_ne!(
+            presence.connection_state(),
+            DiscordConnState::Connected,
+            "a failed handshake must never report success"
+        );
         presence.disconnect();
     }
 
