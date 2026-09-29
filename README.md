@@ -555,6 +555,7 @@ then adds declarative plugins before considering sandboxed WASM execution.
 - [ ] **P5 – Isolated plugin execution** — preferably WASM, with timeouts, resource limits, and crash isolation. (The WASM runtime itself shipped early as M5 RFC Phases 1–3 — see the M5 section.)
 - [ ] **P6 – Plugin quality gate** — compatibility, migration, accessibility, UX, performance, security, and example-plugin checks.
 - [ ] **OBS plugin compatibility bridge** — descoped from M5 ([#147](https://github.com/thoser666/Rivulet/issues/147)): opt-in "Compatibility Mode" (explicitly marked as unsafe) loading native libobs plugins (encoders/filters/sources without UI; Qt UI plugins out of scope); the goal remains migration to the WASM plugin system.
+- [ ] **Live translation showcase plugin** — end-to-end demo of the plugin platform: a host-side STT (speech-to-text) transcript stream feeds a WASM plugin that translates in real time and renders bilingual subtitles burnable into the stream and recording ([#252](https://github.com/thoser666/Rivulet/issues/252)); requires the `host_transcript_subscribe` host import (STT stays host-side — Whisper-class models are too heavy for the WASM sandbox), a capability-gated network import for the translation API, and an overlay subtitle channel.
 
 **Definition of Done:** The versioned layout survives restart, built-in and plugin views use one stable registry, plugins cannot access secrets without explicit capability approval, and a failing plugin cannot terminate the GUI.
 

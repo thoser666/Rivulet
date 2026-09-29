@@ -270,6 +270,13 @@ pub struct RivuletEngine {
     /// volume/mute updates). Mirrors `audio_source_appsrcs`.
     audio_source_volumes: Vec<(Uuid, gst::Element)>,
     is_recording: bool,
+    /// Set when the GStreamer pipeline could not be constructed or started
+    /// (parse failure or failure to enter Playing). Prevents the per-frame
+    /// retry storm: `process_raw_frame` only re-arms pipeline construction
+    /// when this flag is clear, so a permanently broken pipeline string is
+    /// parsed at most once per session instead of once per video frame.
+    /// Cleared again when the user explicitly starts a new session.
+    pipeline_build_failed: bool,
     output_path: Option<PathBuf>,
     stream_settings: Option<StreamSettings>,
     stream_targets: Option<MultistreamSettings>,
@@ -379,6 +386,7 @@ impl Default for RivuletEngine {
             audio_source_appsrcs: Vec::new(),
             audio_source_volumes: Vec::new(),
             is_recording: false,
+            pipeline_build_failed: false,
             output_path: None,
             stream_settings: None,
             stream_targets: None,
@@ -1983,6 +1991,14 @@ impl RivuletEngine {
                         "Recording pipeline parse failed: {}",
                         e.message()
                     );
+                    // Arm the retry guard: the pipeline string could not be
+                    // parsed, so every subsequent video frame would otherwise
+                    // re-parse the same broken string once per frame (the
+                    // per-frame retry storm that spammed the log with 21
+                    // identical errors). End the session instead — the user
+                    // starts a fresh one once the configuration is fixed.
+                    self.pipeline_build_failed = true;
+                    self.is_recording = false;
                     self.set_error(pipeline_parse_failure_message(&e));
                     return;
                 }
@@ -1997,6 +2013,11 @@ impl RivuletEngine {
                     gst_error = ?e,
                     "Recording pipeline failed to enter Playing state"
                 );
+                // Same retry-guard semantics as the parse path: a pipeline
+                // that cannot enter Playing will not succeed on the next
+                // frame either, so stop re-trying and end the session.
+                self.pipeline_build_failed = true;
+                self.is_recording = false;
                 self.set_error(format!("Could not start the recording pipeline: {e}"));
                 return;
             }
@@ -2727,6 +2748,9 @@ impl RivuletEngine {
         }
         tracing::info!("Streaming prepared.");
         self.is_recording = true;
+        // The user explicitly starts a new session: re-arm pipeline
+        // construction even if the previous session's pipeline build failed.
+        self.pipeline_build_failed = false;
         // Capture the clock base so video PTS follow the injected clock
         // relative to the session start (M7 W2a, issue #187).
         self.session_clock_base_ns = Some(self.clock.now_ns());
@@ -2752,6 +2776,9 @@ impl RivuletEngine {
         tracing::info!(path = ?path, "Recording prepared");
         self.output_path = Some(path);
         self.is_recording = true;
+        // The user explicitly starts a new session: re-arm pipeline
+        // construction even if the previous session's pipeline build failed.
+        self.pipeline_build_failed = false;
         // Capture the clock base so video PTS follow the injected clock
         // relative to the session start (M7 W2a, issue #187).
         self.session_clock_base_ns = Some(self.clock.now_ns());
@@ -2966,7 +2993,7 @@ impl RivuletEngine {
             return;
         }
 
-        if self.pipeline.is_none() {
+        if self.pipeline.is_none() && !self.pipeline_build_failed {
             self.initialize_and_start_pipeline(width, height);
         }
 
@@ -3547,6 +3574,91 @@ mod tests {
             msg.contains("code"),
             "message must include a code marker: {msg}"
         );
+    }
+
+    #[test]
+    fn failed_pipeline_build_arms_guard_and_stops_per_frame_retries() {
+        // Regression for the per-frame retry storm: a pipeline that cannot be
+        // started must be rejected once per session, not re-attempted once per
+        // video frame (the user-visible 21x identical error spam in the daily
+        // log). Pointing `filesink` at an existing directory makes
+        // `set_state(Playing)` fail deterministically on every platform (no
+        // OS can open a directory as a file), so the failure path is real
+        // without depending on which GStreamer elements happen to be installed.
+        let mut engine = RivuletEngine::default();
+        let bad_path = std::env::temp_dir().join("rivulet_build_guard_probe");
+        std::fs::create_dir_all(&bad_path).unwrap();
+        engine.start_local_recording(bad_path.clone());
+        assert!(engine.is_recording);
+        assert!(
+            !engine.pipeline_build_failed,
+            "guard starts disarmed for a fresh session"
+        );
+
+        engine.process_raw_frame(&[0u8; 16], 320, 240);
+        assert!(
+            engine.take_error().is_some(),
+            "the pipeline failure must be surfaced"
+        );
+        assert!(
+            !engine.is_recording,
+            "a session whose pipeline cannot be built must end"
+        );
+        assert!(
+            engine.pipeline_build_failed,
+            "the retry guard must be armed after a build failure"
+        );
+
+        // Subsequent frames must not re-enter pipeline construction: no new
+        // error, pipeline stays absent, guard stays armed.
+        for _ in 0..10 {
+            engine.process_raw_frame(&[0u8; 16], 320, 240);
+            assert!(
+                engine.pipeline_build_failed,
+                "guard must stay armed while the session is broken"
+            );
+            assert!(
+                engine.take_error().is_none(),
+                "a broken pipeline must not be re-attempted per frame"
+            );
+            assert!(
+                engine.pipeline.is_none(),
+                "a broken pipeline must never be constructed"
+            );
+        }
+        let _ = std::fs::remove_dir(&bad_path);
+    }
+
+    #[test]
+    fn new_session_rearms_pipeline_build_after_failure() {
+        // After a failed pipeline build the engine ends the session; the user
+        // must be able to start a fresh one (e.g. after fixing the output
+        // path). A new explicit start clears the retry guard so the very next
+        // frame gets exactly one re-attempt and its failure surfaces once.
+        let mut engine = RivuletEngine::default();
+        let bad_path = std::env::temp_dir().join("rivulet_rearm_guard_probe");
+        std::fs::create_dir_all(&bad_path).unwrap();
+        engine.start_local_recording(bad_path.clone());
+        engine.process_raw_frame(&[0u8; 16], 320, 240);
+        assert!(engine.take_error().is_some());
+        assert!(engine.pipeline_build_failed);
+        assert!(!engine.is_recording);
+
+        engine.start_local_recording(bad_path.clone());
+        assert!(
+            !engine.pipeline_build_failed,
+            "a new explicit session must re-arm pipeline construction"
+        );
+        assert!(engine.is_recording);
+
+        engine.process_raw_frame(&[0u8; 16], 320, 240);
+        assert!(
+            engine.take_error().is_some(),
+            "the re-armed session must surface its failure again"
+        );
+        assert!(engine.pipeline_build_failed);
+        assert!(!engine.is_recording);
+        let _ = std::fs::remove_dir(&bad_path);
     }
 
     #[test]
