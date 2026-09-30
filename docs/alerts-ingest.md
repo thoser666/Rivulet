@@ -184,5 +184,5 @@ parse → verify → `AlertIngest::push`.
 - `rivulet-core/tests/ci_pinning.rs` — guards
   `m5_alerts_ingest_is_native_localized_and_pinned` (the ci_pinning guard
   pins the README/roadmap markers, the doc contents and the GUI wiring) and
-  `kick_engagement_alerts_feed_the_alerts_dock`
+  `chat_dock_surfaces_are_pinned`
 - `docs/obs-vision-roadmap.md` — M5 row marked **Done**

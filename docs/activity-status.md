@@ -105,7 +105,7 @@ steps.
 
 1. In `rivulet-core/src/discord.rs` update `DEFAULT_CLIENT_ID` (and
    `DEFAULT_LARGE_IMAGE_KEY` when the asset key changes). Both constants are
-   pinned by the ci_pinning guard `discord_presence_ships_official_defaults_and_migrates_empty_ids`
+   pinned by the ci_pinning guard `discord_presence_surface_is_pinned`
    — the guard fails until the test expectation is updated in the same
    commit, which is intentional: it forces a conscious change.
 2. Update the constants referenced in `docs/activity-status.md`, the wiki
@@ -156,7 +156,7 @@ silently keeping the adapter off. Empty remains valid (adapter off by design).
 This is a format check only — the id still has to belong to a real Discord
 application with Rich Presence enabled for the handshake to succeed (see
 `validate_client_id` in `rivulet-core::discord` and the
-`discord_client_id_is_validated_on_apply` ci_pinning guard).
+`discord_presence_surface_is_pinned` ci_pinning guard).
 
 > **Persistence note:** persisted settings are restored in `RivuletApp::new()`
 > via `eframe::get_value` from the eframe storage (the `save()` path used to

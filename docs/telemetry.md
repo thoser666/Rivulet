@@ -66,7 +66,7 @@ follow-up. This mirrors how other staged contracts ship (e.g. the NDI
   `apply_chat_state()` mirroring each chat connection transition.
 - **Security:** the privacy posture is documented in
   [`docs/security.md`](security.md) and pinned by the ci_pinning guard
-  `m5_telemetry_opt_in_is_privacy_safe_and_pinned`.
+  `m5_surfaces_are_pinned`.
 
 ## Verification
 

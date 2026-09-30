@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+- test(ci): **Pin-Paritätsschlankung Phase 3 (Issue #231)** — die
+  ci_pinning-Guardsuite von 128 auf 102 Tests konsolidiert, ohne einen
+  einzigen Assert zu verlieren: alle 24 verteilten `i18n.rs`-Reads sind
+  in einem Paritätstest (`feature_i18n_keys_exist_in_both_locales`)
+  zusammengeführt, der die Union aller Feature-Keys als Tabelle prüft
+  (exakt-2-Muster bleibt exakt, `>= 2` bleibt `>= 2`, die
+  `chat_title`-Werte bleiben wörtlich gepinnt); die Discord-Familie
+  (10 → 4), die m6/VOD-Familie (10 → 5), m69 (4 → 1), m10 (3 → 1),
+  Plugins (4 → 1), Chat/Kick/Restream/Autoclip (6 → 3), Track-Model
+  (2 → 1) und die Stage-2-Distribution-Pins (2 → 1) sind je Familie in
+  einen Oberflächentest zusammengelegt (Bodies und Marker unverändert,
+  jeder Merge mit Herkunfts-Doc-Kommentar); retained bleiben die
+  Verhaltens-Pins mit echtem Verhaltenswert (per-frame Discord-ui()-Sync,
+  App-ID-Retirement-Kette, Phase-2-GUI-Surface mit exakt-2-Parität,
+  Alerts-Ingest, Rate-Limit-Vertrag, Stage-2-Kontrakt). Die sechs
+  Doc-Referenzen auf umbenannte Guards (activity-status, alerts-ingest,
+  m10-spec, m6-audio-routing, m6-completion-report, telemetry) sind auf
+  die neuen Testnamen umgestellt.
+
 - feat(cli): **`rivulet inspect` — Pipeline-Inspektor/-Diagnose (M7 W5,
   Issue #191)** — `rivulet inspect --config recording.toml [--json]` gibt den
   Pipeline-String aus, den der Engine für die Config bauen *würde*, ohne

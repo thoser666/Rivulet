@@ -52,8 +52,8 @@ honest follow-ups, matching how M3 and M5 handled live-evidence gaps.
 
 | Feature | Issue | Key PRs | Evidence |
 | --- | --- | --- | --- |
-| Chat-driven auto-clips | #97 | (merged before this report) | `autoclip_chat_driven_replay_save_is_wired` ci_pinning guard; Stream-view config; i18n EN/DE |
-| Multi-platform restream | #98 | (merged before this report) | `restream_multitarget_fanout_is_wired_and_documented` ci_pinning guard |
+| Chat-driven auto-clips | #97 | (merged before this report) | `restream_and_autoclip_surfaces_are_pinned` ci_pinning guard; Stream-view config; i18n EN/DE |
+| Multi-platform restream | #98 | (merged before this report) | `restream_and_autoclip_surfaces_are_pinned` ci_pinning guard |
 | Mobile/HTTP remote companion | #99 | (merged before this report) | `m6_remote_companion_is_wired_up_and_pinned` ci_pinning guard |
 | Multi-track audio routing | #154 | #155, #156, #157, #158, #160, #161 | `m6_audio_routing_*` ci_pinning guards (phase 1–5 + resource report harness); quality-gate checklist in the spec; [`docs/m6-audio-resource-report.md`](m6-audio-resource-report.md) |
 
@@ -78,7 +78,7 @@ All criteria in the M6 quality gate (`docs/m6-audio-routing.md`) are checked:
 | Routing matrix isolates record vs stream | `routed_recording_pipeline_has_one_branch_per_record_routed_source`, `routed_streaming_pipeline_mixes_stream_routed_sources_into_single_flv_track` (`rivulet-core/src/lib.rs`) |
 | ≥1 record source → recording starts; 0 → warning, no tracks | `audio_routing_warning_zero_record_routed_sources`; `audio_routing_warning()` engine API pinned |
 | Stream mix contains exactly `stream = true` sources | `routed_streaming_pipeline_single_source_skips_mixer` |
-| macOS loopback fallback + hint | Phase 5; `m6_audio_routing_phase5_macos_fallback_is_pinned`; `audio_app_fallback_hint` i18n EN/DE |
+| macOS loopback fallback + hint | Phase 5; `m6_audio_backend_phases_are_pinned`; `audio_app_fallback_hint` i18n EN/DE |
 | Resource budget (5+ sources, full chains) | [`docs/m6-audio-resource-report.md`](m6-audio-resource-report.md) (6 sources, PASS) |
 | i18n parity EN/DE | `m6_audio_routing_phase2_gui_surface_is_pinned` parity assertions |
 

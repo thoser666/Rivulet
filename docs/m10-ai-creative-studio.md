@@ -272,7 +272,7 @@ The M10 gate (`milestone-quality-gates.md` §M10) already requires local-model C
 | Phase | Content | Status |
 | --- | --- | --- |
 | **Scratch** | Feasibility + Spark parity research | ✅ This document |
-| **Acceptance** | Accepted into M10 scope; README bullet + quality-gate bullet + ci_pinning guard | ✅ README M10 bullets (creative studio + off-switches), M10 gate bullets, `m10_creative_studio_is_specified_in_readme_gate_and_spec` guard, CHANGELOG |
+| **Acceptance** | Accepted into M10 scope; README bullet + quality-gate bullet + ci_pinning guard | ✅ README M10 bullets (creative studio + off-switches), M10 gate bullets, `m10_surfaces_are_pinned` guard, CHANGELOG |
 | **Spike** | Code-gen quality spike (qwen2.5-coder:7b vs devstral) + overlay-in-scene prototype | ✅ Spike done (2026-09-12): `qwen2.5-coder:7b` wins on 8 GB (4/5 valid @ 8–15 s; devstral 2/5 + 3 timeouts). Artifacts + review index in `scripts/codegen-spike/`. Overlay-in-scene prototype still open. |
 | **Feature** | Overlay pipeline + reactive wiring + GUI panel | |
 | **Emote sub-feature** | T2I backend + platform export kit (7TV push optional) | |
