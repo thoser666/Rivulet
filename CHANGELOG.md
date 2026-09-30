@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+- refactor(ci): **Guard-Scripts parsen Workflow-YAML strukturiert statt per
+  Proxy-Pins (Issue #231, Phase 4)** — die drei CI-Guard-Scripts, die
+  Workflow-YAML per Text-Slicing oder Proxy-Literale gelesen haben,
+  parsen jetzt die echte `jobs:`-Struktur (PyYAML, mit dokumentiertem
+  Fallback ohne PyYAML, damit die Checks überall lauffähig bleiben):
+  `check-apt-parity.py` lokalisiert seine Anker-Steps über das
+  strukturierte `name:`-Feld in `jobs:/steps:` statt per Text-Slicing
+  zwischen Step-Überschriften (das deckte nebenbei auf, dass der
+  flatpak-builder-Anker nie der exakte Step-Name war — der Suffix
+  "(screenshot mirroring)" fehlte); `check-beta-gate.py` liest die
+  Build-Matrix aus `strategy:/matrix:` statt per `os: [...]`-Regex, und
+  der Fallback-Scanner bleibt als dokumentierter Pfad erhalten;
+  `check-develop-ruleset.py` verifiziert die `REQUIRED_CHECKS`-Kontexte
+  des Merge-Gates gegen die strukturiert geparsen Job-Namen von
+  ci.yml/security.yml/scorecard.yml inkl. Matrix-Expansion
+  (`CodeQL (${{ matrix.language }})` → `CodeQL (rust)`), statt die
+  Namen nur als Proxy-Literale zu pinnen — ein Rename auf einer der
+  beiden Seiten schlägt jetzt laut fehl. Die ci_pinning-Guards pinnen
+  statt der Proxy-Literale die Parsing-Contracts (`MERGE_GATE_WORKFLOWS`,
+  `workflow_steps`, `ci_platforms`+Matrix). Alle Selbst-Tests
+  (apt-parity, beta-gate, ruleset) decken die strukturierten Pfade mit
+  Fixtures ab.
+
 - test(ci): **Pin-Paritätsschlankung Phase 3 (Issue #231)** — die
   ci_pinning-Guardsuite von 128 auf 102 Tests konsolidiert, ohne einen
   einzigen Assert zu verlieren: alle 24 verteilten `i18n.rs`-Reads sind

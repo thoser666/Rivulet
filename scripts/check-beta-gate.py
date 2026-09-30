@@ -152,8 +152,33 @@ def find_checkbox_state(section_lines, needle):
 
 
 def ci_platforms():
-    """Return the set of OSes in the `os: [ ... ]` matrix lists of ci.yml."""
-    text = CI_WORKFLOW.read_text(encoding="utf-8")
+    """Return the set of OSes in the build-matrix `os:` lists of ci.yml.
+
+    Structured (PyYAML) parse of the real `jobs:`/`strategy:`/`matrix:`
+    structure — the `os:` values of every job's build matrix, so a matrix
+    renamed into a different key, a split into several matrices or a move
+    into a reusable workflow fails the parity check loudly instead of
+    silently shrinking the platform set. Falls back to the line-based
+    scan when PyYAML is not installed.
+    """
+    try:
+        import yaml
+    except ImportError:
+        return _ci_platforms_lines(CI_WORKFLOW.read_text(encoding="utf-8"))
+    data = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8")) or {}
+    platforms = set()
+    for job in (data.get("jobs") or {}).values():
+        if not isinstance(job, dict):
+            continue
+        matrix = (job.get("strategy") or {}).get("matrix") or {}
+        os_values = matrix.get("os")
+        if isinstance(os_values, list):
+            platforms.update(v for v in os_values if isinstance(v, str))
+    return platforms
+
+
+def _ci_platforms_lines(text):
+    """No-PyYAML fallback: scan `os: [ ... ]` flow lists line-based."""
     platforms = set()
     for line in text.splitlines():
         match = OS_LIST_RE.match(line)
@@ -524,6 +549,20 @@ def run_self_test():
         and "- note-b" in sample
         and sample.splitlines()[-1] == "- note-b",
     )
+
+    # 6. Matrix parsing: the structured ci.yml parse must see every OS the
+    # build matrix lists (skipped where PyYAML is not installed; the
+    # checker itself falls back to the line-based scan in that case).
+    try:
+        import yaml  # noqa: F401
+
+        platforms = ci_platforms()
+        case(
+            "CI matrix lists all three OSes",
+            {"ubuntu-latest", "windows-latest", "macos-latest"} <= platforms,
+        )
+    except ImportError:
+        print("SKIP [CI matrix parsing] (PyYAML not installed)")
 
     if failures:
         print(f"{failures} self-test case(s) FAILED")
