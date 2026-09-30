@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- test(discord): **Log-Capture-Worker-Tests pollen statt fixer Wartezeit** —
+  die beiden Worker-Log-Vertrags-Tests (unix: IPC-Fehler + Delivery,
+  windows: IPC-Fehler) haben den Warn des Workers bisher nach einer festen
+  `sleep(2300)`-Wartezeit einmalig aus dem Capture-Buffer gelesen; auf
+  langsamen Runnern konnte die Worker-Thread-Dispatch-Latenz die 2,3 s
+  überschreiten und den Test laut flaky machen (nie falsch-grün). Beide
+  Stellen pollen jetzt den Buffer über `wait_until` mit 5-s-Deadline —
+  der Warn fliegt vor dem exponentiellen Backoff-Sleep des Workers, die
+  Deadline muss also nur die Dispatch-Latenz decken. Die Windows-Variante
+  läuft dadurch lokal von 2,3 s auf ~50 ms.
+
 - refactor(ci): **Guard-Scripts parsen Workflow-YAML strukturiert statt per
   Proxy-Pins (Issue #231, Phase 4)** — die drei CI-Guard-Scripts, die
   Workflow-YAML per Text-Slicing oder Proxy-Literale gelesen haben,
