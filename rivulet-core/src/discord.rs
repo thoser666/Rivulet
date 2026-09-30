@@ -903,9 +903,14 @@ mod tests {
         let mut presence = DiscordPresence::new(&cfg);
         assert!(presence.enabled());
         presence.set_activity(&status());
-        // The worker backs off exponentially (1s, 2s, ...) after a failure,
-        // so ~2.3s reliably covers the first failure and its warn log.
-        std::thread::sleep(Duration::from_millis(2300));
+        // The worker logs the warn *before* its exponential backoff sleep
+        // (1s, 2s, ...), so the deadline only has to cover worker-thread
+        // dispatch latency — polling the buffer is robust on slow runners
+        // where a fixed sleep(2300) could miss the warn entirely.
+        wait_until(|| {
+            crate::discord::test_log_capture::logs()
+                .contains("Discord Rich Presence IPC unavailable")
+        });
         let logs = crate::discord::test_log_capture::logs();
         assert!(
             logs.contains("Discord Rich Presence IPC unavailable"),
@@ -978,9 +983,14 @@ mod tests {
         let mut presence = DiscordPresence::new(&cfg);
         assert!(presence.enabled());
         presence.set_activity(&status());
-        // The worker backs off exponentially (1s, 2s, ...) after a failure,
-        // so ~2.3s reliably covers the first failure and its warn log.
-        std::thread::sleep(Duration::from_millis(2300));
+        // The worker logs the warn *before* its exponential backoff sleep
+        // (1s, 2s, ...), so the deadline only has to cover worker-thread
+        // dispatch latency — polling the buffer is robust on slow runners
+        // where a fixed sleep(2300) could miss the warn entirely.
+        wait_until(|| {
+            crate::discord::test_log_capture::logs()
+                .contains("Discord Rich Presence IPC unavailable")
+        });
         let logs = crate::discord::test_log_capture::logs();
         assert!(
             logs.contains("Discord Rich Presence IPC unavailable"),
