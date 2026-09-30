@@ -424,7 +424,7 @@ must not be implied by beta parity.
 
 *Differentiation pillar #1: OBS is interactive-first, Rivulet is deterministic.*
 
-- [ ] Deterministic pipeline (controllable engine clock, reproducible output from the same inputs) — [#187](https://github.com/thoser666/Rivulet/issues/187)
+- [x] Deterministic pipeline (controllable engine clock, reproducible output from the same inputs) — injectable clock (`SystemClock`/`VirtualClock` with `advance`/`step`/`hold`), identical container timestamps under the virtual clock, and every remaining nondeterminism source *reported* rather than hidden: `rivulet record` emits the active sources, the encoder, and separate `reproducible`/`byte_reproducible` flags in its `stopped` JSON event — [#187](https://github.com/thoser666/Rivulet/issues/187)
 - [x] Headless CLI: capture/rendering without a GUI (`rivulet record ...`), usable as binary and library — shipped in [`rivulet-cli`](rivulet-cli/) (`rivulet record` with TOML config, JSON status events, documented exit codes, graceful SIGINT/SIGTERM; library path via `rivulet_cli::RecordJob`) — [#186](https://github.com/thoser666/Rivulet/issues/186)
 - [ ] CI-friendly rendering: generate video from code (Remotion approach, native in Rust) — e.g. batch creation, tests, per-frame screenshots — [#189](https://github.com/thoser666/Rivulet/issues/189)
 - [ ] Reproducible distribution inputs: deterministic packages, SHA-256 manifests, and post-publish verification for the M5 channel rollout (see [`docs/release-platforms.md`](docs/release-platforms.md)) — [#190](https://github.com/thoser666/Rivulet/issues/190)

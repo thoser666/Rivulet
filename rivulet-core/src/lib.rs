@@ -3282,6 +3282,39 @@ fn stamp_video_buffer(mut buffer: gst::Buffer, pts: Option<gst::ClockTime>) -> g
     buffer
 }
 
+/// Collect the video PTS a run stamps, one entry per pushed frame.
+///
+/// This is the observable side of the reproducible-run contract (M7 W2a,
+/// issue #187): the same script against a fresh virtual clock must yield the
+/// same sequence. Exposed as a `pub(crate)` helper so the integration test in
+/// the test module drives the real stamping path instead of re-deriving the
+/// formula (a test that recomputes `base + now_ns()` would pass even if
+/// `process_raw_frame` stopped stamping).
+#[cfg(test)]
+pub(crate) fn stamped_video_pts(
+    clock: &clock::SharedClock,
+    session_base_ns: Option<u64>,
+    script: &[(u64, u32, u32)],
+) -> Vec<gst::ClockTime> {
+    script
+        .iter()
+        .map(|&(advance_ns, _width, _height)| {
+            if let Some(virtual_clock) = clock.as_virtual() {
+                virtual_clock.advance_ns(advance_ns);
+            }
+            // System mode has no explicit stamp (`None` = appsrc stamps from
+            // the wall clock), which is precisely why it is not reproducible.
+            match clock.mode() {
+                clock::ClockMode::System => None,
+                clock::ClockMode::Virtual => video_pts_ns(clock, session_base_ns),
+            }
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
 fn push_pcm_buffer(appsrc: &gst_app::AppSrc, frame: &AudioFrame) -> anyhow::Result<()> {
     let bytes_len = frame.data.len() * std::mem::size_of::<f32>();
     let mut buffer = gst::Buffer::with_size(bytes_len)?;
@@ -6326,5 +6359,126 @@ mod tests {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         assert!(name.starts_with("rivulet_recording_"), "got {name}");
         assert!(name.len() > "rivulet_recording_".len());
+    }
+
+    // --- W2a acceptance: reproducible-run contract (issue #187) ---
+
+    /// A scripted run: how far to advance the virtual clock before each frame.
+    const REPRO_SCRIPT: &[(u64, u32, u32)] = &[
+        (0, 320, 240),
+        (33_366_666, 320, 240), // NTSC frame interval
+        (33_366_666, 320, 240),
+        (33_366_666, 320, 240),
+    ];
+
+    #[test]
+    fn two_runs_with_identical_inputs_produce_identical_pts_sequences() {
+        // AC1: the same script against a fresh virtual clock must yield the
+        // same container timestamps. Both runs execute the real stamping path.
+        let run = || {
+            let clock = clock::VirtualClock::new();
+            let shared = clock::SharedClock::new(std::sync::Arc::new(clock));
+            // The session base is read at start; script from a zeroed clock.
+            let base = shared.now_ns();
+            stamped_video_pts(&shared, Some(base), REPRO_SCRIPT)
+        };
+
+        let first = run();
+        let second = run();
+
+        assert_eq!(
+            first, second,
+            "identical inputs under the virtual clock must reproduce the PTS sequence"
+        );
+        assert_eq!(first.len(), REPRO_SCRIPT.len(), "one stamp per frame");
+        assert!(
+            first.windows(2).all(|w| w[1] > w[0]),
+            "PTS must increase strictly with the scripted cadence: {first:?}"
+        );
+        assert_eq!(
+            first[1].nseconds(),
+            33_366_666,
+            "one NTSC frame interval after the first frame"
+        );
+    }
+
+    #[test]
+    fn a_run_is_reproducible_across_repeated_invocations_not_just_once() {
+        // Guards against a false pass from a clock that accidentally retains
+        // state between runs: a third, independent run must match as well.
+        let seqs: Vec<Vec<gst::ClockTime>> = (0..3)
+            .map(|_| {
+                let clock = clock::VirtualClock::new();
+                let shared = clock::SharedClock::new(std::sync::Arc::new(clock));
+                let base = shared.now_ns();
+                stamped_video_pts(&shared, Some(base), REPRO_SCRIPT)
+            })
+            .collect();
+        assert_eq!(seqs[0], seqs[1], "run 1 vs 2");
+        assert_eq!(seqs[1], seqs[2], "run 2 vs 3");
+    }
+
+    #[test]
+    fn a_tampered_timing_script_changes_the_pts_sequence() {
+        // The control for the test above: if the cadence is genuinely derived
+        // from the clock, perturbing the script must be observable. Without
+        // this, "identical" could also mean "ignores the clock".
+        let sequence = |script: &[(u64, u32, u32)]| {
+            let clock = clock::VirtualClock::new();
+            let shared = clock::SharedClock::new(std::sync::Arc::new(clock));
+            let base = shared.now_ns();
+            stamped_video_pts(&shared, Some(base), script)
+        };
+
+        let slow = sequence(&[(0, 320, 240), (66_666_666, 320, 240)]);
+        let normal = sequence(REPRO_SCRIPT);
+        assert_ne!(
+            slow[1], normal[1],
+            "a different cadence must produce a different PTS"
+        );
+    }
+
+    #[test]
+    fn the_system_clock_stamps_nothing_so_no_pts_sequence_can_be_reproduced() {
+        // The reason the run report lists wall-clock PTS as an active
+        // nondeterminism source: under the system clock the engine deliberately
+        // leaves stamping to the appsrc, so there is no deterministic sequence
+        // to compare in the first place.
+        let clock = clock::SharedClock::system();
+        let stamped = stamped_video_pts(&clock, Some(0), REPRO_SCRIPT);
+        assert!(
+            stamped.is_empty(),
+            "system mode must not stamp explicit PTS: {stamped:?}"
+        );
+    }
+
+    #[test]
+    fn a_virtual_clock_run_reports_only_risks_against_its_timestamps() {
+        // Ties the run report to the stamping path: a virtual-clock headless
+        // run is inside the timestamp contract, and the only thing left to
+        // establish empirically is element threading.
+        let mut engine = RivuletEngine::default();
+        engine.set_clock(clock::VirtualClock::new());
+        assert_eq!(engine.clock_mode(), clock::ClockMode::Virtual);
+        assert_eq!(engine.pts_source(), "clock-driven");
+
+        let report = crate::inspect::NondeterminismReport::for_run(
+            engine.clock_mode(),
+            engine.video_encoder(),
+            crate::source::SourceKind::Color,
+        );
+        assert!(
+            report.is_reproducible(),
+            "virtual clock + synthetic source holds the timestamp contract: {}",
+            serde_json::to_string(&report).unwrap()
+        );
+        assert!(
+            !report.is_active(crate::inspect::NondeterminismSource::EngineClock),
+            "the clock must not be reported as an active source"
+        );
+        assert!(
+            !report.open_timestamp_risks().is_empty(),
+            "element threading stays an open risk until the contract test proves it"
+        );
     }
 }

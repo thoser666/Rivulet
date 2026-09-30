@@ -2,6 +2,7 @@
 //! W1 contract (issue #186): a small, documented surface that maps onto
 //! [`rivulet_core::RivuletEngine`] settings.
 
+use rivulet_core::inspect::NondeterminismReport;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -161,6 +162,23 @@ pub enum StatusEvent {
         frames: u64,
         seconds: u64,
         file_size_bytes: u64,
+        /// Clock mode that drove the run (`system` or `virtual`).
+        clock: String,
+        /// How video PTS were produced (`do-timestamp` or `clock-driven`).
+        pts_source: String,
+        /// Encoder backend the run actually used.
+        encoder: String,
+        /// Whether the active nondeterminism sources permit a reproducible
+        /// container timestamp sequence (M7 W2a, spec § Nondeterminism
+        /// inventory).
+        reproducible: bool,
+        /// Whether the encoded bytes are expected to repeat run to run.
+        byte_reproducible: bool,
+        /// The nondeterminism sources this run actually used, with details.
+        ///
+        /// Always the full inventory so a consumer can tell a documented limit
+        /// from a limit that applied to this run.
+        nondeterminism: NondeterminismReport,
     },
 }
 
@@ -183,7 +201,29 @@ pub fn describe(event: &StatusEvent) -> String {
             frames,
             seconds,
             file_size_bytes,
-        } => format!("recording stopped: {seconds}s frames={frames} bytes={file_size_bytes}"),
+            clock,
+            pts_source,
+            encoder,
+            reproducible,
+            byte_reproducible,
+            nondeterminism,
+        } => {
+            let limits: Vec<&str> = nondeterminism
+                .active_sources()
+                .iter()
+                .filter(|entry| entry.affects_timestamps || entry.affects_bytes)
+                .map(|entry| entry.source.as_str())
+                .collect();
+            let mut line = format!(
+                "recording stopped: {seconds}s frames={frames} bytes={file_size_bytes} \
+                 clock={clock} pts={pts_source} encoder={encoder} \
+                 reproducible={reproducible} byte_reproducible={byte_reproducible}"
+            );
+            if !limits.is_empty() {
+                line.push_str(&format!(" limits={}", limits.join(",")));
+            }
+            line
+        }
     }
 }
 
@@ -304,10 +344,41 @@ mod tests {
             frames: 120,
             seconds: 4,
             file_size_bytes: 4096,
+            clock: "system".to_string(),
+            pts_source: "do-timestamp".to_string(),
+            encoder: "Software".to_string(),
+            reproducible: false,
+            byte_reproducible: false,
+            nondeterminism: NondeterminismReport::for_run(
+                rivulet_core::clock::ClockMode::System,
+                rivulet_core::encoder::VideoEncoder::Software,
+                rivulet_core::source::SourceKind::Color,
+            ),
         };
-        assert_eq!(
-            serde_json::to_string(&stopped).unwrap(),
-            r#"{"event":"stopped","frames":120,"seconds":4,"file_size_bytes":4096}"#
+        // The schema is a documented machine-readable contract (spec
+        // § CLI surface reference), so the key set is pinned rather than
+        // string-compared: the inventory alone makes the payload large and
+        // every source is covered by its own tests.
+        let value: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&stopped).unwrap()).unwrap();
+        assert_eq!(value["event"], "stopped");
+        assert_eq!(value["clock"], "system");
+        assert_eq!(value["pts_source"], "do-timestamp");
+        assert_eq!(value["encoder"], "Software");
+        assert_eq!(value["reproducible"], false);
+        assert_eq!(value["byte_reproducible"], false);
+        assert_eq!(value["frames"], 120);
+        assert_eq!(value["seconds"], 4);
+        assert_eq!(value["file_size_bytes"], 4096);
+        assert!(
+            value["nondeterminism"]["sources"].is_array(),
+            "the run report must carry the nondeterminism inventory"
         );
+
+        // The human line names the limit instead of only printing a number.
+        let line = describe(&stopped);
+        assert!(line.contains("clock=system"), "got {line}");
+        assert!(line.contains("reproducible=false"), "got {line}");
+        assert!(line.contains("limits="), "the limit must be named: {line}");
     }
 }
