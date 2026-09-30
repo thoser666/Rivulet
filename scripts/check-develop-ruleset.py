@@ -37,9 +37,24 @@ Solo vs. team mode (staged review rollout, see docs/team-onboarding-runbook.md):
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+# The merge-gate contexts are not pinned blindly: each one must exist as a
+# job `name:` in one of these workflows (aggregates included — e.g. the
+# ruleset requires the `CI` gate job, not every leaf job inside ci.yml).
+# Verifying the names against the real workflow YAML keeps the contract
+# verifiable in-repo; a rename on either side fails loudly instead of
+# silently drifting out of the required-checks list.
+MERGE_GATE_WORKFLOWS = (
+    ".github/workflows/ci.yml",
+    ".github/workflows/security.yml",
+    ".github/workflows/scorecard.yml",
+)
 
 REPO = os.environ.get("RIVULET_REPO") or os.environ.get("GITHUB_REPOSITORY") or "thoser666/Rivulet"
 API = "https://api.github.com"
@@ -55,6 +70,105 @@ REQUIRED_CHECKS = (
     "Dependency Review",
     "Pinning-Tests",
 )
+
+
+def _scan_job_names_lines(text: str) -> set[str]:
+    """No-PyYAML fallback: scan `jobs:`-section `name:` fields line-based.
+
+    Matches exactly the structure this repo uses (top-level `jobs:` at column
+    0, two-space job ids, their four-space `name:` fields). Template names are
+    kept raw (callers handle `${{ ... }}` prefixes); a refactor away from that
+    shape surfaces as an empty/partial set, i.e. a loud contract failure.
+    """
+    names: set[str] = set()
+    in_jobs = False
+    for line in text.splitlines():
+        if line.startswith("jobs:"):
+            in_jobs = True
+            continue
+        if not in_jobs:
+            continue
+        if line and not line[0].isspace():
+            break
+        if line.startswith("    name:") and ":" in line:
+            value = line.split(":", 1)[1].strip()
+            if value:
+                names.add(value.strip("\"'").strip())
+    return names
+
+
+def _expand_matrix_name(name: str, job: dict) -> set[str]:
+    """Expand `Foo (${{ matrix.key }})` job names against strategy.matrix."""
+    keys = re.findall(r"\$\{\{\s*matrix\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}", name)
+    if not keys:
+        return {name}
+    matrix = (job.get("strategy") or {}).get("matrix") or {}
+    values = matrix.get(keys[0])
+    if len(keys) == 1 and isinstance(values, list) and all(isinstance(v, str) for v in values):
+        return {name.replace("${{ matrix." + keys[0] + " }}", v) for v in values}
+    # Unresolvable template (multi-key or non-list matrix): keep the raw name.
+    return {name}
+
+
+def _job_check_names(workflow: Path) -> set[str]:
+    """Return the status-check contexts one workflow's jobs produce.
+
+    Structured (PyYAML) parse of the `jobs:` mapping's `name:` fields, with
+    `${{ matrix.key }}` templates expanded against the job's strategy matrix
+    (e.g. `CodeQL (${{ matrix.language }})` yields `CodeQL (rust)`). Falls
+    back to the conservative line-based scan when PyYAML is unavailable.
+    """
+    text = workflow.read_text(encoding="utf-8")
+    try:
+        import yaml  # type: ignore
+    except ImportError:
+        return _scan_job_names_lines(text)
+    data = yaml.safe_load(text) or {}
+    jobs = data.get("jobs") or {}
+    names: set[str] = set()
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        name = job.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if "${{" in name:
+            names.update(_expand_matrix_name(name, job))
+        else:
+            names.add(name.strip())
+    return names
+
+
+def merge_gate_contexts() -> set[str]:
+    """Union of job-derived check contexts across MERGE_GATE_WORKFLOWS."""
+    contexts: set[str] = set()
+    for rel in MERGE_GATE_WORKFLOWS:
+        contexts |= _job_check_names(REPO_ROOT / rel)
+    return contexts
+
+
+def verify_merge_gate_contract() -> None:
+    """Fail loudly when REQUIRED_CHECKS drifts from the workflow job names.
+
+    A required context counts as defined when it is an exact job name, or
+    when it is produced by a matrix-expanded job name, or (in the no-PyYAML
+    fallback) when a raw template job name's prefix matches.
+    """
+    defined = merge_gate_contexts()
+    prefixes = tuple(
+        name.split("${{")[0]
+        for name in defined
+        if "${{" in name
+    )
+    missing = [
+        c
+        for c in REQUIRED_CHECKS
+        if c not in defined and not any(c.startswith(p) for p in prefixes)
+    ]
+    assert not missing, (
+        f"merge-gate context(s) {missing} are not job names of {MERGE_GATE_WORKFLOWS} — "
+        "update REQUIRED_CHECKS or the workflow job names in the same change"
+    )
 
 FAILURES: list[str] = []
 
@@ -90,8 +204,13 @@ def _ruleset_payloads(token: str | None) -> list[dict]:
     return details
 
 
-def evaluate(payloads: list[dict], team_mode: bool = False) -> bool:
-    """Validate the given ruleset payloads; returns True when compliant."""
+def evaluate(payloads: list[dict], team_mode: bool = False, required_checks: tuple = REQUIRED_CHECKS) -> bool:
+    """Validate the given ruleset payloads; returns True when compliant.
+
+    ``required_checks`` lets the self-test drive arbitrary merge-gate sets
+    without touching the module-level default (which is parsed from the real
+    ci.yml at import time).
+    """
     develop = None
     for rs in payloads:
         included = []
@@ -149,7 +268,7 @@ def evaluate(payloads: list[dict], team_mode: bool = False) -> bool:
         if rule.get("type") == "required_status_checks":
             for ctx in rule.get("parameters", {}).get("required_status_checks", []):
                 checks.append(ctx.get("context"))
-    missing = [c for c in REQUIRED_CHECKS if c not in checks]
+    missing = [c for c in required_checks if c not in checks]
     if missing:
         fail(f"required status checks missing: {missing}")
     else:
@@ -165,6 +284,12 @@ def run_live() -> int:
         f"Checking rulesets for {REPO} ({'team' if team_mode else 'solo'} mode, "
         f"{'authenticated' if token else 'anonymous'})"
     )
+    try:
+        verify_merge_gate_contract()
+        print("  ok: every merge-gate context is a job name in-repo")
+    except AssertionError as exc:
+        print(f"FATAL: {exc}")
+        return 2
     try:
         payloads = _ruleset_payloads(token)
     except urllib.error.HTTPError as exc:
@@ -194,6 +319,13 @@ def run_live() -> int:
 
 def self_test() -> int:
     """Offline logic test with canned payloads (no network)."""
+
+    # The job-name contract: every REQUIRED_CHECKS context must actually be
+    # produced by a merge-gate workflow's jobs (structured YAML parse with
+    # matrix expansion) — a rename on either side fails loudly here instead
+    # of drifting out of the required-checks list.
+    verify_merge_gate_contract()
+    print("  ok: merge-gate contract verified against workflow job names")
 
     def ruleset(**overrides) -> dict:
         base = {

@@ -2011,7 +2011,11 @@ fn develop_ruleset_guard_proves_direct_pushes_are_blocked() {
     );
 
     // The checker itself must assert the invariants that implement "no direct
-    // commits to the primary branch".
+    // commits to the primary branch". The required-checks list is not a
+    // blind literal pin: the script verifies every REQUIRED_CHECKS context
+    // against the structured job names of the merge-gate workflows (PyYAML
+    // parse, matrix expansion), so a rename on either side fails loudly
+    // instead of drifting.
     let script = read("scripts/check-develop-ruleset.py");
     for marker in [
         "refs/heads/develop",
@@ -2024,6 +2028,12 @@ fn develop_ruleset_guard_proves_direct_pushes_are_blocked() {
         "Pinning-Tests",
         "OpenSSF Scorecard",
         "--self-test",
+        // The job-name contract (structured YAML parsing instead of proxy
+        // pins): the merge-gate contexts must be verified in-repo.
+        "MERGE_GATE_WORKFLOWS",
+        "verify_merge_gate_contract",
+        "_expand_matrix_name",
+        "merge_gate_contexts",
     ] {
         assert!(
             script.contains(marker),
@@ -2237,7 +2247,9 @@ fn apt_parity_checker_is_wired_up() {
     // nightly.yml — nothing compared the two lists. The apt-parity checker
     // must exist, cover both the clippy (exact set) and build_and_test
     // (set-with-CI-only-exceptions) steps, and be wired into both the CI
-    // Lints job and the pre-push fast-guard stage.
+    // Lints job and the pre-push fast-guard stage. It parses the workflows
+    // structurally (PyYAML, steps located by their structured `name:` field
+    // inside jobs/steps), not by text-slicing between step headings.
     let checker = read("scripts/check-apt-parity.py");
     for marker in [
         "CI_ONLY_BUILD_PACKAGES",
@@ -2245,6 +2257,11 @@ fn apt_parity_checker_is_wired_up() {
         "Install Linux dependencies (if applicable)",
         "--self-test",
         "--json",
+        // Structured parsing contract (not proxy text slicing).
+        "import yaml",
+        "def workflow_steps",
+        "def collect_from_data",
+        "yaml.safe_load",
         // Repo-wide coverage: the guard must keep checking every workflow
         // that installs apt packages, not only ci.yml vs nightly.yml.
         "EXTRA_WORKFLOWS",
@@ -2318,6 +2335,17 @@ fn beta_gate_checker_is_wired_up() {
             && checker.contains("signs automatically")
             && checker.contains("--self-test"),
         "check-beta-gate.py must expose the SignPath notice with a self-test"
+    );
+    // The build matrix must be read structurally (PyYAML
+    // jobs/strategy/matrix parse with a documented line-based fallback), not
+    // by scanning `os: [...]` text — a matrix renamed into a different key
+    // or moved into a reusable workflow must fail the parity check loudly.
+    assert!(
+        checker.contains("def ci_platforms")
+            && checker.contains("strategy")
+            && checker.contains("matrix")
+            && checker.contains("def _ci_platforms_lines"),
+        "check-beta-gate.py must parse the build matrix structurally"
     );
 
     // The gate itself lives in the roadmap; the README must define it.

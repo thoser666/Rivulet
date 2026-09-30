@@ -28,6 +28,11 @@ Exit codes: ``0`` = all compared lists match, ``1`` = drift detected
 (mismatches printed), ``2`` = a workflow or an expected step could not be
 parsed.
 
+The workflows are parsed structurally (PyYAML): steps are located by their
+structured `name:` field inside the real `jobs:`/`steps:` mapping, not by
+text-slicing between step headings, so reordering or re-indenting steps
+cannot silently change what is compared.
+
 Usage:
     scripts/check-apt-parity.py [--json] [--self-test]
 """
@@ -38,23 +43,27 @@ import re
 import sys
 from pathlib import Path
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover - surfaced loudly by collect()
+    yaml = None
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CI_YML = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 NIGHTLY_YML = REPO_ROOT / ".github" / "workflows" / "nightly.yml"
 
-# Anchors: the first line of the dependency step and the line that terminates
-# the `run:` block. The terminator must be the *next* step heading in both
-# workflows; a refactor that renames either anchor fails parsing (exit 2),
-# which is the intended loud outcome.
+# Anchors: the `name:` of the dependency step inside the structured workflow
+# YAML. Steps are located by parsing the real `jobs:`/`steps:` structure
+# (PyYAML), not by slicing raw text between step headings — so reordering,
+# re-indenting or renaming a step fails loudly (exit 2) instead of silently
+# comparing the wrong block.
 ANCHORS = {
     "lints": {
         "step": "Install GStreamer dependencies for clippy",
-        "terminator": "- name:",
         "message": "clippy dependency step",
     },
     "build": {
         "step": "Install Linux dependencies (if applicable)",
-        "terminator": "- name:",
         "message": "Linux build dependency step",
     },
 }
@@ -64,7 +73,6 @@ ANCHORS = {
 CI_EXTRA_ANCHORS = {
     "fuzz": {
         "step": "Run fuzz smoke (256 runs per target)",
-        "terminator": "- name:",
         "message": "fuzz smoke dependency step",
     },
 }
@@ -77,40 +85,34 @@ EXTRA_WORKFLOWS = {
     "build-package": {
         "build": {
             "step": "Install Linux release dependencies",
-            "terminator": "- name:",
             "message": "Linux release dependency step",
         },
     },
     "security": {
         "build": {
             "step": "Install GStreamer development dependencies",
-            "terminator": "- name:",
             "message": "CodeQL build dependency step",
         },
     },
     "fuzz-deep": {
         "fuzz": {
             "step": "Install GStreamer/PipeWire build dependencies",
-            "terminator": "- name:",
             "message": "deep-fuzz dependency step",
         },
     },
     "flatpak-build": {
         "flatpak_tools": {
             "step": "Install flatpak and flatpak-builder",
-            "terminator": "- name:",
             "message": "flatpak tooling step",
         },
         "flatpak_builder_build": {
-            "step": "Build the pinned recent flatpak-builder",
-            "terminator": "- name:",
+            "step": "Build the pinned recent flatpak-builder (screenshot mirroring)",
             "message": "flatpak-builder build step",
         },
     },
     "distribution-readiness": {
         "flatpak_tools": {
             "step": "Install flatpak and flatpak-builder",
-            "terminator": "- name:",
             "message": "flatpak tooling step",
         },
     },
@@ -139,72 +141,84 @@ def parse_error(workflow, role, message):
     return 2
 
 
-def step_slice(text, step_name, terminator):
-    """Return the text from ``step_name`` up to the next ``terminator`` line,
-    or None if the anchor is missing."""
-    idx = text.find(step_name)
-    if idx < 0:
-        return None
-    end = text.find(terminator, idx + len(step_name))
-    if end < 0:
-        return None
-    return text[idx:end]
+def workflow_steps(data):
+    """Yield every step mapping of one parsed workflow document."""
+    jobs = (data or {}).get("jobs") or {}
+    for job in jobs.values():
+        if not isinstance(job, dict):
+            continue
+        for step in job.get("steps") or []:
+            if isinstance(step, dict):
+                yield step
 
 
-def extract_packages(block):
-    """Extract the package set of one apt-get install block.
+def extract_packages(run):
+    """Extract the package set of one `run:` block containing apt-get install.
 
-    Handles backslash-newline continuations and the leading ``-y`` /
-    ``--no-install-recommends`` flags. Package names are validated so a
-    parser regression surfaces as a parse error, not as a bogus comparison.
+    The block is the structured YAML value (a single string, continuations
+    already folded). Package names are validated so a parser regression
+    surfaces as a parse error, not as a bogus comparison.
     """
-    match = INSTALL_RE.search(block)
+    match = INSTALL_RE.search(run)
     if not match:
         return None
-    tail = block[match.end():]
-    # Cut at any line that is no longer part of the install command (blank
-    # line, non-continuation command, or an unindented YAML key).
-    lines = []
-    for line in tail.splitlines():
-        if not line.strip() or not (line.startswith(" ") or line.endswith("\\")):
-            if lines and not line.strip().endswith("\\") and not line.startswith(" "):
-                break
-            if not line.strip():
-                break
-        lines.append(line)
-        if not line.rstrip().endswith("\\"):
-            break
+    tail = run[match.end():]
     packages = set()
-    for line in lines:
+    # The install command ends at the first line without a trailing
+    # backslash continuation; later lines of the same `run:` block belong
+    # to other commands and must not leak into the package set.
+    for line in tail.splitlines():
         for token in line.replace("\\", " ").split():
             if token in NON_PACKAGE_TOKENS:
                 continue
             if not re.fullmatch(r"[a-z0-9][a-z0-9+.-]*", token):
                 return None
             packages.add(token)
+        if not line.rstrip().endswith("\\"):
+            break
     return packages or None
 
 
-def collect(workflow, anchors):
-    """Parse every anchored dependency step of one workflow; return a dict of
-    sets keyed by checker role."""
-    text = workflow.read_text(encoding="utf-8")
+def collect_from_data(data, anchors, workflow):
+    """Parse every anchored dependency step from one parsed document; return a
+    dict of sets keyed by checker role."""
     result = {}
     for key, anchor in anchors.items():
-        block = step_slice(text, anchor["step"], anchor["terminator"])
-        if block is None:
+        step_name = anchor["step"]
+        run = next(
+            (
+                step.get("run")
+                for step in workflow_steps(data)
+                if step.get("name") == step_name and isinstance(step.get("run"), str)
+            ),
+            None,
+        )
+        if run is None:
             return None, parse_error(
                 workflow,
                 anchor["message"],
-                f"step '{anchor['step']}' (or its terminator) not found",
+                f"step '{step_name}' (or its run block) not found",
             )
-        packages = extract_packages(block)
+        packages = extract_packages(run)
         if packages is None:
             return None, parse_error(
                 workflow, anchor["message"], "no apt-get install packages parsed"
             )
         result[key] = packages
     return result, None
+
+
+def collect(workflow, anchors):
+    """Parse every anchored dependency step of one workflow file; return a
+    dict of sets keyed by checker role."""
+    if yaml is None:
+        print("ERROR: PyYAML is required for structured workflow parsing", file=sys.stderr)
+        return None, 2
+    try:
+        data = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        return None, parse_error(workflow, "workflow", f"invalid YAML: {exc}")
+    return collect_from_data(data, anchors, workflow)
 
 
 # Equivalence groups: all members of a group must install the same package
@@ -275,7 +289,24 @@ def compare(parsed):
 
 def self_test():
     """Guard the extraction logic against silent regressions."""
+
+    def load(sample):
+        return yaml.safe_load(sample)
+
+    def find_run(data, step_name):
+        return next(
+            (
+                step.get("run")
+                for step in workflow_steps(data)
+                if step.get("name") == step_name and isinstance(step.get("run"), str)
+            ),
+            None,
+        )
+
     sample = """\
+jobs:
+  build:
+    steps:
       - name: Install Linux dependencies (if applicable)
         if: runner.os == 'Linux'
         run: |
@@ -290,21 +321,23 @@ def self_test():
       - name: Next step
         run: echo done
 """
-    block = step_slice(sample, "Install Linux dependencies (if applicable)", "- name:")
-    assert block is not None, "step_slice must find the anchor"
-    assert step_slice(sample, "Not a real step", "- name:") is None, \
-        "step_slice must return None for a missing anchor"
-    packages = extract_packages(block)
+    data = load(sample)
+    run = find_run(data, "Install Linux dependencies (if applicable)")
+    assert run is not None, "structured parse must find the anchor step"
+    assert find_run(data, "Not a real step") is None, \
+        "a missing anchor must yield no run block"
+    packages = extract_packages(run)
     assert packages == {
         "build-essential", "pkg-config", "libasound2-dev", "xdotool", "xvfb",
     }, f"extraction drifted: {packages}"
     assert extract_packages("sudo apt-get update -y\n") is None, \
         "extract_packages must reject blocks without an install command"
 
-    # Inline form (flatpak workflows): packages on the same line as install.
+    # Later commands in the same run block must not leak tokens (the
+    # flatpak workflows install inline and then configure remotes).
     inline = extract_packages(
         "sudo apt-get install -y flatpak flatpak-builder\n"
-        "          sudo flatpak remote-add --if-not-exists flathub example"
+        "sudo flatpak remote-add --if-not-exists flathub example"
     )
     assert inline == {"flatpak", "flatpak-builder"}, \
         f"inline install form must parse: {inline}"
@@ -322,6 +355,23 @@ def self_test():
         "libxcb-render0-dev", "libasound2-dev",
     }, f"multi-per-line form must parse cleanly: {multi}"
     assert "n" not in multi, "the continuation backslash must not leak tokens"
+
+    # Structured collection end-to-end: the anchor must match by step name
+    # (the structured `name:` field), not by text position.
+    parsed, err = collect_from_data(
+        load(sample),
+        {"build": {"step": "Install Linux dependencies (if applicable)", "message": "x"}},
+        CI_YML,
+    )
+    assert err is None and parsed == {
+        "build": {"build-essential", "pkg-config", "libasound2-dev", "xdotool", "xvfb"},
+    }, f"structured collection drifted: {parsed}, {err}"
+    missing, err = collect_from_data(
+        load(sample),
+        {"build": {"step": "No such step anywhere", "message": "x"}},
+        CI_YML,
+    )
+    assert missing is None and err == 2, "a missing anchor must fail loudly (exit 2)"
 
     # Group comparison on the new parsed-dict model.
     def wf(lints, build, fuzz, tools):

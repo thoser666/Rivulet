@@ -274,7 +274,10 @@ executing `scripts/check-develop-ruleset.py` against the live rulesets API
 `develop` ruleset is `active`, covers `refs/heads/develop`, lists **no bypass
 actors**, and still carries the `deletion`, `non_fast_forward`, `pull_request`
 (automated-review) and `required_status_checks` rules with the merge-gate
-contexts. Run it locally — no credentials are needed for the public repo:
+contexts. The merge-gate contexts are verified in-repo against the structured
+job names of `ci.yml`/`security.yml`/`scorecard.yml` (PyYAML parse with matrix
+expansion) instead of a proxy literal — a rename on either side fails loudly.
+Run it locally — no credentials are needed for the public repo:
 
 ```bash
 python3 scripts/check-develop-ruleset.py           # live check
