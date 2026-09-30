@@ -14,6 +14,88 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// Generates deterministic RGBA video frames at a fixed cadence.
+///
+/// The engine's appsrc consumes raw RGBA (`gst_video::VideoFormat::Rgba`, see
+/// `initialize_and_start_pipeline`), so a synthetic source needs exactly this
+/// layout. Frame *content* is a simple time-varying gradient so encoded frames
+/// actually differ between frames — an all-zero picture makes some encoders
+/// emit degenerate slices.
+///
+/// This lives in core rather than in the CLI so the deterministic tests
+/// (M7 W2b, issue #188) can generate frames from the same code the recording
+/// path uses; `rivulet-cli` re-exports it, keeping its public surface intact.
+pub struct TestVideoSource {
+    width: u32,
+    height: u32,
+    fps: u32,
+    frame_index: u64,
+}
+
+impl TestVideoSource {
+    /// A source producing `width * height` RGBA frames at `fps`.
+    pub fn new(width: u32, height: u32, fps: u32) -> Self {
+        Self {
+            width,
+            height,
+            fps,
+            frame_index: 0,
+        }
+    }
+
+    /// The frame cadence this source was configured with.
+    pub fn fps(&self) -> u32 {
+        self.fps
+    }
+
+    /// Produce the next RGBA frame (width * height * 4 bytes).
+    pub fn next_frame(&mut self) -> Vec<u8> {
+        let w = self.width as usize;
+        let h = self.height as usize;
+        let mut data = vec![0u8; w * h * 4];
+        // Cheap deterministic animation: a slowly moving vertical band plus
+        // a static horizontal gradient. Distinct per-frame content proves
+        // the encoder received real picture data.
+        let band = (self.frame_index % self.width.max(1) as u64) as usize;
+        for y in 0..h {
+            let row = &mut data[y * w * 4..(y + 1) * w * 4];
+            for x in 0..w {
+                let px = &mut row[x * 4..x * 4 + 4];
+                px[0] = (x * 255 / w.max(1)) as u8; // R: horizontal ramp
+                px[1] = if x >= band.saturating_sub(8) && x <= band + 8 {
+                    255
+                } else {
+                    40
+                }; // G: moving band
+                px[2] = (y * 255 / h.max(1)) as u8; // B: vertical ramp
+                px[3] = 255; // A
+            }
+        }
+        self.frame_index += 1;
+        data
+    }
+
+    /// Frame `index` as a [`crate::test_helpers::GoldenFrame`], without
+    /// disturbing this source's position in the sequence.
+    ///
+    /// Golden-frame tests need an addressed frame ("frame 12 must look like
+    /// this"); rendering from a scratch source keeps the reference independent
+    /// of how many frames the test has already consumed.
+    pub fn frame_at(
+        index: u64,
+        width: u32,
+        height: u32,
+        fps: u32,
+    ) -> crate::test_helpers::GoldenFrame {
+        let mut scratch = TestVideoSource::new(width, height, fps);
+        for _ in 0..index {
+            scratch.next_frame();
+        }
+        let rgba = scratch.next_frame();
+        crate::test_helpers::GoldenFrame::new(width, height, rgba)
+    }
+}
+
 /// Chroma-key settings for removing a target color from a video source.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ChromaKey {
@@ -696,6 +778,8 @@ impl SourceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // W2b deterministic-test helper (issue #188): scene-state comparison.
+    use crate::test_helpers::SceneState;
 
     // ── SourceKind ───────────────────────────────────────────────
 
@@ -1239,6 +1323,8 @@ mod tests {
         // Acceptance criterion: deterministic id generation, test-pinned.
         // Two fresh managers pasting the same clipboard content must land
         // on identical scene state — same id, same name, same properties.
+        // The W2b `SceneState` helper (issue #188) makes the equality
+        // checkable as a named difference rather than one opaque dump.
         let (mgr_a, scene_a, sid_a) = clipboard_fixture();
         let clipboard = mgr_a.copy_scene_item(sid_a, scene_a).unwrap();
 
@@ -1249,7 +1335,8 @@ mod tests {
         };
         let state_a = run();
         let state_b = run();
-        assert_eq!(state_a, state_b);
+        SceneState::new(state_a.current_collection())
+            .assert_matches(&SceneState::new(state_b.current_collection()));
 
         let pasted = state_a.sources().iter().next().unwrap();
         assert_eq!(pasted.name, "Cam copy");
@@ -1358,13 +1445,16 @@ mod tests {
     #[test]
     fn undo_paste_restores_pre_paste_state_exactly() {
         // Acceptance criterion: undo restores the pre-paste scene state
-        // exactly (sources AND scene bindings).
+        // exactly (sources AND scene bindings). The W2b `SceneState` helper
+        // expresses the comparison so a regression names the item and property
+        // that drifted instead of dumping the whole collection.
         let (mut mgr, scene, sid) = clipboard_fixture();
-        let before = mgr.current_collection();
+        let before = SceneState::new(mgr.current_collection());
         let new_id = mgr.duplicate_scene_item(sid, scene).unwrap();
         assert!(mgr.can_undo_paste());
         assert!(mgr.undo_paste());
-        assert_eq!(mgr.current_collection(), before);
+        SceneState::new(mgr.current_collection()).assert_matches(&before);
+        assert_eq!(mgr.current_collection().0.len(), before.source_count());
         assert_eq!(mgr.source_count_in_scene(scene), 1);
         assert!(mgr.get_source(new_id).is_none());
 

@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+- test(core): **Deterministische Tests als Bürger erster Klasse — Golden-Frame
+  und PTS/DTS-Helfer (M7 W2b, Issue #188)** — die M7-Qualitätsbedingung
+  verlangte "nützliche Diffs bei Golden-Frame-/Timestamp-/
+  Reproduzierbarkeitsfehlern", aber es gab keinen Golden-Frame-Vergleich, keine
+  PTS-Prüfung und kein `TestVideoSource` in core: ein fehlschlagender
+  Pipeline-Test konnte nur zwei komplette RGBA-Puffer dumpen. Neu ist
+  `rivulet_core::test_helpers` mit zwei Helfern, bewusst dependency-frei auf
+  dem Raw-RGBA-Format, das die Engine ohnehin in den appsrc schreibt:
+  `GoldenFrame` vergleicht gegen eine Referenz und benennt bei Abweichung
+  Frame-Index, abweichende Pixelzahl, maximalen und mittleren Kanaldelta sowie
+  die erste abweichende Koordinate — als Panik-Message, als `FrameDiff`
+  (`Serialize`, für einen CI-Schritt, der JSON statt Paniktext will) und als
+  PNG-Artefakt zum Anschauen (`to_png_bytes`). Längen- und
+  Geometriemismatches werden beim Konstruieren abgewiesen statt verglichen,
+  weil der Vergleich unzusammenhängender Regionen einen selbstbewusst falschen
+  Diff produziert. `Timestamps` hält eine PTS/DTS-Sequenz in Nanosekunden mit
+  drei Verträgen — `assert_equals` (exakte Sequenz),
+  `assert_constant_interval` (feste Cadence), `assert_monotonic` — plus
+  `assert_dts_not_after_pts`; jede `check_*`-Variante liefert eine
+  `TimestampViolation` mit dem *Index* des Verstoßes plus erwartetem und
+  tatsächlichem Wert, damit ein Fehler "index 3: expected 100000000 ns, got
+  101000000 ns" lautet statt zweier gedumpter Sequenzen. `from_buffers` liest
+  eine `(pts, dts)`-Liste direkt vom appsink, mit DTS→PTS-Fallback wie in den
+  eigenen Probes der Engine. `TestVideoSource` ist dafür aus
+  `rivulet-cli` nach core gewandert (die CLI re-exportiert ihn, ihre
+  öffentliche Fläche bleibt unverändert) und bringt `frame_at(n, w, h, fps)`
+  mit, das Frame *n* aus einer frischen Quelle rendert — eine Referenz hängt
+  damit nicht davon ab, wie viele Frames ein Test schon konsumiert hat.
+  Dauerhaft abgesichert in `rivulet-core/tests/m7_golden_frames.rs`:
+  zwei Golden-Frame-Tests, drei PTS/DTS-Contract-Tests (manipulierter Wert,
+  verlorener Frame, echte GStreamer-Pipeline über appsink) und ein
+  Pinning-Guard, der nicht nur die Helfer-Oberfläche, sondern auch die
+  geforderten Fehleraussagen festschreibt.
+
 - feat(core,cli): **Deterministic Pipeline — reproduzierbarer Lauf-Report (M7
   W2a, Issue #187)** — der injizierbare Engine-Clock (`SystemClock`/
   `VirtualClock` mit `advance_ns`/`step_frames`/`hold`, `RivuletEngine::

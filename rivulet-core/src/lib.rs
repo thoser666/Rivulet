@@ -111,6 +111,12 @@ pub use video_effects::VideoEffects;
 pub mod clock;
 pub use clock::{ClockMode, EngineClock, SharedClock, SystemClock, VirtualClock};
 
+pub mod test_helpers;
+pub use test_helpers::{
+    FrameDiff, GoldenFrame, PixelDifference, SceneState, SceneStateDifference, TimestampViolation,
+    Timestamps,
+};
+
 pub mod health;
 pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 

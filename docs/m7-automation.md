@@ -180,20 +180,119 @@ clock; file-backed and synthetic sources can.
 
 **DoD**
 
-- Golden-frame helper: render frame N → compare against a reference; failure
+- [x] Golden-frame helper: render frame N → compare against a reference; failure
   output shows frame index and a useful diff, not a raw buffer dump.
-- Exact PTS/DTS verification helper for pipeline contract tests.
-- At least two golden-frame tests and one PTS/DTS contract test in the repo
+- [x] Exact PTS/DTS verification helper for pipeline contract tests.
+- [x] At least two golden-frame tests and one PTS/DTS contract test in the repo
   using the helpers.
-- Helpers documented in this spec with usage examples.
+- [x] Helpers documented in this spec with usage examples.
 
 **Acceptance criteria**
 
-- [ ] Golden-frame test failure output names the frame index and shows a
+- [x] Golden-frame test failure output names the frame index and shows a
   pixel-level diff summary.
-- [ ] PTS/DTS helper detects a tampered timestamp in a test.
-- [ ] All M7 pipeline contract tests can express themselves in terms of these
+- [x] PTS/DTS helper detects a tampered timestamp in a test.
+- [x] All M7 pipeline contract tests can express themselves in terms of these
   helpers.
+
+**Implementation**
+
+`rivulet_core::test_helpers` provides both helpers, dependency-free and
+operating on raw RGBA (the engine's appsrc format):
+
+- `GoldenFrame` — a frame plus the geometry needed to interpret it.
+  `assert_matches(&reference, frame_index)` is the test entry point; on
+  mismatch it panics with the frame index, how many pixels differ, the maximum
+  and mean channel delta, and the first differing coordinates. `diff` returns
+  the same information as data (`FrameDiff`, `Serialize`) for a CI step that
+  wants JSON instead of a panic message, and `to_png_bytes` emits a viewable
+  artifact. A length mismatch is rejected at construction rather than compared,
+  because comparing unrelated regions produces a confidently wrong diff.
+- `Timestamps` — a PTS/DTS sequence in nanoseconds with three contracts:
+  `assert_equals` (exact sequence), `assert_constant_interval` (fixed cadence),
+  `assert_monotonic` (strictly increasing), plus `assert_dts_not_after_pts`.
+  Each `check_*` variant returns a `TimestampViolation` carrying the offending
+  *index*, the expected value and the actual value, so a failure reads
+  "index 3: expected 100000000 ns, got 101000000 ns" instead of two dumped
+  sequences. `from_buffers` reads a `(pts, dts)` list straight off an appsink,
+  with DTS falling back to PTS the way the engine's own probes do.
+- `SceneState` — the scene-collection counterpart, so "this operation is
+  deterministic" is assertable as a *named* difference (which item, which
+  property) rather than one opaque whole-collection `assert_eq!`. Snapshot with
+  `SceneState::new(mgr.current_collection())`, compare with `assert_matches`,
+  and use `check_matches` when the difference should be data (for a test that
+  asserts the shape of a failure). Ordering is normalized, so two runs that
+  agree on content but not on insertion order do not report a spurious
+  difference — precisely the distinction "is this operation deterministic?"
+  needs. W6's copy/paste determinism and undo-restore tests express their
+  assertions through it.
+
+Usage — scene-state determinism:
+
+```rust
+use rivulet_core::test_helpers::SceneState;
+
+let before = SceneState::new(mgr.current_collection());
+mgr.duplicate_scene_item(sid, scene);
+let after = SceneState::new(mgr.current_collection());
+
+assert!(mgr.undo_paste());
+SceneState::new(mgr.current_collection()).assert_matches(&before);
+```
+
+A failure names the drift instead of dumping two collections:
+
+```
+scene state differs: source 9f2c... property z_order differs: expected 0, got 9
+  (actual 3 sources / 2 bindings, expected 3 sources / 2 bindings)
+```
+
+Synthetic frames come from `rivulet_core::source::TestVideoSource`, the same
+generator the headless recording path pushes; it moved from `rivulet-cli` to
+core for this workstream and is re-exported there, so the CLI's public surface
+is unchanged. `TestVideoSource::frame_at(n, w, h, fps)` renders frame *n* from a
+scratch source, so a reference frame does not depend on how many frames a test
+has already consumed.
+
+Usage — golden frame:
+
+```rust
+use rivulet_core::source::TestVideoSource;
+
+let frame = TestVideoSource::frame_at(5, 64, 48, 30);
+let reference = TestVideoSource::frame_at(5, 64, 48, 30);
+frame.assert_matches(&reference, 5);
+```
+
+A failure reads:
+
+```
+golden frame mismatch at frame 5: 4/3072 (0.13%) pixels differ, max channel
+delta 64, mean 16.00, first difference at (10, 10): expected [40, 40, 10, 255],
+got [104, 40, 10, 255]
+```
+
+Usage — PTS/DTS contract:
+
+```rust
+use rivulet_core::test_helpers::Timestamps;
+
+let interval = rivulet_core::clock::frame_interval_ns((30, 1));
+let expected: Vec<u64> = (0..5).map(|frame| frame * interval).collect();
+
+Timestamps::from_pts(expected.clone()).assert_equals(&expected);
+Timestamps::from_pts(expected.clone()).assert_constant_interval(interval);
+
+// A tampered or dropped timestamp is localized rather than merely detected:
+assert!(Timestamps::from_pts(vec![0, interval, interval + 1_000, 3 * interval, 4 * interval])
+    .check_equals(&expected)
+    .is_err());
+```
+
+The helpers are exercised end-to-end in `rivulet-core/tests/m7_golden_frames.rs`,
+which includes a test that captures timestamps from a *real* GStreamer
+pipeline through an appsink, so the helper is proven on pipeline data rather
+than only on hand-written vectors.
 
 ### W3 — CI-friendly rendering (video from code) — issue [#189](https://github.com/thoser666/Rivulet/issues/189)
 
@@ -299,13 +398,12 @@ The introspection half of the CLI story, analogous to `gst-inspect` /
 
 **Acceptance criteria**
 
-- [ ] Paste of the same clipboard content twice produces identical scene state
+- [x] Paste of the same clipboard content twice produces identical scene state
   (deterministic id generation, test-pinned).
-- [ ] Cross-scene paste does not move the item out of the source scene
+- [x] Cross-scene paste does not move the item out of the source scene
   (duplicate semantics, not move).
-- [ ] Undo restores the pre-paste scene state exactly.
-- [ ] The operation is covered by the deterministic-test helpers from W2b.
-
+- [x] Undo restores the pre-paste scene state exactly.
+- [x] The operation is covered by the deterministic-test helpers from W2b.
 ## CLI surface reference
 
 ```
