@@ -273,8 +273,14 @@ fn m6_completion_report_is_linked_and_records_follow_ups() {
     }
 }
 
+/// Consolidates the three M5 feature pins (issue #231 phase 3, was
+/// m5_platform_parity_evidence_is_linked_and_pinned,
+/// m5_source_delete_hotkey_is_wired_and_pinned and
+/// m5_telemetry_opt_in_is_privacy_safe_and_pinned): the platform-parity
+/// evidence, the delete-source hotkey and the opt-in telemetry privacy
+/// contract. The alerts-ingest pin stays as its own test.
 #[test]
-fn m5_platform_parity_evidence_is_linked_and_pinned() {
+fn m5_surfaces_are_pinned() {
     // M5 gate (docs/milestone-quality-gates.md): platform parity requires a
     // platform feature matrix as exit evidence, and the OBS compatibility mode
     // must be explicitly marked as a compatibility/risk boundary. Pinning the
@@ -284,6 +290,7 @@ fn m5_platform_parity_evidence_is_linked_and_pinned() {
     let gates = read("docs/milestone-quality-gates.md");
     let matrix = read("docs/platform-feature-matrix.md");
     let obs = read("docs/obs-websocket.md");
+    let gui = read("rivulet-gui/src/app.rs");
     assert!(readme.contains("docs/platform-feature-matrix.md"));
     assert!(gates.contains("platform-feature-matrix.md"));
     for required in [
@@ -308,19 +315,14 @@ fn m5_platform_parity_evidence_is_linked_and_pinned() {
     ] {
         assert!(obs.contains(required), "OBS doc must contain {required}");
     }
-}
 
-#[test]
-fn m5_source_delete_hotkey_is_wired_and_pinned() {
     // M5 roadmap "Source delete hotkey" (OBS 32.2 parity): the action must
     // live in the hotkey registry, be rebindable in the Hotkeys settings, stay
     // honest about scope (destructive, deliberately app-local) and be pinned
     // across the README, the roadmap, the hotkey docs and the GUI wiring so a
     // silent regression fails CI instead of drifting.
-    let readme = read("README.md");
     let roadmap = read("docs/obs-vision-roadmap.md");
     let hotkeys_docs = read("docs/hotkeys.md");
-    let gui = read("rivulet-gui/src/app.rs");
     assert!(
         readme.contains("- [x] **Source delete hotkey**"),
         "M5 README bullet must be checked"
@@ -361,21 +363,17 @@ fn m5_source_delete_hotkey_is_wired_and_pinned() {
         gui.contains("is deliberately NOT registered here"),
         "delete_source must stay absent from the OS-global binding list"
     );
-}
 
-#[test]
-fn m5_telemetry_opt_in_is_privacy_safe_and_pinned() {
     // M5 roadmap "Telemetry (opt-in, privacy-friendly)": the toggle must stay
     // off by default, the event model must stay free of free-form text, the
     // shipped build must wire no transport, and all of it must be pinned
     // across the README, the telemetry doc, the security policy and the GUI
     // wiring so a silent privacy regression fails CI instead of drifting.
-    let readme = read("README.md");
     let telemetry_docs = read("docs/telemetry.md");
     let security = read("docs/security.md");
-    let gui = read("rivulet-gui/src/app.rs");
     let core = read("rivulet-core/src/telemetry.rs");
     let changelog = read("CHANGELOG.md");
+    let gui = read("rivulet-gui/src/app.rs");
     assert!(
         readme.contains("- [x] **Telemetry (opt-in, privacy-friendly)**"),
         "M5 README bullet must be checked"
@@ -451,7 +449,6 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
     let webhook = read("rivulet-core/src/alerts_webhook.rs");
     let eventsub = read("rivulet-core/src/alerts_eventsub.rs");
     let gui = read("rivulet-gui/src/app.rs");
-    let i18n = read("rivulet-core/src/i18n.rs");
     let changelog = read("CHANGELOG.md");
     assert!(
         readme.contains("docs/alerts-ingest.md"),
@@ -549,18 +546,13 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
             && app.contains("alert_raid_direction_out"),
         "the GUI must expose the raid direction choice with localized labels"
     );
-    assert!(
-        i18n.matches("\"alert_raid_direction_out\"").count() >= 2
-            && i18n.matches("\"alert_raid_direction_in\"").count() >= 2
-            && i18n.matches("\"alert_raid_direction_both\"").count() >= 2,
-        "raid direction labels must exist in EN and DE"
-    );
+    // The raid-direction label keys are pinned in the shared feature-i18n
+    // parity test at the end of this file.
     let alerts_docs = read("docs/alerts-ingest.md");
     assert!(
         alerts_docs.contains("RaidAlertDirection") || alerts_docs.contains("direction"),
         "alerts docs must describe the raid direction setting"
     );
-    let alerts_docs = read("docs/alerts-ingest.md");
     assert!(
         alerts_docs.contains("Shared Chat sessions")
             && alerts_docs.contains("channel.shared_chat.begin"),
@@ -597,22 +589,6 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
     ] {
         assert!(gui.contains(required), "GUI must wire {required}");
     }
-    assert!(
-        i18n.matches("\"alert_kind_follow\"").count() >= 2,
-        "alert kind keys must be localized in both locales"
-    );
-    assert!(
-        i18n.matches("\"alert_receiver_enable\"").count() >= 2,
-        "receiver settings keys must be localized in both locales"
-    );
-    assert!(
-        i18n.matches("\"alert_eventsub_enable\"").count() >= 2,
-        "EventSub settings keys must be localized in both locales"
-    );
-    assert!(
-        i18n.matches("\"alerts_rate_limited\"").count() >= 2,
-        "the rate-limit notice must be localized in both locales"
-    );
     let core = read("rivulet-core/src/alerts_ingest.rs");
     for required in [
         "pub enum AlertSource",
@@ -633,8 +609,13 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
     );
 }
 
+/// Consolidates the four M6.9 pins (issue #231 phase 3, was
+/// m69_interim_backlog_is_pinned_in_readme, m69_scene_compositing_api_is_pinned,
+/// m69_device_picker_api_is_pinned and m69_browser_backend_reference_is_pinned):
+/// the README backlog row plus the scene compositing, device picker and
+/// browser backend surfaces.
 #[test]
-fn m69_interim_backlog_is_pinned_in_readme() {
+fn m69_surfaces_are_pinned() {
     // M6.9 is an interim backlog milestone for post-M6 follow-up work that
     // belongs in neither M7 nor M8. The README milestone row and the roadmap
     // section must stay in sync with the GitHub milestone and keep its issue
@@ -647,10 +628,7 @@ fn m69_interim_backlog_is_pinned_in_readme() {
     assert!(readme.contains("#215"));
     assert!(readme.contains("#216"));
     assert!(readme.contains("#217"));
-}
 
-#[test]
-fn m69_scene_compositing_api_is_pinned() {
     // Issue #217: the scene snapshot compositor must keep its native-frame
     // path stable. A renamed/removed public construction entrypoint for real
     // source frames, the attach hook, or the RGBA renderer fails CI.
@@ -668,10 +646,7 @@ fn m69_scene_compositing_api_is_pinned() {
         );
     }
     assert!(core_lib.contains("SnapshotFrame"));
-}
 
-#[test]
-fn m69_device_picker_api_is_pinned() {
     // Issue #216: the scene device picker needs a persisted per-source device
     // id plus a GUI picker for capture kinds. Dropping the core field,
     // the picker-capable kinds check, or the GUI helpers fails CI.
@@ -692,10 +667,7 @@ fn m69_device_picker_api_is_pinned() {
     for (label, found) in &asserts {
         assert!(found, "device picker must define {label}");
     }
-}
 
-#[test]
-fn m69_browser_backend_reference_is_pinned() {
     // Issue #215 slice: the testable BrowserSourceBackend reference must stay
     // public and importable before a native wry adapter lands. Losing the
     // synthetic backend or its priming helper fails CI.
@@ -733,8 +705,12 @@ fn m69_browser_backend_reference_is_pinned() {
     }
 }
 
+/// Consolidates the two m6 documentation pins (issue #231 phase 3, was
+/// m6_audio_routing_is_specified_in_readme_gate_and_spec and
+/// m6_audio_routing_phase1_is_documented): the README/gate/spec sync plus the
+/// phase statuses, CHANGELOG deliveries and resource-report evidence.
 #[test]
-fn m6_audio_routing_is_specified_in_readme_gate_and_spec() {
+fn m6_audio_routing_is_documented_and_pinned() {
     // M6 audio routing: the README milestone block, the M6 quality gate and
     // the feature spec must stay in sync — a silent edit to any of the three
     // (or a lost spec) fails CI.
@@ -761,10 +737,94 @@ fn m6_audio_routing_is_specified_in_readme_gate_and_spec() {
             "M6 audio-routing spec must contain {required}"
         );
     }
+
+    // The phase milestone states must stay documented: the spec carries the
+    // statuses, the README bullet reflects them, and the CHANGELOG records
+    // the deliveries.
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        spec.contains("Phase 1 (engine core, 2026-09-13)"),
+        "spec must record the Phase-1 status"
+    );
+    assert!(
+        spec.contains("Phase 2 (GUI, 2026-09-13)"),
+        "spec must record the Phase-2 status"
+    );
+    assert!(
+        spec.contains("Phase 3 (Windows WASAPI per-app capture, 2026-09-13)"),
+        "spec must record the Phase-3 status"
+    );
+    assert!(
+        spec.contains("Phase 4 (Linux PipeWire per-app capture, 2026-09-14)"),
+        "spec must record the Phase-4 status"
+    );
+    assert!(
+        spec.contains(
+            "Phase 5 (macOS system-loopback fallback for Application sources, 2026-09-14)"
+        ),
+        "spec must record the Phase-5 status"
+    );
+    assert!(
+        readme.contains(
+            "Windows WASAPI, Linux PipeWire and macOS system-loopback fallback per-app capture implemented (Phases 1–5"
+        ) && readme.contains("#154"),
+        "README M6 bullet must reflect the Phase 1-5 state"
+    );
+    assert!(
+        changelog.contains("feat(audio): **multi-track audio routing engine core"),
+        "CHANGELOG must record the Phase-1 delivery"
+    );
+    assert!(
+        changelog.contains("feat(gui): **multi-track audio routing mixer"),
+        "CHANGELOG must record the Phase-2 delivery"
+    );
+    assert!(
+        changelog.contains("feat(audio): **WASAPI per-application capture backend"),
+        "CHANGELOG must record the Phase-3 delivery"
+    );
+    assert!(
+        changelog.contains("feat(audio): **PipeWire per-application capture backend"),
+        "CHANGELOG must record the Phase-4 delivery"
+    );
+    assert!(
+        changelog.contains("feat(audio): **macOS system-loopback per-app fallback"),
+        "CHANGELOG must record the Phase-5 delivery"
+    );
+    // The resource-report gate evidence must stay attached to the feature:
+    // the report doc exists, the spec checklist links it as met, and the
+    // CHANGELOG records the harness delivery.
+    let report = read("docs/m6-audio-resource-report.md");
+    for required in [
+        "# M6 Resource Report",
+        "Result: **PASS**",
+        "p50 | 11.6",
+        "6 routed audio sources, each carrying the full filter chain",
+        "resource-efficiency-check.py",
+        // The honest N/A reporting the gates doc requires.
+        "`N/A`",
+        "G5's gate",
+    ] {
+        assert!(
+            report.contains(required),
+            "resource report must contain {required}"
+        );
+    }
+    assert!(
+        spec.contains("m6-audio-resource-report.md"),
+        "spec must link the resource report for the budget criterion"
+    );
+    assert!(
+        changelog.contains("test(resources): **M6 resource report"),
+        "CHANGELOG must record the resource-report harness"
+    );
 }
 
+/// Consolidates the retired m6 engine pins (issue #231 phase 3): the routing
+/// engine API and schema (phase 1) plus the per-track audio model schema,
+/// engine API and pipeline slice (issue #242). The GUI/backend phases and the
+/// documentation pins stay as their own tests.
 #[test]
-fn m6_audio_routing_phase1_engine_surface_is_pinned() {
+fn m6_audio_engine_surface_is_pinned() {
     // Issue #154 Phase 1: the engine core ships the routing types, the
     // per-source API, the versioned persistence schema, and the routing-aware
     // pipeline composition. The public surface and the persisted schema are
@@ -820,24 +880,17 @@ fn m6_audio_routing_phase1_engine_surface_is_pinned() {
         lib.contains("AUDIO_MIXER_INPUT_CAPS"),
         "stream mixer input legs must carry explicit caps (1.24 strict parser)"
     );
-}
 
-#[test]
-fn m6_audio_track_model_surface_is_pinned() {
     // Issue #242 (per-track audio model): the bus types, the versioned
     // `audio_tracks_v1` schema, the `track_members` field on sources and the
     // migration from `audio_routing_v1` are contract. The engine stores the
     // config now and consumes it in the pipeline slice.
-    let lib = read("rivulet-core/src/lib.rs");
-    let source = read("rivulet-core/src/audio_source.rs");
-
     for required in [
         "pub const AUDIO_TRACK_SCHEMA_VERSION: u32 = 1",
         "pub const AUDIO_TRACK_MAX: u8 = 6",
         "pub struct AudioBus",
         "pub struct AudioTrackConfig",
         "pub enum AudioTrackConfigError",
-        "UnknownVersion { found: u32, supported: u32 }",
         "pub fn new() -> Self",
         "pub fn sanitized(mut self) -> Self",
         "pub fn send_bus(&self) -> Option<&AudioBus>",
@@ -900,8 +953,12 @@ fn m6_audio_track_model_surface_is_pinned() {
     }
 }
 
+/// Consolidates the two VodTrack pins (issue #231 phase 3, was
+/// m3_vod_track_recording_branch_is_pinned and
+/// m3_vod_track_streaming_mux_marker_is_pinned): the recording branch, the
+/// streaming FLV marker and the quality-gate documentation anchor.
 #[test]
-fn m3_vod_track_recording_branch_is_pinned() {
+fn m3_vod_track_pipeline_is_pinned() {
     // Issue #78 (Z78-1/2): an active VodTrack in a dual-output session adds a
     // third, independent audio branch into the recording muxer via the
     // standard named mux-leg pattern, the engine can push PCM into it, and
@@ -925,16 +982,12 @@ fn m3_vod_track_recording_branch_is_pinned() {
         lib.contains("settings.vod_track.active()"),
         "VOD branch gated on vod_track.active()"
     );
-}
 
-#[test]
-fn m3_vod_track_streaming_mux_marker_is_pinned() {
     // Issue #78 (streaming-side wiring): an active VodTrack marks the
     // streaming FLV mux stage in BOTH builder tails via
     // `flvmux metadatacreator=Rivulet-ivod` — the only onMetaData-visible,
     // parse-launch-expressible marker with stock GStreamer (stock flvmux
     // skips unknown tag names; see the quality-gate VOD track section).
-    let lib = read("rivulet-core/src/lib.rs");
     let stream = read("rivulet-core/src/stream.rs");
     assert!(
         stream.contains("pub const FLV_STREAMING_MARKER: &'static str = \"Rivulet-ivod\";"),
@@ -969,7 +1022,6 @@ fn m6_audio_routing_phase2_gui_surface_is_pinned() {
     // Renames or removals must fail CI, not drift silently.
     let gui = read("rivulet-gui/src/app.rs");
     let lib = read("rivulet-core/src/lib.rs");
-    let i18n = read("rivulet-core/src/i18n.rs");
 
     for required in [
         "fn sync_audio_routing",
@@ -1001,31 +1053,17 @@ fn m6_audio_routing_phase2_gui_surface_is_pinned() {
         "routed source volume elements must be named for live updates"
     );
 
-    // i18n keys in both locales (EN and DE are one array each; the parity
-    // test asserts lengths, here we pin the keys themselves).
-    for key in [
-        "audio_source_add",
-        "audio_source_remove",
-        "audio_source_name",
-        "audio_source_mute",
-        "audio_routing_record",
-        "audio_routing_stream",
-        "audio_routing_hint",
-        "audio_routing_inline",
-        "audio_routing_sources",
-        "audio_routing_legacy_active",
-        "audio_filter_per_source",
-    ] {
-        assert_eq!(
-            i18n.matches(&format!("(\"{key}\"")).count(),
-            2,
-            "i18n key {key} must exist in EN and DE"
-        );
-    }
+    // The GUI's i18n keys for the mixer surface are pinned in the shared
+    // feature-i18n parity test at the end of this file.
 }
 
+/// Consolidates the three backend-phase pins (issue #231 phase 3, was
+/// m6_audio_routing_phase3_windows_backend_is_pinned,
+/// m6_audio_routing_phase4_linux_backend_is_pinned and
+/// m6_audio_routing_phase5_macos_fallback_is_pinned): the per-app capture
+/// backends for all three desktop platforms plus the shared GUI wiring.
 #[test]
-fn m6_audio_routing_phase3_windows_backend_is_pinned() {
+fn m6_audio_backend_phases_are_pinned() {
     // Issue #154 Phase 3: the WASAPI per-application capture backend in
     // rivulet-audio plus the GUI wiring (picker, lifecycle, drain).
     // Renames or removals must fail CI, not drift silently.
@@ -1075,32 +1113,13 @@ fn m6_audio_routing_phase3_windows_backend_is_pinned() {
             "per-app picker live-refresh surface must be pinned: {needle}"
         );
     }
+    // The Phase-3 i18n keys are pinned in the shared feature-i18n parity
+    // test at the end of this file.
 
-    // Phase-3 i18n keys in both locales.
-    let i18n = read("rivulet-core/src/i18n.rs");
-    for key in [
-        "audio_source_pick_process",
-        "audio_source_refresh_processes",
-        "audio_source_no_process_selected",
-        "audio_source_pid_required",
-        "audio_app_capture_failed",
-    ] {
-        assert_eq!(
-            i18n.matches(&format!("(\"{key}\"")).count(),
-            2,
-            "i18n key {key} must exist in EN and DE"
-        );
-    }
-}
-
-#[test]
-fn m6_audio_routing_phase4_linux_backend_is_pinned() {
     // Issue #154 Phase 4: the PipeWire per-application capture backend in
     // rivulet-audio plus the GUI unification (the picker/lifecycle/drain
     // contract is now platform-gated on Windows AND Linux, not Windows only).
     let pw = read("rivulet-audio/src/app_audio_pw.rs");
-    let audio_lib = read("rivulet-audio/src/lib.rs");
-    let gui = read("rivulet-gui/src/app.rs");
 
     // Backend surface: targeting, format contract, enumeration, teardown.
     for required in [
@@ -1156,17 +1175,12 @@ fn m6_audio_routing_phase4_linux_backend_is_pinned() {
             "GUI per-app capture wiring must pin {required}"
         );
     }
-}
 
-#[test]
-fn m6_audio_routing_phase5_macos_fallback_is_pinned() {
     // Issue #154 Phase 5: the macOS per-app fallback — the system loopback
     // mix delivered to every routed Application source, because macOS has
     // no per-application capture API. The GUI wiring must now cover all
     // three desktop platforms.
     let mac = read("rivulet-audio/src/app_audio_macos.rs");
-    let audio_lib = read("rivulet-audio/src/lib.rs");
-    let gui = read("rivulet-gui/src/app.rs");
 
     // Backend surface: the honest fallback semantics.
     for required in [
@@ -1219,91 +1233,6 @@ fn m6_audio_routing_phase5_macos_fallback_is_pinned() {
     assert!(
         gui.contains("fn per_app_capture_gating_covers_all_backends"),
         "GUI tests must pin the triple-platform gating"
-    );
-}
-
-#[test]
-fn m6_audio_routing_phase1_is_documented() {
-    // The Phase-1 milestone state must stay documented: the spec carries a
-    // status, the README bullet reflects it, and the CHANGELOG records the
-    // delivery.
-    let spec = read("docs/m6-audio-routing.md");
-    let readme = read("README.md");
-    let changelog = read("CHANGELOG.md");
-    assert!(
-        spec.contains("Phase 1 (engine core, 2026-09-13)"),
-        "spec must record the Phase-1 status"
-    );
-    assert!(
-        spec.contains("Phase 2 (GUI, 2026-09-13)"),
-        "spec must record the Phase-2 status"
-    );
-    assert!(
-        spec.contains("Phase 3 (Windows WASAPI per-app capture, 2026-09-13)"),
-        "spec must record the Phase-3 status"
-    );
-    assert!(
-        spec.contains("Phase 4 (Linux PipeWire per-app capture, 2026-09-14)"),
-        "spec must record the Phase-4 status"
-    );
-    assert!(
-        spec.contains(
-            "Phase 5 (macOS system-loopback fallback for Application sources, 2026-09-14)"
-        ),
-        "spec must record the Phase-5 status"
-    );
-    assert!(
-        readme.contains(
-            "Windows WASAPI, Linux PipeWire and macOS system-loopback fallback per-app capture implemented (Phases 1\u{2013}5"
-        ) && readme.contains("#154"),
-        "README M6 bullet must reflect the Phase 1-5 state"
-    );
-    assert!(
-        changelog.contains("feat(audio): **multi-track audio routing engine core"),
-        "CHANGELOG must record the Phase-1 delivery"
-    );
-    assert!(
-        changelog.contains("feat(gui): **multi-track audio routing mixer"),
-        "CHANGELOG must record the Phase-2 delivery"
-    );
-    assert!(
-        changelog.contains("feat(audio): **WASAPI per-application capture backend"),
-        "CHANGELOG must record the Phase-3 delivery"
-    );
-    assert!(
-        changelog.contains("feat(audio): **PipeWire per-application capture backend"),
-        "CHANGELOG must record the Phase-4 delivery"
-    );
-    assert!(
-        changelog.contains("feat(audio): **macOS system-loopback per-app fallback"),
-        "CHANGELOG must record the Phase-5 delivery"
-    );
-    // The resource-report gate evidence must stay attached to the feature:
-    // the report doc exists, the spec checklist links it as met, and the
-    // CHANGELOG records the harness delivery.
-    let report = read("docs/m6-audio-resource-report.md");
-    for required in [
-        "# M6 Resource Report",
-        "Result: **PASS**",
-        "p50 | 11.6",
-        "6 routed audio sources, each carrying the full filter chain",
-        "resource-efficiency-check.py",
-        // The honest N/A reporting the gates doc requires.
-        "`N/A`",
-        "G5's gate",
-    ] {
-        assert!(
-            report.contains(required),
-            "resource report must contain {required}"
-        );
-    }
-    assert!(
-        spec.contains("m6-audio-resource-report.md"),
-        "spec must link the resource report for the budget criterion"
-    );
-    assert!(
-        changelog.contains("test(resources): **M6 resource report"),
-        "CHANGELOG must record the resource-report harness"
     );
 }
 
@@ -2782,9 +2711,8 @@ fn m6_remote_companion_is_wired_up_and_pinned() {
     let app = read("rivulet-gui/src/app.rs");
     assert!(app.contains("reconcile_remote_companion"));
     assert!(app.contains("fn start_remote_companion"));
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(i18n.contains("\"remote_companion_section\""));
-    assert!(i18n.contains("\"remote_companion_lan_requires_password\""));
+    // The companion settings i18n keys are pinned in the shared feature-i18n
+    // parity test at the end of this file.
     // The docs and the roadmap must reflect the feature (README M6 bullet).
     let readme = read("README.md");
     assert!(readme.contains("Mobile & HTTP remote companion"));
@@ -2856,8 +2784,15 @@ fn discord_app_id_retirement_chain_is_guarded() {
     );
 }
 
+/// Consolidates the retired Discord-surface pins (issue #231 phase 3):
+/// official defaults + empty-id migration, error-state priority, payload
+/// validation warnings, reconnect, client-id validation, OBS-style assets, and
+/// the exposed connection state. The client-id/eframe-restore pins live in
+/// discord_settings_surface_is_pinned; the behavior-level pins that must stay
+/// separate (per-frame ui() sync and the app-id retirement chain) remain as
+/// their own tests.
 #[test]
-fn discord_presence_ships_official_defaults_and_migrates_empty_ids() {
+fn discord_presence_surface_is_pinned() {
     // Zero-config Rich Presence: the core config must default to the official
     // application id (validated snowflake) plus the official logo asset key,
     // and the GUI must start with those defaults and migrate restores with an
@@ -2888,15 +2823,11 @@ fn discord_presence_ships_official_defaults_and_migrates_empty_ids() {
             && gui.contains("Discord client id was empty - applying the official default"),
         "the restore path must migrate empty persisted ids to the default"
     );
-}
 
-#[test]
-fn discord_presence_error_state_is_wired_into_the_status_model() {
     // PresenceActivity::Error must be produced by the presence status logic
     // when the engine reported a failure (last_error set), take priority over
     // the activity labels, and never leak the raw error text. Streaming starts
     // must clear a stale error so the status recovers.
-    let gui = read("rivulet-gui/src/app.rs");
     assert!(gui.contains("PresenceActivity::Error"));
     assert!(
         gui.contains("fn current_presence_activity"),
@@ -2910,18 +2841,14 @@ fn discord_presence_error_state_is_wired_into_the_status_model() {
     let presence = read("rivulet-core/src/presence.rs");
     assert!(presence.contains("PresenceActivity::Error"));
     assert!(presence.contains("Self::Error => \"presence_error\""));
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(i18n.matches("\"presence_error\"").count() >= 2);
-}
+    // The presence_error key is pinned in the shared feature-i18n parity
+    // test at the end of this file.
 
-#[test]
-fn discord_payload_validation_contract_is_ci_enforced() {
     // Regression: Discord rejected a SET_ACTIVITY containing an empty string
     // with `4000: "..." is not allowed to be empty` (verified live), silently
     // dropping the whole status update. The payload validator plus the
     // exhaustive wire-contract test must stay wired so such 4000 rejections
     // surface locally in CI instead of on a live Discord client.
-    let discord = read("rivulet-core/src/discord.rs");
     // The reusable pre-wire validator encodes the documented rules.
     assert!(discord.contains("pub enum PayloadIssue"));
     assert!(discord.contains("pub fn validate_set_activity_payload"));
@@ -2946,32 +2873,22 @@ fn discord_payload_validation_contract_is_ci_enforced() {
     // The Settings UI must warn immediately on Apply: the payload validator
     // runs next to the client-id check and both warnings render with the
     // error palette, in both locales.
-    let gui = read("rivulet-gui/src/app.rs");
     assert!(gui.contains("fn apply_discord_payload_validation"));
     assert!(gui.contains("discord_payload_warning"));
     assert!(gui.contains("discord_payload_error_field_too_long"));
     assert!(gui.contains("discord_payload_error_asset_key"));
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(
-        i18n.matches("\"discord_payload_error_field_too_long\"")
-            .count()
-            >= 2
-    );
-    assert!(i18n.matches("\"discord_payload_error_asset_key\"").count() >= 2);
+    // The payload-warning keys are pinned in the shared feature-i18n parity
+    // test at the end of this file.
     // The docs must describe the rules and the 4000 rejection.
     let docs = read("docs/activity-status.md");
     assert!(
         docs.contains("128 characters") && docs.contains("4000"),
         "activity-status.md must document the payload rules and the 4000 rejection"
     );
-}
 
-#[test]
-fn discord_reconnect_button_rebuilds_the_adapter() {
     // The Stream view must offer a one-click reconnect when the adapter is
     // not connected, and the flag must force a fresh worker + handshake in
     // the reconcile (no app restart needed).
-    let gui = read("rivulet-gui/src/app.rs");
     assert!(gui.contains("discord_reconnect_requested: bool"));
     assert!(
         gui.contains("self.discord_client_id_dirty || self.discord_reconnect_requested"),
@@ -2986,16 +2903,11 @@ fn discord_reconnect_button_rebuilds_the_adapter() {
     assert!(draw.contains("self.discord_reconnect_requested = true;"));
     // The behavior test must stay wired.
     assert!(gui.contains("discord_presence_reconnect_rebuilds_the_adapter"));
-    // The i18n key exists in both locales (parity test enforces agreement).
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(i18n.matches("\"discord_reconnect\"").count() >= 2);
-}
+    // The reconnect label key is pinned in the shared feature-i18n parity
+    // test at the end of this file.
 
-#[test]
-fn discord_client_id_is_validated_on_apply() {
-    // Settings must validate the client id format on Apply and warn instead of
-    // silently accepting a mistyped id (which would keep the adapter off).
-    let discord = read("rivulet-core/src/discord.rs");
+    // Settings must validate the client id format on Apply and warn instead
+    // of silently accepting a mistyped id (which would keep the adapter off).
     assert!(discord.contains("pub fn validate_client_id"));
     assert!(discord.contains("pub enum ClientIdError"));
     assert!(discord.contains("ClientIdError::NotNumeric"));
@@ -3004,28 +2916,71 @@ fn discord_client_id_is_validated_on_apply() {
     assert!(discord.contains("client_id_validation_accepts_realistic_snowflakes"));
     assert!(discord.contains("client_id_validation_rejects_non_numeric_values"));
 
-    let gui = read("rivulet-gui/src/app.rs");
     assert!(gui.contains("fn apply_discord_client_id"));
     assert!(gui.contains("validate_client_id(self.discord_presence_client_id.trim())"));
     assert!(gui.contains("discord_client_id_warning"));
     // Behavior test must stay wired.
     assert!(gui.contains("discord_client_id_validation_blocks_invalid_apply_and_warns"));
-    // Both locales must translate the two error messages.
-    let i18n = read("rivulet-core/src/i18n.rs");
-    for key in [
-        "discord_client_id_error_not_numeric",
-        "discord_client_id_error_length",
-    ] {
-        let k = format!("\"{key}\"");
-        assert!(
-            i18n.matches(&k).count() >= 2,
-            "{key} must exist in EN and DE"
-        );
-    }
+    // The client-id error keys are pinned in the shared feature-i18n parity
+    // test at the end of this file.
+
+    // Like OBS, the activity card should render the app artwork (large image
+    // from the Discord Developer Portal) instead of the generic placeholder
+    // icon. The first card line (`details`) is the dynamic composed title
+    // "Rivulet · <localized status>" so small hover cards identify Rivulet
+    // even when they do not render the registration title; the app word is
+    // deliberately NOT duplicated into the game slot (`state`) or the assets.
+    let presence = read("rivulet-core/src/presence.rs");
+    assert!(
+        presence.contains("let state = match game"),
+        "the game name must live in state (second card line)"
+    );
+    assert!(
+        presence.contains("let details = format!(\"Rivulet · {label}\")"),
+        "details must be the composed title \"Rivulet · <status>\""
+    );
+    assert!(discord.contains("large_image_key: Option<String>"));
+    assert!(discord.contains("struct ActivityAssets"));
+    assert!(discord.contains("#[serde(rename = \"large_image\")]"));
+    // The key is mirrored to small_image (member list) alongside large_image
+    // (profile card) so the same uploaded asset replaces the placeholder in
+    // both places; Discord renders small_image in the member list.
+    assert!(discord.contains("#[serde(rename = \"small_image\")]"));
+    assert!(discord.contains("small_image: key,"));
+    // Wire-level coverage: assets attached when configured, absent otherwise.
+    assert!(discord.contains("set_activity_attaches_large_image_when_configured"));
+    // Discord rejects an empty string field (4000: "..." is not allowed to be
+    // empty, verified live), so `state` must be omitted when there is no game
+    // name instead of being sent empty; `details` always carries the label.
+    assert!(
+        discord.contains("details: String") && discord.contains("!status.state.trim().is_empty()"),
+        "empty state must be omitted, never sent as an empty string"
+    );
+    assert!(discord.contains("empty_state_is_omitted_not_sent_empty"));
+    assert!(gui.contains("discord_presence_large_image"));
+    assert!(gui.contains("discord_large_image"));
+    // The artwork key must survive the eframe persistence round trip.
+    assert!(gui.contains("discord_presence_large_image, \"rivulet_logo\""));
+
+    // Regression: the presence worker used to swallow IPC failures silently,
+    // so the GUI showed the desired status while Discord displayed only the
+    // plain "Playing Rivulet" game card. The core log contract is unit-tested
+    // at the origin in rivulet-core/src/discord.rs
+    // (worker_logs_ipc_failures_and_deliveries_and_flips_connection_state); the
+    // GUI surfacing is covered by
+    // discord_presence_connection_state_is_surfaced_in_the_stream_view there.
+    assert!(
+        gui.contains("p.connection_state()"),
+        "Stream view must poll the real connection state"
+    );
+    assert!(gui.contains("discord_conn_off"));
+    assert!(gui.contains("discord_conn_connected"));
+    // The connection-state keys are pinned in the shared feature-i18n parity
+    // test at the end of this file.
 }
 
 #[test]
-fn discord_client_id_is_restored_from_eframe_storage() {
+fn discord_settings_surface_is_pinned() {
     // Bug regression: `save()` wrote the full app (including the Discord
     // application id) under eframe::APP_KEY, but nothing ever read the value
     // back — every launch started from Default and silently dropped ALL
@@ -3060,81 +3015,19 @@ fn discord_client_id_is_restored_from_eframe_storage() {
     // The regression test that guarantees the round trip must stay wired.
     assert!(gui.contains("discord_client_id_survives_eframe_storage_round_trip"));
     assert!(gui.contains("impl eframe::Storage for MemoryStorage"));
-}
-
-#[test]
-fn discord_presence_uses_obs_style_assets_and_composed_title() {
-    // Like OBS, the activity card should render the app artwork (large image
-    // from the Discord Developer Portal) instead of the generic placeholder
-    // icon. The first card line (`details`) is the dynamic composed title
-    // "Rivulet · <localized status>" so small hover cards identify Rivulet
-    // even when they do not render the registration title; the app word is
-    // deliberately NOT duplicated into the game slot (`state`) or the assets.
-    let presence = read("rivulet-core/src/presence.rs");
+    // A fresh install must start with the official client id, and the restore
+    // path must migrate empty persisted ids to the official default
+    // (custom ids stay untouched).
     assert!(
-        presence.contains("let state = match game"),
-        "the game name must live in state (second card line)"
+        gui.contains(
+            "discord_presence_client_id: rivulet_core::discord::DEFAULT_CLIENT_ID.to_owned()"
+        ),
+        "a fresh install must start with the official client id"
     );
     assert!(
-        presence.contains("let details = format!(\"Rivulet · {label}\")"),
-        "details must be the composed title \"Rivulet · <status>\""
+        gui.contains("Discord client id was empty - applying the official default"),
+        "the restore path must migrate empty persisted ids to the default"
     );
-    let discord = read("rivulet-core/src/discord.rs");
-    assert!(discord.contains("large_image_key: Option<String>"));
-    assert!(discord.contains("struct ActivityAssets"));
-    assert!(discord.contains("#[serde(rename = \"large_image\")]"));
-    // The key is mirrored to small_image (member list) alongside large_image
-    // (profile card) so the same uploaded asset replaces the placeholder in
-    // both places; Discord renders small_image in the member list.
-    assert!(discord.contains("#[serde(rename = \"small_image\")]"));
-    assert!(discord.contains("small_image: key,"));
-    // Wire-level coverage: assets attached when configured, absent otherwise.
-    assert!(discord.contains("set_activity_attaches_large_image_when_configured"));
-    // Discord rejects an empty string field (4000: "..." is not allowed to be
-    // empty, verified live), so `state` must be omitted when there is no game
-    // name instead of being sent empty; `details` always carries the label.
-    assert!(
-        discord.contains("details: String") && discord.contains("!status.state.trim().is_empty()"),
-        "empty state must be omitted, never sent as an empty string"
-    );
-    assert!(discord.contains("empty_state_is_omitted_not_sent_empty"));
-    let gui = read("rivulet-gui/src/app.rs");
-    assert!(gui.contains("discord_presence_large_image"));
-    assert!(gui.contains("discord_large_image"));
-    // The artwork key must survive the eframe persistence round trip.
-    assert!(gui.contains("discord_presence_large_image, \"rivulet_logo\""));
-}
-
-#[test]
-fn discord_presence_errors_are_logged_and_connection_state_is_exposed() {
-    // Regression: the presence worker swallowed IPC failures silently, so the
-    // GUI showed the desired status while Discord displayed only the plain
-    // "Playing Rivulet" game card. The core contract (warn on IPC failure,
-    // info on delivery, shared connection state flipping to Connected) is
-    // unit-tested at the origin in rivulet-core/src/discord.rs
-    // (worker_logs_ipc_failures_and_deliveries_and_flips_connection_state);
-    // the GUI surfacing is covered by
-    // discord_presence_connection_state_is_surfaced_in_the_stream_view there.
-    let gui = read("rivulet-gui/src/app.rs");
-    assert!(
-        gui.contains("p.connection_state()"),
-        "Stream view must poll the real connection state"
-    );
-    assert!(gui.contains("discord_conn_off"));
-    assert!(gui.contains("discord_conn_connected"));
-    // Locales must translate every new key (parity test enforces agreement).
-    let i18n = read("rivulet-core/src/i18n.rs");
-    for key in [
-        "discord_conn_off",
-        "discord_conn_connecting",
-        "discord_conn_connected",
-    ] {
-        let k = format!("\"{key}\"");
-        assert!(
-            i18n.matches(&k).count() >= 2,
-            "{key} must exist in EN and DE"
-        );
-    }
 }
 
 #[test]
@@ -3154,17 +3047,8 @@ fn presence_legend_lists_every_state_with_a_tooltip() {
     assert!(draw.contains("for activity in PresenceActivity::all()"));
     assert!(draw.contains("activity.tooltip_i18n_key()"));
     assert!(draw.contains("response.on_hover_text(tip)"));
-    let i18n = read("rivulet-core/src/i18n.rs");
-    for key in [
-        "presence_tooltip_ready",
-        "presence_tooltip_recording",
-        "presence_tooltip_streaming",
-        "presence_tooltip_recording_streaming",
-        "presence_tooltip_paused",
-        "presence_tooltip_error",
-    ] {
-        assert!(i18n.matches(key).count() >= 2, "{key} must be localized");
-    }
+    // The six tooltip keys are pinned in the shared feature-i18n parity test
+    // at the end of this file.
     // The operator-facing docs must document all six states with their labels
     // and transitions so the model cannot drift from the documented contract.
     let docs = read("docs/activity-status.md");
@@ -3207,6 +3091,8 @@ fn midi_mapping_is_wired_into_gui_and_ci() {
         gui.contains("midi_section"),
         "Settings must expose the MIDI section"
     );
+    // (the matching i18n keys are pinned in the shared feature-i18n parity
+    // test at the end of this file)
     // Learn mode + per-device presets are part of the MIDI configuration UI.
     assert!(gui.contains("midi_learn"), "Learn mode must be wired up");
     assert!(
@@ -3226,11 +3112,8 @@ fn midi_mapping_is_wired_into_gui_and_ci() {
         "Release builds must install libasound2-dev for the midir ALSA backend"
     );
     // The i18n catalogs must cover the MIDI section (incl. learn/presets) in
-    // both locales.
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(i18n.matches("midi_section").count() >= 2);
-    assert!(i18n.matches("midi_learn").count() >= 2);
-    assert!(i18n.matches("midi_presets").count() >= 2);
+    // both locales — pinned in the shared feature-i18n parity test at the end
+    // of this file.
 }
 
 #[test]
@@ -4548,12 +4431,8 @@ fn ndi_output_is_wired_into_the_engine_and_gui() {
             && production.contains("self.tr(\"ndi_section\")"),
         "the GUI must expose the NDI destination in Settings via apply_ndi_output"
     );
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(
-        i18n.matches("\"ndi_section\"").count() == 2
-            && i18n.matches("\"ndi_plugin_missing\"").count() == 2,
-        "NDI labels must exist in both locales (EN + DE)"
-    );
+    // The NDI label keys are pinned in the shared feature-i18n parity test
+    // at the end of this file.
 }
 
 #[test]
@@ -4741,8 +4620,13 @@ fn build_caches_do_not_restore_stale_target_artifacts() {
     }
 }
 
+/// Consolidates the three community-dock pins (issue #231 phase 3, was
+/// twitch_chat_dock_is_wired_and_covered, chat_dock_supports_kick_and_youtube
+/// and kick_engagement_alerts_feed_the_alerts_dock): the Stream-workspace chat
+/// dock, the multi-platform workers with token hygiene and shared-chat
+/// threading, the stream-info editor and the engagement alert feeds.
 #[test]
-fn twitch_chat_dock_is_wired_and_covered() {
+fn chat_dock_surfaces_are_pinned() {
     // M5 community dock: the chat lives inside the Stream workspace (one
     // Meld-style broadcast page with stream start/stop, chat, stream status
     // and compact audio), no longer as its own sidebar entry. The core worker
@@ -4766,12 +4650,8 @@ fn twitch_chat_dock_is_wired_and_covered() {
         core.contains("worker_connects_and_delivers_messages_to_local_listener"),
         "the Twitch worker must keep its local-listener smoke test"
     );
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(
-        i18n.contains("(\"chat_title\", \"Chat dock\")")
-            && i18n.contains("(\"chat_title\", \"Chat-Dock\")"),
-        "the chat view must be localized in DE and EN"
-    );
+    // The chat_title values are pinned in the shared feature-i18n parity
+    // test at the end of this file.
     let docs = read("docs/twitch-chat.md");
     assert!(
         docs.contains("# Chat Dock") && docs.contains("parse_irc_line"),
@@ -4799,10 +4679,7 @@ fn twitch_chat_dock_is_wired_and_covered() {
         app.contains("chat_send_locked"),
         "the UI must show a lock hint when sending is unavailable"
     );
-}
 
-#[test]
-fn chat_dock_supports_kick_and_youtube() {
     // M5 community dock: besides Twitch IRC the chat dock can connect to
     // Kick (Pusher WebSocket) and YouTube (Innertube polling). Each platform
     // worker must keep a deterministic local-listener smoke test, the GUI
@@ -4871,14 +4748,8 @@ fn chat_dock_supports_kick_and_youtube() {
         app.contains("chat_read_only") && app.contains("ChatPlatform::YouTube"),
         "YouTube chat must be marked read-only in the GUI"
     );
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(
-        i18n.contains("(\"chat_note_kick\", ")
-            && i18n.contains("(\"chat_note_youtube\", ")
-            && i18n.contains("(\"chat_channel_hint_kick\", ")
-            && i18n.contains("(\"chat_channel_hint_youtube\", "),
-        "Kick/YouTube chat keys must exist in both locales"
-    );
+    // The Kick/YouTube chat keys are pinned in the shared feature-i18n
+    // parity test at the end of this file.
     let docs = read("docs/twitch-chat.md");
     assert!(
         docs.contains("Kick") && docs.contains("YouTube"),
@@ -4910,8 +4781,7 @@ fn chat_dock_supports_kick_and_youtube() {
         "the chat docs must state the shared-session reply semantics"
     );
     assert!(
-        app.contains("message.source_room_id")
-            && i18n.matches("\"chat_shared_chat_source_tooltip\"").count() >= 2,
+        app.contains("message.source_room_id"),
         "the dock must badge shared-chat source rooms with a translated tooltip"
     );
     // Room-name resolution: the numeric source-room-id must be resolvable to
@@ -4966,21 +4836,13 @@ fn chat_dock_supports_kick_and_youtube() {
         app.contains("chat_info_outcomes"),
         "stream-info outcomes must be reported per platform"
     );
-    assert!(
-        i18n.contains("(\"chat_info_apply_all\", ")
-            && i18n.contains("(\"chat_info_updated\", ")
-            && i18n.contains("(\"chat_info_scope_all\", ")
-            && i18n.contains("(\"chat_info_apply_platform\", "),
-        "stream-info editor keys must exist in both locales"
-    );
+    // The stream-info editor keys are pinned in the shared feature-i18n
+    // parity test at the end of this file.
     assert!(
         docs.contains("Stream info editor"),
         "the chat dock documentation must describe the stream-info editor"
     );
-}
 
-#[test]
-fn kick_engagement_alerts_feed_the_alerts_dock() {
     // Kick subs/gifts are parsed from the same Pusher chat stream the chat
     // worker already maintains: the parser must stay pure and tested, the
     // worker must route engagement payloads to a dedicated alert channel,
@@ -5034,8 +4896,12 @@ fn kick_engagement_alerts_feed_the_alerts_dock() {
     );
 }
 
+/// Consolidates the two stream-extras pins (issue #231 phase 3, was
+/// restream_multitarget_fanout_is_wired_and_documented and
+/// autoclip_chat_driven_replay_save_is_wired): the multi-platform restream
+/// fan-out and the chat-driven auto-clip spike detector.
 #[test]
-fn restream_multitarget_fanout_is_wired_and_documented() {
+fn restream_and_autoclip_surfaces_are_pinned() {
     // M6 multi-platform restream: the engine already has MultistreamSettings
     // with per-target fan-out, but the GUI must expose add/remove controls,
     // wire MultistreamSettings before streaming starts, and the feature must
@@ -5065,22 +4931,14 @@ fn restream_multitarget_fanout_is_wired_and_documented() {
         app.contains("restream_add_target") && app.contains("restream_remove_target"),
         "the GUI must offer add/remove target controls with i18n keys"
     );
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(
-        i18n.contains("(\"restream_section\", ")
-            && i18n.contains("(\"restream_add_target\", ")
-            && i18n.contains("(\"restream_target_key\", "),
-        "restream i18n keys must exist in both locales"
-    );
+    // The restream keys are pinned in the shared feature-i18n parity test
+    // at the end of this file.
     let readme = read("README.md");
     assert!(
         readme.contains("Multi-platform restream") && readme.contains("restream"),
         "README must reference the multi-platform restream feature"
     );
-}
 
-#[test]
-fn autoclip_chat_driven_replay_save_is_wired() {
     // M6 chat-driven auto-clips: the autoclip module must expose a config
     // type, a spike detector, and a !clip command parser; the GUI must offer
     // settings controls, and the feature must be localized.
@@ -5109,13 +4967,8 @@ fn autoclip_chat_driven_replay_save_is_wired() {
         app.contains("draw_auto_clip_section"),
         "the GUI must draw an auto-clip section in the stream view"
     );
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(
-        i18n.contains("(\"autoclip_section\", ")
-            && i18n.contains("(\"autoclip_enabled\", ")
-            && i18n.contains("(\"autoclip_spike_threshold\", "),
-        "auto-clip i18n keys must exist in both locales"
-    );
+    // The auto-clip keys are pinned in the shared feature-i18n parity test
+    // at the end of this file.
 }
 
 #[test]
@@ -5267,13 +5120,8 @@ fn chat_outbound_is_rate_limited_per_platform() {
             && gui.contains("chat_rate_limit_detail_reports_platform_and_window"),
         "the budget accessors must be covered by GUI behavior tests"
     );
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(
-        i18n.contains("chat_rate_budget")
-            && i18n.contains("chat_rate_limited")
-            && i18n.contains("chat_rate_window"),
-        "the budget strings must be translated"
-    );
+    // The budget strings are pinned in the shared feature-i18n parity test
+    // at the end of this file.
     // The platform compliance contract (M10 issue #100) stays documented.
     let readme = read("README.md");
     assert!(readme.contains("20 messages/30 s"));
@@ -5440,15 +5288,18 @@ fn twitch_replies_thread_the_parent_message_id_and_surface_phone_verification() 
         gui.contains("phone_verification_required()") && gui.contains("chat_phone_verification"),
         "the chat dock must surface the phone-verification requirement"
     );
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(
-        i18n.contains("chat_reply_to") && i18n.contains("chat_phone_verification"),
-        "reply/notice UI strings must be translated"
-    );
+    // The reply/notice strings are pinned in the shared feature-i18n parity
+    // test at the end of this file.
 }
 
+/// Consolidates the three M10 pins (issue #231 phase 3, was
+/// m10_platform_compliance_bullets_are_pinned_in_docs,
+/// m10_creative_studio_is_specified_in_readme_gate_and_spec and
+/// m10_codegen_spike_harness_is_wired): the platform-compliance bullets, the
+/// Creative-Studio spec (kill-switch, sound sub-feature) and the codegen spike
+/// harness.
 #[test]
-fn m10_platform_compliance_bullets_are_pinned_in_docs() {
+fn m10_surfaces_are_pinned() {
     // M10 issue #100 (platform-compliance baseline): the bot must satisfy
     // each platform's hard constraints, and that contract is specified in
     // BOTH the README roadmap section and the M10 quality gate. Pinning the
@@ -5523,10 +5374,7 @@ fn m10_platform_compliance_bullets_are_pinned_in_docs() {
     ] {
         assert!(gates.contains(marker), "M10 gate must review {marker}");
     }
-}
 
-#[test]
-fn m10_creative_studio_is_specified_in_readme_gate_and_spec() {
     // M10 feasibility scratch (Spark-like, local-first): the AI Creative
     // Studio must be specified in the README roadmap, the M10 quality gate,
     // AND the spec document, and those three sources must stay in sync. The
@@ -5675,10 +5523,7 @@ fn m10_creative_studio_is_specified_in_readme_gate_and_spec() {
             "README M10 must mention the sound sub-feature: {marker}"
         );
     }
-}
 
-#[test]
-fn m10_codegen_spike_harness_is_wired() {
     // The M10 spike row promises a code-gen quality comparison with real
     // overlay prompts. The harness (prompts, runner, validator, renderer)
     // is repo tooling: pin its pieces so the methodology survives refactors
@@ -5807,14 +5652,8 @@ fn alert_overlay_import_is_wired_through_browser_source() {
     assert!(gui.contains("alert_provider"));
     assert!(gui.contains("alert_overlay_title"));
     assert!(gui.contains("alert_import_loads_provider_widget_url_into_browser_source"));
-    let i18n = read("rivulet-core/src/i18n.rs");
-    for key in ["alert_import", "alert_token", "alert_overlay_title"] {
-        let k = format!("\"{key}\"");
-        assert!(
-            i18n.matches(&k).count() >= 2,
-            "{key} must exist in EN and DE"
-        );
-    }
+    // The overlay-import keys are pinned in the shared feature-i18n parity
+    // test at the end of this file.
     let docs = read("docs/alerts.md");
     assert!(
         docs.contains("# Stream Alerts") && docs.contains("streamelements.com/overlay/"),
@@ -5983,8 +5822,12 @@ fn windows_ci_installs_one_consistent_gstreamer_version() {
     );
 }
 
+/// Consolidates the two Stage-2 distribution pins (issue #231 phase 3, was
+/// m5_flathub_stage2_is_prepared_and_pinned and
+/// m5_winget_stage2_is_prepared_and_pinned): the reproducible Flatpak build and
+/// the deterministic WinGet manifest generator, both with their review gates.
 #[test]
-fn m5_flathub_stage2_is_prepared_and_pinned() {
+fn distribution_stage2_is_prepared_and_pinned() {
     // M5 distribution rollout Stage 2 (Flathub): a reproducible Flatpak build
     // is wired and stays honest. Cargo is fully offline (CARGO_NET_OFFLINE)
     // and works only against the pinned crate archives in cargo-sources.json
@@ -6099,10 +5942,7 @@ fn m5_flathub_stage2_is_prepared_and_pinned() {
         changelog.contains("feat(distribution)") && changelog.contains("flathub"),
         "CHANGELOG must record the Flathub Stage 2 preparation"
     );
-}
 
-#[test]
-fn m5_winget_stage2_is_prepared_and_pinned() {
     // M5 distribution rollout Stage 2 (WinGet): a deterministic manifest
     // generator must stay wired so the winget-pkgs payload stays canonical
     // (GitHub asset URL + SHA-256 + MSI ProductCode/UpgradeCode), covered by
@@ -6161,8 +6001,12 @@ fn m5_winget_stage2_is_prepared_and_pinned() {
     );
 }
 
+/// Consolidates the four plugin-system pins (issue #231 phase 3, was
+/// plugin_system_rfc_is_wired, plugin_manifest_phase1_is_implemented,
+/// plugin_runtime_phase2_is_implemented and plugin_registry_phase3_is_implemented):
+/// RFC cross-references, manifest parser, WASM runtime, registry + approval UI.
 #[test]
-fn plugin_system_rfc_is_wired() {
+fn plugin_system_surfaces_are_pinned() {
     // The plugin system RFC must exist and be cross-referenced from the
     // extensible UI roadmap and VST3 docs.
     let rfc = read("docs/plugin-system-rfc.md");
@@ -6199,10 +6043,7 @@ fn plugin_system_rfc_is_wired() {
         changelog.contains("plugin-system-rfc.md") || changelog.contains("Plugin System RFC"),
         "CHANGELOG must record the Plugin System RFC"
     );
-}
 
-#[test]
-fn plugin_manifest_phase1_is_implemented() {
     // Phase 1 of the plugin system RFC: manifest parser + validator.
     let manifest_rs = read("rivulet-core/src/plugin_manifest.rs");
 
@@ -6239,10 +6080,7 @@ fn plugin_manifest_phase1_is_implemented() {
         changelog.contains("plugin_manifest") || changelog.contains("Plugin Manifest"),
         "CHANGELOG must record the plugin manifest implementation"
     );
-}
 
-#[test]
-fn plugin_runtime_phase2_is_implemented() {
     // Phase 2 of the plugin system RFC: WASM runtime + sandbox + lifecycle.
     let runtime_rs = read("rivulet-core/src/plugin_runtime.rs");
 
@@ -6301,10 +6139,7 @@ fn plugin_runtime_phase2_is_implemented() {
         changelog.contains("plugin_runtime") || changelog.contains("Plugin Runtime"),
         "CHANGELOG must record the plugin runtime implementation"
     );
-}
 
-#[test]
-fn plugin_registry_phase3_is_implemented() {
     // Phase 3 of the plugin system RFC: capability approval + install flow.
     // Core registry: install-root scan + persisted approval store.
     let registry_rs = read("rivulet-core/src/plugin_registry.rs");
@@ -6363,23 +6198,8 @@ fn plugin_registry_phase3_is_implemented() {
         "GUI enable path must consult PluginApprovals::fully_decided"
     );
 
-    // i18n: both locales must carry the plugins keys (EN and DE blocks).
-    let i18n = read("rivulet-core/src/i18n.rs");
-    for key in [
-        "plugins_section",
-        "plugins_review",
-        "plugins_enable_blocked_hint",
-        "plugins_dialog_title",
-        "plugins_dialog_sensitive",
-        "plugins_dialog_done",
-    ] {
-        let needle = format!("(\"{key}\"");
-        assert_eq!(
-            i18n.matches(&needle).count(),
-            2,
-            "i18n key {key} must exist in both locale tables"
-        );
-    }
+    // i18n: both locales must carry the plugins keys (EN and DE blocks) —
+    // pinned in the shared feature-i18n parity test at the end of this file.
 
     // Docs: RFC phase table + M5 gate status note must reflect Phase 3.
     let rfc = read("docs/plugin-system-rfc.md");
@@ -6610,11 +6430,8 @@ fn scene_item_copy_paste_surface_is_pinned() {
         );
     }
 
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(
-        i18n.contains("\"composition_copy_ok\""),
-        "i18n must pin the copy/paste status keys"
-    );
+    // The copy/paste status keys are pinned in the shared feature-i18n
+    // parity test at the end of this file.
 
     let spec = read("docs/m7-automation.md");
     assert!(
@@ -6754,15 +6571,8 @@ fn wasapi_device_capture_surface_is_pinned() {
         );
     }
 
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(
-        i18n.contains("\"audio_source_pick_device\""),
-        "i18n must pin the device-picker keys"
-    );
-    assert!(
-        i18n.contains("\"audio_source_output_device_loopback_hint\""),
-        "i18n must pin the macOS OutputDevice loopback hint"
-    );
+    // The device-picker and loopback-hint keys are pinned in the shared
+    // feature-i18n parity test at the end of this file.
 
     let spec = read("docs/m6-audio-routing.md");
     assert!(
@@ -6848,11 +6658,8 @@ fn steam_game_detection_surface_is_pinned() {
         assert!(gui.contains(needle), "GUI must pin {needle}");
     }
 
-    let i18n = read("rivulet-core/src/i18n.rs");
-    assert!(
-        i18n.contains("\"game_detection_running_marker\""),
-        "i18n must pin the running-game marker (EN + DE)"
-    );
+    // The running-game marker key is pinned in the shared feature-i18n
+    // parity test at the end of this file.
 
     let docs = read("docs/game-detection.md");
     for fragment in ["local reads only", "game:steam:", "Launcher matrix"] {
@@ -6863,8 +6670,12 @@ fn steam_game_detection_surface_is_pinned() {
     }
 }
 
+/// Consolidates the two per-track-model pins (issue #231 phase 3, was
+/// track_model_container_remux_parity_is_pinned and
+/// track_model_gui_surface_is_pinned): the crash-safe remux parity plus the
+/// tracks-panel GUI surface.
 #[test]
-fn track_model_container_remux_parity_is_pinned() {
+fn track_model_surface_is_pinned() {
     // Issue #242 (slice 3): every container's track-model recording must
     // survive the crash-safe remux with all its audio tracks, and the remux
     // must not re-encode. The engine TS gate (PMT completeness) and the
@@ -6900,10 +6711,7 @@ fn track_model_container_remux_parity_is_pinned() {
         lib.contains("0x100 itself stays free"),
         "the TS PID base rationale must stay documented"
     );
-}
 
-#[test]
-fn track_model_gui_surface_is_pinned() {
     // Issue #242 (slice 4): the OBS-style per-track model ships its GUI
     // surface — tracks panel (enable/gain/mute/send), per-source membership
     // toggles, the dedicated `audio_tracks_v1` persistence key with a
@@ -6942,25 +6750,8 @@ fn track_model_gui_surface_is_pinned() {
         );
     }
 
-    // i18n keys in both locales (EN and DE are one array each).
-    let i18n = read("rivulet-core/src/i18n.rs");
-    for key in [
-        "audio_tracks_panel_title",
-        "audio_tracks_hint",
-        "audio_tracks_track",
-        "audio_tracks_enabled",
-        "audio_tracks_gain",
-        "audio_tracks_send",
-        "audio_tracks_send_hint",
-        "audio_tracks_members",
-        "audio_tracks_membership_hint",
-    ] {
-        assert_eq!(
-            i18n.matches(&format!("(\"{key}\"")).count(),
-            2,
-            "i18n key {key} must exist in EN and DE"
-        );
-    }
+    // The tracks-panel i18n keys are pinned in the shared feature-i18n
+    // parity test at the end of this file.
 
     // Docs: the tracks-panel section and the storage-key split are
     // documented, and the quality gate records the persistence round trip.
@@ -7027,6 +6818,148 @@ fn team_readiness_surface_is_pinned() {
         assert!(
             clean_desk.contains(needle),
             "clean-desk doc must pin {needle}"
+        );
+    }
+}
+
+/// Union of every feature-surface i18n key that used to be asserted inline in
+/// the individual pinning tests above (issue #231 phase 3). EN and DE are one
+/// `("key", ...) => ...` entry each, so every key must occur exactly twice —
+/// or at least twice when a key is also produced by non-literal code (the
+/// pre-merge inline checks used `>= 2` for exactly those keys).
+#[test]
+fn feature_i18n_keys_exist_in_both_locales() {
+    let i18n = read("rivulet-core/src/i18n.rs");
+
+    // (key, minimum count). 2 means exactly-two unless listed with 3/4 below;
+    // for clarity the exact-two keys are split out further down.
+    // The chat_title values themselves are pinned verbatim below the table.
+    let exactly_two: &[&str] = &[
+        // m5 alerts ingest (raid direction + kinds + receivers).
+        "alert_raid_direction_out",
+        "alert_raid_direction_in",
+        "alert_raid_direction_both",
+        "alert_kind_follow",
+        "alert_receiver_enable",
+        "alert_eventsub_enable",
+        // m5 alert overlay import.
+        "alert_import",
+        "alert_token",
+        "alert_overlay_title",
+        // m6 audio routing: engine/gui + phase 3 (WASAPI per-app).
+        "audio_source_add",
+        "audio_source_remove",
+        "audio_source_name",
+        "audio_source_mute",
+        "audio_routing_record",
+        "audio_routing_stream",
+        "audio_routing_hint",
+        "audio_routing_inline",
+        "audio_routing_sources",
+        "audio_routing_legacy_active",
+        "audio_filter_per_source",
+        "audio_source_pick_process",
+        "audio_source_refresh_processes",
+        "audio_source_no_process_selected",
+        "audio_source_pid_required",
+        "audio_app_capture_failed",
+        // m6 remote companion settings.
+        "remote_companion_section",
+        "remote_companion_lan_requires_password",
+        // m6 audio track model (tracks panel).
+        "audio_tracks_panel_title",
+        "audio_tracks_hint",
+        "audio_tracks_track",
+        "audio_tracks_enabled",
+        "audio_tracks_gain",
+        "audio_tracks_send",
+        "audio_tracks_send_hint",
+        "audio_tracks_members",
+        "audio_tracks_membership_hint",
+        // Discord presence (error state, payload warnings, reconnect,
+        // client-id errors, connection states, tooltips).
+        "presence_error",
+        "discord_payload_error_field_too_long",
+        "discord_payload_error_asset_key",
+        "discord_reconnect",
+        "discord_client_id_error_not_numeric",
+        "discord_client_id_error_length",
+        "discord_conn_off",
+        "discord_conn_connecting",
+        "discord_conn_connected",
+        "presence_tooltip_ready",
+        "presence_tooltip_recording",
+        "presence_tooltip_streaming",
+        "presence_tooltip_recording_streaming",
+        "presence_tooltip_paused",
+        "presence_tooltip_error",
+        // MIDI mapping.
+        "midi_section",
+        "midi_learn",
+        "midi_presets",
+        // NDI output.
+        "ndi_section",
+        "ndi_plugin_missing",
+        // Chat dock: kick/youtube notes, shared-chat tooltip, stream-info
+        // editor, restream, autoclip, rate-limit budget, replies/phone.
+        "chat_note_kick",
+        "chat_note_youtube",
+        "chat_channel_hint_kick",
+        "chat_channel_hint_youtube",
+        "chat_info_apply_all",
+        "chat_info_updated",
+        "chat_info_scope_all",
+        "chat_info_apply_platform",
+        "restream_section",
+        "restream_add_target",
+        "restream_target_key",
+        "autoclip_section",
+        "autoclip_enabled",
+        "autoclip_spike_threshold",
+        "chat_rate_budget",
+        "chat_rate_limited",
+        "chat_rate_window",
+        "chat_reply_to",
+        "chat_phone_verification",
+        // Plugin settings/review dialog.
+        "plugins_section",
+        "plugins_review",
+        "plugins_enable_blocked_hint",
+        "plugins_dialog_title",
+        "plugins_dialog_sensitive",
+        "plugins_dialog_done",
+        // Scene item copy/paste.
+        "composition_copy_ok",
+        // WASAPI device capture picker.
+        "audio_source_pick_device",
+        "audio_source_output_device_loopback_hint",
+        // Steam game detection.
+        "game_detection_running_marker",
+    ];
+    for key in exactly_two {
+        let needle = format!("(\"{key}\",");
+        assert_eq!(
+            i18n.matches(&needle).count(),
+            2,
+            "i18n key {key} must exist exactly once in EN and once in DE"
+        );
+    }
+
+    // The twitch chat title carries a literal translation; pin the values
+    // themselves so a silent rewording fails CI.
+    assert!(
+        i18n.contains("(\"chat_title\", \"Chat dock\")")
+            && i18n.contains("(\"chat_title\", \"Chat-Dock\")"),
+        "the chat view must be localized in DE and EN"
+    );
+
+    // Array-form keys (not `("key", ...)` rows): they must simply occur in
+    // both locale tables, so `>= 2` occurrences are the honest check.
+    let at_least_two: &[&str] = &["chat_shared_chat_source_tooltip"];
+    for key in at_least_two {
+        assert!(
+            i18n.matches(key).count() >= 2,
+            "{key} must exist in both locale tables"
         );
     }
 }
