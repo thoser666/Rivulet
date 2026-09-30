@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+- test(core): **Suite-weites Timing-Audit: letzte Sleep-basierten Asserts auf
+  Polling umgestellt** — ein Audit über alle 80 `sleep()`-Stellen in
+  rivulet-core und rivulet-gui (Test-Kontexte wie Produktion) klassifizierte
+  jede Stelle: Poll-Loops mit Deadline, negative Asserts (`assert_ne!`),
+  synchrone Stop-Pfade, intrinsisch zeitgetriebene Tests und Server-Puppets
+  sind flake-sicher und blieben unangetastet; Produktionssleeps (Backoff,
+  Frame-Pacing, Pipe-Connect) liegen außerhalb des Test-Pfads. Zwei Stellen
+  waren flake-gefährdet — ein positiver Assert nach fixem Sleep, unter
+  paralleler Testlast zufällig wahr oder falsch: `recording_metrics_report_
+  fps_and_file_size` verlangte `file_size_bytes > 0` nach fixen 200 ms (der
+  filesink meldet sich asynchron; jetzt bis zu 10 s pollt, bis die Größe
+  nicht-null ist), und `records_synthetic_frames_and_fills_replay_buffer`
+  prüfte Replay-Ring-Inhalt nach fixen 200 ms (die tee-Verkabelung liefert
+  Pakete asynchron; jetzt pollt der Test bis zu 10 s auf Caps plus mehrere
+  Pakete plus Keyframe). Beide Tests warten jetzt auf die Bedingung statt auf
+  eine Uhr und laufen damit auf langsamen Runnern zuverlässig, auf schnellen
+  Maschinen spürbar kürzer.
+
 - test(core): **Deterministische Tests als Bürger erster Klasse — Golden-Frame
   und PTS/DTS-Helfer (M7 W2b, Issue #188)** — die M7-Qualitätsbedingung
   verlangte "nützliche Diffs bei Golden-Frame-/Timestamp-/

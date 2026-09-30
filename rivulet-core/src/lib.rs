@@ -3546,13 +3546,30 @@ mod tests {
             let _ = engine.push_audio_frame(&audio);
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(200));
-
         // The ring must have captured encoded packets with caps while the
-        // recording was live.
-        if let Some(replay) = &engine.replay {
+        // recording was live. Poll instead of trusting a fixed sleep: the
+        // tee hands encoded packets over asynchronously, so a slow runner
+        // would otherwise sample an incomplete ring by the first check.
+        {
+            let replay = engine
+                .replay
+                .as_ref()
+                .expect("replay buffer must be enabled");
+            let ring_ready = |rb: &crate::replay::ReplayBuffer| {
+                rb.video_caps().is_some()
+                    && rb.video().len() > 1
+                    && rb.video().iter().any(|s| s.keyframe)
+            };
+            let ring_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while !ring_ready(&replay.lock().unwrap()) {
+                assert!(
+                    std::time::Instant::now() < ring_deadline,
+                    "replay ring should hold encoded packets with a keyframe while the recording is live"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+
             let rb = replay.lock().unwrap();
-            assert!(!rb.is_empty(), "replay ring should hold encoded packets");
             assert!(
                 rb.video().len() > 1,
                 "replay ring should hold multiple encoded video packets"
@@ -3569,8 +3586,6 @@ mod tests {
                 rb.retained_ns() > 0,
                 "ring must retain a positive span of video"
             );
-        } else {
-            panic!("replay buffer must be enabled");
         }
 
         engine.stop_recording();
@@ -4935,8 +4950,17 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(33));
         }
 
-        // Give the pipeline time to flush muxed data to the filesink.
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        // Poll until the muxer flushed data to the filesink instead of
+        // trusting a fixed sleep: a slow runner must not miss the first
+        // non-empty file-size sample (the GUI surfaces the file size live).
+        let flush_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while engine.recording_stats().file_size_bytes == 0 {
+            assert!(
+                std::time::Instant::now() < flush_deadline,
+                "filesink never reported a non-empty file size"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
 
         let metrics = engine.recording_stats();
         assert!(
