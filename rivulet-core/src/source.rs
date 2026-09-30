@@ -77,6 +77,23 @@ impl SourceKind {
             SourceKind::Audio => "Audio",
         }
     }
+
+    /// Whether this source delivers live input that cannot repeat run to run.
+    ///
+    /// Live sources are outside the reproducible-run contract (M7 W2a, issue
+    /// #187; spec § Nondeterminism inventory): a window capture, camera or
+    /// microphone samples whatever the machine does at that moment, so two
+    /// runs with identical settings still differ. The file-backed and
+    /// synthetic kinds are reproducible given the same input.
+    pub fn is_live(&self) -> bool {
+        matches!(
+            self,
+            SourceKind::Webcam
+                | SourceKind::GameCapture
+                | SourceKind::ScreenCapture
+                | SourceKind::Audio
+        )
+    }
 }
 
 /// 2-D transform applied to a source within a scene.

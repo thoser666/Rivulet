@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+- feat(core,cli): **Deterministic Pipeline — reproduzierbarer Lauf-Report (M7
+  W2a, Issue #187)** — der injizierbare Engine-Clock (`SystemClock`/
+  `VirtualClock` mit `advance_ns`/`step_frames`/`hold`, `RivuletEngine::
+  set_clock`) war vorhanden, aber der reproducible-run contract blieb eine
+  Zusage ohne Beleg: der Run-Report meldete nicht, welche
+  Nondeterminismus-Quellen ein Lauf tatsächlich benutzt hat. Neu ist
+  `rivulet_core::inspect::NondeterminismReport` — abgeleitet aus dem
+  *tatsächlichen* Engine-Zustand nach dem Lauf (`clock_mode()`,
+  `video_encoder()`, `SourceKind::is_live()`), nicht aus der angeforderten
+  Config; `rivulet record` gibt ihn im `stopped`-Event aus (`clock`,
+  `pts_source`, `encoder`, `reproducible`, `byte_reproducible`,
+  `nondeterminism.sources`). Jede Quelle wird bei jedem Lauf gemeldet, mit
+  `active` als Trennung zwischen dokumentierter Grenze und tatsächlich
+  eingetretener; Live-Quellen (Webcam/Screen/Game-Capture/Audio) sind per
+  `SourceKind::is_live()` klassifiziert statt über eine zweite, auseinanderlaufende
+  CLI-Liste. Zwei Flags statt einem, weil zwei verschiedene Zusagen gemeint
+  sind: `reproducible` betrifft die **Container-Timestamp-Sequenz**
+  (`timestamp_risk` markiert Quellen, die nur ein *Risiko* sind — das
+  Element-Threading, dessen Ausbleiben erst der Reproduzierbarkeitstest
+  belegt), `byte_reproducible` die **kodierten Bytes** und hängt zusätzlich an
+  Encoder-Rate-Control, Hardware-Encoder und Wall-Clock-Metadaten
+  (`creation_time`, die auch unter Virtual Clock aus der Systemuhr stammen).
+  AC1: zwei Läufe mit identischen Eingaben unter Virtual Clock erzeugen
+  identische PTS-Sequenzen (über den echten Stamping-Pfad, plus
+  Kontrolltest, der beweist, dass eine manipulierte Cadence abweicht);
+  AC2: ein Lauf mit Wanduhr meldet die Quellen im Run-Summary — JSON *und*
+  stderr-Diagnose.
+
 - test(discord): **Log-Capture-Worker-Tests pollen statt fixer Wartezeit** —
   die beiden Worker-Log-Vertrags-Tests (unix: IPC-Fehler + Delivery,
   windows: IPC-Fehler) haben den Warn des Workers bisher nach einer festen

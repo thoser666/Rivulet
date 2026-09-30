@@ -6421,6 +6421,129 @@ fn cli_inspect_surface_is_pinned() {
 }
 
 #[test]
+fn m7_reproducible_run_report_surface_is_pinned() {
+    // Issue #187 (M7 W2a): the reproducible-run contract. What makes it more
+    // than a promise is that a run *reports* which nondeterminism sources it
+    // used. Pin the whole vertical slice — the injectable clock, the
+    // nondeterminism inventory that mirrors the spec table, the derived run
+    // summary in the stopped event, and the documented contract — so the
+    // guarantee cannot quietly erode into an unchecked claim.
+    let clock = read("rivulet-core/src/clock.rs");
+    for needle in [
+        "pub trait EngineClock",
+        "pub struct SystemClock",
+        "pub struct VirtualClock",
+        "pub fn advance_ns",
+        "pub fn step_frames",
+        "pub fn hold",
+        "pub fn frame_interval_ns",
+    ] {
+        assert!(
+            clock.contains(needle),
+            "clock.rs must pin the injectable-clock surface: {needle}"
+        );
+    }
+
+    let core = read("rivulet-core/src/lib.rs");
+    for needle in [
+        "pub fn set_clock",
+        "pub fn clock_mode",
+        "pub fn pts_source",
+        "fn video_pts_ns",
+        "pub(crate) fn stamped_video_pts",
+    ] {
+        assert!(
+            core.contains(needle),
+            "core must pin the run-report surface: {needle}"
+        );
+    }
+    // Under the virtual clock the engine must stamp explicitly; if the mode
+    // dispatch ever fell back to `do-timestamp`, the contract would be a lie
+    // while every type check still passed.
+    let stamp = core
+        .split("let stamp_pts = match self.clock.mode()")
+        .nth(1)
+        .expect("stamping dispatch present")
+        .chars()
+        .take(320)
+        .collect::<String>();
+    assert!(
+        stamp.contains("video_pts_ns"),
+        "virtual mode must stamp explicit PTS: {stamp}"
+    );
+    assert!(
+        stamp.contains("clock::ClockMode::System => None"),
+        "system mode must keep appsrc wall-clock stamping: {stamp}"
+    );
+
+    let inspect_mod = read("rivulet-core/src/inspect.rs");
+    for needle in [
+        "pub enum NondeterminismSource",
+        "pub struct NondeterminismReport",
+        "pub struct NondeterminismEntry",
+        "pub fn for_run",
+        "pub fn is_reproducible",
+        "pub fn is_byte_reproducible",
+        "pub fn open_timestamp_risks",
+        "const ALL: [NondeterminismSource; 6]",
+    ] {
+        assert!(
+            inspect_mod.contains(needle),
+            "nondeterminism report must pin {needle}"
+        );
+    }
+    // Live-source classification lives with the source enum, not in a CLI
+    // list that could drift from it.
+    let source = read("rivulet-core/src/source.rs");
+    assert!(
+        source.contains("pub fn is_live"),
+        "SourceKind must classify live input for the inventory"
+    );
+
+    // The run summary has to be machine-readable and derived from the actual
+    // engine state, not from the config that was requested.
+    let cli_lib = read("rivulet-cli/src/lib.rs");
+    let emit = cli_lib
+        .split("let nondeterminism = NondeterminismReport::for_run(")
+        .nth(1)
+        .expect("run report is derived in RecordJob::run")
+        .chars()
+        .take(400)
+        .collect::<String>();
+    for needle in ["engine.clock_mode()", "engine.video_encoder()"] {
+        assert!(
+            emit.contains(needle),
+            "the run report must read the engine state: {needle}"
+        );
+    }
+    let cli_config = read("rivulet-cli/src/config.rs");
+    for needle in [
+        "clock: String",
+        "pts_source: String",
+        "byte_reproducible: bool",
+        "nondeterminism: NondeterminismReport",
+    ] {
+        assert!(
+            cli_config.contains(needle),
+            "the stopped event must carry the run report: {needle}"
+        );
+    }
+
+    // The spec states the contract and its limits.
+    let spec = read("docs/m7-automation.md");
+    for fragment in [
+        "Nondeterminism inventory",
+        "reproducible-run contract",
+        "wall-clock metadata",
+    ] {
+        assert!(
+            spec.contains(fragment),
+            "m7 spec must document the reproducibility contract: {fragment}"
+        );
+    }
+}
+
+#[test]
 fn scene_item_copy_paste_surface_is_pinned() {
     // Issue #192 (M7 W6): the scene-item copy/paste API is the OBS 32.2
     // frontend-parity item. Pin the full vertical slice — core clipboard

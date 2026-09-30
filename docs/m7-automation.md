@@ -99,23 +99,82 @@ The smallest complete slice of "automation": a `rivulet-cli` crate with a
 
 **DoD**
 
-- Engine accepts an injectable clock source (system clock default; virtual /
+- [x] Engine accepts an injectable clock source (system clock default; virtual /
   manual clock for tests and rendering).
-- Virtual clock drives PTS/GstClock so a run is time-scriptable (advance,
+- [x] Virtual clock drives PTS/GstClock so a run is time-scriptable (advance,
   hold, step).
-- Reproducible-run contract: identical inputs + virtual clock → identical
+- [x] Reproducible-run contract: identical inputs + virtual clock → identical
   container timestamps.
-- Nondeterminism inventory: wall-clock metadata, encoder rate-control state,
+- [x] Nondeterminism inventory: wall-clock metadata, encoder rate-control state,
   hardware encoders — documented in this spec (§ Nondeterminism inventory).
-- Machine-readable run report lists which nondeterminism sources were active.
+- [x] Machine-readable run report lists which nondeterminism sources were active.
 
 **Acceptance criteria**
 
-- [ ] Two runs with identical inputs under the virtual clock produce identical
+- [x] Two runs with identical inputs under the virtual clock produce identical
   PTS/DTS sequences (integration test).
-- [ ] A run using wall-clock features reports them in the run summary.
-- [ ] The spec documents the reproducibility contract and its explicit limits.
-- [ ] Clean-machine transcript (gate exit evidence) reproducible from the docs.
+- [x] A run using wall-clock features reports them in the run summary.
+- [x] The spec documents the reproducibility contract and its explicit limits.
+- [x] Clean-machine transcript (gate exit evidence) reproducible from the docs.
+
+**Implementation**
+
+`rivulet_core::clock` provides the injectable time source: `SystemClock`
+(wall-clock pacing, today's `do-timestamp` behavior) and `VirtualClock`
+(`advance_ns` / `step_frames` / `hold`), injected with
+`RivuletEngine::set_clock`. Under the virtual clock the video buffer is stamped
+explicitly at `session base + clock.now_ns()` and the appsrc's `do-timestamp` is
+switched off, so the PTS cadence is exactly the scripted one and independent of
+real-time speed. Audio PTS stay derived from sample counts at the fixed engine
+rate, so the audio timeline is clock-independent by construction.
+
+The run report is `rivulet_core::inspect::NondeterminismReport`, built from the
+engine's *actual* state after a run (`clock_mode()`, `video_encoder()`, the
+source kind) rather than from the requested config, so it describes what
+happened. `rivulet record` emits it in the `stopped` status event:
+
+```json
+{
+  "event": "stopped",
+  "frames": 300,
+  "seconds": 10,
+  "file_size_bytes": 4194304,
+  "clock": "system",
+  "pts_source": "do-timestamp",
+  "encoder": "NVIDIA NVENC",
+  "reproducible": false,
+  "byte_reproducible": false,
+  "nondeterminism": {
+    "sources": [
+      {
+        "source": "engine_clock",
+        "detail": "PTS/session duration from the system clock",
+        "active": true,
+        "affects_timestamps": true,
+        "timestamp_risk": false,
+        "affects_bytes": false
+      }
+    ]
+  }
+}
+```
+
+Every source is reported on every run, with `active` telling a consumer whether
+this run used it — so a documented limit is distinguishable from a limit that
+actually applied. Two separate flags keep the claims honest:
+
+- `reproducible` — the container **timestamp sequence** repeats. False whenever
+  wall-clock PTS drive the run. `timestamp_risk` marks a source as only a *risk*
+  to the timeline (element-internal threads), which the reproducibility test
+  establishes empirically rather than by static analysis.
+- `byte_reproducible` — the encoded **bytes** repeat. A stronger claim, and
+  generally false: it additionally depends on encoder rate control, on whether
+  a hardware encoder was used, and on wall-clock container metadata (creation
+  time), which is written from the system clock even under the virtual clock.
+
+Live capture sources (`Webcam`, `ScreenCapture`, `GameCapture`, `Audio` — see
+`SourceKind::is_live`) are reported as active and cannot repeat regardless of the
+clock; file-backed and synthetic sources can.
 
 ### W2b — Deterministic tests as first-class citizens — issue [#188](https://github.com/thoser666/Rivulet/issues/188)
 
@@ -308,7 +367,7 @@ with a stable `event` discriminator —
 | --- | --- |
 | `started` | `width`, `height`, `fps`, `audio` |
 | `progress` | `seconds`, `frames`, `fps`, `file_size_bytes` |
-| `stopped` | `frames`, `seconds`, `file_size_bytes` |
+| `stopped` | `frames`, `seconds`, `file_size_bytes`, `clock`, `pts_source`, `encoder`, `reproducible`, `byte_reproducible`, `nondeterminism` (shipped in W2a) |
 
 Failures are not JSON events: they are human-readable diagnostics on stderr
 plus a non-zero exit code, so a broken run never corrupts a JSON consumer's
@@ -322,12 +381,12 @@ run report must state explicitly:
 
 | Source | Behavior | Reporting |
 | --- | --- | --- |
-| Engine clock (PTS, session duration) | deterministic under the virtual clock | run report |
-| Encoder rate-control state (x264 lookahead/VBV) | deterministic for identical input frames; first-frame effects depend on settings | run report notes encoder config |
-| Hardware encoders (NVENC/QSV/VAAPI) | not bit-deterministic across runs/driver versions | run report flags hw encoder use |
-| Wall-clock-derived metadata (creation_time, capture timestamps) | nondeterministic by nature | run report lists fields |
-| Capture-backed sources (screen/camera/mic) | live input cannot repeat | out of reproducibility contract; test/loopback sources only |
-| GStreamer element threading | fixed scheduling under the virtual clock; element-internal threads (queue leaks) may reorder | validated by the reproducibility test |
+| Engine clock (PTS, session duration) | deterministic under the virtual clock | `active` when the system clock drives the run; `affects_timestamps` |
+| Encoder rate-control state (x264 lookahead/VVB) | deterministic for identical input frames; first-frame effects depend on settings | always `active`; `affects_bytes` |
+| Hardware encoders (NVENC/QSV/VAAPI) | not bit-deterministic across runs/driver versions | `active` when a hardware backend encoded; `affects_bytes` |
+| Wall-clock-derived metadata (creation_time, capture timestamps) | nondeterministic by nature, even under the virtual clock | always `active`; `affects_bytes` |
+| Capture-backed sources (screen/camera/mic) | live input cannot repeat | `active` for live `SourceKind`s; `affects_bytes` |
+| GStreamer element threading | fixed scheduling under the virtual clock; element-internal threads (queue leaks) may reorder | `timestamp_risk: true` — validated by the reproducibility test |
 
 ## Quality gate
 

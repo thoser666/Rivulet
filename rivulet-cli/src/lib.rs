@@ -22,6 +22,8 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use rivulet_core::inspect::NondeterminismReport;
+use rivulet_core::source::SourceKind;
 use rivulet_core::{RecordingContainer, RivuletEngine};
 
 /// Exit codes documented in the M7 spec (§ CLI surface reference).
@@ -234,11 +236,42 @@ impl RecordJob {
 
         let file_size = file_size_of(&output_path);
         let seconds = started_at.elapsed().as_secs();
+        // Reproducible-run contract (M7 W2a): derive the nondeterminism
+        // inventory from the engine's actual state after the run rather than
+        // from the config, so the report describes what happened instead of
+        // what was requested. The headless path feeds a synthetic
+        // `videotestsrc`, which is not live input.
+        let nondeterminism = NondeterminismReport::for_run(
+            engine.clock_mode(),
+            engine.video_encoder(),
+            SourceKind::Color,
+        );
+        let reproducible = nondeterminism.is_reproducible();
+        let byte_reproducible = nondeterminism.is_byte_reproducible();
         self.emit(StatusEvent::Stopped {
             frames: metrics_before_stop.frames_captured.max(frames_pushed),
             seconds,
             file_size_bytes: file_size.unwrap_or(0),
+            clock: engine.clock_mode().as_str().to_string(),
+            pts_source: engine.pts_source().to_string(),
+            encoder: engine.video_encoder().label().to_string(),
+            reproducible,
+            byte_reproducible,
+            nondeterminism,
         });
+
+        if !reproducible {
+            self.diag(
+                "run is outside the reproducible-run contract (see the nondeterminism \
+                 report: wall-clock PTS do not repeat)",
+            );
+        }
+        if !byte_reproducible {
+            self.diag(
+                "encoded bytes are not expected to be identical across runs; \
+                 compare container timestamps instead",
+            );
+        }
 
         if file_size.map_or(true, |s| s == 0) {
             anyhow::bail!(
@@ -390,6 +423,142 @@ mod tests {
         cfg.audio = AudioConfig { enabled: true };
         let out = record(cfg).expect("recording with audio succeeds");
         assert!(std::fs::metadata(&out).expect("output exists").len() > 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- W2a acceptance: wall-clock features are reported (issue #187) ---
+
+    #[test]
+    fn the_stopped_event_reports_the_nondeterminism_the_run_used() {
+        // AC2: a headless run uses the system clock, so the run summary has to
+        // say that its container timestamps are not reproducible rather than
+        // quietly implying they are.
+        let dir = tmp_dir("nondet");
+        let config = recording_config(&dir, "out.mp4", 1);
+        let events: Arc<Mutex<Vec<StatusEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        let out = RecordJob::new(config)
+            .with_event_sink(Box::new(move |e| sink.lock().unwrap().push(e.clone())))
+            .with_diagnostic_sink(Box::new(|_| {}))
+            .run(|| false)
+            .expect("recording succeeds");
+        assert!(std::fs::metadata(&out).is_ok());
+
+        let evs = events.lock().unwrap();
+        let stopped = evs
+            .iter()
+            .find_map(|e| match e {
+                StatusEvent::Stopped {
+                    clock,
+                    reproducible,
+                    byte_reproducible,
+                    nondeterminism,
+                    ..
+                } => Some((
+                    clock.clone(),
+                    *reproducible,
+                    *byte_reproducible,
+                    nondeterminism.clone(),
+                )),
+                _ => None,
+            })
+            .expect("a stopped event");
+
+        let (clock, reproducible, byte_reproducible, report) = stopped;
+        assert_eq!(clock, "system", "the headless path uses the wall clock");
+        assert!(
+            !reproducible,
+            "wall-clock PTS do not repeat, so the run is outside the contract"
+        );
+        assert!(
+            !byte_reproducible,
+            "wall-clock container metadata keeps the bytes from repeating too"
+        );
+        assert!(
+            report.is_active(rivulet_core::inspect::NondeterminismSource::EngineClock),
+            "the run summary must name the clock as an active source"
+        );
+        assert!(
+            report.is_active(rivulet_core::inspect::NondeterminismSource::WallClockMetadata),
+            "and the wall-clock metadata it writes"
+        );
+        assert!(
+            !report.is_active(rivulet_core::inspect::NondeterminismSource::CaptureSource),
+            "the headless synthetic source is not live input"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_stopped_event_json_carries_the_inventory() {
+        // The gate requires machine-readable JSON separated from human text.
+        let dir = tmp_dir("nondet-json");
+        let config = recording_config(&dir, "out.mp4", 1);
+        let events: Arc<Mutex<Vec<StatusEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = events.clone();
+        RecordJob::new(config)
+            .with_event_sink(Box::new(move |e| sink.lock().unwrap().push(e.clone())))
+            .with_diagnostic_sink(Box::new(|_| {}))
+            .run(|| false)
+            .expect("recording succeeds");
+
+        let json = serde_json::to_value(events.lock().unwrap().last().unwrap()).unwrap();
+        assert_eq!(json["event"], "stopped");
+        assert_eq!(json["clock"], "system");
+        assert_eq!(json["pts_source"], "do-timestamp");
+        assert_eq!(json["reproducible"], false);
+        assert_eq!(json["byte_reproducible"], false);
+        assert!(json["encoder"].is_string(), "encoder must be reported");
+
+        let sources = json["nondeterminism"]["sources"]
+            .as_array()
+            .expect("nondeterminism.sources array");
+        assert_eq!(
+            sources.len(),
+            rivulet_core::inspect::NondeterminismSource::ALL.len(),
+            "every documented source is reported, so a consumer can tell a documented limit from an active one"
+        );
+        for entry in sources {
+            for key in [
+                "source",
+                "detail",
+                "active",
+                "affects_timestamps",
+                "affects_bytes",
+            ] {
+                assert!(entry.get(key).is_some(), "source entry needs {key}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_human_diagnostic_names_the_reproducibility_limit() {
+        // The stderr line must be actionable, not just the JSON.
+        let dir = tmp_dir("nondet-diag");
+        let config = recording_config(&dir, "out.mp4", 1);
+        let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = lines.clone();
+        RecordJob::new(config)
+            .with_event_sink(Box::new(|_| {}))
+            .with_diagnostic_sink(Box::new(move |msg| {
+                sink.lock().unwrap().push(msg.to_string())
+            }))
+            .run(|| false)
+            .expect("recording succeeds");
+
+        let lines = lines.lock().unwrap();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.contains("reproducible-run contract")),
+            "a wall-clock run must be told it is outside the contract: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("container timestamps")),
+            "and told what to compare instead: {lines:?}"
+        );
+        drop(lines);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
