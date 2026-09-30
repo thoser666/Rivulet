@@ -6544,6 +6544,138 @@ fn m7_reproducible_run_report_surface_is_pinned() {
 }
 
 #[test]
+fn m7_deterministic_test_helpers_are_pinned() {
+    // Issue #188 (M7 W2b): golden-frame and PTS/DTS helpers. The M7 quality
+    // gate requires "useful diffs on golden-frame/timestamp/reproducibility
+    // failures", so what matters is not merely that the helpers exist but that
+    // a failure *says something*: the frame index, the pixel extent, and the
+    // offending timestamp index. Pin both the surface and those properties.
+    let helpers = read("rivulet-core/src/test_helpers.rs");
+    for needle in [
+        "pub struct GoldenFrame",
+        "pub struct FrameDiff",
+        "pub struct PixelDifference",
+        "pub fn diff(",
+        "pub fn assert_matches",
+        "pub fn differing_fraction",
+        "pub fn describe",
+        "pub struct Timestamps",
+        "pub struct TimestampViolation",
+        "pub fn from_buffers",
+        "pub fn assert_equals",
+        "pub fn assert_constant_interval",
+        "pub fn assert_monotonic",
+        "pub fn assert_dts_not_after_pts",
+        // The scene-state counterpart: without it, W6's determinism claims
+        // reduce to an opaque whole-collection assert_eq.
+        "pub struct SceneState",
+        "pub enum SceneStateDifference",
+        "pub fn source_count",
+        "pub fn check_matches",
+    ] {
+        assert!(
+            helpers.contains(needle),
+            "test_helpers.rs must pin the deterministic-test surface: {needle}"
+        );
+    }
+    // A failure must name the frame index and summarize pixels — the exact
+    // wording the gate asks for.
+    let describe = helpers
+        .split("pub fn describe(&self) -> String {")
+        .nth(1)
+        .expect("FrameDiff::describe present")
+        .chars()
+        .take(700)
+        .collect::<String>();
+    assert!(
+        describe.contains("at frame"),
+        "a golden-frame failure must name the frame index: {describe}"
+    );
+    assert!(
+        describe.contains("pixels differ") && describe.contains("max channel delta"),
+        "a golden-frame failure must summarize pixels, not dump a buffer: {describe}"
+    );
+
+    // The synthetic frame generator moved to core so the deterministic tests
+    // can produce frames from the same code the recording path pushes.
+    let core_source = read("rivulet-core/src/source.rs");
+    for needle in ["pub struct TestVideoSource", "pub fn frame_at"] {
+        assert!(
+            core_source.contains(needle),
+            "source.rs must pin the deterministic frame source: {needle}"
+        );
+    }
+    let cli_source = read("rivulet-cli/src/source.rs");
+    assert!(
+        cli_source.contains("pub use rivulet_core::source::TestVideoSource"),
+        "the CLI must re-export the core generator so its public surface is unchanged"
+    );
+
+    // At least two golden-frame tests and one PTS/DTS contract test, using the
+    // helpers as documented.
+    let tests = read("rivulet-core/tests/m7_golden_frames.rs");
+    let golden_tests = tests.matches("fn golden_frame_test").count();
+    assert!(
+        golden_tests >= 2,
+        "the DoD requires at least two golden-frame tests, found {golden_tests}"
+    );
+    for needle in [
+        "assert_matches",
+        "pts_dts_helper_detects_a_tampered_timestamp",
+        "TimestampViolationKind::Value",
+        "check_constant_interval",
+    ] {
+        assert!(
+            tests.contains(needle),
+            "the PTS/DTS contract tests must use {needle}"
+        );
+    }
+    // The integration test needs GStreamer, so the dev-dependency must stay.
+    let manifest = read("rivulet-core/Cargo.toml");
+    assert!(
+        manifest.contains("[dev-dependencies]") && manifest.contains("gstreamer-app"),
+        "the deterministic tests drive a real pipeline; the dev-dependency must remain"
+    );
+
+    // The spec must document the helpers with usage examples.
+    let spec = read("docs/m7-automation.md");
+    for fragment in [
+        "GoldenFrame",
+        "Timestamps",
+        "SceneState",
+        "m7_golden_frames.rs",
+        "assert_matches",
+    ] {
+        assert!(
+            spec.contains(fragment),
+            "m7 spec must document the deterministic-test helpers: {fragment}"
+        );
+    }
+
+    // W6 AC "the operation is covered by the deterministic-test helpers from
+    // W2b" must be true in code, not only in the spec checkbox: the scene-item
+    // determinism tests have to call the helper.
+    let core = read("rivulet-core/src/source.rs");
+    let clipboard_tests = core
+        .split("// ── Scene-item copy/paste")
+        .nth(1)
+        .expect("scene-item copy/paste test block present");
+    let helper_uses = clipboard_tests.matches("SceneState::new").count();
+    assert!(
+        helper_uses >= 2,
+        "W6's determinism tests must use the W2b SceneState helper, found {helper_uses} uses"
+    );
+    assert!(
+        clipboard_tests.contains("undo_paste_restores_pre_paste_state_exactly"),
+        "the undo criterion must keep its own test"
+    );
+    assert!(
+        clipboard_tests.contains("cross_scene_paste_keeps_source_scene_intact"),
+        "the duplicate-semantics criterion must keep its own test"
+    );
+}
+
+#[test]
 fn scene_item_copy_paste_surface_is_pinned() {
     // Issue #192 (M7 W6): the scene-item copy/paste API is the OBS 32.2
     // frontend-parity item. Pin the full vertical slice — core clipboard

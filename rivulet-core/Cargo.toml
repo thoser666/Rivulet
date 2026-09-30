@@ -92,6 +92,12 @@ keyring = { version = "3.6", default-features = false, features = ["apple-native
 
 [dev-dependencies]
 tempfile = "3"
+# The M7 W2b deterministic tests (tests/m7_golden_frames.rs) drive a real
+# GStreamer pipeline to capture timestamps, so the integration test needs the
+# crates the library already depends on. Same minor line as the normal
+# dependencies above; no new locked version.
+gstreamer = "0.25"
+gstreamer-app = "0.25"
 # In-memory log capture for the Discord worker contract test
 # (src/discord.rs::test_log_capture): formats real worker `tracing` events
 # into a buffer. Same minor line as the GUI's subscriber; no new lock entry.
