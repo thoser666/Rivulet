@@ -28,6 +28,15 @@
   Loops mit Fail-Fast-Escape (Chat-Worker-Tests panic'en sofort bei
   `Disconnected`, weil ein Retry nie erfolgreich sein kann). Doku in
   `docs/m7-automation.md` ergänzt.
+  Nachtrag aus der CI-Erstrunde des PRs: der Helper-Unit-Test
+  `wait_until_does_not_poll_after_the_deadline_has_passed` flaked auf einem
+  unter Last stehenden macOS-Runner — der Test ließ die Bedingung per
+  Wanduhr erst nach 120 ms wahr werden und erwartete `None` bei 40-ms-
+  Deadline, aber der Helper sampelt die Bedingung (dokumentiert) mindestens
+  einmal vor der Deadline-Prüfung, und ein 25-ms-Sleep kann unter Last
+  >100 ms überlaufen. Der Test pinnt jetzt per Call-Counting (Flip erst nach
+  ~100 Polls), Modul-Doc und m7-automation.md halten den Contract explizit
+  fest.
 
 - feat(cli): **Maschinenlesbare Fehlerdiagnose mit benannter Stage
   (M7 W5, Issue #191)** — die Abnahmekriterien von W5 waren erfüllt, aber die

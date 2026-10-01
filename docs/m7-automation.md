@@ -317,6 +317,14 @@ worker tests panic as soon as the worker reports `Disconnected`, because
 retrying can never succeed) keep that logic instead of waiting out the
 deadline.
 
+Note the helper's contract when writing assertions about the deadline itself:
+the condition is sampled at least once before the deadline is honored — under
+load a single 25 ms sleep can overrun its interval by a large factor, so a
+condition that turns true during such an overrun may still be observed. Tests
+must not pin "must-not-see" expectations to sub-second
+deadline/sleep timing; pin such behavior with call counting instead (the
+helper's unit tests show how).
+
 The helpers are exercised end-to-end in `rivulet-core/tests/m7_golden_frames.rs`,
 which includes a test that captures timestamps from a *real* GStreamer
 pipeline through an appsink, so the helper is proven on pipeline data rather

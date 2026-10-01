@@ -24,6 +24,13 @@
 //!   a fixed amount, so slow runners wait longer and fast ones return
 //!   immediately (a positive assert after a fixed sleep is flake-prone).
 //!
+//! `wait_until` contract: the condition is sampled at least once before the
+//! deadline is honored — under a heavily loaded runner a single 25 ms sleep
+//! can overrun its interval by a large factor, so a condition that turns true
+//! during such an overrun may still be observed. Tests must not build
+//! "must-not-see" expectations on sub-second deadline/sleep relationships;
+//! pin behavior with call counting instead (see the helper's unit tests).
+//!
 //! The frame and timestamp helpers are dependency-free (no image/PNG crate)
 //! and operate on raw RGBA, which is the engine's appsrc format. PNG encoding
 //! belongs to the caller (the GUI already has the `image` crate); the gate
@@ -1182,13 +1189,24 @@ mod tests {
 
     #[test]
     fn wait_until_does_not_poll_after_the_deadline_has_passed() {
-        // A condition that becomes true only after the deadline must not be
-        // sampled once time is up: the helper returns None, not a late hit.
-        let started = Instant::now();
+        // The condition would only flip after ~100 polls (~2.5 s at the 25 ms
+        // cadence) — far beyond the 40 ms deadline. The helper must give up
+        // at the deadline instead of polling until the flip. Call counting
+        // instead of a wall-clock flip keeps this deterministic even when a
+        // poll sleep badly overruns its interval (observed >100 ms late on a
+        // loaded macOS CI runner): a late sample can still happen, but it
+        // can never reach the flip.
+        let mut calls = 0usize;
         let value = wait_until(Duration::from_millis(40), || {
-            (started.elapsed() > Duration::from_millis(120)).then_some(())
+            calls += 1;
+            (calls >= 100).then_some(())
         });
-        assert!(value.is_none());
+        assert!(value.is_none(), "the deadline must end the polling");
+        assert!(
+            calls < 100,
+            "polled {} times without honoring the deadline",
+            calls
+        );
     }
 
     #[test]
