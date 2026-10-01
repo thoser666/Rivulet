@@ -3566,14 +3566,12 @@ mod tests {
                     && rb.video().len() > 1
                     && rb.video().iter().any(|s| s.keyframe)
             };
-            let ring_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while !ring_ready(&replay.lock().unwrap()) {
-                assert!(
-                    std::time::Instant::now() < ring_deadline,
-                    "replay ring should hold encoded packets with a keyframe while the recording is live"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(25));
-            }
+            crate::test_helpers::wait_until(Duration::from_secs(10), || {
+                ring_ready(&replay.lock().unwrap()).then_some(())
+            })
+            .expect(
+                "replay ring should hold encoded packets with a keyframe while the recording is live",
+            );
 
             let rb = replay.lock().unwrap();
             assert!(
@@ -4960,12 +4958,14 @@ mod tests {
         // trusting a fixed sleep: a slow runner must not miss the first
         // non-empty file-size sample (the GUI surfaces the file size live).
         let flush_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while engine.recording_stats().file_size_bytes == 0 {
-            assert!(
-                std::time::Instant::now() < flush_deadline,
-                "filesink never reported a non-empty file size"
+        let flushed = crate::test_helpers::wait_until(Duration::from_secs(10), || {
+            (engine.recording_stats().file_size_bytes > 0).then_some(())
+        });
+        if flushed.is_none() {
+            panic!(
+                "filesink never reported a non-empty file size (waited {:?})",
+                flush_deadline.saturating_duration_since(std::time::Instant::now())
             );
-            std::thread::sleep(std::time::Duration::from_millis(25));
         }
 
         let metrics = engine.recording_stats();

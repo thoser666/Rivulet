@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+- ci: **Skript-Self-Tests unter dem Pre-Push-Hook schreiben nicht mehr ins
+  echte Repo** — git startet den Pre-Push-Hook mit `GIT_DIR` (& Co.) im
+  Environment, und die Self-Test-Fixtures von `scripts/check-release-notes.py`
+  und `scripts/generate-release-notes.sh` erbten das: ihre
+  `git init`/`git tag`-Aufrufe liefen gegen das echte Repository statt gegen
+  das Temp-Verzeichnis (beobachtet: Fixture-Commit im Branch-Verlauf,
+  `user.name=Test` in der Repo-Config, Push-Abbruch an „tag
+  'v0.1.0-alpha.1' already exists"). Beide Skripte scrubben die GIT_*-Variablen
+  jetzt für die Fixture-Aufrufe; Standalone blieben die Self-Tests grün,
+  nur der Hook-Kontext war betroffen.
+
+- test(core,gui): **`test_helpers::wait_until` als gemeinsamer Poll-Helfer** —
+  der Timing-Audit (#267) hat die Poll-Idiomatik etabliert, aber jeder Modul
+  rollte seine eigene Deadline-Schleife (discord.rs hatte einen lokalen
+  Helfer, kick/twitch/youtube/eventsub/reconnect/container und die GUI-
+  Tests schrieben den Loop inline). Neu ist `wait_until(deadline, condition)`
+  in `rivulet_core::test_helpers`: pollt die Bedingung im 25-ms-Takt bis
+  `Some(value)` oder die Deadline abläuft, und ist für beide Crates nutzbar
+  (GUI-testet gegen die core-Dependency). Helfer-Tests decken
+  Sofort-Treffer, wiederholtes Pollen bis zum Umschlagen, Deadline-Abbruch
+  und kein Nachpollen nach der Deadline ab. 16 handgerollte Loops sind
+  konvertiert (discord.rs lokaler Helfer gelöscht); bewusst nicht konvertiert:
+  negative Asserts (fixe Verzögerung macht die Bedingung nur wahrer) und
+  Loops mit Fail-Fast-Escape (Chat-Worker-Tests panic'en sofort bei
+  `Disconnected`, weil ein Retry nie erfolgreich sein kann). Doku in
+  `docs/m7-automation.md` ergänzt.
+
 - feat(cli): **Maschinenlesbare Fehlerdiagnose mit benannter Stage
   (M7 W5, Issue #191)** — die Abnahmekriterien von W5 waren erfüllt, aber die
   dritte traf nur für den Erfolgsfall zu: `inspect --json` lieferte einen

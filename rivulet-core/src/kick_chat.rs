@@ -514,6 +514,7 @@ fn run_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::wait_until;
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
@@ -693,19 +694,10 @@ mod tests {
         let mut chat = KickChat::new(&cfg);
         assert!(chat.enabled());
 
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        let delivered = loop {
-            if let Some(rx) = chat.messages() {
-                if let Ok(msg) = rx.try_recv() {
-                    break Some(msg);
-                }
-            }
-            if std::time::Instant::now() > deadline {
-                break None;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        };
-        let msg = delivered.expect("message delivered");
+        let msg = wait_until(Duration::from_secs(5), || {
+            chat.messages().and_then(|rx| rx.try_recv().ok())
+        })
+        .expect("message delivered");
         assert_eq!(msg.user, "KickFan");
         assert_eq!(msg.text, "hello from kick ws");
         assert_eq!(msg.color.as_deref(), Some("#FF00FF"));
@@ -860,33 +852,15 @@ mod tests {
         assert!(chat.enabled());
 
         // The chat line arrives on the message receiver…
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        let chat_delivered = loop {
-            if let Some(rx) = chat.messages() {
-                if let Ok(msg) = rx.try_recv() {
-                    break Some(msg);
-                }
-            }
-            if std::time::Instant::now() > deadline {
-                break None;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        };
+        let chat_delivered = wait_until(Duration::from_secs(5), || {
+            chat.messages().and_then(|rx| rx.try_recv().ok())
+        });
         assert_eq!(chat_delivered.expect("chat delivered").text, "chat line");
 
         // …and the subscription lands on the alert receiver.
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        let alert_delivered = loop {
-            if let Some(rx) = chat.alerts() {
-                if let Ok(event) = rx.try_recv() {
-                    break Some(event);
-                }
-            }
-            if std::time::Instant::now() > deadline {
-                break None;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        };
+        let alert_delivered = wait_until(Duration::from_secs(5), || {
+            chat.alerts().and_then(|rx| rx.try_recv().ok())
+        });
         let event = alert_delivered.expect("alert delivered");
         assert_eq!(event.kind, crate::alerts_ingest::AlertKind::Subscribe);
         assert_eq!(event.user, "WsSubber");

@@ -289,6 +289,34 @@ assert!(Timestamps::from_pts(vec![0, interval, interval + 1_000, 3 * interval, 4
     .is_err());
 ```
 
+Usage — waiting on asynchronous state (`wait_until`):
+
+```rust
+use rivulet_core::test_helpers::wait_until;
+
+let msg = wait_until(Duration::from_secs(5), || {
+    chat.messages().and_then(|rx| rx.try_recv().ok())
+})
+.expect("message delivered");
+```
+
+`wait_until` is the suite-wide idiom established by the timing audit (see the
+CHANGELOG entry "Suite-weites Timing-Audit"): a test that waits for an
+asynchronous worker, pipeline or channel delivery polls the condition up to a
+caller-supplied deadline (25 ms interval) instead of sleeping a fixed amount.
+A positive assert after a fixed sleep is flake-prone — under parallel test
+load a slow runner can sample the state before the worker produced it —
+while polling turns the same assert into "wait until it is true, fail after
+the deadline": slow runners wait longer, fast ones return immediately, and a
+genuinely broken condition still fails instead of hanging. Prefer it over any
+new `thread::sleep`-then-assert pattern; per-module hand-rolled loops are
+being migrated to this helper. Two exceptions are deliberate: negative
+asserts ("must not happen") stay as they are — a fixed delay only makes the
+condition more true — and loops with a fail-fast escape (for example the chat
+worker tests panic as soon as the worker reports `Disconnected`, because
+retrying can never succeed) keep that logic instead of waiting out the
+deadline.
+
 The helpers are exercised end-to-end in `rivulet-core/tests/m7_golden_frames.rs`,
 which includes a test that captures timestamps from a *real* GStreamer
 pipeline through an appsink, so the helper is proven on pipeline data rather
