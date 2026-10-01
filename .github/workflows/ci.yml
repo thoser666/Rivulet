@@ -293,14 +293,18 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-      - name: Install GStreamer runtime and x264
+      - name: Install GStreamer runtime, PipeWire headers and x264
         # Same package set as the coverage job: the render path needs the
-        # plugins-* runtime (not just the -dev headers clippy requires).
+        # plugins-* runtime (not just the -dev headers clippy requires), and
+        # rivulet-core links pipewire/spa, so the -dev packages must be present
+        # for libspa-sys to build.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libgstreamer1.0-dev \
             libgstreamer-plugins-base1.0-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev \
             gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good \
             gstreamer1.0-plugins-bad \
