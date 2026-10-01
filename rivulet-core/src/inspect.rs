@@ -290,10 +290,17 @@ impl NondeterminismSource {
 
     /// Whether this source can make the encoded *bytes* differ between two
     /// otherwise identical runs, leaving the timeline intact.
+    ///
+    /// `capture_source` counts: live input is the reason a desktop run cannot
+    /// be byte-compared, and excluding it would let a run with a webcam layer
+    /// report `is_byte_reproducible() == true`.
     pub fn affects_bytes(self) -> bool {
         matches!(
             self,
-            Self::EncoderRateControl | Self::HardwareEncoder | Self::WallClockMetadata
+            Self::EncoderRateControl
+                | Self::HardwareEncoder
+                | Self::WallClockMetadata
+                | Self::CaptureSource
         )
     }
 }
@@ -360,8 +367,14 @@ impl NondeterminismReport {
             (
                 NondeterminismSource::HardwareEncoder,
                 format!(
-                    "{} encoder is not bit-deterministic across runs/drivers",
-                    encoder.label()
+                    "the {} encoder is not bit-deterministic across \
+                     runs/drivers (this run: {})",
+                    encoder.label(),
+                    if encoder.is_hardware() {
+                        "hardware, so the limit applies"
+                    } else {
+                        "software, so this limit does not apply"
+                    }
                 ),
                 encoder.is_hardware(),
             ),
@@ -668,6 +681,60 @@ mod tests {
             SourceKind::Color,
         );
         assert!(report.is_active(NondeterminismSource::EngineClock));
+    }
+
+    #[test]
+    fn the_software_encoder_detail_does_not_claim_the_hardware_limit() {
+        // The detail string interpolates the encoder, so a software run used to
+        // read "Software encoder is not bit-deterministic" - the one limit that
+        // explicitly does not apply to it.
+        let sw = NondeterminismReport::for_run(
+            ClockMode::Virtual,
+            VideoEncoder::Software,
+            SourceKind::Color,
+        );
+        let detail = &sw
+            .sources
+            .iter()
+            .find(|entry| entry.source == "hardware_encoder")
+            .expect("entry")
+            .detail;
+        assert!(
+            detail.contains("does not apply"),
+            "a software run must not be told it has a hardware limit: {detail}"
+        );
+        assert!(
+            !sw.is_active(NondeterminismSource::HardwareEncoder),
+            "and the entry must stay inactive for software encoding"
+        );
+    }
+
+    #[test]
+    fn live_capture_is_reported_as_a_byte_limit() {
+        // A webcam/screen layer is the reason a desktop run cannot be compared
+        // byte for byte, so it must not be reported as timeline-only.
+        let live = NondeterminismReport::for_run(
+            ClockMode::Virtual,
+            VideoEncoder::Software,
+            SourceKind::ScreenCapture,
+        );
+        assert!(NondeterminismSource::CaptureSource.affects_bytes());
+        let entry = live
+            .sources
+            .iter()
+            .find(|entry| entry.source == "capture_source")
+            .expect("entry");
+        assert!(entry.affects_bytes, "{entry:?}");
+        assert!(
+            entry.active,
+            "a screen-capture source must be active: {entry:?}"
+        );
+        assert!(
+            !live.is_byte_reproducible(),
+            "a live source rules byte-reproducibility out"
+        );
+        // It is not a *timestamp* divergence: the virtual clock still holds.
+        assert!(live.is_reproducible());
     }
 
     #[test]

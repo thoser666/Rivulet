@@ -102,6 +102,19 @@ impl SceneSnapshot {
         }
     }
 
+    /// Override the canvas size.
+    ///
+    /// [`from_scene`](Self::from_scene) starts at the editor's
+    /// [`DEFAULT_CANVAS_WIDTH`] x [`DEFAULT_CANVAS_HEIGHT`], which is a
+    /// desktop editing canvas. Headless rendering needs the output resolution
+    /// of the run instead, so this is a plain builder rather than a
+    /// constructor argument: every existing caller keeps the default.
+    pub fn with_size(mut self, width: u32, height: u32) -> Self {
+        self.width = width;
+        self.height = height;
+        self
+    }
+
     /// Attach a native frame to the layer for the given source, if present.
     ///
     /// The frame is validated against the layer's crop: `crop` dims reference

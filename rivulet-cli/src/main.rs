@@ -22,6 +22,8 @@ USAGE:
     rivulet record --config <file.toml> [flags]
     rivulet record --output <file.mp4> [flags]   # minimal inline config
     rivulet inspect --config <file.toml> [--json] # print the pipeline, don't record
+    rivulet render --config <scene.toml> --frame <n> --png <out.png>
+    rivulet render --config-dir <scenes/> --out-dir <renders/>   # batch
     rivulet help                                 # show this help
 
 FLAGS (record):
@@ -42,6 +44,18 @@ FLAGS (inspect):
     -a, --audio               include the audio branch in the pipeline
         --json                machine-readable report (pipeline + capabilities)
 
+FLAGS (render):
+    -c, --config <file>       scene composition TOML
+        --config-dir <dir>    render every .toml in <dir> (batch mode)
+        --out-dir <dir>       output directory for batch mode
+        --frame <n>           which still frame to render (default 0)
+        --frames <n>          frames a video render pushes (default 60)
+        --png <file>          write a still frame as PNG
+        --video <file>        write the render as a video container
+        --container <fmt>     mp4 | mkv (default mp4)
+        --summary <file>      batch summary JSON (default <out-dir>/summary.json)
+        --json                print the batch summary to stdout as well
+
 STREAMS:
     stdout  JSON status events (started/progress/stopped; stable schema)
     stderr  human-readable diagnostics
@@ -57,6 +71,7 @@ EXIT CODES:
 enum Command {
     Record,
     Inspect,
+    Render,
 }
 
 struct RecordArgs {
@@ -68,6 +83,9 @@ struct RecordArgs {
     /// `record --dry-run`: build the pipeline and stop.
     dry_run: bool,
     show_help: bool,
+    /// `render`: its own flags. Rendering configures a composition rather than
+    /// a recording, so its vocabulary does not overlap with `record`'s.
+    render: rivulet_cli::render::RenderArgs,
 }
 
 fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
@@ -83,6 +101,10 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
                 command = Command::Inspect;
                 rest = &args[1..];
             }
+            "render" => {
+                command = Command::Render;
+                rest = &args[1..];
+            }
             "help" | "--help" | "-h" => {
                 return Ok(RecordArgs {
                     command,
@@ -91,11 +113,12 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
                     json: false,
                     dry_run: false,
                     show_help: true,
+                    render: rivulet_cli::render::RenderArgs::default(),
                 })
             }
             other => {
                 return Err(format!(
-                    "unknown command {other:?} (expected \"record\" or \"inspect\")"
+                    "unknown command {other:?} (expected \"record\", \"inspect\" or \"render\")"
                 ))
             }
         }
@@ -108,7 +131,19 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
         json: false,
         dry_run: false,
         show_help: false,
+        render: rivulet_cli::render::RenderArgs::default(),
     };
+
+    // `render` has its own flag vocabulary, so it is parsed by its own parser
+    // and never sees the recording flags below.
+    if command == Command::Render {
+        if rest.iter().any(|arg| arg == "--help" || arg == "-h") {
+            parsed.show_help = true;
+            return Ok(parsed);
+        }
+        parsed.render = rivulet_cli::render::parse_render_args(rest)?;
+        return Ok(parsed);
+    }
     let mut i = 0;
     while i < rest.len() {
         let flag = rest[i].as_str();
@@ -192,9 +227,21 @@ fn run() -> i32 {
         }
     };
     if parsed.show_help {
-        print!("{USAGE}");
+        // `render --help` shows the render surface on its own; `rivulet help`
+        // shows the overall usage (which summarizes every subcommand).
+        if parsed.command == Command::Render {
+            print!("{}", rivulet_cli::render::USAGE);
+        } else {
+            print!("{USAGE}");
+        }
         let _ = std::io::stdout().flush();
         return exit_code::OK;
+    }
+
+    if parsed.command == Command::Render {
+        // Rendering builds a composition from a scene config, so it must not
+        // go through the recording config path (and its `output.path` default).
+        return rivulet_cli::render::run_render(&parsed.render);
     }
 
     // Load config file, then apply flag overrides (flags win).

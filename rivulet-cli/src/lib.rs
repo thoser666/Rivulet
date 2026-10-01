@@ -12,6 +12,7 @@
 
 pub mod config;
 pub mod inspect;
+pub mod render;
 pub mod source;
 
 pub use config::{describe, AudioConfig, OutputConfig, RecordConfig, StatusEvent, VideoConfig};

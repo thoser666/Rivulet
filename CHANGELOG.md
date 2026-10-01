@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+- feat(cli): **CI-freundliches Rendering — Video aus Code (M7 W3, Issue #189)**
+  — „Video from code" war die verbleibende Säule der M7-Differenzierung, aber
+  es gab keinen Weg, aus einer Szenenbeschreibung eine Datei zu erzeugen: eine
+  Konfiguration musste interaktiv in der GUI zusammengebaut werden. Neu ist
+  `rivulet render` mit zwei Modi. Einzelrender mit `--config scene.toml --frame
+  7 --png out.png` schreibt Frame N deterministisch — zweimal gerendert sind die
+  Bytes identisch, ohne dass eine Uhr beteiligt ist; `--video` schiebt Frames
+  durch die Engine auf einem `VirtualClock`. Der Batch-Modus
+  `--config-dir scenes/ --out-dir renders/ --json` fährt einen Job pro Config,
+  isoliert Fehler (ein defekter Config bricht den Lauf nicht ab) und schreibt
+  eine maschinenlesbare Zusammenfassung mit Status und Ausgabepfaden je Job.
+  Die Pfade stehen relativ zu `out_dir`, damit eine Zusammenfassung zwischen
+  Runnern diffbar bleibt. `render` hat bewusst ein eigenes Flag-Vokabular und
+  einen eigenen Parser, weil es eine Komposition konfiguriert statt einer
+  Aufnahme; die Exit-Codes folgen der bestehenden Konvention (0/1/2).
+  Die Komposition liegt in `rivulet_core::render` (`SceneRenderConfig` →
+  `SceneSnapshot` → `GoldenFrame`), der Prozess in `rivulet_cli::render`.
+  Zwei Befunde aus dieser Arbeit sind mitkorrigiert, weil sie in jedem
+  gerenderten Report sichtbar waren: die Reproduzierbarkeits-Zusage stand
+  unabhängig von der Konfiguration auf `Color`, sodass ein als `GameCapture`
+  konfigurierter Render fälschlich als byte-reproduzierbar gemeldet wurde —
+  sie folgt jetzt `dominant_source_kind()`, und ein Live-Format stuft die
+  Zusage herab; und der Detailtext zu `hardware_encoder` behauptete auch für
+  Software-Encoding die Hardware-Eigenschaft. Außerdem meldet `capture_source`
+  jetzt korrekt `affects_bytes` — Live-Eingabe verändert die Bytes, das Feld
+  stand auf `false`. Aus demselben Grund sind im W2b-Helfer drei Kanten
+  nachgezogen: `to_png_bytes` liefert bei einer Geometrie/Buffer-Mismatch jetzt
+  `None` statt in der Scanline-Schleife zu panicen, `check_constant_interval`
+  meldet eine fallende PTS-Sequenz als Monotonie-Verletzung statt zu
+  überlaufen, und `assert_dts_not_after_pts` weist ungleiche Längen zurück, weil
+  `zip` sonst nur den kürzeren Teil geprüft hätte. Der Doku-Kommentar zu
+  `to_png_bytes` behauptete ein `image`-Crate und ein Feature, die es nie gab.
+  End-to-End auf einem Clean Runner nachgewiesen: der neue `Render Smoke`-Job
+  führt `scripts/ci-render-smoke.sh` mit der ausgelieferten Binary gegen zwei
+  Fixture-Configs aus und prüft Byte-Gleichheit, PNG-Signatur, abweichende
+  aufeinanderfolgende Frames, die Batch-Zusammenfassung sowie einen echten
+  MP4-Container.
+
 - test(core): **Suite-weites Timing-Audit: letzte Sleep-basierten Asserts auf
   Polling umgestellt** — ein Audit über alle 80 `sleep()`-Stellen in
   rivulet-core und rivulet-gui (Test-Kontexte wie Produktion) klassifizierte

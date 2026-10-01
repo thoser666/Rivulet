@@ -77,7 +77,7 @@ jobs:
       - name: ShellCheck macOS packaging scripts
         run: |
           sudo apt-get install -y shellcheck
-          shellcheck packaging/macos/*.sh scripts/release-branch.sh scripts/test-release-branch.sh
+          shellcheck packaging/macos/*.sh scripts/release-branch.sh scripts/test-release-branch.sh scripts/ci-render-smoke.sh
 
       - name: Test release-branch reconciliation
         run: bash scripts/test-release-branch.sh
@@ -279,6 +279,39 @@ jobs:
         run: cargo test -p rivulet-obs-websocket --test companion_smoke -- --nocapture
 
   ################################################################
+  # RENDER SMOKE (M7 W3)
+  # End-to-end video generation from code on a clean runner: renders
+  # stills twice and compares the bytes, drives a batch run over two
+  # scene configs and validates the machine-readable summary, and
+  # checks the encoder really produced an MP4 container.
+  ################################################################
+  render_smoke:
+    name: Render Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - name: Install GStreamer runtime and x264
+        # Same package set as the coverage job: the render path needs the
+        # plugins-* runtime (not just the -dev headers clippy requires).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            gstreamer1.0-tools \
+            python3
+      - name: Run render smoke test
+        run: bash scripts/ci-render-smoke.sh
+
+  ################################################################
   # FUZZ SMOKE (libFuzzer regression run of the untrusted-input parsers)
   # Builds the fuzz targets with cargo-fuzz on nightly and runs a fixed,
   # short number of executions each. A crash (panic, overflow, hang under
@@ -399,7 +432,7 @@ jobs:
   ci:
     name: CI
     if: ${{ always() }}
-    needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, remote_companion_smoke, fuzz_smoke, coverage, roadmap_sync]
+    needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, remote_companion_smoke, render_smoke, fuzz_smoke, coverage, roadmap_sync]
     runs-on: ubuntu-latest
     steps:
       - name: Require all CI jobs to pass

@@ -25,3 +25,8 @@ toml = "0.9"
 ctrlc = "3.4"
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+# The W3 batch-summary tests (src/render.rs) need scratch directories for
+# scene configs and rendered outputs.
+tempfile = "3"
