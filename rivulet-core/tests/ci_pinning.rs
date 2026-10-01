@@ -3411,7 +3411,7 @@ fn develop_required_checks_have_stable_job_names() {
             && ci.contains("cargo test -p rivulet-core --test ci_pinning")
             && ci.contains("name: CI")
             && ci.contains(
-                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, remote_companion_smoke, fuzz_smoke, coverage, roadmap_sync]"
+                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, remote_companion_smoke, render_smoke, fuzz_smoke, coverage, roadmap_sync]"
             ),
         "CI must expose dedicated Pinning-Tests and aggregate CI checks"
     );
@@ -6673,6 +6673,129 @@ fn m7_deterministic_test_helpers_are_pinned() {
         clipboard_tests.contains("cross_scene_paste_keeps_source_scene_intact"),
         "the duplicate-semantics criterion must keep its own test"
     );
+}
+
+#[test]
+fn m7_batch_render_surface_is_pinned() {
+    // Issue #189 (M7 W3): batch rendering and the CI integration example. The
+    // acceptance criteria are about behaviour, not just symbols, so pin the
+    // properties that make them hold:
+    //   * a still render of the same frame is byte-identical (no wall clock),
+    //   * a batch keeps going after a broken config instead of aborting,
+    //   * the summary is machine-readable and records per-job output paths,
+    //   * CI runs the real binary end to end.
+    let render = read("rivulet-core/src/render.rs");
+    for needle in [
+        "pub struct SceneRenderConfig",
+        "pub struct CanvasConfig",
+        "pub struct RenderLayerConfig",
+        "pub enum RenderVideoTarget",
+        "pub struct RenderVideoReport",
+        "pub enum RenderError",
+        "pub fn render_video",
+        "pub fn frame_pts_ns",
+        "pub fn write_frame_png",
+        "pub fn dominant_source_kind",
+        // The determinism guarantee has to be asserted in code, not claimed in
+        // a comment.
+        "rendering_the_same_frame_twice_is_byte_identical",
+        // A live layer kind must downgrade the byte-reproducibility claim;
+        // hard-coding Color would let a webcam render claim stability.
+        "a_live_layer_kind_downgrades_the_reproducibility_claim",
+    ] {
+        assert!(
+            render.contains(needle),
+            "core render.rs must pin the W3 render surface: {needle}"
+        );
+    }
+
+    let cli_render = read("rivulet-cli/src/render.rs");
+    for needle in [
+        "pub struct RenderArgs",
+        "pub fn parse_render_args",
+        "pub fn run_render",
+        "pub struct BatchRenderSummary",
+        "pub struct BatchRenderJob",
+        "pub enum JobStatus",
+        "pub fn render_batch",
+        "pub fn load_scene_config",
+        "pub const SCHEMA_VERSION: u32 = 1",
+        "a_batch_run_reports_one_job_per_config_including_failures",
+        "a_failing_encoder_is_reported_per_job",
+        "the_summary_is_machine_readable",
+    ] {
+        assert!(
+            cli_render.contains(needle),
+            "cli render.rs must pin the W3 batch surface: {needle}"
+        );
+    }
+    // A failing job must not abort the batch: the loop collects one job per
+    // config and the summary decides the exit code.
+    assert!(
+        cli_render.contains("if configs.is_empty()") && cli_render.contains("render_one_batch_job"),
+        "a batch must render one job per config"
+    );
+
+    // The subcommand has to be reachable, not just implemented.
+    let cli_main = read("rivulet-cli/src/main.rs");
+    for needle in ["Command::Render", "rivulet render --config", "render:"] {
+        assert!(
+            cli_main.contains(needle),
+            "the CLI binary must expose the render subcommand: {needle}"
+        );
+    }
+    let cli_lib = read("rivulet-cli/src/lib.rs");
+    assert!(
+        cli_lib.contains("pub mod render"),
+        "the render module must be part of the rivulet_cli library surface"
+    );
+
+    // The CI integration example: the real binary, a batch over >=2 configs,
+    // a byte comparison and a summary assertion.
+    let script = read("scripts/ci-render-smoke.sh");
+    for needle in [
+        "cargo run --quiet --locked -p rivulet-cli",
+        "--config-dir",
+        "--json",
+        "cmp -s",
+        "schema_version",
+        "ftyp",
+    ] {
+        assert!(
+            script.contains(needle),
+            "the W3 CI integration example must pin: {needle}"
+        );
+    }
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("name: Render Smoke") && ci.contains("scripts/ci-render-smoke.sh"),
+        "the render smoke job must run on a clean runner"
+    );
+
+    // Two scene configs, or the ">=2 configs" criterion is untested.
+    let fixtures = read("scripts/ci-render-smoke/card.toml");
+    assert!(
+        fixtures.contains("[canvas]"),
+        "the render smoke fixtures must be real scene configs"
+    );
+    assert!(
+        read("scripts/ci-render-smoke/split.toml").contains("[[layers]]"),
+        "the batch criterion needs at least two configs"
+    );
+
+    // The spec has to record the surface and the checked criteria.
+    let spec = read("docs/m7-automation.md");
+    for fragment in [
+        "SceneRenderConfig",
+        "BatchRenderSummary",
+        "ci-render-smoke.sh",
+        "render_smoke",
+    ] {
+        assert!(
+            spec.contains(fragment),
+            "m7 spec must document the batch-render surface: {fragment}"
+        );
+    }
 }
 
 #[test]

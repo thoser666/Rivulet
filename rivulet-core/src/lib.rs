@@ -188,6 +188,12 @@ pub use scene::{Scene, SceneManager};
 pub mod scene_snapshot;
 pub use scene_snapshot::{SceneSnapshot, SnapshotFrame, SnapshotLayer};
 
+pub mod render;
+pub use render::{
+    render_video, CanvasConfig, RenderConfigError, RenderError, RenderLayerConfig,
+    RenderVideoReport, RenderVideoTarget, SceneRenderConfig,
+};
+
 pub mod transition;
 pub use transition::{SceneTransition, TransitionKind};
 

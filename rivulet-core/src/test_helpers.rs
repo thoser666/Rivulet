@@ -175,12 +175,14 @@ impl GoldenFrame {
         panic!("{}", diff.describe());
     }
 
-    /// Write the frame as a PNG next to a failed test's output.
+    /// Encode the frame as a PNG.
     ///
-    /// Uses the `image` crate only if the caller enables the `golden-png`
-    /// feature; without it the bytes are returned so the caller can decide.
-    /// Kept free of a hard dependency because core has no image handling today
-    /// and the diff itself needs none.
+    /// A dependency-free encoder (stored deflate + hand-rolled CRC32): core has
+    /// no image handling, and a golden frame that needs a new dev-dependency to
+    /// be written to disk would make the helper less usable, not more.
+    ///
+    /// Returns `None` when the pixel buffer does not match the declared
+    /// geometry, rather than panicking on the slice range.
     pub fn to_png_bytes(&self) -> Option<Vec<u8>> {
         png_bytes(self.width, self.height, &self.rgba)
     }
@@ -303,9 +305,11 @@ impl Timestamps {
 
     /// Read PTS/DTS out of GStreamer buffers, preserving order.
     ///
-    /// A buffer without a PTS contributes `None` so the caller can decide
-    /// whether that is a failure; DTS falls back to PTS when absent, matching
-    /// how the engine's own probes read timestamps.
+    /// A missing value becomes `0`, because PTS `0` is a legitimate timestamp
+    /// for the first frame and must not be confused with "unset". Callers that
+    /// need to tell the two apart use [`Self::missing_timestamps`].
+    /// DTS falls back to PTS when absent, matching how the engine's own probes
+    /// read timestamps.
     pub fn from_buffers(buffers: &[(Option<u64>, Option<u64>)]) -> Self {
         Self {
             pts_ns: buffers.iter().map(|(pts, _)| pts.unwrap_or(0)).collect(),
@@ -313,6 +317,24 @@ impl Timestamps {
                 .iter()
                 .map(|(pts, dts)| dts.or(*pts).unwrap_or(0))
                 .collect(),
+        }
+    }
+
+    /// Indices of the buffers that carried no PTS, so `from_buffers`' `0`
+    /// placeholder can be told apart from a real timestamp at frame 0.
+    ///
+    /// Returns `None` when every buffer had a PTS.
+    pub fn missing_timestamps(buffers: &[(Option<u64>, Option<u64>)]) -> Option<Vec<usize>> {
+        let missing: Vec<usize> = buffers
+            .iter()
+            .enumerate()
+            .filter(|(_, (pts, _))| pts.is_none())
+            .map(|(index, _)| index)
+            .collect();
+        if missing.is_empty() {
+            None
+        } else {
+            Some(missing)
         }
     }
 
@@ -381,12 +403,25 @@ impl Timestamps {
     pub fn check_constant_interval(&self, interval_ns: u64) -> Result<(), TimestampViolation> {
         assert!(interval_ns > 0, "frame interval must be non-zero");
         for index in 1..self.pts_ns.len() {
-            let gap = self.pts_ns[index] - self.pts_ns[index - 1];
+            // A decreasing sequence has no meaningful gap, and subtracting it
+            // would overflow. Report it as the monotonicity violation it is
+            // instead of panicking with an arithmetic error.
+            let gap = match self.pts_ns[index].checked_sub(self.pts_ns[index - 1]) {
+                Some(gap) => gap,
+                None => {
+                    return Err(TimestampViolation {
+                        index,
+                        kind: TimestampViolationKind::Monotonic,
+                        expected_ns: self.pts_ns[index - 1].checked_add(1),
+                        actual_ns: Some(self.pts_ns[index]),
+                    })
+                }
+            };
             if gap != interval_ns {
                 return Err(TimestampViolation {
                     index,
                     kind: TimestampViolationKind::Interval { interval_ns },
-                    expected_ns: Some(self.pts_ns[index - 1] + interval_ns),
+                    expected_ns: self.pts_ns[index - 1].checked_add(interval_ns),
                     actual_ns: Some(self.pts_ns[index]),
                 });
             }
@@ -409,7 +444,7 @@ impl Timestamps {
                 return Err(TimestampViolation {
                     index,
                     kind: TimestampViolationKind::Monotonic,
-                    expected_ns: Some(self.pts_ns[index - 1] + 1),
+                    expected_ns: self.pts_ns[index - 1].checked_add(1),
                     actual_ns: Some(self.pts_ns[index]),
                 });
             }
@@ -418,8 +453,21 @@ impl Timestamps {
     }
 
     /// Assert DTS never exceeds PTS for the same buffer.
+    ///
+    /// The two sequences are zipped, so a length mismatch would otherwise be
+    /// checked only up to the shorter one and silently pass. A mismatch means
+    /// the two sides were not recorded from the same buffers, which invalidates
+    /// the per-index comparison, so it is its own failure.
     #[track_caller]
     pub fn assert_dts_not_after_pts(&self) {
+        assert_eq!(
+            self.dts_ns.len(),
+            self.pts_ns.len(),
+            "timestamp violation: {} PTS but {} DTS entries; the per-index \
+             comparison would silently cover only the shorter sequence",
+            self.pts_ns.len(),
+            self.dts_ns.len(),
+        );
         for (index, (&pts, &dts)) in self.pts_ns.iter().zip(self.dts_ns.iter()).enumerate() {
             assert!(
                 dts <= pts,
@@ -501,6 +549,14 @@ impl std::fmt::Display for TimestampViolation {
 /// and a CRC32/Adler32 pair — no external dependency, at the cost of file
 /// size, which is irrelevant for a test artifact.
 fn png_bytes(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
+    let stride = width as usize * RGBA_CHANNELS;
+    // A short buffer would panic in the scanline loop below. Report it through
+    // the `Option` instead, so a geometry/pixel mismatch is a readable
+    // failure rather than an index-out-of-bounds.
+    if width == 0 || height == 0 || rgba.len() != stride * height as usize {
+        return None;
+    }
+
     let mut out = Vec::with_capacity(rgba.len() + 1024);
     out.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -511,7 +567,6 @@ fn png_bytes(width: u32, height: u32, rgba: &[u8]) -> Option<Vec<u8>> {
     write_chunk(&mut out, b"IHDR", &ihdr);
 
     // Raw scanlines, each prefixed with filter type 0 (None).
-    let stride = width as usize * RGBA_CHANNELS;
     let mut raw = Vec::with_capacity(height as usize * (stride + 1));
     for row in 0..height as usize {
         raw.push(0);
@@ -967,6 +1022,64 @@ mod tests {
             png.ends_with(&crc32(b"IEND").to_be_bytes()),
             "must end with IEND"
         );
+    }
+
+    #[test]
+    fn a_pixel_buffer_that_does_not_match_the_geometry_yields_no_png() {
+        // `to_png_bytes` promises a `None` failure path, so a short buffer must
+        // actually take it rather than panic inside the scanline loop.
+        // `GoldenFrame::new` already rejects a mismatch at construction, so
+        // this exercises the encoder directly.
+        assert!(
+            png_bytes(8, 4, &[0u8; 8 * 4 * 4 - 1]).is_none(),
+            "one byte short of width*height*4 must not encode"
+        );
+        assert!(png_bytes(8, 4, &[0u8; 8 * 4 * 4 + 1]).is_none());
+        assert!(png_bytes(0, 0, &[]).is_none());
+        assert!(png_bytes(8, 4, &[]).is_none());
+        // The well-formed frame still encodes, so the check is not vacuous.
+        assert!(png_bytes(8, 4, &[0u8; 8 * 4 * 4]).is_some());
+    }
+
+    #[test]
+    fn a_missing_pts_is_distinguishable_from_a_real_zero() {
+        // Frame 0 legitimately has PTS 0, so `from_buffers` cannot use 0 as its
+        // "unset" marker without hiding the difference from the caller.
+        let buffers = [(Some(0), Some(0)), (None, None), (Some(70), Some(70))];
+        let stamps = Timestamps::from_buffers(&buffers);
+        assert_eq!(stamps.pts_ns, vec![0, 0, 70]);
+        assert_eq!(
+            Timestamps::missing_timestamps(&buffers),
+            Some(vec![1]),
+            "the gap at index 1 must be reportable"
+        );
+        assert_eq!(
+            Timestamps::missing_timestamps(&buffers[..1]),
+            None,
+            "a complete run reports nothing missing"
+        );
+        // DTS falls back to PTS, so it inherits the placeholder.
+        assert_eq!(stamps.dts_ns, vec![0, 0, 70]);
+    }
+
+    #[test]
+    fn a_decreasing_sequence_is_a_violation_rather_than_an_overflow() {
+        // Subtracting a decreasing PTS pair overflows. The cadence check has to
+        // report the monotonicity violation instead of panicking.
+        let stamps = Timestamps::from_pts(vec![100, 50]);
+        let violation = stamps
+            .check_constant_interval(10)
+            .expect_err("index 1 goes backwards");
+        assert_eq!(violation.index, 1);
+        assert_eq!(violation.kind, TimestampViolationKind::Monotonic);
+        assert_eq!(violation.actual_ns, Some(50));
+    }
+
+    #[test]
+    #[should_panic(expected = "1 PTS but 3 DTS entries")]
+    fn unequal_pts_and_dts_lengths_fail_the_comparison() {
+        // `zip` alone would compare only the first entry and pass.
+        Timestamps::new(vec![0], vec![0, 10, 20]).assert_dts_not_after_pts();
     }
 
     #[test]

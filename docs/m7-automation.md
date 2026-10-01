@@ -308,12 +308,89 @@ than only on hand-written vectors.
 
 **Acceptance criteria**
 
-- [ ] Rendering frame N twice under the virtual clock yields identical PNG
+- [x] Rendering frame N twice under the virtual clock yields identical PNG
   output (test).
-- [ ] Batch run over ≥2 configs produces a machine-readable summary (per-job
+- [x] Batch run over ≥2 configs produces a machine-readable summary (per-job
   status, output paths).
-- [ ] A CI job demonstrates end-to-end video generation from code on a clean
+- [x] A CI job demonstrates end-to-end video generation from code on a clean
   runner.
+
+#### Surface
+
+`rivulet-core/src/render.rs` owns the composition side, `rivulet-cli/src/render.rs`
+the process side:
+
+| Item | Purpose |
+| --- | --- |
+| `SceneRenderConfig` | One render job: canvas, fps, layers, collection/profile. |
+| `CanvasConfig`, `RenderLayerConfig` | Geometry plus per-layer kind, transform, visibility, z-order, `animated`. |
+| `SceneRenderConfig::snapshot` / `render_frame` | Composites frame N into a `SceneSnapshot`, then a `GoldenFrame`. |
+| `SceneRenderConfig::write_frame_png` | Deterministic PNG for frame N (`GoldenFrame::to_png_bytes`). |
+| `SceneRenderConfig::dominant_source_kind` | The kind that decides the run's reproducibility claim. |
+| `render_video` | Pushes `frames` frames through `RivuletEngine` on a `VirtualClock` with the software encoder. |
+| `RenderVideoReport` | Frames, duration, fps, dimensions, output size, and the nondeterminism inventory. |
+| `frame_pts_ns` | PTS of frame N, matching the W2a timestamp contract. |
+| `RenderArgs` / `parse_render_args` | The `rivulet render` flags. |
+| `BatchRenderSummary` / `BatchRenderJob` / `JobStatus` | The machine-readable batch report. |
+| `render_batch` / `load_scene_config` | One job per config, failures isolated. |
+
+Validation is deliberately strict, because these files are CI inputs: canvas
+non-zero and even, `fps` non-zero, at least one layer, unique non-empty layer
+names, at most `MAX_LAYERS` (64) layers, and opacity within `0.0..=1.0`. A bad
+key is named in the error, and unknown TOML keys are rejected rather than
+ignored.
+
+#### Determinism
+
+Frame content comes from `SceneSnapshot::render_rgba()` over synthetic
+`TestVideoSource` frames addressed by frame index, so frame N does not depend on
+how many frames were rendered before it. An `animated` layer gets a stable
+per-layer motion offset; a hidden layer contributes nothing. PNG encoding is the
+dependency-free encoder from `GoldenFrame`, which keeps the bytes reproducible
+and lets `rivulet render` write a file without pulling in an image crate.
+
+`render_video` never uses the wall clock: it sets a `VirtualClock` *before*
+`start_local_recording` (the engine rejects a clock swap once a session is
+running) and steps it one frame before each push, so frame 0 is stamped at the
+session base rather than one interval in. The report is emitted from
+`config.dominant_source_kind()`, so a config naming a live kind (webcam, game
+capture) is not advertised as byte-reproducible.
+
+#### CLI
+
+```console
+# A still, deterministic and byte-identical on every run.
+rivulet render --config scene.toml --frame 7 --png out/frame7.png
+
+# A video through the real encoder.
+rivulet render --config scene.toml --video out/scene.mp4 --frames 60
+
+# Batch: one job per config, isolated failures, machine-readable summary.
+rivulet render --config-dir scenes/ --out-dir renders/ --json
+```
+
+`render` has its own flag vocabulary and parser rather than sharing `record`'s,
+because rendering configures a composition instead of a recording. Exit codes
+follow the existing convention: `0` success, `1` runtime failure, `2` invalid
+usage or config.
+
+The summary records `schema_version`, `out_dir`, `jobs`, `succeeded` and
+`failed`; each job carries `config`, `status`, `video`, `png`, `frames`,
+`duration_secs` and `error`. Job output paths are relative to `out_dir`, so a
+summary from one runner is diffable against another, and a failing job's `error`
+already names its own config.
+
+#### CI integration example
+
+`scripts/ci-render-smoke.sh` runs the shipped binary against the two fixture
+configs in `scripts/ci-render-smoke/`, and the `Render Smoke` job
+(`render_smoke`) runs it on a clean `ubuntu-latest` runner with the GStreamer
+runtime and x264 installed. It checks that the same frame rendered twice is
+byte-identical, that consecutive frames differ (so the first check cannot pass
+by rendering one constant image), that the output carries the PNG signature,
+that a batch over two configs reports two succeeded jobs with relative output
+paths, that the two scenes produce different stills, and that both videos carry
+an MP4 header.
 
 ### W4 — Reproducible distribution inputs — issue [#190](https://github.com/thoser666/Rivulet/issues/190)
 

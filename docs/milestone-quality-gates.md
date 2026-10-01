@@ -305,6 +305,28 @@ This is a developer-experience gate as well as a UI gate:
 Exit evidence: clean-machine command transcript, reproducibility comparison,
 and machine-readable schema validation.
 
+Per-workstream status:
+
+- **#186 (headless CLI)** — shipped: `rivulet record`/`inspect` with TOML config,
+  stable JSON status events, documented exit codes, graceful SIGINT/SIGTERM.
+- **#187 (deterministic clock)** — shipped: injectable `SystemClock`/
+  `VirtualClock`, and every remaining nondeterminism source *reported* with
+  separate `reproducible`/`byte_reproducible` flags in the `stopped` event.
+- **#188 (golden-frame tests)** — shipped: `rivulet_core::test_helpers` with
+  `GoldenFrame`, `Timestamps` and `SceneState`, each failure naming the frame
+  index or offending timestamp index.
+- **#189 (CI rendering)** — shipped: `rivulet render` renders frame N
+  deterministically, pushes video through the engine on the virtual clock, and
+  drives a batch (one job per config, isolated failures, machine-readable
+  summary with relative output paths). The `Render Smoke` job runs the shipped
+  binary end-to-end on a clean runner and checks byte-identity, the PNG
+  signature, the summary, and a real MP4 container.
+- **#190 (reproducible distribution)** — open: SHA-256 manifests and
+  post-publish verification.
+- **#191 (inspector)** — shipped: `rivulet inspect`/`record --dry-run` print the
+  pipeline the engine would build plus a capability report.
+- **#192 (scene-item copy/paste)** — open.
+
 ### M8: Embeddable Engine and API
 
 Review the API as a product consumed by another developer:

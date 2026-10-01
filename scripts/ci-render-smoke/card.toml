@@ -1,0 +1,38 @@
+name = "SmokeCard"
+collection = "CI"
+profile = "Default"
+fps = 30
+
+[canvas]
+width = 64
+height = 48
+
+[[layers]]
+name = "Backdrop"
+kind = "Color"
+animated = false
+z_order = 0
+visible = true
+
+[layers.transform]
+x = 0.0
+y = 0.0
+width = 64.0
+height = 48.0
+rotation = 0.0
+opacity = 1.0
+
+[[layers]]
+name = "Motion"
+kind = "Image"
+animated = true
+z_order = 1
+visible = true
+
+[layers.transform]
+x = 8.0
+y = 8.0
+width = 32.0
+height = 24.0
+rotation = 0.0
+opacity = 0.5

@@ -1,0 +1,58 @@
+# Second fixture for the batch run, so the W3 acceptance criterion ("a batch
+# run over >=2 configs") is exercised by the real job and not only by unit
+# tests. It differs from card.toml in layer count and opacity, so its PNG must
+# differ from card.png - a batch that silently rendered one scene twice would
+# still pass a file-existence check.
+name = "SmokeSplit"
+collection = "CI"
+profile = "Default"
+fps = 30
+
+[canvas]
+width = 32
+height = 32
+
+[[layers]]
+name = "Backdrop"
+kind = "Color"
+animated = false
+z_order = 0
+visible = true
+
+[layers.transform]
+x = 0.0
+y = 0.0
+width = 32.0
+height = 32.0
+rotation = 0.0
+opacity = 1.0
+
+[[layers]]
+name = "Top"
+kind = "Text"
+animated = false
+z_order = 1
+visible = true
+
+[layers.transform]
+x = 0.0
+y = 0.0
+width = 16.0
+height = 16.0
+rotation = 0.0
+opacity = 1.0
+
+[[layers]]
+name = "Hidden"
+kind = "Media"
+animated = true
+z_order = 2
+visible = false
+
+[layers.transform]
+x = 0.0
+y = 0.0
+width = 32.0
+height = 32.0
+rotation = 0.0
+opacity = 1.0
