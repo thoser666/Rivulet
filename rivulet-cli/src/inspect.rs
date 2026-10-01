@@ -15,11 +15,11 @@
 //! Secrets never reach this surface: the pipeline description is redacted by
 //! the core before it is handed out, and this module does no un-redacting.
 
-use anyhow::{Context, Result};
 use rivulet_core::{FeatureReport, RivuletEngine};
 use serde::Serialize;
 
 use crate::config::RecordConfig;
+use crate::RunFailure;
 
 /// The result of an inspection: the pipeline for a config plus, optionally, the
 /// machine's capability report.
@@ -120,15 +120,21 @@ impl InspectReport {
 /// Inspect a config and return the pipeline the engine would build.
 ///
 /// No pipeline is constructed and no file is written — the engine is only
-/// configured far enough to describe itself.
-pub fn inspect(config: RecordConfig) -> Result<InspectReport> {
-    config.validate().map_err(|e| anyhow::anyhow!("{e}"))?;
-    let engine = crate::engine_for(&config)?;
+/// configured far enough to describe itself. A failure here is always
+/// configuration-stage: an invalid config value or an unmappable container.
+pub fn inspect(config: RecordConfig) -> std::result::Result<InspectReport, RunFailure> {
+    config
+        .validate()
+        .map_err(|e| RunFailure::config(e).with_config(config.clone()))?;
+    let engine = crate::engine_for(&config)
+        .map_err(|e| RunFailure::config(format!("{e:#}")).with_config(config.clone()))?;
     Ok(InspectReport::from_engine(&config, &engine))
 }
 
 /// Inspect a config and include the machine's capability report.
-pub fn inspect_with_features(config: RecordConfig) -> Result<InspectReport> {
+pub fn inspect_with_features(
+    config: RecordConfig,
+) -> std::result::Result<InspectReport, RunFailure> {
     Ok(inspect(config)?.with_features(FeatureReport::detect()))
 }
 
@@ -136,9 +142,10 @@ pub fn inspect_with_features(config: RecordConfig) -> Result<InspectReport> {
 ///
 /// The JSON is the machine-readable form (`rivulet inspect --json`); its shape
 /// is pinned by the `cli_inspect_json_schema_is_pinned` ci_pinning test.
-pub fn inspect_json(config: RecordConfig) -> Result<String> {
+pub fn inspect_json(config: RecordConfig) -> std::result::Result<String, RunFailure> {
     let report = inspect_with_features(config)?;
-    serde_json::to_string(&report).context("serializing the inspect report")
+    serde_json::to_string(&report)
+        .map_err(|e| RunFailure::config(format!("serializing the inspect report: {e}")))
 }
 
 #[cfg(test)]

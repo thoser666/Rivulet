@@ -6421,6 +6421,93 @@ fn cli_inspect_surface_is_pinned() {
 }
 
 #[test]
+fn w5_machine_readable_failure_is_pinned() {
+    // Issue #191 (M7 W5) acceptance criterion: "a failing run names the failing
+    // stage in the machine-readable report". The stage taxonomy and the `failed`
+    // event are the contract, so pin the schema, the error type, the exit-code
+    // mapping, and the binary's emission.
+
+    // 1. The event schema carries the stage and the machine-readable shape. The
+    //    event name "failed" itself comes from the `Failed` variant under the
+    //    `rename_all = "snake_case"` already pinned by the W1 test, so pin the
+    //    variant and its fields here.
+    let config = read("rivulet-cli/src/config.rs");
+    for fragment in [
+        "pub enum Stage",
+        "Failed {",
+        "stage: Stage",
+        "exit_code: i32",
+        "\"usage\"",
+        "\"config\"",
+        "\"output\"",
+        "\"engine\"",
+        "\"finalize\"",
+    ] {
+        assert!(
+            config.contains(fragment),
+            "config.rs must pin the failure schema: {fragment}"
+        );
+    }
+
+    // 2. The library error type names the stage and renders both streams.
+    let failure = read("rivulet-cli/src/failure.rs");
+    for fragment in [
+        "pub struct RunFailure",
+        "pub fn usage(",
+        "pub fn config(",
+        "pub fn output(",
+        "pub fn engine(",
+        "pub fn finalize(",
+        "pub fn exit_code",
+        "pub fn to_json",
+        "pub fn describe",
+    ] {
+        assert!(
+            failure.contains(fragment),
+            "failure.rs must pin the structured failure surface: {fragment}"
+        );
+    }
+
+    // 3. A failing run returns the stage-typed error, and every stage is mapped.
+    let lib = read("rivulet-cli/src/lib.rs");
+    for fragment in [
+        "RunFailure",
+        "RunFailure::config",
+        "RunFailure::output",
+        "RunFailure::engine",
+        "RunFailure::finalize",
+    ] {
+        assert!(
+            lib.contains(fragment),
+            "lib.rs must map each stage to RunFailure: {fragment}"
+        );
+    }
+
+    // 4. The binary emits the machine-readable failure on stdout, separate from
+    //    the human line on stderr.
+    let main = read("rivulet-cli/src/main.rs");
+    for fragment in [
+        "fn report_failure",
+        "failure.to_json()",
+        "failure.describe()",
+    ] {
+        assert!(
+            main.contains(fragment),
+            "main.rs must emit the `failed` report: {fragment}"
+        );
+    }
+
+    // 5. The spec documents the failure report and its stage vocabulary.
+    let spec = read("docs/m7-automation.md");
+    for fragment in ["\"event\": \"failed\"", "failing stage"] {
+        assert!(
+            spec.contains(fragment),
+            "m7 spec must document the failure report: {fragment}"
+        );
+    }
+}
+
+#[test]
 fn m7_reproducible_run_report_surface_is_pinned() {
     // Issue #187 (M7 W2a): the reproducible-run contract. What makes it more
     // than a promise is that a run *reports* which nondeterminism sources it

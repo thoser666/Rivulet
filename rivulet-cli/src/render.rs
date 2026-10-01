@@ -352,10 +352,10 @@ fn render_one_batch_job(
 
 /// Execute `rivulet render` and return the process exit code.
 ///
-/// Errors are printed to stderr rather than emitted as JSON: the documented
-/// contract (spec § CLI surface reference) keeps stdout a machine-readable
-/// stream, and the batch summary is written to a file or requested explicitly
-/// with `--json`.
+/// Errors are printed to stderr rather than emitted as JSON: `render` owns no
+/// status stream (the batch summary is written to a file or requested explicitly
+/// with `--json`), so it does not emit the `failed` status event that `record`
+/// and `inspect` do. Its exit codes are the same documented ones.
 pub fn run_render(args: &RenderArgs) -> i32 {
     if args.config_dir.is_some() {
         return run_batch(args);

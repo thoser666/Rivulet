@@ -11,15 +11,19 @@
 //! around this module.
 
 pub mod config;
+pub mod failure;
 pub mod inspect;
 pub mod render;
 pub mod source;
 
-pub use config::{describe, AudioConfig, OutputConfig, RecordConfig, StatusEvent, VideoConfig};
+pub use config::{
+    describe, AudioConfig, OutputConfig, RecordConfig, Stage, StatusEvent, VideoConfig,
+};
+pub use failure::RunFailure;
 pub use inspect::{inspect, inspect_json, inspect_with_features, InspectReport};
 pub use source::{silence_frame, SilenceSource, TestVideoSource};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -123,8 +127,17 @@ impl RecordJob {
     /// The `stop_requested` closure is polled between frames; when it returns
     /// `true` (SIGINT/SIGTERM in the binary), the recording stops cleanly and
     /// the container is finalized.
-    pub fn run(&mut self, stop_requested: impl Fn() -> bool) -> Result<PathBuf> {
-        self.config.validate().map_err(|e| anyhow::anyhow!("{e}"))?;
+    ///
+    /// On failure the returned [`RunFailure`] names the stage that broke, the
+    /// redacted pipeline (when one was built), and the resolved config, so the
+    /// caller can emit the machine-readable `failed` event (M7 W5).
+    pub fn run(
+        &mut self,
+        stop_requested: impl Fn() -> bool,
+    ) -> std::result::Result<PathBuf, RunFailure> {
+        self.config
+            .validate()
+            .map_err(|e| RunFailure::config(e).with_config(self.config.clone()))?;
 
         let width = self.config.video.width;
         let height = self.config.video.height;
@@ -140,12 +153,18 @@ impl RecordJob {
 
         if let Some(parent) = output_path.parent() {
             if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("creating output directory {}", parent.display()))?;
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    RunFailure::output(format!(
+                        "creating output directory {}: {e}",
+                        parent.display()
+                    ))
+                    .with_config(self.config.clone())
+                })?;
             }
         }
 
-        let mut engine = engine_for(&self.config)?;
+        let mut engine = engine_for(&self.config)
+            .map_err(|e| RunFailure::config(format!("{e:#}")).with_config(self.config.clone()))?;
 
         self.emit(StatusEvent::Started {
             width,
@@ -188,7 +207,9 @@ impl RecordJob {
                 }
             }
             if let Some(err) = engine.take_error() {
-                return Err(anyhow::anyhow!("engine error: {err}"));
+                return Err(RunFailure::engine(format!("engine error: {err}"))
+                    .with_pipeline(engine.pipeline_description())
+                    .with_config(self.config.clone()));
             }
 
             engine.process_raw_frame(&video.next_frame(), width, height);
@@ -196,9 +217,11 @@ impl RecordJob {
 
             if let Some(audio) = audio.as_mut() {
                 let frame = audio.next_frame(audio_samples_per_push);
-                engine
-                    .push_audio_frame(&frame)
-                    .context("pushing audio frame")?;
+                engine.push_audio_frame(&frame).map_err(|e| {
+                    RunFailure::engine(format!("pushing audio frame: {e:#}"))
+                        .with_pipeline(engine.pipeline_description())
+                        .with_config(self.config.clone())
+                })?;
                 audio_pushes += 1;
             }
 
@@ -231,7 +254,8 @@ impl RecordJob {
 
         let metrics_before_stop = engine.recording_stats();
         engine.stop_recording();
-        if let Some(err) = engine.take_error() {
+        let stop_error = engine.take_error();
+        if let Some(err) = &stop_error {
             self.diag(&format!("engine reported: {err}"));
         }
 
@@ -275,10 +299,16 @@ impl RecordJob {
         }
 
         if file_size.map_or(true, |s| s == 0) {
-            anyhow::bail!(
-                "recording produced no output file at {} (or the file is empty)",
-                output_path.display()
-            );
+            let detail = match &stop_error {
+                Some(err) => format!("engine error: {err}"),
+                None => format!(
+                    "recording produced no output file at {} (or the file is empty)",
+                    output_path.display()
+                ),
+            };
+            return Err(RunFailure::finalize(detail)
+                .with_pipeline(engine.pipeline_description())
+                .with_config(self.config.clone()));
         }
 
         self.diag(&format!(
@@ -295,9 +325,12 @@ impl RecordJob {
     /// Shares [`engine_for`] with [`RecordJob::run`], so the dry-run and a real
     /// run cannot disagree about the pipeline. No frame is pushed, so the
     /// output path is never created.
-    pub fn dry_run(&self) -> Result<InspectReport> {
-        self.config.validate().map_err(|e| anyhow::anyhow!("{e}"))?;
-        let engine = engine_for(&self.config)?;
+    pub fn dry_run(&self) -> std::result::Result<InspectReport, RunFailure> {
+        self.config
+            .validate()
+            .map_err(|e| RunFailure::config(e).with_config(self.config.clone()))?;
+        let engine = engine_for(&self.config)
+            .map_err(|e| RunFailure::config(format!("{e:#}")).with_config(self.config.clone()))?;
         Ok(InspectReport::from_engine(&self.config, &engine))
     }
 }
@@ -329,7 +362,7 @@ pub fn stdout_stderr_sinks() -> SinkPair {
 
 /// Convenience wrapper for library consumers: run a config to completion with
 /// default sinks, returning the finalized output path.
-pub fn record(config: RecordConfig) -> Result<PathBuf> {
+pub fn record(config: RecordConfig) -> std::result::Result<PathBuf, RunFailure> {
     let (events, diags) = stdout_stderr_sinks();
     RecordJob::new(config)
         .with_event_sink(events)
@@ -415,6 +448,39 @@ mod tests {
         cfg.output.path = None;
         let err = RecordJob::new(cfg).run(|| false).unwrap_err();
         assert!(err.to_string().contains("output.path"), "error = {err}");
+    }
+
+    #[test]
+    fn invalid_config_failure_names_the_stage() {
+        // M7 W5 AC: a failing run names the stage in the machine-readable report.
+        let mut cfg = recording_config(&tmp_dir("invalid-stage"), "out.mp4", 1);
+        cfg.output.path = None;
+        let failure = RecordJob::new(cfg).run(|| false).unwrap_err();
+        assert_eq!(failure.stage(), Stage::Config);
+        assert_eq!(failure.exit_code(), exit_code::USAGE);
+        assert!(failure.message().contains("output.path"), "{failure}");
+        assert!(
+            failure.resolved_config().is_some(),
+            "a config failure still echoes the resolved config"
+        );
+    }
+
+    #[test]
+    fn output_stage_failure_is_structured_and_machine_readable() {
+        // Aim the output under a regular file so the parent cannot be created.
+        let dir = tmp_dir("output-stage");
+        let blocker = dir.join("blocker");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+        let cfg = recording_config(&blocker, "out.mp4", 1);
+        let failure = RecordJob::new(cfg).run(|| false).unwrap_err();
+        assert_eq!(failure.stage(), Stage::Output, "{failure}");
+        assert_eq!(failure.exit_code(), exit_code::RUNTIME);
+
+        let value: serde_json::Value = serde_json::from_str(&failure.to_json()).unwrap();
+        assert_eq!(value["event"], "failed");
+        assert_eq!(value["stage"], "output");
+        assert_eq!(value["exit_code"], 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
