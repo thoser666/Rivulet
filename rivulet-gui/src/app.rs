@@ -13959,6 +13959,7 @@ fn on_file_dialog_cancelled() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rivulet_core::test_helpers::wait_until;
 
     /// Minimal in-memory log capture for the dialog-cancel contract test:
     /// installs a process-wide subscriber buffering formatted events, runs
@@ -14970,20 +14971,13 @@ mod tests {
 
         // The worker pushes asynchronously through the queue; poll reconcile
         // until the follow surfaces in the chat dock (or fail after 10 s).
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        let surfaced = loop {
+        let surfaced = wait_until(std::time::Duration::from_secs(10), || {
             app.reconcile_chat();
             let texts: Vec<&str> = app.chat_messages.iter().map(|m| m.text.as_str()).collect();
-            if texts.contains(&"Ada followed the channel") {
-                break true;
-            }
-            if std::time::Instant::now() >= deadline {
-                break false;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(25));
-        };
+            texts.contains(&"Ada followed the channel").then_some(())
+        });
         assert!(
-            surfaced,
+            surfaced.is_some(),
             "an EventSub follow must surface as a localized chat entry: {:?}",
             app.chat_messages
                 .iter()
@@ -15680,15 +15674,11 @@ mod tests {
 
         // The status flips to "Recording saved." once the background
         // finalization ran (polled once per frame like the real UI).
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        while app.record_status.as_deref() != Some(app.tr("recording_saved")) {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "status must flip to saved after the background finalization"
-            );
+        wait_until(std::time::Duration::from_secs(20), || {
             app.poll_stop_finalization();
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+            (app.record_status.as_deref() == Some(app.tr("recording_saved"))).then_some(())
+        })
+        .expect("status must flip to saved after the background finalization");
         assert!(
             app.stop_finalizing.is_none(),
             "handle is dropped after completion"
@@ -15727,15 +15717,11 @@ mod tests {
 
         // The status flips to "Recording saved." once the background
         // finalization ran (polled once per frame like the real UI).
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        while app.record_status.as_deref() != Some(app.tr("recording_saved")) {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "status must flip to saved after the background finalization"
-            );
+        wait_until(std::time::Duration::from_secs(20), || {
             app.poll_stop_finalization();
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+            (app.record_status.as_deref() == Some(app.tr("recording_saved"))).then_some(())
+        })
+        .expect("status must flip to saved after the background finalization");
         assert!(app.stop_finalizing.is_none());
     }
 
@@ -15888,15 +15874,11 @@ mod tests {
 
         // The completion handle fires once the (no-op) background finalization
         // ran, flipping the status to "Recording saved.".
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        while app.record_status.as_deref() != Some(app.tr("recording_saved")) {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "status must flip to saved after the background finalization"
-            );
+        wait_until(std::time::Duration::from_secs(20), || {
             app.poll_stop_finalization();
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+            (app.record_status.as_deref() == Some(app.tr("recording_saved"))).then_some(())
+        })
+        .expect("status must flip to saved after the background finalization");
         assert!(app.stop_finalizing.is_none());
     }
 
@@ -20246,13 +20228,10 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         );
         // Drain via the reconcile path (thread finishes quickly; retry a
         // few times to avoid flakiness).
-        for _ in 0..100 {
+        wait_until(std::time::Duration::from_secs(2), || {
             app.reconcile_chat();
-            if !app.chat_info_busy {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+            (!app.chat_info_busy).then_some(())
+        });
         assert!(!app.chat_info_busy, "reconcile must drain the outcome");
         assert_eq!(app.chat_info_outcomes.len(), 1, "one configured platform");
         assert_eq!(
@@ -20280,13 +20259,10 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         app.chat_info_game[rivulet_core::InfoPlatform::Twitch.index()] = "Just Chatting".to_owned();
         app.apply_chat_stream_info(Some(rivulet_core::InfoPlatform::Twitch));
         assert!(app.chat_info_busy);
-        for _ in 0..100 {
+        wait_until(std::time::Duration::from_secs(2), || {
             app.reconcile_chat();
-            if !app.chat_info_busy {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+            (!app.chat_info_busy).then_some(())
+        });
         assert_eq!(
             app.chat_info_outcomes.len(),
             1,
@@ -20315,13 +20291,10 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
             app.chat_info_game[idx] = "Software".to_owned();
         }
         app.apply_chat_stream_info(None);
-        for _ in 0..100 {
+        wait_until(std::time::Duration::from_secs(2), || {
             app.reconcile_chat();
-            if !app.chat_info_busy {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+            (!app.chat_info_busy).then_some(())
+        });
         assert_eq!(
             app.chat_info_outcomes.len(),
             3,
@@ -20384,13 +20357,10 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
         // reach exactly the platform with content (#214 core behavior).
         app.chat_info_title[rivulet_core::InfoPlatform::Twitch.index()] = "Twitch only".to_owned();
         app.apply_chat_stream_info(None);
-        for _ in 0..100 {
+        wait_until(std::time::Duration::from_secs(2), || {
             app.reconcile_chat();
-            if !app.chat_info_busy {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+            (!app.chat_info_busy).then_some(())
+        });
         assert_eq!(
             app.chat_info_outcomes.len(),
             1,

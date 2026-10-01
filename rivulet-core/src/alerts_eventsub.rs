@@ -704,6 +704,7 @@ fn apply_read_timeout(
 mod tests {
     use super::*;
     use crate::alerts_ingest::AlertKind;
+    use crate::test_helpers::wait_until;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::time::Duration as StdDuration;
@@ -1087,17 +1088,16 @@ mod tests {
         // subscription POSTs are sequential HTTP calls that can lag the event
         // on a loaded runner (parallel suite), so poll — the assertion still
         // requires exactly the four creations and no rejections/errors.
-        let stats_deadline = std::time::Instant::now() + StdDuration::from_secs(10);
-        let (delivered, rejected, created, error) = loop {
+        let stats = wait_until(StdDuration::from_secs(10), || {
             let (delivered, rejected, created, error, _, _) = receiver.stats();
-            if delivered == 1 && created == EVENTSUB_ALERT_SUBSCRIPTIONS.len() as u64 {
-                break (delivered, rejected, created, error);
-            }
-            if std::time::Instant::now() >= stats_deadline {
-                break (delivered, rejected, created, error);
-            }
-            std::thread::sleep(StdDuration::from_millis(50));
-        };
+            (delivered == 1 && created == EVENTSUB_ALERT_SUBSCRIPTIONS.len() as u64)
+                .then_some((delivered, rejected, created, error))
+        })
+        .unwrap_or_else(|| {
+            let (delivered, rejected, created, error, _, _) = receiver.stats();
+            (delivered, rejected, created, error)
+        });
+        let (delivered, rejected, created, error) = stats;
         assert_eq!(delivered, 1);
         assert_eq!(rejected, 0);
         assert_eq!(created, EVENTSUB_ALERT_SUBSCRIPTIONS.len() as u64);

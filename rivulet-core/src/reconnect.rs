@@ -250,6 +250,8 @@ impl Drop for ReconnectWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::wait_until;
+
     #[test]
     fn backoff_is_exponential_and_bounded() {
         let p = RetryPolicy::new(5, Duration::from_secs(1), Duration::from_secs(3));
@@ -362,17 +364,8 @@ mod tests {
         // Poll instead of sleeping a fixed amount: under parallel test load the
         // worker thread can be starved, so a one-shot try_recv after a fixed
         // sleep is flaky. Wait up to several seconds for the command.
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        loop {
-            if let Some(cmd) = worker.try_recv() {
-                assert_eq!(cmd, ReconnectCommand::RebuildBranch("target".into()));
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "worker never emitted RebuildBranch"
-            );
-            thread::sleep(Duration::from_millis(5));
-        }
+        let cmd = wait_until(Duration::from_secs(5), || worker.try_recv())
+            .expect("worker never emitted RebuildBranch");
+        assert_eq!(cmd, ReconnectCommand::RebuildBranch("target".into()));
     }
 }

@@ -627,6 +627,7 @@ fn run_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::wait_until;
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
@@ -822,22 +823,21 @@ mod tests {
         // error the worker retries against the already-exhausted local
         // listener, which can never succeed, so waiting out the deadline
         // would only slow the failure down.
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        let delivered = loop {
+        let msg = wait_until(Duration::from_secs(20), || {
             if let Some(rx) = chat.messages() {
                 if let Ok(msg) = rx.try_recv() {
-                    break Some(msg);
+                    return Some(msg);
                 }
             }
             if chat.connection_state() == ChatConnState::Disconnected {
-                break None;
+                // Fail fast instead of waiting out the deadline: after a
+                // session error the worker retries against the already
+                // exhausted local listener, which can never succeed.
+                panic!("worker disconnected before delivering the message");
             }
-            if std::time::Instant::now() > deadline {
-                break None;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        };
-        let msg = delivered.expect("message delivered");
+            None
+        })
+        .expect("message delivered");
         assert_eq!(msg.user, "YTViewer");
         assert_eq!(msg.text, "hello youtube");
         chat.disconnect();
@@ -1004,39 +1004,31 @@ mod tests {
         assert!(chat.enabled());
 
         // The plain chat line arrives on the message receiver…
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        let chat_delivered = loop {
+        let chat_delivered = wait_until(Duration::from_secs(20), || {
             if let Some(rx) = chat.messages() {
                 if let Ok(msg) = rx.try_recv() {
-                    break Some(msg);
+                    return Some(msg);
                 }
             }
             if chat.connection_state() == ChatConnState::Disconnected {
-                break None;
+                panic!("worker disconnected before delivering the chat line");
             }
-            if std::time::Instant::now() > deadline {
-                break None;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        };
+            None
+        });
         assert_eq!(chat_delivered.expect("chat delivered").text, "plain line");
 
         // …and the Super Chat lands on the alert receiver.
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        let alert_delivered = loop {
+        let alert_delivered = wait_until(Duration::from_secs(20), || {
             if let Some(rx) = chat.alerts() {
                 if let Ok(event) = rx.try_recv() {
-                    break Some(event);
+                    return Some(event);
                 }
             }
             if chat.connection_state() == ChatConnState::Disconnected {
-                break None;
+                panic!("worker disconnected before delivering the alert");
             }
-            if std::time::Instant::now() > deadline {
-                break None;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        };
+            None
+        });
         let event = alert_delivered.expect("alert delivered");
         assert_eq!(event.kind, crate::alerts_ingest::AlertKind::Donation);
         assert_eq!(event.user, "WsDonor");

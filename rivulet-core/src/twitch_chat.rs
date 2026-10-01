@@ -540,6 +540,7 @@ pub fn parse_irc_line(line: &str) -> Option<ChatMessage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::wait_until;
 
     fn line() -> String {
         "@badge-info=;badges=broadcaster/1;color=#FF0000;display-name=Thoser666;emotes=;id=1;mod=0;room-id=1;subscriber=0;tmi-sent-ts=1;turbo=0;user-id=1;user-type= :thoser666!thoser666@thoser666.tmi.twitch.tv PRIVMSG #rivulet :hello chat".to_owned()
@@ -649,13 +650,10 @@ mod tests {
         .expect("send shared-chat PRIVMSG");
         conn.flush().expect("flush");
 
-        let delivered = loop {
-            let rx = chat.messages().expect("message channel");
-            match rx.try_recv() {
-                Ok(msg) => break msg,
-                Err(_) => std::thread::sleep(Duration::from_millis(25)),
-            }
-        };
+        let delivered = wait_until(Duration::from_secs(5), || {
+            chat.messages().and_then(|rx| rx.try_recv().ok())
+        })
+        .expect("shared-chat message delivered");
         assert_eq!(delivered.user, "TwitchDev");
         assert_eq!(
             delivered.id.as_deref(),
@@ -839,19 +837,10 @@ mod tests {
         .expect("message");
         conn.flush().expect("flush");
 
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        let delivered = loop {
-            if let Some(rx) = chat.messages() {
-                if let Ok(msg) = rx.try_recv() {
-                    break Some(msg);
-                }
-            }
-            if std::time::Instant::now() > deadline {
-                break None;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        };
-        let msg = delivered.expect("message delivered to the channel");
+        let msg = wait_until(Duration::from_secs(5), || {
+            chat.messages().and_then(|rx| rx.try_recv().ok())
+        })
+        .expect("message delivered to the channel");
         assert_eq!(msg.user, "ViewerOne");
         assert_eq!(msg.text, "hello rivulet");
         assert_eq!(msg.color.as_deref(), Some("#FF0000"));
@@ -888,12 +877,11 @@ mod tests {
         )
         .expect("notice");
         conn.flush().expect("flush");
-        let notice_deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while !chat.phone_verification_required() && std::time::Instant::now() < notice_deadline {
-            std::thread::sleep(Duration::from_millis(25));
-        }
+        let flagged = wait_until(Duration::from_secs(5), || {
+            chat.phone_verification_required().then_some(())
+        });
         assert!(
-            chat.phone_verification_required(),
+            flagged.is_some(),
             "phone-verification notice must set the handle flag"
         );
 

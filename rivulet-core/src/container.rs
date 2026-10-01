@@ -882,6 +882,7 @@ fn scan_mpegts_stream_kinds(path: &str) -> TsStreamCounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::wait_until;
 
     #[test]
     fn default_container_is_mp4() {
@@ -1421,13 +1422,12 @@ mod tests {
             second.push_event(gst::event::Eos::new()),
             "EOS from the surviving pad must be accepted"
         );
-        // Give the streaming threads a moment, then assert.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-        while std::time::Instant::now() < deadline
-            && !eos_seen.load(std::sync::atomic::Ordering::SeqCst)
-        {
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+        // Poll the streaming threads instead of sleeping a fixed amount.
+        wait_until(std::time::Duration::from_secs(2), || {
+            eos_seen
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .then_some(())
+        });
         pipeline.set_state(gst::State::Null).ok();
         assert!(
             received.load(std::sync::atomic::Ordering::SeqCst) >= 1,

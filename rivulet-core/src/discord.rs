@@ -827,6 +827,7 @@ mod test_log_capture {
 mod tests {
     use super::*;
     use crate::presence::{PresenceActivity, PresenceStatus};
+    use crate::test_helpers::wait_until;
 
     fn status() -> PresenceStatus {
         PresenceStatus::for_activity(PresenceActivity::Recording)
@@ -907,9 +908,10 @@ mod tests {
         // (1s, 2s, ...), so the deadline only has to cover worker-thread
         // dispatch latency — polling the buffer is robust on slow runners
         // where a fixed sleep(2300) could miss the warn entirely.
-        wait_until(|| {
+        wait_until(Duration::from_secs(5), || {
             crate::discord::test_log_capture::logs()
                 .contains("Discord Rich Presence IPC unavailable")
+                .then_some(())
         });
         let logs = crate::discord::test_log_capture::logs();
         assert!(
@@ -943,14 +945,17 @@ mod tests {
             .expect("read timeout");
         let _ = read_frame(&mut conn).expect("handshake frame");
         let _ = read_frame(&mut conn).expect("set_activity frame");
-        wait_until(|| presence.connection_state() == DiscordConnState::Connected);
+        wait_until(Duration::from_secs(5), || {
+            (presence.connection_state() == DiscordConnState::Connected).then_some(())
+        });
         presence.disconnect();
         // The worker flips the shared state *before* formatting the delivery
         // log line, so wait_until(Connected) can win that race under load —
         // poll the buffer for the info line instead of reading it once.
-        wait_until(|| {
+        wait_until(Duration::from_secs(5), || {
             crate::discord::test_log_capture::logs()
                 .contains("Discord Rich Presence SET_ACTIVITY delivered")
+                .then_some(())
         });
         let logs = crate::discord::test_log_capture::logs();
         assert!(
@@ -987,9 +992,10 @@ mod tests {
         // (1s, 2s, ...), so the deadline only has to cover worker-thread
         // dispatch latency — polling the buffer is robust on slow runners
         // where a fixed sleep(2300) could miss the warn entirely.
-        wait_until(|| {
+        wait_until(Duration::from_secs(5), || {
             crate::discord::test_log_capture::logs()
                 .contains("Discord Rich Presence IPC unavailable")
+                .then_some(())
         });
         let logs = crate::discord::test_log_capture::logs();
         assert!(
@@ -1510,22 +1516,10 @@ mod tests {
 
         // The shared connection state must reflect the successful handshake so
         // the GUI can show "connected" instead of only the plain game card.
-        wait_until(|| presence.connection_state() == DiscordConnState::Connected);
+        wait_until(Duration::from_secs(5), || {
+            (presence.connection_state() == DiscordConnState::Connected).then_some(())
+        });
         presence.disconnect();
-    }
-
-    /// Poll `condition` until it holds or the deadline passes (test helper for
-    /// the async worker: the SET_ACTIVITY frame may be buffered before the
-    /// worker flips the shared connection state).
-    fn wait_until(condition: impl Fn() -> bool) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while std::time::Instant::now() < deadline {
-            if condition() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(25));
-        }
-        panic!("condition not met within 5s");
     }
 
     /// End-to-end smoke test for the Windows transport: run the real worker
@@ -1657,7 +1651,9 @@ mod tests {
 
             // The shared connection state must reflect the successful handshake
             // (same contract as the Unix listener smoke test).
-            super::wait_until(|| presence.connection_state() == DiscordConnState::Connected);
+            super::wait_until(Duration::from_secs(5), || {
+                (presence.connection_state() == DiscordConnState::Connected).then_some(())
+            });
             presence.disconnect();
         }
     }

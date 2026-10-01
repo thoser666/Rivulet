@@ -19,6 +19,17 @@
 //! - [`SceneState`] — the scene-collection counterpart, so "this operation is
 //!   deterministic" is assertable as a named difference (which item, which
 //!   property) instead of one opaque whole-collection `assert_eq!`.
+//! - [`wait_until`] — the suite-wide polling idiom from the timing audit:
+//!   wait for an asynchronous condition up to a deadline instead of sleeping
+//!   a fixed amount, so slow runners wait longer and fast ones return
+//!   immediately (a positive assert after a fixed sleep is flake-prone).
+//!
+//! `wait_until` contract: the condition is sampled at least once before the
+//! deadline is honored — under a heavily loaded runner a single 25 ms sleep
+//! can overrun its interval by a large factor, so a condition that turns true
+//! during such an overrun may still be observed. Tests must not build
+//! "must-not-see" expectations on sub-second deadline/sleep relationships;
+//! pin behavior with call counting instead (see the helper's unit tests).
 //!
 //! The frame and timestamp helpers are dependency-free (no image/PNG crate)
 //! and operate on raw RGBA, which is the engine's appsrc format. PNG encoding
@@ -632,6 +643,43 @@ fn adler32(data: &[u8]) -> u32 {
     (b << 16) | a
 }
 
+// ── Shared poll helper ──────────────────────────────────────────
+
+/// Poll `condition` until it returns `Some(value)` or `deadline` elapses.
+///
+/// This is the suite-wide idiom established by the timing audit (see
+/// `CHANGELOG` under "Suite-weites Timing-Audit"): a test that waits for an
+/// asynchronous worker, pipeline or channel delivery must poll the condition
+/// with a deadline instead of sleeping a fixed amount. A positive assert
+/// after a fixed sleep is flake-prone — a slow runner can miss the
+/// condition entirely — while polling turns the same assert into "wait
+/// until it is true, fail after the deadline". The deadline keeps a broken
+/// condition a failure instead of a hang.
+///
+/// The 25 ms poll interval matches the pre-existing per-module helpers; the
+/// deadline is caller-supplied so slow CI runners can be given more headroom
+/// than a fast local run needs.
+///
+/// Returns the first `Some(value)` the condition produced, or `None` when the
+/// deadline passed without success. The caller decides how to fail (`.expect`
+/// with a message that includes the observed state, or an explicit
+/// `assert!`).
+pub fn wait_until<T>(
+    deadline: std::time::Duration,
+    mut condition: impl FnMut() -> Option<T>,
+) -> Option<T> {
+    let deadline = std::time::Instant::now() + deadline;
+    loop {
+        if let Some(value) = condition() {
+            return Some(value);
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+
 // ── Scene-state determinism ─────────────────────────────────────
 
 /// How a scene state differs from its reference.
@@ -930,6 +978,7 @@ fn property_differences<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     fn gradient(width: u32, height: u32) -> GoldenFrame {
         let mut rgba = vec![0u8; width as usize * height as usize * RGBA_CHANNELS];
@@ -1105,6 +1154,59 @@ mod tests {
         stamps.assert_equals(&[0, 33_333_333, 66_666_666]);
         stamps.assert_monotonic();
         stamps.assert_dts_not_after_pts();
+    }
+
+    // ── wait_until ────────────────────────────────────────────────
+
+    #[test]
+    fn wait_until_returns_an_immediately_satisfied_condition() {
+        let value = wait_until(Duration::from_secs(1), || Some(7));
+        assert_eq!(value, Some(7));
+    }
+
+    #[test]
+    fn wait_until_polls_until_the_condition_becomes_true() {
+        // The condition must actually be re-evaluated: it flips to true on
+        // the third call, and the helper keeps polling until then.
+        let mut calls = 0usize;
+        let value = wait_until(Duration::from_secs(5), || {
+            calls += 1;
+            (calls >= 3).then_some(calls)
+        });
+        assert_eq!(value, Some(3));
+    }
+
+    #[test]
+    fn wait_until_returns_none_after_the_deadline() {
+        let started = Instant::now();
+        let value = wait_until(Duration::from_millis(80), || None::<u32>);
+        assert!(value.is_none(), "an unsatisfied condition must yield None");
+        assert!(
+            started.elapsed() >= Duration::from_millis(80),
+            "the deadline must be honored before giving up"
+        );
+    }
+
+    #[test]
+    fn wait_until_does_not_poll_after_the_deadline_has_passed() {
+        // The condition would only flip after ~100 polls (~2.5 s at the 25 ms
+        // cadence) — far beyond the 40 ms deadline. The helper must give up
+        // at the deadline instead of polling until the flip. Call counting
+        // instead of a wall-clock flip keeps this deterministic even when a
+        // poll sleep badly overruns its interval (observed >100 ms late on a
+        // loaded macOS CI runner): a late sample can still happen, but it
+        // can never reach the flip.
+        let mut calls = 0usize;
+        let value = wait_until(Duration::from_millis(40), || {
+            calls += 1;
+            (calls >= 100).then_some(())
+        });
+        assert!(value.is_none(), "the deadline must end the polling");
+        assert!(
+            calls < 100,
+            "polled {} times without honoring the deadline",
+            calls
+        );
     }
 
     #[test]

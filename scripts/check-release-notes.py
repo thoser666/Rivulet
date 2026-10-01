@@ -33,6 +33,7 @@ Usage:
 
 import argparse
 import collections
+import os
 import re
 import subprocess
 import sys
@@ -51,6 +52,31 @@ PREPARE_PREFIX = "chore(release): prepare "
 BULLET_PREFIX = "- "
 
 
+def _child_git_env():
+    """Build a clean environment for the fixture repositories' git calls.
+
+    git invokes the pre-push hook with ``GIT_DIR`` (and friends) pointing at
+    the real repository, and every subprocess inherits that environment.
+    Without this scrub the ``--self-test`` fixture's ``git init``/``git tag``
+    commands run against the actual repo instead of the temporary fixture
+    directory — a stale fixture tag then breaks every later push with
+    ``tag 'v0.1.0-alpha.1' already exists``.
+    """
+    env = os.environ.copy()
+    for var in (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_NAMESPACE",
+        "GIT_CEILING_DIRECTORIES",
+    ):
+        env.pop(var, None)
+    return env
+
+
 def run_git(repo, *args):
     """Run a git command in ``repo``; return stdout text or ``None`` on error."""
     try:
@@ -59,6 +85,7 @@ def run_git(repo, *args):
             capture_output=True,
             text=True,
             check=False,
+            env=_child_git_env(),
         )
     except FileNotFoundError:
         return None
@@ -239,6 +266,7 @@ def _git(repo, *args):
         capture_output=True,
         text=True,
         check=False,
+        env=_child_git_env(),
     )
     if proc.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")

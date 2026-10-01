@@ -318,7 +318,14 @@ self_test_digest() {
   return "$status"
 }
 
+# The pre-push hook invokes this script with GIT_DIR (and friends) exported
+# to the real repository. The self-test fixtures create their own temporary
+# repositories, so those variables must not leak into the fixture's git
+# calls — otherwise `git init`/`git tag` run against the real repo and the
+# stale fixture tag breaks every later push ("tag already exists").
 if [ "$SELF_TEST" -eq 1 ]; then
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
   status=0
   self_test || status=1
   self_test_from_tag || status=1
