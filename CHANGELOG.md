@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+- feat(cli): **Maschinenlesbare Fehlerdiagnose mit benannter Stage
+  (M7 W5, Issue #191)** — die Abnahmekriterien von W5 waren erfüllt, aber die
+  dritte traf nur für den Erfolgsfall zu: `inspect --json` lieferte einen
+  Report, während ein *fehlschlagender* Lauf weiterhin nur `error: <anyhow-Kette>`
+  auf stderr schrieb und mit einem Exit-Code abbrach. Ein Skript konnte damit
+  nicht unterscheiden, ob ein Lauf an den Argumenten, an der Konfiguration, am
+  Ausgabeziel, in der Engine oder beim Finalisieren zerbrochen ist — genau das,
+  was das Kriterium „a failing run names the failing stage in the machine-readable
+  report" verlangt. Neu ist der Typ `rivulet_cli::RunFailure`, der die Stage
+  (`usage`/`config`/`output`/`engine`/`finalize`), eine handlungsfähige Meldung
+  und — wo bekannt — die redigierte Pipeline und die aufgelöste Konfiguration
+  trägt; die Binary rendert ihn als `failed`-Objekt auf stdout plus einer
+  menschlichen Zeile auf stderr. Die Streams bleiben getrennt (nie Prosa auf
+  stdout), aber der JSON-Strom ist jetzt auf Erfolg *und* Fehler derselbe: ein
+  defekter Lauf sieht nicht mehr wie ein leerer erfolgreicher aus. `RecordJob::run`,
+  `dry_run` und die `inspect`-Funktionen geben den typisierten Fehler zurück, jede
+  Stelle im Aufnahmepfad ordnet ihre Stage explizit zu, und der Exit-Code wird
+  aus der Stage *abgeleitet* statt daneben gesetzt — beide können also nicht
+  auseinanderlaufen. Unbekanntes wird weggelassen statt als `null` serialisiert,
+  damit ein Consumer „noch nicht erreicht" von „leer" unterscheiden kann. Die
+  Redaktion ist unverändert wirksam: die gemeldete Pipeline ist derselbe
+  redigierte String, den `inspect` ausgibt. An der Doku ist dabei ein echter
+  Widerspruch aufgefallen und aufgelöst worden — die Spec behauptete
+  „Failures are not JSON events", was dem AC direkt widersprach; § CLI surface
+  reference dokumentiert jetzt beides: `failed` in der Event-Tabelle, die
+  Stage-Tabelle und ein vollständiges Beispielobjekt. Nebenbei nachgezogen:
+  `render` war in der CLI-Referenz noch als „planned, W3" geführt, obwohl W3
+  ausgeliefert ist.
+
 - feat(cli): **CI-freundliches Rendering — Video aus Code (M7 W3, Issue #189)**
   — „Video from code" war die verbleibende Säule der M7-Differenzierung, aber
   es gab keinen Weg, aus einer Szenenbeschreibung eine Datei zu erzeugen: eine

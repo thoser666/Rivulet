@@ -12,7 +12,7 @@ use std::sync::{
 
 use rivulet_cli::{
     config::RecordConfig, exit_code, inspect_json, inspect_with_features, stdout_stderr_sinks,
-    RecordJob,
+    RecordJob, RunFailure,
 };
 
 const USAGE: &str = "\
@@ -57,13 +57,16 @@ FLAGS (render):
         --json                print the batch summary to stdout as well
 
 STREAMS:
-    stdout  JSON status events (started/progress/stopped; stable schema)
+    stdout  JSON status events (started/progress/stopped, or failed on error)
     stderr  human-readable diagnostics
 
 EXIT CODES:
     0  success (including graceful SIGINT/SIGTERM stop)
     1  runtime failure (engine error, IO error)
     2  invalid usage or config (the error names the offending key)
+
+record/inspect failures end with a machine-readable object naming the stage:
+    {\"event\": \"failed\", \"stage\": \"engine\", \"exit_code\": 1, \"message\": ...}
 ";
 
 /// Which subcommand the arguments selected.
@@ -217,13 +220,24 @@ fn main() {
     std::process::exit(code);
 }
 
+/// Emit a failure the documented way (M7 W5): the machine-readable `failed`
+/// object on stdout, appended to the JSON status stream, plus the human line on
+/// stderr. The two streams never mix.
+fn report_failure(failure: &RunFailure) -> i32 {
+    println!("{}", failure.to_json());
+    eprintln!("{}", failure.describe());
+    failure.exit_code()
+}
+
 fn run() -> i32 {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let parsed = match parse_args(&args) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("error: {e}\n\n{USAGE}");
-            return exit_code::USAGE;
+            let failure = RunFailure::usage(e);
+            println!("{}", failure.to_json());
+            eprintln!("{}\n\n{USAGE}", failure.describe());
+            return failure.exit_code();
         }
     };
     if parsed.show_help {
@@ -248,10 +262,7 @@ fn run() -> i32 {
     let mut config = match &parsed.config_path {
         Some(path) => match RecordConfig::load(path) {
             Ok(c) => c,
-            Err(e) => {
-                eprintln!("error: {e}");
-                return exit_code::USAGE;
-            }
+            Err(e) => return report_failure(&RunFailure::config(e)),
         },
         None => RecordConfig::default(),
     };
@@ -279,8 +290,10 @@ fn run() -> i32 {
 
     // Validate up front so a bad config exits 2 with the offending key.
     if let Err(e) = config.validate() {
-        eprintln!("error: {e}\n\n{USAGE}");
-        return exit_code::USAGE;
+        let failure = RunFailure::config(e).with_config(config.clone());
+        println!("{}", failure.to_json());
+        eprintln!("{}\n\n{USAGE}", failure.describe());
+        return failure.exit_code();
     }
 
     if parsed.command == Command::Inspect {
@@ -295,10 +308,7 @@ fn run() -> i32 {
                 println!("{}", report.describe());
                 exit_code::OK
             }
-            Err(e) => {
-                eprintln!("error: {e:#}");
-                exit_code::RUNTIME
-            }
+            Err(failure) => report_failure(&failure),
         };
     }
 
@@ -321,10 +331,7 @@ fn run() -> i32 {
             eprintln!("done: {}", path.display());
             exit_code::OK
         }
-        Err(e) => {
-            eprintln!("error: {e:#}");
-            exit_code::RUNTIME
-        }
+        Err(failure) => report_failure(&failure),
     }
 }
 
@@ -341,9 +348,6 @@ fn run_inspect(config: RecordConfig, json: bool) -> i32 {
             println!("{body}");
             exit_code::OK
         }
-        Err(e) => {
-            eprintln!("error: {e:#}");
-            exit_code::RUNTIME
-        }
+        Err(failure) => report_failure(&failure),
     }
 }

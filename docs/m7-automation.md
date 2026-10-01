@@ -455,10 +455,16 @@ The introspection half of the CLI story, analogous to `gst-inspect` /
   never applied it to the engine, so every container produced MP4; the shared
   mapping applies `set_recording_container`, which both fixes that gap and is
   what lets `inspect` report the muxer a real run would use.
-- A failing run's stage is reported by the engine's existing
-  `pipeline_parse_failure_message()` (GStreamer domain + code) and surfaces on
-  stderr with exit code 1; the machine-readable success report is the
-  `inspect --json` object documented below.
+- A failing run is machine-readable, not just prose (AC: "a failing run names
+  the failing stage in the machine-readable report"). `rivulet_cli::RunFailure`
+  carries the `Stage`, an actionable message and — when known — the redacted
+  pipeline and the resolved config; the binary renders it as a `failed` object
+  on stdout plus a human line on stderr. The stages are `usage`, `config`,
+  `output`, `engine` and `finalize`, and the stage selects the exit code, so the
+  two can never disagree. The engine's existing
+  `pipeline_parse_failure_message()` (GStreamer domain + code) is the `engine`
+  stage's message; the `finalize` stage carries an engine error reported at stop
+  time, falling back to the empty-output complaint.
 
 
 ### W6 — Scene-item copy/paste API — issue [#192](https://github.com/thoser666/Rivulet/issues/192)
@@ -488,8 +494,8 @@ rivulet record --config recording.toml [--output FILE] [--duration SECS]
                [--width PX] [--height PX] [--fps N] [--audio]
                [--container mp4|mkv|mov|mpegts] [--dry-run]   (shipped, W1)
 rivulet inspect --config recording.toml [--json]            (shipped, W5)
-rivulet render --config scene.toml --frame N --png out.png    (planned, W3)
-rivulet render --config-dir scenes/ --out-dir renders/        (planned, W3 batch)
+rivulet render --config scene.toml --frame N --png out.png    (shipped, W3)
+rivulet render --config-dir scenes/ --out-dir renders/        (shipped, W3 batch)
 ```
 
 Flags override the TOML config (`--output` wins over `output.path`, etc.).
@@ -535,6 +541,10 @@ Exit codes (shipped in W1):
 | 1 | generic runtime failure (engine error, IO error, empty output) |
 | 2 | invalid usage or configuration (error names the offending key, e.g. `output.container: unknown container …`) |
 
+These codes are fixed by W1; which one a failure gets is derived from its
+`stage` (the table below), so the exit status and the machine-readable report can
+never disagree.
+
 JSON status event schema (shipped in W1): one JSON object per line on stdout
 with a stable `event` discriminator —
 
@@ -543,11 +553,45 @@ with a stable `event` discriminator —
 | `started` | `width`, `height`, `fps`, `audio` |
 | `progress` | `seconds`, `frames`, `fps`, `file_size_bytes` |
 | `stopped` | `frames`, `seconds`, `file_size_bytes`, `clock`, `pts_source`, `encoder`, `reproducible`, `byte_reproducible`, `nondeterminism` (shipped in W2a) |
+| `failed` | `stage`, `exit_code`, `message`, `pipeline` (optional), `config` (optional) (shipped in W5) |
 
-Failures are not JSON events: they are human-readable diagnostics on stderr
-plus a non-zero exit code, so a broken run never corrupts a JSON consumer's
-stream (AC: diagnostics never mix into the JSON stream). The schema is
-pinned by the `cli_mvp_schema_and_docs_are_pinned` ci_pinning test.
+Failures are part of the same JSON stream: a failing run appends a final
+`failed` object to stdout and writes the human diagnostic to stderr. The streams
+stay separated — prose never lands on stdout — but a JSON consumer still learns
+*where* the run broke without scraping text, and never mistakes a broken run for
+an empty successful one (AC: diagnostics never mix into the JSON stream).
+
+Failure report schema (shipped in W5) — the last stdout object of a failed run:
+
+```json
+{"event": "failed", "stage": "engine", "exit_code": 1, "message": "engine error: bus error", "pipeline": "appsrc … ! mp4mux ! filesink", "config": {"output": {"path": "out.mp4"}, "video": {"source": "test"}, "audio": {"enabled": false}}}
+```
+
+| Field | Contents |
+| --- | --- |
+| `event` | always `"failed"` |
+| `stage` | `usage`, `config`, `output`, `engine` or `finalize` |
+| `exit_code` | the code the process ended with; derived from `stage`, never chosen separately |
+| `message` | actionable, secret-free description — names the offending config key where there is one |
+| `pipeline` | the redacted pipeline, when one was built before the failure |
+| `config` | the fully resolved `RecordConfig`, when one was parsed |
+
+`pipeline` and `config` are omitted rather than serialized as `null` when the
+failure happened before they existed (a usage error has no config), so a
+consumer can tell "not reached yet" from "empty".
+
+| Stage | Exit | Meaning |
+| --- | --- | --- |
+| `usage` | 2 | invalid command-line arguments |
+| `config` | 2 | invalid config file or values |
+| `output` | 1 | the output location could not be prepared |
+| `engine` | 1 | the engine failed while pushing frames or audio |
+| `finalize` | 1 | the engine failed while stopping, or produced no output |
+
+Redaction applies unchanged: the `pipeline` a failure reports is the same
+redacted string `inspect` prints, so a stream key never reaches the report. The
+success and failure schemas are pinned by the `cli_mvp_schema_and_docs_are_pinned`
+and `w5_machine_readable_failure_is_pinned` ci_pinning tests.
 
 ## Nondeterminism inventory
 

@@ -324,7 +324,10 @@ Per-workstream status:
 - **#190 (reproducible distribution)** — open: SHA-256 manifests and
   post-publish verification.
 - **#191 (inspector)** — shipped: `rivulet inspect`/`record --dry-run` print the
-  pipeline the engine would build plus a capability report.
+  pipeline the engine would build plus a capability report, and a failing run
+  appends a machine-readable `failed` object naming the stage
+  (`usage`/`config`/`output`/`engine`/`finalize`) — the exit code is derived from
+  that stage, so the report and the exit status cannot disagree.
 - **#192 (scene-item copy/paste)** — open.
 
 ### M8: Embeddable Engine and API

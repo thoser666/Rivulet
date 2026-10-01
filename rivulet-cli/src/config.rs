@@ -138,6 +138,46 @@ impl RecordConfig {
     }
 }
 
+/// The pipeline stage a run failed in (M7 W5, issue #191).
+///
+/// This is the machine-readable half of "a failing run names the failing
+/// stage": the human stderr line and the `failed` JSON event both identify it.
+/// The set is deliberately small and stable so downstream tooling can branch on
+/// it without parsing messages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Stage {
+    /// Command-line arguments were invalid (exit code 2).
+    Usage,
+    /// The config file or its values were invalid (exit code 2).
+    Config,
+    /// The output location could not be prepared (exit code 1).
+    Output,
+    /// The media engine failed while pushing frames or audio (exit code 1).
+    Engine,
+    /// The engine failed while stopping/finalizing, or produced nothing.
+    Finalize,
+}
+
+impl Stage {
+    /// The stable snake_case name used in the JSON event and the human line.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Stage::Usage => "usage",
+            Stage::Config => "config",
+            Stage::Output => "output",
+            Stage::Engine => "engine",
+            Stage::Finalize => "finalize",
+        }
+    }
+}
+
+impl std::fmt::Display for Stage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// JSON status event emitted on stdout (spec: stable documented schema).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
@@ -179,6 +219,27 @@ pub enum StatusEvent {
         /// Always the full inventory so a consumer can tell a documented limit
         /// from a limit that applied to this run.
         nondeterminism: NondeterminismReport,
+    },
+    /// Emitted once, as the final stdout object, when the run fails (M7 W5).
+    ///
+    /// This is the machine-readable failure report: it names the [`Stage`] the
+    /// run failed in, the exit code, and (when known) the redacted pipeline and
+    /// the resolved config, without leaking secrets. A JSON consumer sees the
+    /// same stream shape on success and failure, so a broken run never looks
+    /// like an empty successful one.
+    Failed {
+        /// The stage that failed.
+        stage: Stage,
+        /// Process exit code the caller should return.
+        exit_code: i32,
+        /// Actionable, secret-free description of the failure.
+        message: String,
+        /// The redacted pipeline the engine was running, when one was built.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pipeline: Option<String>,
+        /// The resolved config the run was driven from, when one was parsed.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        config: Option<RecordConfig>,
     },
 }
 
@@ -224,6 +285,12 @@ pub fn describe(event: &StatusEvent) -> String {
             }
             line
         }
+        StatusEvent::Failed {
+            stage,
+            exit_code: _,
+            message,
+            ..
+        } => format!("error: {stage}: {message}"),
     }
 }
 
@@ -380,5 +447,59 @@ mod tests {
         assert!(line.contains("clock=system"), "got {line}");
         assert!(line.contains("reproducible=false"), "got {line}");
         assert!(line.contains("limits="), "the limit must be named: {line}");
+    }
+
+    #[test]
+    fn failed_event_json_shape_is_stable() {
+        // M7 W5: the machine-readable failure report. The event name comes from
+        // the variant under `rename_all = "snake_case"`, so assert the wire
+        // shape here rather than in the source pin.
+        let failed = StatusEvent::Failed {
+            stage: Stage::Engine,
+            exit_code: 1,
+            message: "engine error: bus error".to_string(),
+            pipeline: Some("videotestsrc ! mp4mux ! filesink".to_string()),
+            config: None,
+        };
+        let value: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&failed).unwrap()).unwrap();
+        assert_eq!(value["event"], "failed");
+        assert_eq!(value["stage"], "engine");
+        assert_eq!(value["exit_code"], 1);
+        assert_eq!(value["message"], "engine error: bus error");
+        assert_eq!(value["pipeline"], "videotestsrc ! mp4mux ! filesink");
+        assert!(
+            value.get("config").is_none(),
+            "an unset config must be omitted, not serialized as null"
+        );
+
+        // Every stage maps to its documented snake_case name and exit code.
+        for (stage, name, code) in [
+            (Stage::Usage, "usage", 2),
+            (Stage::Config, "config", 2),
+            (Stage::Output, "output", 1),
+            (Stage::Engine, "engine", 1),
+            (Stage::Finalize, "finalize", 1),
+        ] {
+            assert_eq!(stage.as_str(), name);
+            let event = StatusEvent::Failed {
+                stage,
+                exit_code: code,
+                message: "m".to_string(),
+                pipeline: None,
+                config: None,
+            };
+            let value: serde_json::Value =
+                serde_json::from_str(&serde_json::to_string(&event).unwrap()).unwrap();
+            assert_eq!(value["stage"], name);
+            assert_eq!(value["exit_code"], code);
+        }
+
+        let line = describe(&failed);
+        assert!(line.starts_with("error: "), "{line}");
+        assert!(
+            line.contains("engine"),
+            "the human line names the stage: {line}"
+        );
     }
 }
