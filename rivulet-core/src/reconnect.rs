@@ -33,18 +33,30 @@ impl Default for RetryPolicy {
         }
     }
 }
+/// Lower bound for any configured retry delay. A stream sink that fails
+/// immediately (bad ingest URL, revoked stream key) would otherwise be retried
+/// in a tight loop, burning CPU and flooding the platform with error events.
+const MIN_BACKOFF: Duration = Duration::from_millis(100);
 impl RetryPolicy {
     pub fn new(max_attempts: u32, initial_backoff: Duration, max_backoff: Duration) -> Self {
+        // Clamp first, then derive the ceiling from the clamped floor: a zero
+        // `max_backoff` must never produce a zero backoff, and the ceiling must
+        // never sit below the floor (which would silently flatten the
+        // exponential growth to the ceiling from the very first attempt).
+        let initial_backoff = initial_backoff.max(MIN_BACKOFF);
         Self {
             max_attempts,
-            initial_backoff: initial_backoff.max(Duration::from_millis(100)),
+            initial_backoff,
             max_backoff: max_backoff.max(initial_backoff),
         }
     }
+    /// Delay before retry number `attempt` (1-based), doubling per attempt and
+    /// clamped to [`RetryPolicy::max_backoff`]. Never returns zero.
     pub fn backoff(&self, attempt: u32) -> Duration {
         self.initial_backoff
             .saturating_mul(2u32.saturating_pow(attempt.saturating_sub(1)))
             .min(self.max_backoff)
+            .max(MIN_BACKOFF)
     }
 }
 
@@ -258,6 +270,57 @@ mod tests {
         assert_eq!(p.backoff(1), Duration::from_secs(1));
         assert_eq!(p.backoff(2), Duration::from_secs(2));
         assert_eq!(p.backoff(3), Duration::from_secs(3));
+    }
+    #[test]
+    fn zero_max_backoff_cannot_flatten_the_backoff_to_zero() {
+        // Regression: `max_backoff` used to be clamped against the *unclamped*
+        // `initial_backoff`, so a zero ceiling produced a zero backoff and the
+        // supervisor retried a dead sink in a tight loop.
+        let p = RetryPolicy::new(5, Duration::ZERO, Duration::ZERO);
+        assert_eq!(p.initial_backoff, Duration::from_millis(100));
+        assert_eq!(p.max_backoff, Duration::from_millis(100));
+        for attempt in 1..=5 {
+            assert_eq!(p.backoff(attempt), Duration::from_millis(100));
+        }
+    }
+    #[test]
+    fn ceiling_below_the_clamped_floor_is_raised_to_the_floor() {
+        // A 50 ms ceiling under a 100 ms floor must not flatten the growth: the
+        // first attempt waits the floor, not the (lower) requested ceiling.
+        let p = RetryPolicy::new(5, Duration::ZERO, Duration::from_millis(50));
+        assert_eq!(p.max_backoff, Duration::from_millis(100));
+        assert_eq!(p.backoff(1), Duration::from_millis(100));
+        assert_eq!(p.backoff(4), Duration::from_millis(100));
+    }
+    #[test]
+    fn backoff_never_reports_zero_for_degenerate_attempts() {
+        let p = RetryPolicy::new(5, Duration::from_millis(1), Duration::from_secs(30));
+        for attempt in [0, 1, 2, 31, 32, u32::MAX] {
+            assert!(
+                p.backoff(attempt) >= Duration::from_millis(100),
+                "attempt {attempt} produced {:?}",
+                p.backoff(attempt)
+            );
+        }
+        // Growth still doubles until the ceiling, then saturates there.
+        assert_eq!(p.backoff(1), Duration::from_millis(100));
+        assert_eq!(p.backoff(2), Duration::from_millis(200));
+        assert_eq!(p.backoff(64), Duration::from_secs(30));
+    }
+    #[test]
+    fn a_zero_backoff_never_leaves_the_target_immediately_due() {
+        // The user-visible consequence of the zero-backoff bug: the very next
+        // poll would already see the retry as due.
+        let p = RetryPolicy::new(3, Duration::ZERO, Duration::ZERO);
+        let mut s = StreamingReconnectSupervisor::new(vec!["target".into()], p);
+        assert_eq!(s.mark_failed("target"), Some(true));
+        let retry_at = s.targets()[0].retry_at.expect("retry scheduled");
+        assert!(
+            retry_at >= Duration::from_millis(100),
+            "retry scheduled after {retry_at:?}"
+        );
+        assert!(s.due_retries(Duration::ZERO).is_empty());
+        assert_eq!(s.due_retries(retry_at), vec!["target"]);
     }
     #[test]
     fn targets_are_isolated_during_retries() {

@@ -67,6 +67,19 @@ required as documented hardware evidence before claiming the M3 budget.
   adaptive-bitrate bounds, disabled behavior, and compatibility with existing
   pipeline location construction.
 - Reconnect tests cover exponential backoff, target isolation, duplicate-failure suppression, retry-window observation, and recovery.
+
+### Backoff floor and ceiling
+
+`RetryPolicy::new` establishes the `MIN_BACKOFF` floor (100 ms) **first** and
+only then derives the ceiling from that clamped value, so
+`max_backoff = max(max_backoff, initial_backoff)` can never end up *below* the
+floor — and never at zero. `backoff()` additionally floors its result at
+`MIN_BACKOFF` after clamping to the ceiling. Without that order of operations a
+policy built from zero durations (`RetryPolicy::new(5, ZERO, ZERO)`) yielded a
+zero backoff for every attempt, and `due_retries()` would then see the retry as
+due on the very next poll: a permanently failing sink was rebuilt in a tight
+loop with no delay at all. The invariant is pinned by the guard
+`retry_backoff_is_clamped_before_the_ceiling_is_derived`.
 - Existing workspace tests continue to cover RTMP/RTMPS pipeline construction,
   health classification, and dual-output routing.
 - Multistream model tests cover target limits, duplicate-name rejection, invalid

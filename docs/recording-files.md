@@ -24,6 +24,29 @@ Unknown placeholders, unterminated braces, and path-hostile characters are
 rejected at construction so a pattern can never break the output path. Free
 text in `{name}`/`{stream}` is sanitized and doubled separators collapsed.
 
+### Unvalidated patterns (settings files)
+
+`FileNamePattern` derives `Deserialize` and deliberately does **not** re-run
+that construction-time validation: a settings file with a broken pattern must
+still load so the user can repair it in the UI instead of losing every other
+setting. `render` is therefore *total* — it never panics and always returns a
+single, sandboxed filename component:
+
+| Input (e.g. from a hand-edited settings file) | Rendered |
+|-----------------------------------------------|----------|
+| `rec{unclosed` | `recunclosed` |
+| `{bogus}` | `bogus` |
+| `../../pwned` | `___pwned` |
+| `/etc/passwd` | `_etc_passwd` |
+| `recording.v2_{name}` | `recording.v2_scene` |
+
+Literal text (and the `{date}`/`{time}` values) goes through
+`sanitize_literal`, which keeps alphanumerics, `-`, `_`, and a **single** `.`
+so deliberate dots survive, while collapsing a run of two or more dots — that
+is what stops a `../../` pattern in a settings file from writing outside the
+recording directory. A placeholder that cannot be expanded renders as its own
+text (without the braces) instead of aborting the recording.
+
 `RivuletEngine::default_recording_path(dir, stream)` applies the configured
 pattern to the current timestamp and container extension — the GUI's file
 dialogs use it instead of the hard-coded `rivulet-recording-<timestamp>` name.
@@ -62,6 +85,8 @@ recordings get distinct, pattern-named files.
 ## Status
 
 - [x] Pattern model + validation + rendering
+- [x] `render` hardened against patterns that skip construction validation
+      (serde-loaded settings): no panic, no path escape, dots preserved
 - [x] Split-by-time/size model + part sequencing
 - [x] Auto-record flag + engine settings + GUI toggles
 - [x] `default_recording_path` used by GUI dialogs

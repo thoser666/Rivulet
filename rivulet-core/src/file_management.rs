@@ -63,10 +63,14 @@ impl PatternToken {
     }
 }
 
-/// A validated filename pattern.
+/// A filename pattern.
 ///
 /// Built via [`FileNamePattern::new`], which rejects unknown placeholders and
 /// filename-hostile characters so a pattern can never break the output path.
+/// The derived [`Deserialize`] deliberately does **not** re-run that
+/// validation: a settings file with a bad pattern must still load so the user
+/// can fix it in the UI. [`FileNamePattern::render`] is therefore total — it
+/// sanitizes and never panics, see its docs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileNamePattern {
     /// The raw pattern with `{token}` placeholders.
@@ -130,6 +134,14 @@ impl FileNamePattern {
 
     /// Renders the pattern to a concrete base filename.
     ///
+    /// The result is always a single, sandboxed filename component: it never
+    /// contains a path separator, a `..` segment, or a leading dot, and this
+    /// function never panics. [`FileNamePattern::new`] is the validating
+    /// constructor, but a pattern can also arrive from a settings file via
+    /// serde, which bypasses that validation — so literal text is sanitized
+    /// here as well, and a placeholder that is unterminated or unknown is
+    /// rendered verbatim (sanitized) instead of aborting the recording.
+    ///
     /// # Arguments
     /// - `vals` supplies the value for each [`PatternToken`].
     /// - `sequence` is a 1-based number formatted as `{:02}` for `{seq}`.
@@ -137,25 +149,33 @@ impl FileNamePattern {
         let mut out = String::new();
         let mut rest = self.raw.as_str();
         while let Some(open) = rest.find('{') {
-            out.push_str(&rest[..open]);
+            out.push_str(&sanitize_literal(&rest[..open]));
             let after_open = &rest[open + 1..];
-            let close = after_open
-                .find('}')
-                .expect("pattern was validated, placeholders are closed");
+            let Some(close) = after_open.find('}') else {
+                // Unterminated placeholder: render the text the user typed.
+                out.push_str(&sanitize_literal(after_open));
+                rest = "";
+                break;
+            };
             let body = &after_open[..close];
-            match PatternToken::from_body(body).expect("validated token") {
-                PatternToken::Name => out.push_str(&sanitize_component(&vals.name)),
-                PatternToken::Date => out.push_str(&vals.date),
-                PatternToken::Time => out.push_str(&vals.time),
-                PatternToken::Sequence => out.push_str(&format!("{sequence:02}")),
-                PatternToken::Stream => {
+            match PatternToken::from_body(body) {
+                Some(PatternToken::Name) => out.push_str(&sanitize_component(&vals.name)),
+                Some(PatternToken::Date) => out.push_str(&sanitize_literal(&vals.date)),
+                Some(PatternToken::Time) => out.push_str(&sanitize_literal(&vals.time)),
+                Some(PatternToken::Sequence) => out.push_str(&format!("{sequence:02}")),
+                Some(PatternToken::Stream) => {
                     out.push_str(&sanitize_component(&stream_label.to_ascii_lowercase()))
+                }
+                None => {
+                    // Unknown placeholder: render its body verbatim instead of
+                    // panicking. The braces are dropped so the name stays clean.
+                    out.push_str(&sanitize_literal(body));
                 }
             }
             rest = &after_open[close + 1..];
         }
         // Append the literal tail (e.g. a trailing separator the user wrote).
-        out.push_str(rest);
+        out.push_str(&sanitize_literal(rest));
         // Collapse doubled separators and strip leading/trailing ones, so a
         // free-text token ending in `_` next to a literal `_` cannot produce
         // an ugly `__` filename.
@@ -179,6 +199,41 @@ impl FileNamePattern {
             collapsed
         }
     }
+}
+
+/// Sanitizes the *literal* text between placeholders (and the `{date}`/
+/// `{time}` values) to a filename-safe token.
+///
+/// [`FileNamePattern::new`] already rejects the characters a filename cannot
+/// hold, so this only matters for patterns that reached the engine without
+/// validation (a hand-edited or foreign settings file). A single `.` is kept
+/// so deliberate dots survive (`recording.v2`, `2026-08-31`), while a run of
+/// two or more dots is replaced — that is what stops `../../` from escaping
+/// the recording directory.
+fn sanitize_literal(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '.' {
+            let run = chars[i..].iter().take_while(|c| **c == '.').count();
+            if run == 1 && !out.is_empty() && !out.ends_with('.') {
+                out.push('.');
+            } else {
+                out.extend(std::iter::repeat_n('_', run));
+            }
+            i += run;
+            continue;
+        }
+        if c.is_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else {
+            out.push('_');
+        }
+        i += 1;
+    }
+    out
 }
 
 /// Sanitizes a free-text component to a filename-safe token, preserving case
@@ -424,6 +479,94 @@ mod tests {
             time: "".to_string(),
         };
         assert_eq!(p.render(&vals, 1, ""), "fallback");
+    }
+
+    // --- Patterns that bypass FileNamePattern::new via serde ---------------
+    //
+    // `FileNamePattern` derives Deserialize without re-running `new()`s
+    // validation, so a hand-edited or foreign settings file can carry a
+    // pattern that `new()` would have rejected. `render` must stay total:
+    // no panic, and no escaping the recording directory.
+
+    fn serde_pattern(raw: &str) -> FileNamePattern {
+        serde_json::from_value(serde_json::json!({ "raw": raw })).expect("pattern parses")
+    }
+
+    fn vals() -> PatternValues {
+        PatternValues {
+            name: "scene name".to_string(),
+            date: "2026-10-02".to_string(),
+            time: "12-00-00".to_string(),
+        }
+    }
+
+    #[test]
+    fn unterminated_placeholder_from_a_settings_file_renders_instead_of_panicking() {
+        // Regression: `render` used to `.expect()` a closing brace, so starting
+        // a recording with this pattern panicked instead of producing a file.
+        let out = serde_pattern("rec{unclosed").render(&vals(), 1, "twitch");
+        assert_eq!(out, "recunclosed");
+    }
+
+    #[test]
+    fn unknown_placeholder_from_a_settings_file_renders_instead_of_panicking() {
+        // Regression: the same `.expect()` existed for the token lookup.
+        let out = serde_pattern("{bogus}").render(&vals(), 1, "twitch");
+        assert_eq!(out, "bogus");
+    }
+
+    #[test]
+    fn a_deserialized_pattern_cannot_escape_the_recording_directory() {
+        // Regression: literal text was pushed verbatim, so a `../../` pattern
+        // in a settings file made the muxer write outside the recording dir.
+        for raw in ["../../pwned", "..\\..\\pwned", "a/../../b", "/etc/passwd"] {
+            let stem = serde_pattern(raw).render(&vals(), 1, "twitch");
+            assert!(
+                !stem.contains('/') && !stem.contains('\\'),
+                "{raw:?} produced a separator in {stem:?}"
+            );
+            assert!(
+                !stem.split(['.', '_']).any(|part| part == "..") && !stem.contains(".."),
+                "{raw:?} kept a parent segment in {stem:?}"
+            );
+            assert!(
+                !stem.starts_with('.'),
+                "{raw:?} produced a hidden name {stem:?}"
+            );
+            assert!(!stem.is_empty(), "{raw:?} produced an empty name");
+            let joined = std::path::Path::new("/recordings").join(format!("{stem}.mkv"));
+            assert!(
+                joined.starts_with("/recordings"),
+                "{raw:?} escaped to {joined:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn deliberate_dots_in_a_pattern_survive() {
+        // The hardening must not mangle dots the user meant: `recording.v2`
+        // keeps both dots while a `..` run collapses.
+        let out = FileNamePattern::new("recording.v2_{name}")
+            .unwrap()
+            .render(&vals(), 1, "");
+        assert_eq!(out, "recording.v2_scene_name");
+        assert_eq!(
+            serde_pattern("recording.v2").render(&vals(), 1, ""),
+            "recording.v2"
+        );
+    }
+
+    #[test]
+    fn placeholder_values_are_sanitized_even_when_crafted_by_hand() {
+        // PatternValues is a public struct, so date/time can carry separators
+        // that `from_datetime` would never produce.
+        let v = PatternValues {
+            name: "scene".to_string(),
+            date: "2026/10".to_string(),
+            time: "12:00".to_string(),
+        };
+        let out = serde_pattern("{date}_{time}").render(&v, 1, "");
+        assert_eq!(out, "2026_10_12_00");
     }
 
     #[test]

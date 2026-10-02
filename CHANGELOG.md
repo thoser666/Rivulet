@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+- fix(core): **Ein totes Stream-Ziel kann keinen Hot-Loop mehr auslösen** —
+  `RetryPolicy::new` (rivulet-core/src/reconnect.rs) hat `initial_backoff` auf
+  mindestens 100 ms geklemmt, `max_backoff` aber gegen den **ungeklemmten**
+  Wert berechnet. Eine aus Null-Dauern gebaute Policy
+  (`RetryPolicy::new(5, ZERO, ZERO)`) hatte damit `max_backoff == 0`, und
+  `backoff()` klemmte jeden Versuch auf 0 — `retry_at` stand auf 0 und
+  `due_retries()` sah den Retry schon beim nächsten Poll als fällig an: der
+  Supervisor baute das gescheiterte Sink in einer engen Schleife neu auf, ohne
+  jede Pause. Die Policy bildet jetzt erst den Boden (`MIN_BACKOFF`), leitet
+  daraus die Obergrenze ab und floor`t zusätzlich das Ergebnis von `backoff()`.
+  Vier neue Tests decken den Null-Ceiling-Fall, eine Obergrenze unter dem
+  Boden, degenerierte Versuchsnummern und die beobachtete Nutzlast ab (3 davon
+  schlagen gegen den alten Code fehl); gepinnt mit dem Guard
+  `retry_backoff_is_clamped_before_the_ceiling_is_derived`.
+
+- fix(core): **Ein kaputtes Dateinamen-Pattern panickt nicht mehr und
+  entkommt dem Aufnahme-Ordner nicht** — `FileNamePattern` erbt `Deserialize`,
+  validiert dabei aber bewusst *nicht* erneut: eine Settings-Datei mit
+  fehlerhaftem Pattern muss noch ladbar sein, damit der Nutzer es in der UI
+  reparieren kann. `render` (rivulet-core/src/file_management.rs) vertraute
+  darauf und panickte über zwei `.expect()` — ein unterminiertes `{` oder ein
+  unbekanntes Token ließ den Aufnahmestart **abstürzen** statt eine Datei
+  anzulegen. Außerdem wurde der Literaltext unverändert in den Pfad
+  geschrieben, ein Pattern `../../pwned` aus einer Datei ließ den Muxer also
+  außerhalb des Aufnahme-Verzeichnisses schreiben. `render` ist jetzt total:
+  unbrauchbare Platzhalter rendern als ihr eigener Text (ohne Klammern), und
+  Literaltext sowie `{date}`/`{time}` laufen durch `sanitize_literal`, das
+  alphanumerische Zeichen, `-`, `_` und einen **einzelnen** `.` behält (damit
+  `recording.v2` intakt bleibt) und Punktfolgen von zwei oder mehr Punkten
+  kollabiert — genau das verhindert `../../`. Fünf neue Tests (4 rot gegen den
+  alten Code) plus der Guard
+  `recording_filename_patterns_cannot_panic_or_escape_their_directory`; die
+  Doku in `docs/recording-files.md` hat eine neue Tabelle mit den gerenderten
+  Ausgaben unvalidierter Patterns.
+
 - fix(core): **Der letzte Audio-Track überlebt den TS→MP4-Remux jetzt** —
   der PMT-Pre-Scan (`scan_mpegts_stream_kinds`, rivulet-core/src/container.rs),
   der vor dem Remux-Start die Muxer-Request-Pads vorab belegt, hatte keine
