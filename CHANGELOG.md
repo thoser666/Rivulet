@@ -27,7 +27,7 @@
   deshalb zwei neue high Alerts statt #85 zu schließen und ließ den
   `Scorecard`-Code-Scanning-Check fehlschlagen, was den Merge blockierte. Der
   `promote`-Job muss den `weekly-latest`-Tag tatsächlich bewegen, eine korrektere
-  Konfiguration existiert nicht; #85 wird als *tolerable risk* dismissed. Neu ist
+  Konfiguration existiert nicht; #85 wird als *won't fix* dismissed. Neu ist
   stattdessen der Guard `every_write_scoped_workflow_is_documented_in_security_docs`:
   jeder Workflow mit Schreib-Scope muss in docs/security.md begründet sein.
 

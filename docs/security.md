@@ -103,7 +103,7 @@ Current state:
   integration tests and are dismissed with the canonical `used in tests`
   reason so the dismissed state stays auditable. The vectors are not
   credentials and are never installed as secrets.
-- **Alert #85 (`TokenPermissionsID`, high, dismissed as *tolerable risk*):**
+- **Alert #85 (`TokenPermissionsID`, high, dismissed as *won't fix*):**
   the finding comes from the **OpenSSF Scorecard** `Token-Permissions` check,
   not from CodeQL. `.github/workflows/weekly-promotion.yml` declares
   `permissions: contents: write` at the top level while only its `promote` job
