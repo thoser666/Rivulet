@@ -1,6 +1,35 @@
-# Changelog
-
 ## [Unreleased]
+
+- chore(ci): **Ein offener Code-Scanning-Alert blockiert jetzt `develop`** —
+  Alert #85 (`TokenPermissionsID`, high) blieb offen, obwohl CI grün war: der
+  ci_pinning-Guard `code_scanning_alerts_are_resolved_and_pinned` ist rein
+  statisch und fragt die Alerts-API nie ab, sodass ein Alert erst auffiel, als
+  ein Mensch den Security-Tab ansah. Neu ist
+  `scripts/check-code-scanning-alerts.py`: es liest die offenen Alerts über `gh api`
+  und lässt das Gate fehlschlagen, solange `ALLOWED_OPEN_ALERTS` leer ist — ein
+  Dismissal muss damit eine bewusste Code-Änderung plus dokumentierte
+  Begründung in docs/security.md sein. Der Job `security_gate` in
+  `.github/workflows/security.yml` führt das Skript mit `security-events: read`
+  und `--comment` aus (blockierend auf `develop` und im Zeitplan, auf Pull
+  Requests nur beratend, weil ein PR die Alert-Liste des Repositories nicht
+  auflösen kann); der Self-Test läuft im Pre-Push-Hook mit. Zwei neue
+  ci_pinning-Guards scannen jetzt alle 16 Workflows statt einer handgepflegten
+  Liste von 11: `every_workflow_file_is_covered_by_the_pinning_guard` (in beide
+  Richtungen) und `open_code_scanning_alerts_are_triaged_in_ci`.
+
+  **Korrektur einer falschen Annahme:** der Versuch, #85 durch eine
+  Verengung des Schreib-Rechts auf den `promote`-Job zu schließen, ist
+  **verworfen**. Der Alert stammt nicht von CodeQL, sondern vom OpenSSF
+  Scorecard-Check `Token-Permissions`, und der meldet *jedes* `contents: write`
+  — job-level genauso wie top-level (in `checks/evaluation/permissions.go`
+  senkt top-level write den Score auf 0, job-level write wird geloggt, erzeugt
+  aber trotzdem ein SARIF-Result auf `level: error`). Die Verengung erzeugte
+  deshalb zwei neue high Alerts statt #85 zu schließen und ließ den
+  `Scorecard`-Code-Scanning-Check fehlschlagen, was den Merge blockierte. Der
+  `promote`-Job muss den `weekly-latest`-Tag tatsächlich bewegen, eine korrektere
+  Konfiguration existiert nicht; #85 wird als *won't fix* dismissed. Neu ist
+  stattdessen der Guard `every_write_scoped_workflow_is_documented_in_security_docs`:
+  jeder Workflow mit Schreib-Scope muss in docs/security.md begründet sein.
 
 - fix(core): **Ein totes Stream-Ziel kann keinen Hot-Loop mehr auslösen** —
   `RetryPolicy::new` (rivulet-core/src/reconnect.rs) hat `initial_backoff` auf

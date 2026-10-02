@@ -14,18 +14,44 @@ fn read(rel: &str) -> String {
 }
 
 const WORKFLOWS: &[&str] = &[
-    "ci.yml",
-    "ruleset-guard.yml",
-    "release.yml",
-    "nightly.yml",
-    "signing-e2e.yml",
     "build-package.yml",
+    "ci.yml",
     "dependabot-auto-merge.yml",
-    "security.yml",
-    "scorecard.yml",
     "distribution-readiness.yml",
     "flatpak-build.yml",
+    "fuzz-deep.yml",
+    "nightly.yml",
+    "obs-upstream.yml",
+    "pat-expiry-guard.yml",
+    "release.yml",
+    "ruleset-guard.yml",
+    "scorecard.yml",
+    "security.yml",
+    "signing-e2e.yml",
+    "weekly-promotion.yml",
+    "wiki-translations.yml",
 ];
+
+/// Every workflow file checked into `.github/workflows`, sorted.
+///
+/// [`WORKFLOWS`] deliberately lists *all* of them rather than the ones that
+/// happened to exist when the guard was written;
+/// `every_workflow_file_is_covered_by_the_pinning_guard` fails when the two
+/// drift apart, so a new workflow cannot skip pinning.
+fn workflow_files() -> Vec<String> {
+    let dir = repo_file(".github/workflows");
+    let mut names: Vec<String> = fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display()))
+        .filter_map(|entry| {
+            entry
+                .ok()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+        })
+        .filter(|name| name.ends_with(".yml") || name.ends_with(".yaml"))
+        .collect();
+    names.sort();
+    names
+}
 
 /// The reviewed pins. `(action@sha, human-readable version)` — the version
 /// comment documents which upstream release the SHA corresponds to. Keeping the
@@ -7585,5 +7611,97 @@ fn recording_filename_patterns_cannot_panic_or_escape_their_directory() {
     assert!(
         sanitizer.contains("if run == 1"),
         "sanitize_literal must collapse dot runs so `..` cannot survive"
+    );
+}
+
+#[test]
+fn every_write_scoped_workflow_is_documented_in_security_docs() {
+    // Alert #85 (TokenPermissionsID, high) stayed open while CI stayed green.
+    // The lesson is not "no write scopes" - the `promote` job genuinely has to
+    // move the weekly-latest tag - but that every deliberate write scope is
+    // accounted for in docs/security.md. A new workflow that grants write
+    // access therefore needs a documented justification, which is the thing
+    // that was missing for #85.
+    let docs = read("docs/security.md");
+    let mut undocumented: Vec<String> = Vec::new();
+    for name in workflow_files() {
+        let text = read(&format!(".github/workflows/{name}"));
+        // Comment lines are excluded: the workflows explain the rule in prose,
+        // and a comment must never count as a declaration.
+        let grants_write = text
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#'))
+            .any(|line| {
+                [
+                    "contents: write",
+                    "pull-requests: write",
+                    "security-events: write",
+                ]
+                .iter()
+                .any(|scope| line.contains(scope))
+            });
+        if grants_write && !docs.contains(&name) {
+            undocumented.push(name);
+        }
+    }
+    assert!(
+        undocumented.is_empty(),
+        "workflows granting write scopes must be justified in docs/security.md: {undocumented:?}"
+    );
+}
+
+#[test]
+fn every_workflow_file_is_covered_by_the_pinning_guard() {
+    // The pinning guard only checks the files it knows about. A workflow added
+    // later would otherwise be pinned by nobody: five workflows
+    // (fuzz-deep, obs-upstream, pat-expiry-guard, weekly-promotion,
+    // wiki-translations) sat outside the list until this guard was added.
+    let on_disk = workflow_files();
+    let mut unlisted: Vec<String> = on_disk
+        .iter()
+        .filter(|name| !WORKFLOWS.contains(&name.as_str()))
+        .cloned()
+        .collect();
+    unlisted.sort();
+    assert!(
+        unlisted.is_empty(),
+        "these workflows are not pinning-guarded - add them to WORKFLOWS: {unlisted:?}"
+    );
+    // ...and the other direction: a listed file that no longer exists.
+    let mut stale: Vec<String> = WORKFLOWS
+        .iter()
+        .filter(|name| !on_disk.iter().any(|f| f == *name))
+        .map(|name| name.to_string())
+        .collect();
+    stale.sort();
+    assert!(
+        stale.is_empty(),
+        "WORKFLOWS lists workflows that do not exist: {stale:?}"
+    );
+}
+
+#[test]
+fn open_code_scanning_alerts_are_triaged_in_ci() {
+    // Alert #85 stayed open for days because every guard in this file is
+    // static: nothing ever asked the alerts API what GitHub had open. The
+    // Security workflow must therefore run the triage script, with the scope
+    // that makes the call possible.
+    let security = read(".github/workflows/security.yml");
+    assert!(
+        security.contains("scripts/check-code-scanning-alerts.py"),
+        "security.yml must run the code-scanning alert triage script"
+    );
+    assert!(
+        security.contains("security-events: read"),
+        "the triage job needs security-events: read to list code-scanning alerts"
+    );
+    assert!(
+        security.contains("continue-on-error: ${{ github.event_name == 'pull_request' }}"),
+        "the triage step must stay non-blocking on pull requests (a PR that fixes \
+         an alert always sees the base branch's alerts re-reported by CodeQL)"
+    );
+    assert!(
+        security.contains("- name: Require security checks to pass"),
+        "the triage step must not replace the existing security gate"
     );
 }

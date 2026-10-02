@@ -103,6 +103,49 @@ Current state:
   integration tests and are dismissed with the canonical `used in tests`
   reason so the dismissed state stays auditable. The vectors are not
   credentials and are never installed as secrets.
+- **Alert #85 (`TokenPermissionsID`, high, dismissed as *won't fix*):**
+  the finding comes from the **OpenSSF Scorecard** `Token-Permissions` check,
+  not from CodeQL. `.github/workflows/weekly-promotion.yml` declares
+  `permissions: contents: write` at the top level while only its `promote` job
+  pushes a tag; `prepare-winget`, `prepare-chocolatey` and `prepare-aur` only
+  read the repository. Narrowing the write scope to the job was tried and
+  **rejected**: Scorecard's `Token-Permissions` rule reports *every*
+  `contents: write`, at the job level just as much as at the top level, so
+  moving the scope does not clear the alert — it only moves it (see
+  `checks/evaluation/permissions.go`: top-level write drives the score to 0,
+  job-level write is logged as a warning but still emits a SARIF result at
+  `level: error`). The experiment produced two new high alerts
+  (`dependabot-auto-merge.yml` and `weekly-promotion.yml`) and failed the
+  `Scorecard` code-scanning check, which blocked the merge.
+  `.github/workflows/dependabot-auto-merge.yml` carries the same pattern.
+  This is accepted deliberately: the `promote` job genuinely has to move the
+  `weekly-latest` tag, so no narrower correct configuration exists, and
+  Scorecard's heuristic cannot tell a needed write from an unneeded one.
+
+#### Alert triage gate
+
+Up to now the only enforcement of this policy lived in a human reading the
+  `Security` tab: the ci_pinning guard
+  `code_scanning_alerts_are_resolved_and_pinned` is purely static and never
+  talks to the alerts API, so a new finding could sit open on `develop` while
+  CI stayed green — exactly how #85 survived.
+
+  `scripts/check-code-scanning-alerts.py` closes that gap. It reads the open
+  alerts through `gh api`, applies an `ALLOWED_OPEN_ALERTS` allow-list that is
+  empty by default, and can be limited to the alerts at or above a severity
+  threshold (`--fail-on`). Without allow-list entries every open alert fails
+  the gate, so a dismissal has to be a deliberate edit plus a written reason in
+  this file. The `security_gate` job in `.github/workflows/security.yml`
+  runs it with `security-events: read` and `--comment`; the report is posted
+  as a job summary and written as a pull-request comment. On pull requests the
+  step is advisory (`continue-on-error`), because a pull request cannot resolve
+  the repository's alert list; on `push` to `develop` and on `schedule` it is
+  blocking. `python3 scripts/check-code-scanning-alerts.py --self-test` runs as
+  part of the pre-push hook.
+
+  Note that dismissing an alert on GitHub also removes it from the gate's
+  input: the script only sees *open* alerts. A dismissal therefore has to be
+  justified in this section, not just clicked in the UI.
 
 ### Dependabot alert management
 
