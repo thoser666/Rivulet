@@ -47,11 +47,18 @@ on:
         required: false
         type: string
 
-# Tag push on this repository. No other scope is needed; notably there is
-# deliberately no `actions: read` — GitHub rejects workflow_call files that
-# carry that top-level permission at startup (see docs/ci-action-pins.md).
+# Default for this workflow: read-only. Only the `promote` job needs to push
+# the `weekly-latest` tag, so it declares `contents: write` itself. A
+# workflow-level `contents: write` is a CodeQL `TokenPermissionsID` finding
+# (alert #85): every job — including the three that only render manifests and
+# upload artifacts — would inherit a token that can rewrite releases.
+# The `prepare-*` jobs still need `contents: read` for checkout and
+# `gh release download`.
+#
+# No `actions: read` here either: GitHub rejects workflow_call files that carry
+# that permission at startup (see docs/ci-action-pins.md).
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: weekly-promotion
@@ -64,6 +71,9 @@ jobs:
   promote:
     name: Promote newest green release to weekly-latest
     runs-on: ubuntu-latest
+    # Least privilege: this is the only job that writes (the tag push).
+    permissions:
+      contents: write
     outputs:
       chosen: ${{ steps.resolve.outputs.chosen }}
       up_to_date: ${{ steps.previous.outputs.up_to_date }}

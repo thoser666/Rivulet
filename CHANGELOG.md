@@ -1,6 +1,30 @@
-# Changelog
-
 ## [Unreleased]
+
+- chore(ci): **Ein offener Code-Scanning-Alert blockiert jetzt `develop`** —
+  Alert #85 (`TokenPermissionsID`, error) meldete, dass
+  `.github/workflows/weekly-promotion.yml` auf oberster Ebene `contents: write`
+  vergab, obwohl nur der Job `promote` Tags und Releases pusht — die Jobs
+  `prepare-winget`, `prepare-chocolatey` und `prepare-aur` lesen nur. Der
+  Workflow startet jetzt mit `contents: read` und `promote` fordert das Schreibrecht
+  selbst an; `.github/workflows/dependabot-auto-merge.yml` mit dem gleichen Muster
+  wurde ebenso auf `contents: read` / `pull-requests: read` zurückgestuft, der
+  Job `dependabot` nimmt die Schreibrechte explizit. Der bisherige ci_pinning-Guard
+  `code_scanning_alerts_are_resolved_and_pinned` ist rein statisch und fragt die
+  Alerts-API nie ab — deshalb konnte #85 offen bleiben, obwohl CI grün war. Neu ist
+  `scripts/check-code-scanning-alerts.py`: es liest die offenen Alerts über `gh api`
+  und lässt das Gate fehlschlagen, solange `ALLOWED_OPEN_ALERTS` leer ist — ein
+  Dismissal muss damit eine bewusste Code-Änderung mit dokumentierter Begründung in
+  docs/security.md sein. Der Job `security_gate` in `.github/workflows/security.yml`
+  führt das Skript mit `security-events: read` und `--comment` aus (Blockierung auf
+  `develop` und im Zeitplan, auf Pull Requests nur beratend, weil ein PR die
+  Alert-Liste des Repositories nicht auflösen kann); der Self-Test läuft im
+  Pre-Push-Hook mit. Drei neue ci_pinning-Guards decken das ab und scannen jetzt
+  alle 16 Workflows statt einer handgepflegten Liste von 11:
+  `no_workflow_grants_contents_write_at_the_top_level`,
+  `every_workflow_file_is_covered_by_the_pinning_guard` (in beide Richtungen) und
+  `open_code_scanning_alerts_are_triaged_in_ci`.
+
+Unreleased]
 
 - fix(core): **Ein totes Stream-Ziel kann keinen Hot-Loop mehr auslösen** —
   `RetryPolicy::new` (rivulet-core/src/reconnect.rs) hat `initial_backoff` auf

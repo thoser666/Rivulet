@@ -111,7 +111,33 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Reading code-scanning alerts is the whole point of the triage step
+      # below; without this scope it cannot ask the API what it thinks of us.
+      security-events: read
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The static guards in rivulet-core/tests/ci_pinning.rs can only check
+      # the checked-out sources. This step asks GitHub for the alerts it
+      # actually has open - alert #85 (TokenPermissionsID on the weekly
+      # promotion workflow) survived for days with a fully green CI.
+      #
+      # It runs non-blocking on pull requests on purpose: CodeQL re-reports
+      # every alert of the *base* branch from a PR run, so a PR that fixes an
+      # alert would always fail its own gate. The blocking check happens on
+      # develop, where the workflow's own CodeQL run has already refreshed the
+      # alert states this step reads.
+      - name: Triage open code-scanning alerts
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # pipefail keeps the script's exit code authoritative while the
+          # Markdown still lands in the step summary.
+          python3 scripts/check-code-scanning-alerts.py --comment | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Require security checks to pass
         env:
           CODEQL_RESULT: ${{ needs.codeql.result }}

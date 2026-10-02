@@ -103,6 +103,36 @@ Current state:
   integration tests and are dismissed with the canonical `used in tests`
   reason so the dismissed state stays auditable. The vectors are not
   credentials and are never installed as secrets.
+- **Alert #85 (`TokenPermissionsID`):** `.github/workflows/weekly-promotion.yml`
+  granted `contents: write` at the top level, although only the `promote` job
+  pushes tags and releases; `prepare-winget`, `prepare-chocolatey` and
+  `prepare-aur` only read the repository. The workflow now defaults to
+  `contents: read` and the `promote` job opts into `contents: write`
+  explicitly. `.github/workflows/dependabot-auto-merge.yml` had the same
+  pattern and was narrowed the same way. Pinned by the ci_pinning guard
+  `no_workflow_grants_contents_write_at_the_top_level`, which scans every
+  workflow in `.github/workflows` (not just the pinned ones).
+
+#### Alert triage gate
+
+Up to now the only enforcement of this policy lived in a human reading the
+  `Security` tab: the ci_pinning guard
+  `code_scanning_alerts_are_resolved_and_pinned` is purely static and never
+  talks to the alerts API, so a new `TokenPermissionsID` finding could sit
+  open on `develop` while CI stayed green.
+
+  `scripts/check-code-scanning-alerts.py` closes that gap. It reads the open
+  alerts through `gh api`, applies an `ALLOWED_OPEN_ALERTS` allow-list that is
+  empty by default, and can be limited to the alerts at or above a severity
+  threshold (`--fail-on`). Without allow-list entries every open alert fails
+  the gate, so a dismissal has to be a deliberate edit with a written reason in
+  this file. The `security_gate` job in `.github/workflows/security.yml`
+  runs it with `security-events: read` and `--comment`; the report is posted
+  as a job summary and written as a pull-request comment. On pull requests the
+  step is advisory (`continue-on-error`), because a pull request cannot resolve
+  the repository's alert list; on `push` to `develop` and on `schedule` it is
+  blocking. `python3 scripts/check-code-scanning-alerts.py --self-test` runs as
+  part of the pre-push hook.
 
 ### Dependabot alert management
 
