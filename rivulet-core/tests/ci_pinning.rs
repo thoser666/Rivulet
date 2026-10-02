@@ -7615,32 +7615,38 @@ fn recording_filename_patterns_cannot_panic_or_escape_their_directory() {
 }
 
 #[test]
-fn no_workflow_grants_contents_write_at_the_top_level() {
-    // Alert #85 (CodeQL TokenPermissionsID, error, left open while CI stayed
-    // green): weekly-promotion.yml declared `permissions: contents: write` at
-    // the workflow level, so all four jobs inherited a token that can rewrite
-    // releases - including the three that only render manifests and upload
-    // artifacts. Write scopes belong on the job that actually needs them.
-    let mut offenders: Vec<String> = Vec::new();
+fn every_write_scoped_workflow_is_documented_in_security_docs() {
+    // Alert #85 (TokenPermissionsID, high) stayed open while CI stayed green.
+    // The lesson is not "no write scopes" - the `promote` job genuinely has to
+    // move the weekly-latest tag - but that every deliberate write scope is
+    // accounted for in docs/security.md. A new workflow that grants write
+    // access therefore needs a documented justification, which is the thing
+    // that was missing for #85.
+    let docs = read("docs/security.md");
+    let mut undocumented: Vec<String> = Vec::new();
     for name in workflow_files() {
         let text = read(&format!(".github/workflows/{name}"));
-        let top_level = text
-            .split("\njobs:")
-            .next()
-            .expect("workflow must have a jobs: section");
         // Comment lines are excluded: the workflows explain the rule in prose,
         // and a comment must never count as a declaration.
-        let declares_write = top_level
+        let grants_write = text
             .lines()
             .filter(|line| !line.trim_start().starts_with('#'))
-            .any(|line| line.contains("contents: write"));
-        if declares_write {
-            offenders.push(name);
+            .any(|line| {
+                [
+                    "contents: write",
+                    "pull-requests: write",
+                    "security-events: write",
+                ]
+                .iter()
+                .any(|scope| line.contains(scope))
+            });
+        if grants_write && !docs.contains(&name) {
+            undocumented.push(name);
         }
     }
     assert!(
-        offenders.is_empty(),
-        "workflow-level `contents: write` must move to the job that needs it: {offenders:?}"
+        undocumented.is_empty(),
+        "workflows granting write scopes must be justified in docs/security.md: {undocumented:?}"
     );
 }
 

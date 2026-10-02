@@ -15,20 +15,14 @@ name: Dependabot auto-merge
 on:
   pull_request_target:
 
-# Read-only by default; the single job below declares what it actually needs.
-# A workflow-level `contents: write` is a CodeQL `TokenPermissionsID` finding
-# (the token can rewrite releases), so write scopes live on the job.
 permissions:
-  contents: read
-  pull-requests: read
+  contents: write
+  pull-requests: write
 
 jobs:
   dependabot:
     name: Approve and enable auto-merge
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
     # Only for Dependabot PRs; pull_request_target runs in the base-repo
     # context, so never checkout or execute anything from the PR itself.
     if: ${{ github.actor == 'dependabot[bot]' }}
