@@ -1302,6 +1302,62 @@ fn code_scanning_alerts_are_resolved_and_pinned() {
 }
 
 #[test]
+fn dependabot_unreachable_glib_advisory_is_documented_and_pinned() {
+    // Dependabot alert #3 (RUSTSEC-2024-0429 / GHSA-wrw7-89jp-8q8g) reports the
+    // glib VariantStrIter unsoundness against the glib 0.18.5 entry the
+    // lockfile still carries. The crate is unreachable on every supported
+    // target — wry sits behind cfg(windows), and wry 0.57.0 (the newest
+    // release on crates.io) still pins the vulnerable gtk-rs 0.18 core, so no
+    // upgrade removes it. The alert is dismissed `not_used` with that evidence
+    // in docs/security.md; this guard keeps the dismissal auditable and fails
+    // as soon as wry is ungated or the rationale drifts away.
+    let security_docs = read("docs/security.md");
+    for needle in [
+        "Dependabot alert management",
+        "RUSTSEC-2024-0429",
+        "GHSA-wrw7-89jp-8q8g",
+        "VariantStrIter",
+        "glib 0.18.5",
+        "glib 0.22.8",
+        "not_used",
+        "x86_64-unknown-linux-gnu",
+        "WebView2",
+        "newest release on",
+    ] {
+        assert!(
+            security_docs.contains(needle),
+            "docs/security.md must keep documenting the dismissed Dependabot glib \
+             advisory (missing: {needle})"
+        );
+    }
+
+    // The dismissal rests on wry never being built for a non-Windows target.
+    // Pin that where it lives: the manifest must keep wry inside the
+    // cfg(windows) table and keep its Windows-only rationale next to it.
+    let browser = read("rivulet-browser/Cargo.toml");
+    assert!(
+        browser.contains("# The wry spike is Windows-only for now."),
+        "rivulet-browser/Cargo.toml must keep the Windows-only wry rationale comment"
+    );
+    let windows_gate = browser
+        .find("[target.'cfg(windows)'.dependencies]")
+        .expect("rivulet-browser must gate its webview dependencies behind cfg(windows)");
+    let wry_dep = browser
+        .find("wry = ")
+        .expect("rivulet-browser must declare wry");
+    assert!(
+        wry_dep > windows_gate,
+        "wry must stay inside the cfg(windows) dependency table — building it on \
+         Linux/macOS makes the dismissed Dependabot glib advisory reachable and \
+         invalidates its documentation"
+    );
+    assert!(
+        !browser[..windows_gate].contains("wry = "),
+        "rivulet-browser must not pull wry in unconditionally"
+    );
+}
+
+#[test]
 fn security_policy_is_linked_from_readme_and_docs() {
     let readme = read("README.md");
     let policy = read("SECURITY.md");

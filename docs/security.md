@@ -104,6 +104,48 @@ Current state:
   reason so the dismissed state stays auditable. The vectors are not
   credentials and are never installed as secrets.
 
+### Dependabot alert management
+
+GitHub Dependabot reports vulnerable dependencies under
+`Security → Dependabot alerts`. The policy matches code scanning: upgrade the
+dependency on `develop` through a pull request and pin the fix in
+`rivulet-core/tests/ci_pinning.rs`. Dismiss only when the alert does not
+describe a reachable vulnerability, using one of the canonical GitHub reasons
+and recording the evidence here.
+
+Current state:
+
+- **Alert #3 (`glib` unsoundness, `RUSTSEC-2024-0429` /
+  `GHSA-wrw7-89jp-8q8g`, medium):** `glib::VariantStrIter`'s `Iterator` /
+  `DoubleEndedIterator` impls (`next`, `last`, `nth`, `next_back`,
+  `nth_back`) handed an out-parameter to C through `&` instead of `&mut`.
+  Recent compilers discard that unsound write under optimization, so every
+  call then violates the `CStr::from_ptr` safety contract and crashes. Fixed
+  in `glib >= 0.20.0`. RustSec classifies the advisory as `INFO`, which is why
+  the `Cargo Audit` and `Cargo Deny` gates stay green with an empty ignore
+  list in `deny.toml`.
+
+  The lockfile does resolve a vulnerable `glib 0.18.5` next to the patched
+  `glib 0.22.8` (which comes in through `gstreamer 0.25`), but the crate is
+  unreachable on every supported target:
+
+  - `rivulet-browser` keeps `wry = "0.57"` behind
+    `[target.'cfg(windows)'.dependencies]`, so the Linux and macOS builds never
+    resolve the wry tree at all — `cargo tree -i glib@0.18.5 --target
+    x86_64-unknown-linux-gnu` prints nothing. On Windows, wry renders through
+    WebView2 and its gtk-rs dependencies are Linux-only, so `gtk 0.18` and
+    `webkit2gtk 2.0` are never compiled either.
+
+  - There is also no upgrade to pull in: `wry 0.57.0` is the newest release on
+    crates.io and still pins the gtk-rs 0.18 core. The lockfile entry can only
+    disappear when upstream wry moves to the `glib >= 0.20` core (or if the
+    browser backend is dropped).
+
+  Dismissed with the canonical `not_used` reason. Revisit when either of those
+  happens: the `dependabot_unreachable_glib_advisory_is_documented_and_pinned`
+  guard fails as soon as wry is no longer Windows-gated, which is precisely
+  when this entry has to be re-evaluated.
+
 ### Cargo dependency policy
 
 The lockfile is checked for yanked crates in CI. When RustSec reports a yanked

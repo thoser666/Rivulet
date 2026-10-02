@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+- docs(security): **Dependabot-Alert #3 (`glib` `VariantStrIter`-Unsoundness,
+  `RUSTSEC-2024-0429`) als unerreichbar begründet und maschinell gepinnt** —
+  die Lockfile führt neben dem gepatchten `glib 0.22.8` (über gstreamer 0.25)
+  auch das verwundbare `glib 0.18.5`, dessen `Iterator`/`DoubleEndedIterator`-
+  Impls einen C-Out-Parameter über `&` statt `&mut` geben: unter Optimierung
+  verwirft der Compiler den Schreibzugriff, jeder Aufruf verletzt dann die
+  `CStr::from_ptr`-Sicherheitsbedingung. RustSec führt das Advisory als `INFO`,
+  deshalb bleiben `cargo audit`/`cargo deny` mit leerer Ignore-Liste grün.
+  Erreichbar ist der Code nirgends: `rivulet-browser` hält `wry = "0.57"` hinter
+  `[target.'cfg(windows)'.dependencies]` — Linux/macOS lösen den wry-Baum gar
+  nicht erst auf (`cargo tree -i glib@0.18.5 --target x86_64-unknown-linux-gnu`
+  druckt nichts), und unter Windows rendert wry über WebView2 statt gtk. Ein
+  Upgrade existiert auch nicht: wry 0.57.0 ist die neueste crates.io-Version und
+  pinnt weiter den gtk-rs-0.18-Core. Der Alert wird daher mit dem kanonischen
+  Grund `not_used` dismissed; Begründung und Wiedervorlage-Bedingung stehen in
+  `docs/security.md`, und der neue Guard
+  `dependabot_unreachable_glib_advisory_is_documented_and_pinned` schlägt fehl,
+  sobald wry nicht mehr hinter `cfg(windows)` liegt — also genau dann, wenn die
+  Dismissal-Begründung neu bewertet werden muss.
+
 - ci: **Skript-Self-Tests unter dem Pre-Push-Hook schreiben nicht mehr ins
   echte Repo** — git startet den Pre-Push-Hook mit `GIT_DIR` (& Co.) im
   Environment, und die Self-Test-Fixtures von `scripts/check-release-notes.py`
