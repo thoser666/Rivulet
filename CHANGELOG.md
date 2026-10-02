@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+- fix(core): **Der letzte Audio-Track überlebt den TS→MP4-Remux jetzt** —
+  der PMT-Pre-Scan (`scan_mpegts_stream_kinds`, rivulet-core/src/container.rs),
+  der vor dem Remux-Start die Muxer-Request-Pads vorab belegt, hatte keine
+  Testabdeckung (er liest Bytes von Platte). Die neuen
+  `container::tests::pmt_scan_*`-Tests bauen einen Transport-Stream synthetisch
+  (PAT+PMT in eine Temp-Datei) und deckten dabei einen echten Bug auf:
+  `section_length` zählt die Bytes **nach** dem Längenfeld selbst, das
+  Section-Ende liegt also bei `3 + section_len`. Der Parser rechnete mit
+  `section_len` und zog danach 4 für die CRC32 ab, landete damit drei Bytes zu
+  früh und übersprang konsequent den **letzten** Stream-Eintrag — bei einer
+  TS-Aufnahme mit Video + N Audiotracks wurden nur N−1 Audiotracks vorab
+  belegt, der letzte landete also nicht im MP4. Genau der Fall, den das
+  Per-Track-Modell (#242) abstellen sollte. Zusätzlich gepinnt: die letzte
+  PMT-Version gewinnt (mpegtsmux schreibt die PMT beim Entstehen der Streams
+  neu), jede PID zählt einmal, und Codec-Familien/Private-Stream-Types werden
+  korrekt bzw. gar nicht gezählt. Der Parser ist jetzt korrigiert, die Doku in
+  `docs/m6-audio-routing.md` beschreibt beide Feinheiten.
+
 - docs(security): **Dependabot-Alert #3 (`glib` `VariantStrIter`-Unsoundness,
   `RUSTSEC-2024-0429`) als unerreichbar begründet und maschinell gepinnt** —
   die Lockfile führt neben dem gepatchten `glib 0.22.8` (über gstreamer 0.25)

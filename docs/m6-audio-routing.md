@@ -257,6 +257,18 @@ MOV and TS **and** through the crash-safe intermediate remux
 (`remux_to_mp4`, `RemuxPlan`) to the final MP4 — verified E2E for all four
 `RecordingContainer` values with a Discoverer assertion.
 
+The TS path counts its streams from a pure-byte PMT pre-scan
+(`scan_mpegts_stream_kinds`) so every muxer request pad exists before the
+remux pipeline starts and pad assignment cannot race the muxer's
+"refuse pads once configured" rule. Two details in that parser decide whether
+the last audio track survives the remux and are pinned by the
+`container::tests::pmt_scan_*` unit tests (they synthesize a transport stream in
+a temp file, so no recording is needed): `section_length` counts the bytes
+*after* the length field, so a section ends at `3 + section_len` (minus the
+trailing CRC32) — using `section_len` directly ends three bytes early and skips
+the final stream entry; and mpegtsmux rewrites the PMT as streams materialize,
+so the **last** PMT version wins rather than the first.
+
 ### Settings
 
 - Persisted in `eframe::Storage` under a versioned JSON schema:
