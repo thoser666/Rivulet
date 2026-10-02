@@ -7512,3 +7512,78 @@ fn feature_i18n_keys_exist_in_both_locales() {
         );
     }
 }
+
+#[test]
+fn retry_backoff_is_clamped_before_the_ceiling_is_derived() {
+    // `RetryPolicy::new` used to derive `max_backoff` from the *unclamped*
+    // `initial_backoff`, so a zero ceiling survived and every `backoff()` was
+    // clamped to zero — the supervisor then retried a dead sink in a tight
+    // loop with no delay. The floor must be established first, and `backoff`
+    // must never report a zero delay for degenerate attempt numbers.
+    let reconnect = read("rivulet-core/src/reconnect.rs");
+    assert!(
+        reconnect.contains("const MIN_BACKOFF: Duration = Duration::from_millis(100);"),
+        "reconnect.rs must define the MIN_BACKOFF floor"
+    );
+    assert!(
+        reconnect.contains("let initial_backoff = initial_backoff.max(MIN_BACKOFF);"),
+        "RetryPolicy::new must clamp initial_backoff into a local first"
+    );
+    assert!(
+        !reconnect.contains("initial_backoff: initial_backoff.max(MIN_BACKOFF),"),
+        "RetryPolicy::new must not clamp inline: the ceiling is derived from the same value"
+    );
+    // Single-line needles only: the sources use CRLF, so a multi-line needle
+    // would silently never match.
+    assert!(
+        reconnect.contains("            .max(MIN_BACKOFF)"),
+        "backoff() must chain a MIN_BACKOFF floor after clamping to the ceiling"
+    );
+}
+
+#[test]
+fn recording_filename_patterns_cannot_panic_or_escape_their_directory() {
+    // `FileNamePattern` derives Deserialize without re-running `new()`s
+    // validation, so a settings file can carry a pattern `new()` would have
+    // rejected. `render` used to `.expect()` a closing brace and an unknown
+    // token (panic on record start) and pushed literal text verbatim (a
+    // `../../` pattern wrote outside the recording directory).
+    let fm = read("rivulet-core/src/file_management.rs");
+    let render = fm
+        .split("pub fn render(")
+        .nth(1)
+        .and_then(|rest| rest.split("\n    }").next())
+        .expect("FileNamePattern::render must exist");
+    assert!(
+        !render.contains(".expect(") && !render.contains("panic!("),
+        "render must stay total: it may not panic on an unvalidated pattern"
+    );
+    assert!(
+        render.contains("let Some(close) = after_open.find('}') else {"),
+        "render must handle an unterminated placeholder instead of expecting a brace"
+    );
+    assert!(
+        render
+            .contains("Some(PatternToken::Name) => out.push_str(&sanitize_component(&vals.name)),")
+            && render.contains("None => {"),
+        "render must keep unknown placeholders literal rather than unwrapping the token"
+    );
+    assert!(
+        render.contains("out.push_str(&sanitize_literal(&rest[..open]));")
+            && render.contains("out.push_str(&sanitize_literal(rest));"),
+        "literal pattern text must be sanitized before it reaches the output path"
+    );
+    assert!(
+        fm.contains("fn sanitize_literal(s: &str) -> String {"),
+        "file_management.rs must keep the literal-text sanitizer"
+    );
+    let sanitizer = fm
+        .split("fn sanitize_literal(s: &str) -> String {")
+        .nth(1)
+        .and_then(|rest| rest.split("\n}").next())
+        .expect("sanitize_literal must exist");
+    assert!(
+        sanitizer.contains("if run == 1"),
+        "sanitize_literal must collapse dot runs so `..` cannot survive"
+    );
+}
