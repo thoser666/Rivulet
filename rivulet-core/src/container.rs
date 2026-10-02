@@ -855,8 +855,13 @@ fn scan_mpegts_stream_kinds(path: &str) -> TsStreamCounts {
         return counts;
     }
     let section_len = (usize::from(pmt[1] & 0x03) << 8) | usize::from(pmt[2]);
-    let end = section_len.min(pmt.len() - 3).saturating_sub(4); // minus CRC32
-                                                                // program_info_length sits at bytes 10-11; the stream entries follow it.
+    // section_length counts the bytes FOLLOWING the length field itself, so
+    // the section ends at 3 + section_len (not at section_len). Skipping the
+    // trailing CRC32 lands on the last stream-entry byte; using section_len
+    // directly ends three bytes early and drops the LAST elementary stream —
+    // for a TS recording that silently lost the last audio track on remux.
+    let end = (3 + section_len).min(pmt.len()).saturating_sub(4);
+    // program_info_length sits at bytes 10-11; the stream entries follow it.
     let prog_info_len = ((usize::from(pmt[10]) & 0x0f) << 8) | usize::from(pmt[11]);
     let mut i = 12 + prog_info_len;
     let mut seen_pids: Vec<u16> = Vec::new();
@@ -1437,5 +1442,194 @@ mod tests {
             eos_seen.load(std::sync::atomic::Ordering::SeqCst),
             "EOS must propagate after retirement — the exact regression that stalled macOS CI"
         );
+    }
+
+    // ── scan_mpegts_stream_kinds (PMT pre-scan, issue #242 slice 3) ──
+    //
+    // The PMT scanner decides how many muxer request pads the remux pipeline
+    // pre-claims, so a miscount silently drops audio tracks from the MP4
+    // output. It reads bytes from disk, which is why it had no coverage at
+    // all until now: the helpers below synthesize a transport stream in a
+    // temp file so every parse branch is reachable without GStreamer.
+
+    /// Wraps `section` into a single TS packet (188 bytes) for `pid`.
+    fn ts_section_packet(pid: u16, section: &[u8]) -> Vec<u8> {
+        assert!(section.len() <= 182, "section must fit one TS packet");
+        let mut pkt = vec![0u8; 188];
+        pkt[0] = 0x47; // sync byte
+        pkt[1] = 0x40 | u8::try_from(pid >> 8).unwrap(); // payload_unit_start_indicator
+        pkt[2] = pid as u8;
+        pkt[3] = 0x10; // adaptation_field_control = 01: payload only
+        pkt[4] = 0x00; // adaptation_field_length = 0
+        pkt[5] = 0x00; // pointer_field: section starts immediately after it
+        pkt[6..6 + section.len()].copy_from_slice(section);
+        pkt
+    }
+
+    /// PAT section for a single program pointing at `pmt_pid`.
+    fn pat_section(pmt_pid: u16) -> Vec<u8> {
+        let pid = pmt_pid;
+        let mut s: Vec<u8> = vec![0x00]; // table_id = PAT
+        s.extend_from_slice(&[0xb0, 0x0d]); // section_length = 13
+        s.extend_from_slice(&[0x00, 0x01]); // transport_stream_id
+        s.extend_from_slice(&[0xc1, 0x00, 0x00]); // version 0, section 0/0
+        s.extend_from_slice(&[0x00, 0x01]); // program_number = 1 (not NIT)
+        s.extend_from_slice(&[0xe0 | u8::try_from(pid >> 8).unwrap(), pid as u8]);
+        s.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // CRC32 (unverified)
+        s
+    }
+
+    /// PMT section listing `(stream_type, pid)` elementary streams.
+    fn pmt_section(streams: &[(u8, u16)]) -> Vec<u8> {
+        let body_len = 5 * streams.len();
+        let section_len = 13 + body_len; // bytes after the section_length field
+        let mut s: Vec<u8> = vec![0x02]; // table_id = PMT
+        s.extend_from_slice(&[
+            0xb0 | u8::try_from(section_len >> 8).unwrap(),
+            section_len as u8,
+        ]);
+        s.extend_from_slice(&[0x00, 0x01]); // program_number = 1
+        s.extend_from_slice(&[0xc1, 0x00, 0x00]); // version 0, section 0/0
+        s.extend_from_slice(&[0xe0, 0x00]); // PCR_PID = 0x100
+        s.extend_from_slice(&[0xf0, 0x00]); // program_info_length = 0
+        for &(stream_type, pid) in streams {
+            s.push(stream_type);
+            s.extend_from_slice(&[0xe0 | u8::try_from(pid >> 8).unwrap(), pid as u8]);
+            s.extend_from_slice(&[0xf0, 0x00]); // ES_info_length = 0
+        }
+        s.extend_from_slice(&[0x00, 0x00, 0x00, 0x00]); // CRC32 (unverified)
+        s
+    }
+
+    /// Writes `packets` to a temp `.ts` file and scans it. Returns the counts.
+    fn scan_packets(packets: &[Vec<u8>]) -> TsStreamCounts {
+        let mut bytes = Vec::new();
+        for p in packets {
+            bytes.extend_from_slice(p);
+        }
+        // The scanner only accepts a path, so materialize the synthetic
+        // stream next to the target dir and clean it up right after.
+        let path = std::env::temp_dir().join(format!(
+            "rivulet-pmt-scan-{}-{:p}.ts",
+            std::process::id(),
+            &bytes
+        ));
+        std::fs::write(&path, &bytes).expect("synthetic TS written");
+        let counts = scan_mpegts_stream_kinds(path.to_str().expect("utf-8 temp path"));
+        std::fs::remove_file(&path).ok();
+        counts
+    }
+
+    #[test]
+    fn pmt_scan_counts_audio_and_video_streams() {
+        // One H.264 video + two AAC audio tracks: the exact shape of an
+        // H.265-per-track recording that was encoded to TS and now has to
+        // reach MP4 with every audio track intact.
+        let counts = scan_packets(&[
+            ts_section_packet(0x0000, &pat_section(0x0100)),
+            ts_section_packet(
+                0x0100,
+                &pmt_section(&[(0x1b, 0x0101), (0x0f, 0x0102), (0x0f, 0x0103)]),
+            ),
+        ]);
+        assert_eq!(counts.audio, 2, "both AAC audio tracks must be counted");
+        assert_eq!(counts.video, 1, "the H.264 video track must be counted");
+    }
+
+    #[test]
+    fn pmt_scan_reads_every_supported_codec_family() {
+        // The stream_type -> kind mapping drives the pre-claim count, so an
+        // unmapped codec would drop that stream's chain entirely.
+        let counts = scan_packets(&[
+            ts_section_packet(0x0000, &pat_section(0x0100)),
+            ts_section_packet(
+                0x0100,
+                // AAC, MPEG audio, AC-3, Opus | MPEG-2 video, H.264, H.265, AV1
+                &pmt_section(&[
+                    (0x0f, 0x0201),
+                    (0x03, 0x0202),
+                    (0x81, 0x0203),
+                    (0x90, 0x0204),
+                    (0x02, 0x0301),
+                    (0x1b, 0x0302),
+                    (0x24, 0x0303),
+                    (0x25, 0x0304),
+                ]),
+            ),
+        ]);
+        assert_eq!(counts.audio, 4, "AAC/MPEG/AC-3/Opus are all audio");
+        assert_eq!(counts.video, 4, "MPEG-2/H.264/H.265/AV1 are all video");
+    }
+
+    #[test]
+    fn pmt_scan_takes_the_last_pmt_version() {
+        // mpegtsmux rewrites the PMT as streams materialize: an early version
+        // may list only video while the audio ES arrives in a later update.
+        // The scanner keeps the LAST PMT, otherwise pre-claiming would
+        // under-count and drop the audio tracks from the remux.
+        let counts = scan_packets(&[
+            ts_section_packet(0x0000, &pat_section(0x0100)),
+            ts_section_packet(0x0100, &pmt_section(&[(0x1b, 0x0101)])),
+            ts_section_packet(0x0100, &pmt_section(&[(0x1b, 0x0101), (0x0f, 0x0102)])),
+        ]);
+        assert_eq!(counts.video, 1);
+        assert_eq!(counts.audio, 1, "the later, more complete PMT must win");
+    }
+
+    #[test]
+    fn pmt_scan_counts_each_pid_once() {
+        // A PMT that repeats an elementary PID (muxer rewrite artifacts)
+        // must not inflate the count, or the remux pre-claims pads that
+        // never receive data and stalls on pad-added.
+        let counts = scan_packets(&[
+            ts_section_packet(0x0000, &pat_section(0x0100)),
+            ts_section_packet(
+                0x0100,
+                &pmt_section(&[(0x0f, 0x0102), (0x0f, 0x0102), (0x1b, 0x0101)]),
+            ),
+        ]);
+        assert_eq!(counts.audio, 1, "the repeated PID counts once");
+        assert_eq!(counts.video, 1);
+    }
+
+    #[test]
+    fn pmt_scan_stays_empty_on_unusable_input() {
+        // Best-effort contract: no PAT, no PMT, a non-TS file and a missing
+        // file all yield zero counts so the caller simply skips pre-claiming
+        // instead of pre-claiming a wrong number of pads.
+        assert_eq!(scan_packets(&[]), TsStreamCounts::default());
+        assert_eq!(
+            scan_packets(&[ts_section_packet(0x0100, &pmt_section(&[(0x0f, 0x0102)]))]),
+            TsStreamCounts::default(),
+            "a PMT without a PAT cannot be located"
+        );
+        assert_eq!(
+            scan_mpegts_stream_kinds("no-such-file.ts"),
+            TsStreamCounts::default(),
+            "a missing file must not panic"
+        );
+        let mut not_ts = vec![0u8; 376];
+        not_ts[0] = 0x00; // no sync byte anywhere
+        assert_eq!(
+            scan_packets(&[not_ts.clone(), not_ts]),
+            TsStreamCounts::default(),
+            "bytes without a sync byte yield no counts"
+        );
+    }
+
+    #[test]
+    fn pmt_scan_ignores_the_stream_type_free_pad_entries() {
+        // Private stream types (0x06 PES private data, 0x0b/0x0c) and the
+        // reserved 0x00 must not be mistaken for a media stream: counting
+        // them would pre-claim pads for streams the muxer never requests.
+        let counts = scan_packets(&[
+            ts_section_packet(0x0000, &pat_section(0x0100)),
+            ts_section_packet(
+                0x0100,
+                &pmt_section(&[(0x06, 0x0401), (0x0f, 0x0102), (0xf0, 0x0402)]),
+            ),
+        ]);
+        assert_eq!(counts.audio, 1);
+        assert_eq!(counts.video, 0);
     }
 }
