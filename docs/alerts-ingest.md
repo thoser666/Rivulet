@@ -78,6 +78,22 @@ entries, with redaction of tokens and privacy tests.
   perspective). Changing the direction updates the worker config, whose
   comparison in `apply_alerts_eventsub` restarts the EventSub WebSocket
   worker so the subscriptions are re-created with the new condition.
+  **Fixture robustness (loopback):** the puppet and the pseudo-Helix stub are
+  hardened against the two socket-level traps this repo has hit before — see
+  `Handshake robustness` in [`obs-websocket.md`](obs-websocket.md) and the
+  `handle_connection` accept loop of `alerts_webhook`. (1) An accepted socket
+  **inherits the listener's non-blocking mode on Windows**, so `drain_http_request`
+  restores blocking mode and retries `WouldBlock`/`TimedOut` instead of reading
+  "no data yet" as "request complete" — the latter answered into a socket the
+  client was still writing to, and the resulting RST cost the client a
+  subscription POST (~5 % of runs on a loaded Windows runner).
+  `drain_http_request_waits_for_a_slow_split_request` pins that invariant.
+  (2) Every fixture read is bounded and the stub runs until the test stops it,
+  so neither a slow client nor a lost stop signal can hang a `join`. The 202
+  answer carries `Connection: close` (the stub drops the socket right after
+  writing it), and the stub reports its counters back so the test can cross-check
+  them against the worker's own view.
+
 - **Kick engagement events** — the Kick chat worker listens to the same
   Pusher chatroom channel for engagement payloads and routes them to a
   dedicated alert channel alongside the chat messages:

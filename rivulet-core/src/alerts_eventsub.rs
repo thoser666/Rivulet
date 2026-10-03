@@ -933,22 +933,61 @@ mod tests {
         drop(receiver);
     }
 
+    /// Poll interval for the loopback fixtures' blocking reads.
+    const FIXTURE_POLL: StdDuration = StdDuration::from_millis(200);
+    /// Hard cap for one loopback fixture operation. Every blocking read in the
+    /// fixtures is bounded so a failing test can never leave a fixture thread —
+    /// and the `join` at the end of the test — hanging.
+    const FIXTURE_READ_DEADLINE: StdDuration = StdDuration::from_secs(5);
+    /// The pseudo-Helix stub's answer. `Connection: close` keeps the client
+    /// from pooling a socket the stub drops immediately after writing: a reused
+    /// socket would surface client-side as a truncated response.
+    const HELIX_202: &[u8] =
+        b"HTTP/1.1 202 Accepted\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+
     /// Read one complete HTTP request from the socket before answering, so the
     /// local stub never drops the connection while the client is still sending
     /// (Windows turns that into `WSAECONNRESET` instead of a clean FIN; same
     /// fixture pattern as the Kick/YouTube worker tests).
+    ///
+    /// Two platform properties made the naive version flaky — both are
+    /// documented fixes in production code elsewhere in this repo
+    /// ([`crate::alerts_webhook`] and `rivulet-obs-websocket`):
+    ///
+    /// 1. An accepted socket **inherits the listener's non-blocking mode** on
+    ///    Windows (Linux does not). The first `read` then returns `WouldBlock`
+    ///    *before the request has even arrived*. The old stub treated that as
+    ///    "request complete", answered immediately and dropped the socket, so
+    ///    the client took an RST mid-POST and counted it as failed:
+    ///    `subscription_created` came up one short in roughly one run in twenty
+    ///    under parallel load.
+    /// 2. Even in blocking mode a read can time out, so "no data yet" must
+    ///    never be confused with "end of stream".
+    ///
+    /// Restores blocking mode, arms a read timeout and retries
+    /// `WouldBlock`/`TimedOut`/`Interrupted` until the deadline expires.
     fn drain_http_request(stream: &mut std::net::TcpStream) -> std::io::Result<()> {
+        let _ = stream.set_nonblocking(false);
+        let _ = stream.set_read_timeout(Some(FIXTURE_POLL));
+        let deadline = Instant::now() + FIXTURE_READ_DEADLINE;
         let mut buf = Vec::new();
         let mut chunk = [0u8; 4096];
         let header_end = loop {
             if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
                 break pos + 4;
             }
-            let n = stream.read(&mut chunk)?;
-            if n == 0 {
-                return Ok(());
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "request headers never completed",
+                ));
             }
-            buf.extend_from_slice(&chunk[..n]);
+            match stream.read(&mut chunk) {
+                Ok(0) => return Ok(()),
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                Err(error) if is_no_data_yet(&error) => {}
+                Err(error) => return Err(error),
+            }
         };
         let headers = String::from_utf8_lossy(&buf[..header_end]);
         let content_length = headers
@@ -962,13 +1001,77 @@ mod tests {
         let mut received = buf.len();
         let needed = header_end + content_length;
         while received < needed {
-            let n = stream.read(&mut chunk)?;
-            if n == 0 {
-                break;
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "request body never completed",
+                ));
             }
-            received += n;
+            match stream.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => received += n,
+                Err(error) if is_no_data_yet(&error) => {}
+                Err(error) => return Err(error),
+            }
         }
         Ok(())
+    }
+
+    /// "No data available *yet*" — distinct from a real socket failure. Shared
+    /// by the fixture drain loop and the puppet's WebSocket drain.
+    fn is_no_data_yet(error: &std::io::Error) -> bool {
+        matches!(
+            error.kind(),
+            std::io::ErrorKind::WouldBlock
+                | std::io::ErrorKind::TimedOut
+                | std::io::ErrorKind::Interrupted
+        )
+    }
+
+    /// Regression pin for the Windows-only flake this module had: a socket
+    /// accepted from a **non-blocking listener** (exactly the stub's own shape)
+    /// must still be drained completely, even when the client writes its request
+    /// in two pieces with a pause in between. Without restoring blocking mode
+    /// the very first `read` returns `WouldBlock` *before a single request byte
+    /// arrived*, the stub answers into a socket the client is still writing to
+    /// and the resulting RST costs the client one subscription POST.
+    #[test]
+    fn drain_http_request_waits_for_a_slow_split_request() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        // The stub accepts on a non-blocking listener so its stop flag wins
+        // promptly — reproduce that inheritance here.
+        listener.set_nonblocking(true).expect("nonblocking");
+        let client = std::thread::Builder::new()
+            .name("test-eventsub-slow-client".into())
+            .spawn(move || {
+                let mut stream =
+                    std::net::TcpStream::connect(("127.0.0.1", port)).expect("connect");
+                let _ = stream.write_all(
+                    b"POST /helix/eventsub/subscriptions HTTP/1.1\r\nHost: local\r\nContent-Len",
+                );
+                std::thread::sleep(FIXTURE_POLL);
+                let _ = stream.write_all(b"gth: 5\r\n\r\nhello");
+                // Stay connected so "fully drained" (nothing left to read) is
+                // distinguishable from "peer went away" (EOF).
+                std::thread::sleep(FIXTURE_READ_DEADLINE);
+            })
+            .expect("spawn client");
+        let (mut stream, _) = wait_until(FIXTURE_READ_DEADLINE, || {
+            TcpListener::accept(&listener).ok()
+        })
+        .expect("accepted connection");
+        drain_http_request(&mut stream).expect("drain the split request");
+        let mut rest = [0u8; 16];
+        stream
+            .set_read_timeout(Some(FIXTURE_POLL))
+            .expect("read timeout");
+        assert!(
+            matches!(stream.read(&mut rest), Err(error) if is_no_data_yet(&error)),
+            "the request body was left in the socket"
+        );
+        // Detached on purpose: the client only holds the socket open.
+        drop(client);
     }
 
     #[test]
@@ -983,15 +1086,31 @@ mod tests {
                 let port = listener.local_addr().expect("addr").port();
                 let _ = port_tx.try_send(port);
                 let (stream, _) = listener.accept().expect("accept");
+                // Generous for the handshake even on a loaded runner, tightened
+                // again before the drain loop so the join below always returns.
+                stream
+                    .set_read_timeout(Some(FIXTURE_READ_DEADLINE))
+                    .expect("puppet read timeout");
                 let mut ws = tungstenite::accept(stream).expect("ws accept");
                 ws.send(tungstenite::Message::Text(WELCOME.into()))
                     .expect("welcome");
                 ws.send(tungstenite::Message::Text(NOTIFICATION.into()))
                     .expect("notification");
-                // Give the client a moment to consume, then drain until the
-                // client disconnects (clean FIN, no RST).
-                std::thread::sleep(StdDuration::from_millis(200));
-                while ws.read().is_ok() {}
+                ws.get_ref()
+                    .set_read_timeout(Some(FIXTURE_POLL))
+                    .expect("puppet poll timeout");
+                // Drain until the client disconnects (clean FIN, no RST), but
+                // never longer than the cap: the client never sends anything,
+                // so without the timeout this thread — and the join below —
+                // would block on the happy path too.
+                let deadline = Instant::now() + FIXTURE_READ_DEADLINE;
+                while Instant::now() < deadline {
+                    match ws.read() {
+                        Ok(_) => {}
+                        Err(tungstenite::Error::Io(error)) if is_no_data_yet(&error) => {}
+                        _ => break,
+                    }
+                }
             })
             .expect("spawn puppet");
 
@@ -1000,43 +1119,51 @@ mod tests {
             .expect("ws port");
 
         // Local pseudo-Helix stub answering 202 for the subscription POSTs.
+        //
+        // The stub runs until the test stops it instead of guessing a lifetime.
+        // The old "5 s after the first incoming connection" timer was *shorter
+        // than the assertions waiting on it*, so under parallel load the stub
+        // stopped serving with one POST still outstanding: the client got
+        // ECONNREFUSED, `subscription_created` stopped at 3 and the test failed
+        // after burning its full 10 s budget. The remaining cap is a safety net
+        // for the case where the stop signal never arrives.
         let (api_port_tx, api_port_rx) = crossbeam_channel::bounded::<u16>(1);
+        let (api_report_tx, api_report_rx) = crossbeam_channel::bounded::<(u64, u64)>(1);
+        let api_stop = Arc::new(AtomicBool::new(false));
         let api_stub = std::thread::Builder::new()
             .name("test-eventsub-api".into())
-            .spawn(move || {
-                let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind api stub");
-                let port = listener.local_addr().expect("addr").port();
-                let _ = api_port_tx.try_send(port);
-                listener.set_nonblocking(true).expect("nonblocking");
-                let mut deadline: Option<std::time::Instant> = None;
-                let mut handled = 0;
-                loop {
-                    if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-                        break;
-                    }
-                    match listener.accept() {
-                        Ok((mut stream, _)) => {
-                            // Arm the deadline on the first incoming
-                            // connection so the timer covers subscription
-                            // creation, not the receiver's WS handshake.
-                            if deadline.is_none() {
-                                deadline =
-                                    Some(std::time::Instant::now() + StdDuration::from_secs(5));
+            .spawn({
+                let api_stop = api_stop.clone();
+                move || {
+                    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind api stub");
+                    let port = listener.local_addr().expect("addr").port();
+                    let _ = api_port_tx.try_send(port);
+                    // Non-blocking accept so the stop flag is honoured
+                    // promptly; the accepted sockets go back to blocking mode
+                    // inside `drain_http_request` (see the comment there).
+                    listener.set_nonblocking(true).expect("nonblocking");
+                    let hard_deadline = Instant::now() + FIXTURE_READ_DEADLINE * 4;
+                    let (mut handled, mut failures) = (0u64, 0u64);
+                    while !api_stop.load(Ordering::SeqCst) && Instant::now() < hard_deadline {
+                        match listener.accept() {
+                            Ok((mut stream, _)) => {
+                                if drain_http_request(&mut stream).is_err() {
+                                    failures += 1;
+                                }
+                                if stream.write_all(HELIX_202).is_ok() {
+                                    handled += 1;
+                                } else {
+                                    failures += 1;
+                                }
                             }
-                            let _ = drain_http_request(&mut stream);
-                            let _ = stream
-                                .write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 2\r\n\r\n{}");
-                            handled += 1;
-                        }
-                        Err(_) => {
-                            std::thread::sleep(StdDuration::from_millis(10));
+                            Err(_) => std::thread::sleep(FIXTURE_POLL),
                         }
                     }
+                    // Report instead of asserting here: a panic in this thread
+                    // would be swallowed by `let _ = api_stub.join()` and the
+                    // real cause would stay invisible.
+                    let _ = api_report_tx.try_send((handled, failures));
                 }
-                assert!(
-                    handled >= EVENTSUB_ALERT_SUBSCRIPTIONS.len(),
-                    "stub handled {handled}"
-                );
             })
             .expect("spawn api stub");
 
@@ -1053,61 +1180,57 @@ mod tests {
             raid_direction: RaidAlertDirection::default(),
         });
 
-        // Poll for the follow event and the delivered/stat counters a few
-        // times — the local puppet is fast, but macOS CI runners have been
-        // observed to delay the first delivery just enough to trip a single
-        // recv_timeout. Retrying up to ~10 s is cheap and removes the flakiness
-        // without loosening the assertion (we still require exactly one
-        // delivered follow with no rejections/errors).
-        let mut event = None;
-        let deadline = std::time::Instant::now() + StdDuration::from_secs(10);
-        while std::time::Instant::now() < deadline {
-            match receiver
+        // Poll for the follow event: the local puppet is fast, but a loaded
+        // parallel runner can delay the first delivery. Retrying keeps the
+        // assertions exact — one delivered follow, nothing rejected.
+        let event = wait_until(StdDuration::from_secs(10), || {
+            receiver
                 .events()
-                .recv_timeout(StdDuration::from_millis(200))
-            {
-                Ok(e) if e.kind == AlertKind::Follow => {
-                    event = Some(e);
-                    break;
-                }
-                Ok(_) => {
-                    // A non-follow event before the follow would be unexpected
-                    // (the puppet only sends welcome + one follow), but keep
-                    // polling rather than failing the test on a spurious frame.
-                }
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                    break;
-                }
-            }
-        }
-        let event = event.expect("event queued within 10 s");
+                .recv_timeout(FIXTURE_POLL)
+                .ok()
+                .filter(|e| e.kind == AlertKind::Follow)
+        })
+        .unwrap_or_else(|| panic!("no follow event within 10 s: stats={:?}", receiver.stats()));
         assert_eq!(event.kind, AlertKind::Follow);
         assert_eq!(event.user, "Ada");
-        // Give the worker a moment to update stats after delivery. The
-        // subscription POSTs are sequential HTTP calls that can lag the event
-        // on a loaded runner (parallel suite), so poll — the assertion still
-        // requires exactly the four creations and no rejections/errors.
-        let stats = wait_until(StdDuration::from_secs(10), || {
+
+        // The subscription POSTs are sequential HTTP calls that can lag the
+        // event on a loaded runner, so poll until they settle. Polling stops
+        // early on a POST error instead of burning the whole budget.
+        let (delivered, rejected, created, error) = wait_until(StdDuration::from_secs(10), || {
             let (delivered, rejected, created, error, _, _) = receiver.stats();
-            (delivered == 1 && created == EVENTSUB_ALERT_SUBSCRIPTIONS.len() as u64)
+            (delivered == 1 && error == 0 && created == EVENTSUB_ALERT_SUBSCRIPTIONS.len() as u64)
                 .then_some((delivered, rejected, created, error))
         })
         .unwrap_or_else(|| {
-            let (delivered, rejected, created, error, _, _) = receiver.stats();
-            (delivered, rejected, created, error)
+            panic!(
+                "EventSub counters never settled (delivered, rejected, \
+                     created, error, revocation, reconnect)={:?}",
+                receiver.stats()
+            )
         });
-        let (delivered, rejected, created, error) = stats;
         assert_eq!(delivered, 1);
         assert_eq!(rejected, 0);
         assert_eq!(created, EVENTSUB_ALERT_SUBSCRIPTIONS.len() as u64);
         assert_eq!(error, 0);
 
         drop(receiver);
+        api_stop.store(true, Ordering::SeqCst);
         let _ = server.join();
         let _ = api_stub.join();
-    }
 
+        // Cross-check the client's view against the stub's: a POST the stub
+        // answered but the client counted as failed (or vice versa) is exactly
+        // the socket-level race this fixture used to lose.
+        let (handled, stub_failures) = api_report_rx
+            .recv_timeout(FIXTURE_READ_DEADLINE)
+            .expect("api stub report");
+        assert_eq!(stub_failures, 0, "the stub could not answer a POST cleanly");
+        assert_eq!(
+            handled, created,
+            "the stub answered {handled} POST(s), the client counted {created}"
+        );
+    }
     #[test]
     fn missing_credentials_never_dial_out() {
         let receiver = EventsubReceiver::start(EventsubWsConfig::default());

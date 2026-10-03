@@ -29,6 +29,33 @@
   der Flatpak-Drift-Check (`generate-cargo-sources.sh --verify`) fehl, weil der
   Flatpak-Build offline gegen die gepinnten Crate-Archive baut.
 
+- test(alerts): **Der EventSub-Puppet-Test ist unter Windows nicht mehr
+  flaky** — `delivers_notification_from_a_local_websocket_puppet` schlug auf
+  belasteten Windows-Runnern in rund 5 % der Läufe fehl (`created: 3` statt 4,
+  nach 10 s Wartezeit). Ursache war kein Timing, sondern das Test-Fixture: der
+  Pseudo-Helix-Stub akzeptiert auf einem **non-blocking** Listener, und auf
+  Windows **erbt der akzeptierte Socket** diesen Modus (Linux nicht).
+  `drain_http_request` las deshalb schon `WouldBlock`, *bevor überhaupt ein
+  Request-Byte ankam*, wertete das als „Request vollständig", antwortete und
+  droppte den Socket — der Client bekam mitten im POST ein RST und zählte ihn
+  als fehlgeschlagen. Dieselbe Falle ist in `alerts_webhook` und
+  `rivulet-obs-websocket` bereits dokumentiert und behoben; das Fixture hatte
+  sie nur nicht übernommen. Gehärtet sind jetzt: Blocking-Modus plus
+  Read-Timeout und Wiederholung statt Abbruch bei
+  `WouldBlock`/`TimedOut`/`Interrupted` in `drain_http_request`,
+  `Connection: close` in der 202-Antwort (kein Socket-Pooling auf einen sofort
+  gedroppten Socket), begrenzte Reads in beiden Fixture-Threads (kein `join`
+  kann mehr hängen) und eine vom Test gesetzte Stop-Flag statt des Timers „5 s
+  nach der ersten Verbindung" — der war **kürzer** als die 10 s, auf die der
+  Test wartete, also stoppte der Stub mitunter genau dann, wenn der letzte POST
+  noch offen war. Der Stub meldet seine Zähler über einen Kanal zurück und der
+  Test prüft sie gegen die Sicht des Clients, statt in einem abgerissenen
+  Thread zu panicen, dessen Meldung `let _ = join()` verschluckt hat.
+  Nebeneffekt: der Test braucht 0,4 s statt 5 s. Neuer Regressionstest
+  `drain_http_request_waits_for_a_slow_split_request` pinnt die Invariante
+  (non-blocking Listener, zweigeteilter Request). Belegt mit 40 Läufen des
+  Moduls unter 12-facher CPU-Last: 0 Fehlschläge, vorher 2 von 20.
+
 - chore(ci): **Ein offener Code-Scanning-Alert blockiert jetzt `develop`** —
   Alert #85 (`TokenPermissionsID`, high) blieb offen, obwohl CI grün war: der
   ci_pinning-Guard `code_scanning_alerts_are_resolved_and_pinned` ist rein
