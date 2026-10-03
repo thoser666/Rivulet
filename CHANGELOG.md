@@ -1,5 +1,34 @@
 ## [Unreleased]
 
+- chore(deps): wasmtime-Familie 48.0.3 → 48.0.5 (Patch-Bump, gleiche Minor-
+  Linie) — schließt **sieben** RustSec-Advisories, die die Supply-Chain-Gates
+  rot setzten: `RUSTSEC-2026-0321` (WASI-preview-0-`poll_oneoff` umgeht den
+  Fuel-Verbrauch), `RUSTSEC-2026-0322` (übermäßiger Host-Speicher bei Gästen
+  ohne stdio), `RUSTSEC-2026-0323` (`fd_readdir` kopiert uninitialisiertes
+  Struct-Padding in den Gastspeicher), `RUSTSEC-2026-0324` (Gast paniked den
+  Host über einen Filesystem-Zeitstempel vor der Epoch auf wasip3),
+  `RUSTSEC-2026-0325` und `RUSTSEC-2026-0326` (GC-Heap-Korruption durch falsch
+  typisierte Tag-Imports bzw. fehlendes Rooting von GC-Werten über `try_call`)
+  sowie `RUSTSEC-2026-0327` (unvalidierte Callback-Ergebnisanzahl bei
+  async-gelifteten Komponenten → nativer Stack-Buffer-Overflow).
+  `RUSTSEC-2026-0321` ist für Rivulet der Relevanteste, weil er genau das
+  per-Call-Fuel-Budget untergräbt, auf das sich `plugin_runtime` verlässt; der
+  Bump hebt die bereits vorhandene CVE-Historie der 29 → 48-Reihe fort.
+
+  Die Advisories erschienen in der Nacht zum 3.10.2026 und trafen **jeden**
+  Branch einschließlich `develop` — der letzte grüne `develop`-Lauf lag vor
+  ihnen. Erkannt durch `cargo audit` / `cargo deny check` (lokal: 7 Fehler vor,
+  `advisories ok` nach), nicht durch einen Quelltext-Pin.
+
+  Kein Manifest-Eingriff nötig, die Anforderung `wasmtime = "48.0"` deckt den
+  Patch bereits ab: `cargo update -p wasmtime -p wasmtime-wasi` zieht die
+  wasmtime-Familie auf 48.0.5, cranelift 0.135.3 → 0.135.5 und
+  wit-component/wit-parser 0.254.0 → 0.254.2 (keine Major-Sprünge).
+  `packaging/flatpak/cargo/cargo-sources.json` wurde mit
+  `packaging/flatpak/generate-cargo-sources.sh` regeneriert — ohne das schlägt
+  der Flatpak-Drift-Check (`generate-cargo-sources.sh --verify`) fehl, weil der
+  Flatpak-Build offline gegen die gepinnten Crate-Archive baut.
+
 - chore(ci): **Ein offener Code-Scanning-Alert blockiert jetzt `develop`** —
   Alert #85 (`TokenPermissionsID`, high) blieb offen, obwohl CI grün war: der
   ci_pinning-Guard `code_scanning_alerts_are_resolved_and_pinned` ist rein
