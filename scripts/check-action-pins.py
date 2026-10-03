@@ -11,7 +11,20 @@ reported separately:
 
 Exit codes: non-zero when any pin is *outdated within its major* or cannot be
 resolved. A *newer major* is reported but does not fail unless you pass
-`--fail-on-major`.
+`--fail-on-major`. *Rolling branch drift* is reported but does not fail unless
+you pass `--fail-on-branch-drift`.
+
+Rolling branch pins
+-------------------
+Some actions are pinned to a moving branch rather than a release tag
+(`dtolnay/rust-toolchain` -> `stable`). For those, "the branch tip is newer
+than our SHA" is not staleness in the same sense as a missed release: the SHA
+still fixes the action *code* that runs, and the compiler version comes from
+`rust-toolchain.toml`, not from the branch. Any upstream push would therefore
+redden the nightly without anything being broken, and Dependabot cannot cover
+the pin because a branch has no release to propose. It is reported separately
+as `branch-drift` and stays informational unless `--fail-on-branch-drift` is
+passed.
 
 Output modes (the exit code is the same regardless of mode):
 
@@ -21,7 +34,8 @@ Output modes (the exit code is the same regardless of mode):
                  PR comment, or the GitHub Actions step summary.
 
 Usage:
-    scripts/check-action-pins.py [--fail-on-major] [--json | --comment]
+    scripts/check-action-pins.py [--fail-on-major] [--fail-on-branch-drift]
+                                  [--json | --comment]
 """
 
 import json
@@ -130,9 +144,9 @@ def action_repo(action):
 def check_action(action, sha, version):
     """Return a JSON-serializable dict describing the pin's status.
 
-    ``statuses`` is a list drawn from ``{"ok", "outdated", "major", "error"}``;
-    an action can be both ``outdated`` (within its major) and ``major`` (a newer
-    major exists).
+    ``statuses`` is a list drawn from ``{"ok", "outdated", "major", "error",
+    "branch-drift"}``; an action can be both ``outdated`` (within its major) and
+    ``major`` (a newer major exists).
     """
     result = {
         "action": action,
@@ -170,9 +184,15 @@ def check_action(action, sha, version):
                 message=f"{action}@{version} is current (branch tip {sha})",
             )
         else:
+            # Not an error: a branch pin is a moving target by construction, and
+            # the pinned SHA still fixes the action code that runs. Reported so
+            # the bump is visible, fatal only behind --fail-on-branch-drift.
             result.update(
-                statuses=["outdated"],
-                message=f"{action}@{version}: branch tip is {tip}, pinned {sha}",
+                statuses=["branch-drift"],
+                message=(
+                    f"{action}@{version}: branch tip is {tip}, pinned {sha} "
+                    "(rolling branch, informational)"
+                ),
             )
         return result
 
@@ -231,7 +251,24 @@ def summarize(results):
         "outdated": sum(1 for r in results if "outdated" in r["statuses"]),
         "major": sum(1 for r in results if "major" in r["statuses"]),
         "errors": sum(1 for r in results if "error" in r["statuses"]),
+        "branch_drift": sum(1 for r in results if "branch-drift" in r["statuses"]),
     }
+
+
+def fatal_count(summary, fail_on_major, fail_on_branch_drift):
+    """Return how many findings must fail the run.
+
+    Shared by the comment renderer and the exit code so the step summary can
+    never claim green while the job still fails (or the reverse). Rolling
+    branch drift only counts when the caller opted in via
+    ``--fail-on-branch-drift``.
+    """
+    total = summary["errors"] + summary["outdated"]
+    if fail_on_major:
+        total += summary["major"]
+    if fail_on_branch_drift:
+        total += summary["branch_drift"]
+    return total
 
 
 def short_status(result):
@@ -241,23 +278,59 @@ def short_status(result):
         parts.append("unresolvable")
     if "outdated" in result["statuses"] and result.get("latest_in_major"):
         parts.append(f"outdated (latest `{result['latest_in_major']['version']}`)")
+    if "branch-drift" in result["statuses"]:
+        tip = result.get("branch_tip", "")
+        # Whether drift is fatal is decided by --fail-on-branch-drift and
+        # stated in the headline, so the cell stays a neutral fact.
+        parts.append(f"branch drift (tip `{tip[:7]}`)")
     if "major" in result["statuses"] and result.get("latest_overall"):
         parts.append(f"newer major `{result['latest_overall']['version']}`")
     return ", ".join(parts)
 
 
-def render_comment(results, summary):
+def render_comment(results, summary, fail_on_major=False, fail_on_branch_drift=False):
     """Return a compact Markdown notification for an issue/PR/step summary."""
-    if summary["outdated"] == 0 and summary["major"] == 0 and summary["errors"] == 0:
-        return f"✅ All {summary['total']} action pins are current.\n"
+    fatal = fatal_count(summary, fail_on_major, fail_on_branch_drift)
+    drift = summary["branch_drift"]
 
-    lines = [
-        "## ⚠️ Action pins need attention",
-        "",
+    if fatal == 0:
+        lines = [f"✅ All {summary['total']} action pins are current."]
+        if drift:
+            # Green, but the bump stays visible: a rolling branch pin that
+            # moved is not a missed release.
+            lines += [
+                "",
+                f"ℹ️ {drift} rolling-branch pin(s) moved upstream "
+                "(informational — the pinned SHA still fixes the action code):",
+                "",
+                "| Action | Pinned | Status |",
+                "| --- | --- | --- |",
+            ]
+            for result in results:
+                if "branch-drift" in result["statuses"]:
+                    lines.append(
+                        f"| `{result['action']}` | `{result['pinned_version']}` | "
+                        f"{short_status(result)} |"
+                    )
+        return "\n".join(lines) + "\n"
+
+    lines = ["## ⚠️ Action pins need attention", ""]
+    if drift:
+        role = (
+            "fatal here, because `--fail-on-branch-drift` is set"
+            if fail_on_branch_drift
+            else "informational unless `--fail-on-branch-drift` is set"
+        )
+        lines += [
+            f"ℹ️ {drift} rolling-branch pin(s) moved upstream — {role}.",
+            "",
+        ]
+    lines += [
         (
             f"**{summary['outdated']} outdated within major · "
-            f"{summary['major']} newer major · {summary['errors']} errors** "
-            f"(of {summary['total']})"
+            f"{summary['major']} newer major · {summary['errors']} errors"
+            + (f" · {drift} rolling-branch drift**" if drift else "**")
+            + f" (of {summary['total']})"
         ),
         "",
         "| Action | Pinned | Status |",
@@ -283,6 +356,7 @@ def main():
         sys.exit("no third-party action pins found in .github/workflows")
 
     fail_on_major = "--fail-on-major" in args
+    fail_on_branch_drift = "--fail-on-branch-drift" in args
     as_json = "--json" in args
     as_comment = "--comment" in args or "--github-comment" in args
 
@@ -307,7 +381,7 @@ def main():
     outdated = summary["outdated"]
     major = summary["major"]
     errored = summary["errors"]
-    failed = bool(errored or outdated or (major if fail_on_major else 0))
+    failed = bool(fatal_count(summary, fail_on_major, fail_on_branch_drift))
 
     if as_json:
         print(
@@ -315,6 +389,7 @@ def main():
                 {
                     "ok": not failed,
                     "fail_on_major": fail_on_major,
+                    "fail_on_branch_drift": fail_on_branch_drift,
                     "summary": summary,
                     "actions": results,
                 },
@@ -322,13 +397,14 @@ def main():
             )
         )
     elif as_comment:
-        print(render_comment(results, summary))
+        print(render_comment(results, summary, fail_on_major, fail_on_branch_drift))
     else:
         for result in results:
             print(result["message"])
         print(
             f"\nSummary: {outdated} outdated within major, "
-            f"{major} with newer major available, {errored} errors",
+            f"{major} with newer major available, {errored} errors, "
+            f"{summary['branch_drift']} rolling-branch drift",
             file=sys.stderr,
         )
 

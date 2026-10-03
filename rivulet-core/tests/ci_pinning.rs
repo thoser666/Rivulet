@@ -75,7 +75,7 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v6.1.0",
     ),
     (
-        "dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87",
+        "dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d",
         "stable",
     ),
     (
@@ -2357,6 +2357,46 @@ fn stale_pin_checker_is_wired_up() {
     assert!(
         nightly.contains("--fail-on-major"),
         "the nightly workflow must treat newer-major gaps as fatal (--fail-on-major)"
+    );
+    // `dtolnay/rust-toolchain` is pinned to the rolling `stable` *branch*.
+    // Dependabot cannot propose updates for a branch (there is no release),
+    // so the checker is the only thing that sees the tip moving. Treating that
+    // as a stale pin reddened the nightly after every upstream push — twice in
+    // three weeks, 8+ days each (#173) — even though the pinned SHA still
+    // fixes the action code and the compiler is pinned by rust-toolchain.toml.
+    // It must therefore be reported as its own `branch-drift` status and stay
+    // informational unless the caller opts in with --fail-on-branch-drift.
+    assert!(
+        checker.contains("\"branch-drift\""),
+        "check-action-pins.py must report a moved branch pin as its own branch-drift status"
+    );
+    assert!(
+        checker.contains("def fatal_count"),
+        "check-action-pins.py must decide what is fatal in one place shared by the exit code and the comment"
+    );
+    assert!(
+        checker.contains("--fail-on-branch-drift"),
+        "check-action-pins.py must offer --fail-on-branch-drift to make branch drift fatal on demand"
+    );
+    assert!(
+        checker.contains("if fail_on_branch_drift:")
+            && checker.contains("total = summary[\"errors\"] + summary[\"outdated\"]"),
+        "branch drift must only enter the fatal count behind --fail-on-branch-drift"
+    );
+    // The comment must not claim green while the job fails, so the drift-aware
+    // renderer has to receive both flags instead of hardcoding the old verdict.
+    assert!(
+        checker.contains("render_comment(results, summary, fail_on_major, fail_on_branch_drift)"),
+        "render_comment must take both flags so the step summary agrees with the exit code"
+    );
+    assert!(
+        !nightly.contains("--fail-on-branch-drift"),
+        "the nightly must not opt into fatal branch drift; the drift is informational there"
+    );
+    let toolchain = read("rust-toolchain.toml");
+    assert!(
+        toolchain.contains("channel = \"1.98.0\""),
+        "the compiler must stay pinned in rust-toolchain.toml, independently of the action's rolling branch"
     );
 }
 
