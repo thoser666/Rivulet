@@ -1,5 +1,39 @@
 ## [Unreleased]
 
+- test(m6): **Der Resource-Report-Harness ist unter CPU-Last nicht mehr
+  flaky** — `m6_resource_report_6_routed_sources_full_filter_chains` fiel auf
+  belasteten Maschinen mit `p99 push latency 6258 µs exceeds half the 10 ms
+  frame budget` um (reproduziert: 5 Fehlschläge in 8 Läufen bei 100 % CPU).
+  Ursache war kein Produktdefekt, sondern ein Messfehler im Harness: die
+  Latenz-Schleife drückte alle 4.800 Frames **ohne Taktung** in die
+  Pipeline, also **10- bis 44-fach über Echtzeit** (8 s Audio in
+  0,18–0,78 s). Die Audio-Zweige sind `is-live=true do-timestamp=true`, die
+  Pipeline ist also für Echtzeit-Verarbeitung gebaut; unter dieser
+  Überlastung blockierte `appsrc::push_buffer` auf GStreamer-Backpressure,
+  bis die sechs AAC-Zweige aufgeschlossen hatten. Gemessen wurde damit die
+  **Drain-Zeit der Pipeline**, nicht der Producer-Pfad, den das Gate
+  ausweisen will — p50 und p95 blieben stabil bei ~23/~28 µs, nur p99
+  schwankte zwischen 95 µs und 6,3 ms. Das Budget selbst bleibt unverändert
+  bei 5.000 µs; korrigiert wurde die Messung.
+  Die Schleife läuft jetzt über einen `FramePacer` im 10-ms-Raster der
+  Frames selbst, im Report als `audio_push_paced_to_real_time` vermerkt.
+  Zusätzlich ist die Bereitschaftsprüfung der Ausgabedatei von „existiert
+  und ist nicht leer" auf „enthält eine Top-Level-`moov`-Box" umgestellt:
+  die alte Prüfung ist schon mit dem ersten `ftyp` erfüllt, lange bevor der
+  Muxer die Track-Metadaten schreibt, und konnte den Discoverer auf eine
+  halb geschriebene Datei ansetzen — die im Issue #276 gemeldete Variante
+  „`found 0` statt 6 Audiospuren". Der Box-Walker läuft über die
+  deklarierten Box-Größen, erkennt also auch keine Payload-Bytes, die
+  zufällig `moov` buchstabieren.
+  Vier neue Regressionstests halten beides fest: zwei für den Pacer
+  (überfällige Runden verkürzen die folgende Periode nicht; ein
+  deschedulter Thread resynchronisiert, statt verpasste Perioden im Burst
+  nachzuholen), einer für den `moov`-Walker und einer als End-to-End-Guard
+  über eine echte 6-Quellen-Session. Belegt mit 6 Läufen des gesamten
+  Harness bei ~90 % CPU: 0 Fehlschläge. Preis: die Latenzphase dauert durch
+  das Echtzeit-Taktung ~8 s statt ~0,2 s, der Harness gesamt ~28 s statt
+  ~18 s.
+
 - chore(deps): wasmtime-Familie 48.0.3 → 48.0.5 (Patch-Bump, gleiche Minor-
   Linie) — schließt **sieben** RustSec-Advisories, die die Supply-Chain-Gates
   rot setzten: `RUSTSEC-2026-0321` (WASI-preview-0-`poll_oneoff` umgeht den

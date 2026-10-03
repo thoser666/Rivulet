@@ -1281,12 +1281,50 @@ fn m6_resource_report_harness_is_pinned() {
         "GetProcessMemoryInfo",
         "audio_streams().len()",
         "MAX_MEMORY_GROWTH_MB: f64 = 64.0",
-        "p99 < 5_000.0",
+        "PUSH_BUDGET_US: f64 = 5_000.0",
+        "p99 < PUSH_BUDGET_US",
         "resource-efficiency schema",
     ] {
         assert!(
             harness.contains(required),
             "resource-report harness must pin {required}"
+        );
+    }
+
+    // Issue #276: the latency gate only means something while the producer
+    // stays inside the live pipeline's real-time envelope, and the output
+    // check only means something once the muxer finalized the file. Both
+    // regressed silently into load-dependent flakiness, so pin the pacing,
+    // the finalized-file readiness and their regression tests.
+    for required in [
+        "const FRAME_PERIOD: Duration = Duration::from_millis(10)",
+        "pacer.wait_for_next_frame()",
+        "struct FramePacer",
+        "fn mp4_is_finalized",
+        "moov",
+        "\"audio_push_paced_to_real_time\": true",
+        "fn frame_pacer_never_runs_faster_than_real_time",
+        "fn frame_pacer_resynchronizes_after_a_long_stall",
+        "fn mp4_finalization_is_detected_by_the_moov_box",
+        "fn routed_push_stays_below_the_frame_budget_when_paced",
+    ] {
+        assert!(
+            harness.contains(required),
+            "resource-report harness must pin {required}"
+        );
+    }
+
+    // The report documents why the pacing exists; without it the next
+    // reader is tempted to "optimize" the loop back to a burst.
+    let report = read("docs/m6-audio-resource-report.md");
+    for required in [
+        "audio_push_paced_to_real_time",
+        "frame_pacer_never_runs_faster_than_real_time",
+        "routed_push_stays_below_the_frame_budget_when_paced",
+    ] {
+        assert!(
+            report.contains(required),
+            "M6 resource report must pin {required}"
         );
     }
 }

@@ -55,6 +55,37 @@ Budget: the p99 must stay below half the 10 ms frame budget (5,000 µs).
 inside GStreamer's streaming threads, off the caller's thread; the push is
 the only part on the producer's path.
 
+**The push loop is paced to the frames' own 10 ms period** (issue #276), and
+the report records that as `audio_push_paced_to_real_time`. This is a
+property of the measurement, not of the feature: the routed branches are
+built `is-live=true do-timestamp=true`, i.e. the pipeline is built to
+consume audio in real time. The harness originally pushed all 4,800 frames
+back-to-back, which drove the pipeline **10–44× over its design rate**
+(8 s of audio injected in 0.18–0.78 s). `appsrc::push_buffer` then blocked
+on GStreamer backpressure until the six AAC branches caught up, so the
+"latency" measured pipeline *drain* time rather than the producer path.
+Under CPU starvation that pushed the p99 past the 5,000 µs budget and failed
+the gate for reasons that had nothing to do with the code under test.
+
+Paced, the pipeline stays inside its design envelope and the measurement
+means what it claims. The budget itself is unchanged — only the measurement
+was wrong.
+
+Re-measured on the same machine with the machine deliberately saturated
+(12 busy loops on 12 logical cores, 100 % reported load), 8 consecutive
+runs, 0 failures:
+
+| Percentile | Latency (unpaced, saturated) | Latency (paced, saturated) |
+| --- | --- | --- |
+| p50 | 22–24 µs | 22.9 µs |
+| p95 | 26–30 µs | 60.2 µs |
+| p99 | 95 µs – **6,258 µs** (fails the 5,000 µs budget) | 131.7 µs |
+
+The p50 is unchanged, which is the point: the unpaced runs measured the
+producer path correctly most of the time and only mis-measured the tail,
+where `push_buffer` blocked on backpressure. Pacing moves that tail back
+into the same order of magnitude as the median.
+
 ### 2. Audio-graph scaling (running pipeline element histograms)
 
 Element factories of the *running* pipeline at 0 / 1 / 2 / 6 routed sources
@@ -113,6 +144,14 @@ The produced MP4 was verified with `gst_pbutils::Discoverer`:
 - **6 audio tracks** — one per record-routed source (asserted).
 - **1 video track**.
 
+Readiness is decided by walking the MP4's top-level box chain and requiring
+a `moov` box, not by "the file exists and is non-empty" (issue #276). The
+weaker check is already satisfied by the first `ftyp`, long before the muxer
+appends the track metadata, so it could point the Discoverer at a
+half-written file and report zero tracks for a session that was in fact
+fine. The walker is unit-tested, including the case of payload bytes that
+happen to spell `moov`.
+
 ## Honest `N/A` items (per the gate's reporting rule)
 
 | Measurement | Status | Reason |
@@ -136,3 +175,20 @@ Reproduce:
 cargo test -p rivulet-core --test m6_resource_report -- --nocapture
 python scripts/resource-efficiency-check.py target/m6-audio-resource-report.json
 ```
+
+## Harness regressions (issue #276)
+
+The harness now also carries four guards, so the pacing and the
+finalization check cannot silently regress:
+
+| Test | Guards |
+| --- | --- |
+| `frame_pacer_never_runs_faster_than_real_time` | the producer cannot outrun the real-time frame period |
+| `frame_pacer_resynchronizes_after_a_long_stall` | a descheduled thread resynchronizes instead of bursting to catch up |
+| `mp4_finalization_is_detected_by_the_moov_box` | readiness means a finalized MP4, not a non-empty file |
+| `routed_push_stays_below_the_frame_budget_when_paced` | end-to-end: paced pushes stay under the budget on a live 6-source session |
+
+The runtime cost of pacing is real and deliberate: 800 real-time rounds
+means the latency phase now takes ~8 s instead of ~0.2 s, and the whole
+harness ~28 s instead of ~18 s. Measuring a live pipeline faster than real
+time is what produced the unstable numbers in the first place.
