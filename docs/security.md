@@ -203,7 +203,11 @@ change. Do not silence the advisory or pin back to the yanked release.
 - The fixed releases for the advisories detected on the previous CI run are
   `anyhow >= 1.0.103` (`RUSTSEC-2026-0190`), `bytes >= 1.11.1`
   (`RUSTSEC-2026-0007`), and `crossbeam-epoch >= 0.9.20`
-  (`RUSTSEC-2026-0204`). These minimums are regression-tested against the
+  (`RUSTSEC-2026-0204`), and `wasmtime`/`wasmtime-wasi` >= 48.0.5
+  (`RUSTSEC-2026-0321` through `RUSTSEC-2026-0327`). `RUSTSEC-2026-0321`
+  is the one that matters here: a WASI preview 0 `poll_oneoff` that
+  circumvents fuel consumption defeats the per-call fuel budget the plugin
+  sandbox relies on. These minimums are regression-tested against the
   committed lockfile; advisories are not silenced with an ignore entry.
 - Unmaintained advisories are evaluated for workspace dependencies; duplicate
   versions are warnings until explicitly triaged.
