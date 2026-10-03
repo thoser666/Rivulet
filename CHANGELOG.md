@@ -1,5 +1,43 @@
 ## [Unreleased]
 
+- ci: **Nightly wieder grün — veralteter `dtolnay/rust-toolchain`-Pin** — der
+  Job „Check for stale action pins" lief seit dem 2. Oktober rot:
+  `**1 outdated within major** (of 15)`, `dtolnay/rust-toolchain` @ `stable`.
+  Ursache ist kein Defekt im Checker, sondern der Roll-Branch-Pin selbst:
+  `dtolnay/rust-toolchain` wird auf den SHA des `stable`-**Branches** gepinnt
+  (nicht auf ein Release-Tag), und der Branch ist gerollt — von `6bed0761`
+  (3.9.) auf `89b12181` (1.10., „Retry release-server checksum failures" +
+  `--force-non-host`). Der Pin damit überall auf den neuen Tip gehoben
+  (14 Stellen in 5 Workflows, plus `ci_pinning.rs` und die generierte
+  Doku-Tabelle). Die `action.yml`-Diff zwischen beiden SHAs wurde geprüft:
+  **keine Änderung an der `inputs:`-Oberfläche**, nur neue `runs:`-Schritte —
+  alle Jobs rufen die Action mit `components:`, ein Input-Umbau hätte sie alle
+  gebrochen.
+  Und weil das **strukturell** so ist — diesen einen Pin kann Dependabot nicht
+  aktualisieren (kein Release, nur ein Branch) — wurde die Gate-Logik
+  nachgezogen: der Checker wertet einen gerollten Branch-Pin nicht mehr als
+  veralteten Pin, sondern meldet ihn als eigenen Status `branch-drift` und
+  lässt ihn **informativ**. Das ist keine Abschwächung, sondern die Korrektur
+  einer falschen Prämisse: es ist nichts veraltet, denn der gepinnte SHA
+  fixiert weiterhin den ausgeführten Action-Code, und die Compiler-Version
+  kommt aus `rust-toolchain.toml` (Kanal 1.98.0), nicht aus dem Branch. Bisher
+  hat **jeder** Upstream-Push auf `stable` den Nightly rot gesetzt, ohne dass
+  irgendetwas kaputt war — zuletzt 8+ Tage (#173), davor derselbe Effekt beim
+  CodeQL-Bump (25.–27.9.). Neu: Drift erscheint als ℹ️-Hinweis in der
+  Step-Summary, der Job bleibt grün; wer es streng will, übergibt
+  `--fail-on-branch-drift`. Die Fatal-Entscheidung liegt jetzt in
+  `fatal_count()` und wird von Exit-Code **und** Markdown-Renderer geteilt,
+  damit die Step-Summary nicht grün melden kann, während der Job rot ist.
+  Nebenbei behoben: ein Branch-Drift-Pin rendert in der Tabelle eine **leere**
+  Statuszelle (im roten Nightly-Log sichtbar) — jetzt mit Tip und Label
+  („branch drift").
+  `ci_pinning.rs` pinnt die neue Semantik (u. a. dass der Nightly
+  `--fail-on-branch-drift` **nicht** setzt) per Negativprobe geprüft; die
+  Gate-Matrix (9 Fälle: outdated/major/error/drift je mit und ohne Flag)
+  läuft grün. Die Doku nennt außerdem den Review-Befehl
+  (`git diff <old> <new> -- action.yml`) und die Prüfbedingung („kein
+  `inputs:`-Diff").
+
 - test(m6): **Der Resource-Report-Harness ist unter CPU-Last nicht mehr
   flaky** — `m6_resource_report_6_routed_sources_full_filter_chains` fiel auf
   belasteten Maschinen mit `p99 push latency 6258 µs exceeds half the 10 ms

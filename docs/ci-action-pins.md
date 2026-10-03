@@ -25,7 +25,7 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | `actions/dependency-review-action` | `v5.0.0` | `a1d282b36b6f3519aa1f3fc636f609c47dddb294` | security.yml |
 | `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | ci.yml, release.yml |
 | `actions/upload-artifact` | `v7.0.1` | `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` | build-package.yml, ci.yml, fuzz-deep.yml, obs-upstream.yml, scorecard.yml, weekly-promotion.yml |
-| `dtolnay/rust-toolchain` | `stable` | `6bed0761d98439e5a578e2877258200ad565ba87` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, security.yml |
+| `dtolnay/rust-toolchain` | `stable` | `89b12181fb390509a0842a86cc55eeb8eb928c1d` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, security.yml |
 | `github/codeql-action/analyze` | `v4.38.2` | `2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2` | security.yml |
 | `github/codeql-action/autobuild` | `v4.38.2` | `2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2` | security.yml |
 | `github/codeql-action/init` | `v4.38.2` | `2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2` | security.yml |
@@ -39,6 +39,33 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 > tag): the SHA pins the action *code*, while the action's default
 > `toolchain: stable` input still installs the latest stable Rust. It therefore
 > has no semver comment.
+>
+> Because that pin tracks a rolling branch, it is the one pin **Dependabot
+> cannot keep current**: Dependabot proposes updates for released versions,
+> and the `stable` branch has no release, so the nightly stale-pin checker is
+> the only thing that notices the tip moving. Upstream pushed `6bed0761` →
+> `89b12181` on 2026-10-01 ("retry release-server checksum failures",
+> `--force-non-host`), which reddened the nightly for several days until the
+> bump landed — the second time in three weeks, the first costing 8+ days
+> (#173). The checker now reports that as `branch-drift` and keeps it
+> **informational**, because nothing is actually stale: the pinned SHA still
+> fixes the action code that runs, and the compiler version comes from
+> `rust-toolchain.toml` below, not from the branch. Bump it when convenient;
+> pass `--fail-on-branch-drift` if you ever want the old strict behaviour back.
+>
+> When the checker reports drift on this action, verify the diff
+>
+> ```bash
+> git clone -q --filter=blob:none --branch stable --single-branch \
+>   https://github.com/dtolnay/rust-toolchain.git /tmp/rtc
+> git -C /tmp/rtc log --oneline <old-sha>..<new-sha>
+> git -C /tmp/rtc diff <old-sha> <new-sha> -- action.yml
+> ```
+>
+> and confirm that no `inputs:` surface changed — the action is called with
+> `components:` in every job, so an input rename would break all of them.
+> Runtime changes to the `runs:` steps (retry loops, extra flags) are the
+> normal reason a bump exists.
 >
 > The **compiler version itself is pinned by `rust-toolchain.toml`** (repo
 > root, channel `1.98.0`, components rustfmt + clippy): every `cargo`
@@ -98,7 +125,16 @@ repository is not configured yet.
   (run daily by the nightly workflow): fails on same-major updates we have not
   taken. The nightly workflow invokes it with `--fail-on-major`, so **newer
   major versions also fail the job** instead of only being reported — a major
-  gap therefore surfaces as a red Nightly run rather than a warning.
+  gap therefore surfaces as a red Nightly run rather than a warning. For a
+  branch pin such as `dtolnay/rust-toolchain@stable` the comparison is against
+  the branch tip, which moves on every upstream push; that is reported as its
+  own `branch-drift` status and stays informational, because the pinned SHA
+  still fixes the action code and Dependabot cannot cover a branch. Add
+  `--fail-on-branch-drift` to make it fatal — the nightly deliberately does
+  not, so an upstream action commit cannot redden the run on its own. The
+  "is this fatal?" decision lives in `fatal_count()`, shared by the exit code
+  and the Markdown renderer, so the step summary can never claim green while
+  the job fails.
   `--json` emits a machine-readable result; `--comment` emits a compact Markdown
   notification that the nightly workflow publishes to the run's step summary.
   Compound actions (`owner/repo/path/to/action`) are resolved against the
