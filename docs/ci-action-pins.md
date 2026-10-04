@@ -137,6 +137,33 @@ repository is not configured yet.
   the job fails.
   `--json` emits a machine-readable result; `--comment` emits a compact Markdown
   notification that the nightly workflow publishes to the run's step summary.
+
+### Two places run the checker: one gates, one reports
+
+The same checker runs in two workflows with deliberately different strictness:
+
+| Workflow | Step | Flags | Failure |
+| --- | --- | --- | --- |
+| `nightly.yml` | `Check for stale action pins` | `--fail-on-major --comment` | **fails the job** (outdated within major, newer major, unresolvable ref) |
+| `ci.yml` | `Report stale action pins (advisory)` | `--comment` | never — `continue-on-error: true` |
+
+`ci.yml` runs on every push and pull request, the nightly only once a day. A
+drifting rolling-branch pin is therefore reported within minutes instead of
+up to 24h later, and lands in that run's step summary next to the commit that
+touched a pin. It stays a report on purpose: the drift must not be able to
+redden a contributor's pull request, which is why the step carries
+`continue-on-error: true` and passes neither `--fail-on-major` nor
+`--fail-on-branch-drift`. The nightly remains the single fatal gate — a second
+one would only duplicate the cause of red builds.
+
+Both invocations use `set -o pipefail` with a `| tee -a "$GITHUB_STEP_SUMMARY"`
+pipeline, so the checker's exit status survives the pipe and the step summary
+is written even when the checker itself fails.
+
+`rivulet-core/tests/ci_pinning.rs` asserts this split
+(`stale_pin_checker_runs_on_every_push_as_an_advisory_report`): the advisory
+step must exist, must run the checker in `--comment` mode, must keep
+`continue-on-error`, and must not pick up either fatal flag.
   Compound actions (`owner/repo/path/to/action`) are resolved against the
   `owner/repo` repository that owns the tags, so the sub-path is stripped before
   comparing SHAs.

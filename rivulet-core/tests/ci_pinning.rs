@@ -2400,6 +2400,80 @@ fn stale_pin_checker_is_wired_up() {
     );
 }
 
+/// The advisory stale-pin report in `.github/workflows/ci.yml`.
+///
+/// The nightly already *gates* stale pins, but it only runs once a day, so a
+/// rolling-branch pin that moved upstream stayed invisible for up to 24h (and
+/// in practice for days, because nobody read the red nightly). Reporting it on
+/// every push/PR makes the drift visible while the commit that touched a pin is
+/// still on screen.
+///
+/// This must stay a *report*, not a second gate: the same drift that reddened
+/// the nightly cannot redden a contributor's pull request. Hence
+/// `continue-on-error`, and deliberately no `--fail-on-major` /
+/// `--fail-on-branch-drift` — those belong to the nightly gate only.
+#[test]
+fn stale_pin_checker_runs_on_every_push_as_an_advisory_report() {
+    let ci = read(".github/workflows/ci.yml");
+    const STEP_NAME: &str = "Report stale action pins (advisory)";
+    let start = ci
+        .find(STEP_NAME)
+        .unwrap_or_else(|| panic!("ci.yml must contain a step named {STEP_NAME:?}"));
+    let rest = &ci[start..];
+    let end = rest[1..]
+        .find("\n      - name: ")
+        .map(|offset| offset + 1)
+        .expect("the advisory step must be followed by another step");
+    let step = &rest[..end];
+
+    assert!(
+        step.contains("python3 scripts/check-action-pins.py --comment"),
+        "the advisory step must run the same checker the nightly runs, in --comment mode"
+    );
+    // The step carries a comment explaining *why* it passes no fatal flag, so
+    // the flags themselves are checked on the executed command line only.
+    let command: String = step
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        step.contains("continue-on-error: true"),
+        "the advisory step must not be able to redden a push or a contributor's pull request"
+    );
+    assert!(
+        step.contains("GITHUB_STEP_SUMMARY"),
+        "the advisory step must publish its report to the run's step summary"
+    );
+    assert!(
+        step.contains("set -o pipefail"),
+        "the advisory step must keep the checker's exit status instead of tee's"
+    );
+    // The nightly stays the single fatal gate; a second one would just be a
+    // duplicate source of red builds.
+    assert!(
+        !command.contains("--fail-on-major"),
+        "newer-major gaps must stay owned by the nightly gate, not the advisory CI step"
+    );
+    assert!(
+        !command.contains("--fail-on-branch-drift"),
+        "branch drift must stay informational in regular CI too"
+    );
+
+    // The gate itself must not be weakened by the addition.
+    let nightly = read(".github/workflows/nightly.yml");
+    assert!(
+        nightly.contains("--fail-on-major") && !nightly.contains("--fail-on-branch-drift"),
+        "the nightly must remain the fatal gate (--fail-on-major, no --fail-on-branch-drift)"
+    );
+
+    let doc = read("docs/ci-action-pins.md");
+    assert!(
+        doc.contains("advisory") && doc.contains("ci.yml"),
+        "docs/ci-action-pins.md must document the advisory report in ci.yml next to the nightly gate"
+    );
+}
+
 #[test]
 fn apt_parity_checker_is_wired_up() {
     // The nightly build broke for over a week because `libasound2-dev` was
