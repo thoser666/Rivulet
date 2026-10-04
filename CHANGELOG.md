@@ -13,6 +13,16 @@
   Baum muss gelistet sein. Die zweite Richtung ist die wichtige: ein Manifest,
   das ein Artefakt stillschweigend auslaesst, veroeffentlicht es ohne
   Integritaetsabdeckung, und niemand weiter unten wuerde es merken.
+  **Der Manifest-Umfang, praezise:** die Release haengt neben dem
+  `release-assets/*`-Glob fuenf Doku-Assets per Pfad an
+  (`docs/opengraph.png` und Verwandte). Die sind kein Build-Output und stehen
+  nicht im Manifest -- und weil `gh release download` *jedes* Release-Asset
+  holt, schliesst die Verifikation genau diese fuenf aus. Ohne diesen
+  Ausschluss haette der neue Job **jedes** Release mit vier falschen
+  "present but not listed"-Meldungen rotgemeldet; das ist beim Nachbauen des
+  echten Download-Layouts aufgefallen und ist jetzt als Fall 10 im Self-Test
+  festgeschrieben. Die Ausschlussliste wird im Guard gegen den `files:`-Block
+  beider Workflows gepinnt, kann also nicht still auseinanderlaufen.
   **Neu: der `verify_release`-Job** in `release.yml` und `ci.yml`. Er laedt die
   bereits veroeffentlichte Release per `gh release download` herunter und
   prueft sie — nicht das Staging-Verzeichnis, das der Release-Job gehasht
