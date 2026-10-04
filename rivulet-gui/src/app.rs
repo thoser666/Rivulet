@@ -1,5 +1,6 @@
 #![allow(unused_imports, dead_code, unused_variables)]
 
+use crate::launcher_icons::{self, LauncherGlyph};
 use crate::midi_io::{list_devices, MidiListener};
 use crate::theme;
 use eframe::egui;
@@ -5368,6 +5369,10 @@ impl RivuletApp {
         self.selected_scene_device_idx = self
             .selected_scene_device_idx
             .filter(|idx| *idx < entries.len());
+        let selected_group = self
+            .selected_scene_device_idx
+            .and_then(|idx| entries.get(idx))
+            .map(|entry| entry.group);
         let selected_label = self
             .selected_scene_device_idx
             .and_then(|idx| entries.get(idx))
@@ -5390,15 +5395,22 @@ impl RivuletApp {
                 // undifferentiated column of titles.
                 let mut previous_group: Option<SceneDeviceGroup> = None;
                 for (index, entry) in entries.iter().enumerate() {
-                    if previous_group != Some(entry.group) {
+                    let is_section_header = previous_group != Some(entry.group);
+                    if is_section_header {
                         if previous_group.is_some() {
                             ui.add_space(4.0);
                         }
-                        ui.add(egui::Label::new(
-                            egui::RichText::new(self.scene_device_group_label(entry.group))
-                                .strong()
-                                .small(),
-                        ));
+                        // The mark sits on the section header, so the whole
+                        // list reads as "Steam / Epic / GOG / ..." at a glance
+                        // without repeating the same icon on every row.
+                        ui.horizontal(|ui| {
+                            self.draw_scene_device_group_icon(ui, entry.group);
+                            ui.add(egui::Label::new(
+                                egui::RichText::new(self.scene_device_group_label(entry.group))
+                                    .strong()
+                                    .small(),
+                            ));
+                        });
                         previous_group = Some(entry.group);
                     }
                     if ui
@@ -5445,6 +5457,31 @@ impl RivuletApp {
             }
         };
         self.tr(key)
+    }
+
+    /// The self-designed mark for a picker section, if it has one.
+    ///
+    /// The heuristic fallback gets its own window-frame mark; every storefront
+    /// launcher gets its own. See [`crate::launcher_icons`] for why these are
+    /// drawn by us instead of the vendors' logos.
+    fn scene_device_group_icon(&self, group: SceneDeviceGroup) -> LauncherGlyph {
+        match group {
+            SceneDeviceGroup::Launcher(launcher) => launcher_icons::launcher_glyph(launcher)
+                .unwrap_or_else(launcher_icons::heuristic_glyph),
+            SceneDeviceGroup::OtherWindows => launcher_icons::heuristic_glyph(),
+        }
+    }
+
+    /// Paint a picker section's mark at the start of `ui` and return the
+    /// remaining horizontal space for the label.
+    fn draw_scene_device_group_icon(&self, ui: &mut egui::Ui, group: SceneDeviceGroup) -> f32 {
+        let (rect, _) = ui.allocate_exact_size(
+            egui::vec2(launcher_icons::ICON_SIZE, launcher_icons::ICON_SIZE),
+            egui::Sense::hover(),
+        );
+        launcher_icons::paint_glyph(ui.painter(), rect, self.scene_device_group_icon(group));
+        ui.add_space(4.0);
+        ui.min_size().x
     }
 
     /// Resolve the device id selected in the scene dialog, if any.

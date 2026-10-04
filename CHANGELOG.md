@@ -1,5 +1,34 @@
 ## [Unreleased]
 
+- ui(game-detect): **selbst gezeichnete Launcher-Marken im Szenen-Geraete-Picker**
+  — die Sektionen des Pickers tragen jetzt je eine eigene, von Rivulet
+  gezeichnete Marke (Balken, Chevrons, Ring, Raute, Sechseck, Blueten; fuer
+  die Heuristik ein Fensterrahmen), gemalt mit eguis Painter statt als
+  eingebettetes Bild.
+  Ausdruecklich **nicht** die Logos der Stores, und das ist eine
+  Lizenzentscheidung: Epics *Trademark Usage Guidelines (Non-Licensee)*
+  untersagen die Logo-Nutzung "without express written permission", und
+  Valves Steam Branding Guidelines verlangen, dass das Logo "stand alone and
+  may not be combined with any object, including but not limited to other
+  logos" — eine Reihe Store-Logos verstoesse also genau dagegen. Blizzard,
+  EA und CD PROJEKT gate ihre Logos ebenfalls. Damit verteilt Rivulet keine
+  Fremdmarke, es liegen keine Binaer-Assets im Repo, die Marken bleiben bei
+  jedem DPI scharf und der Guard
+  `launcher_marks_are_self_designed_and_embed_no_vendor_logos` laesst jeden
+  Versuch scheitern, ein echtes Logo-Asset einzubinden.
+  Die Einfaerbung ist markennah, aber bewusst dunkel und entsaettigt, damit
+  die Stores unterscheidbar bleiben, ohne ihre Marke nachzuahmen. Fuenf neue
+  Tests sichern ab, dass jeder Launcher eine **eigene** Marke hat (ein neu
+  hinzugefuegter `LauncherKind` ohne Marke faellt durch), dass sich keine zwei
+  Launcher eine Form oder Fuellfarbe teilen, dass die Heuristik keine
+  Store-Marke bekommt und dass das Zeichnen auch bei entarteten Rechtecken
+  nicht panickt. 11 Negativproben verifiziert, darunter ein simuliertes
+  `steam_logo.png`.
+  Geprueft ist ausschliesslich, dass die Zeichenbefehle die erwarteten Shapes
+  erzeugen und nicht ueber ungueltige Rechtecke panicken - egui bietet keine
+  oeffentliche Shape-Rueckfrage, und die UI-Tests dieses Repos sind bewusst
+  Quelltext-Vertraege statt Pixelvergleiche.
+
 - feat(game-detect): **Steam-Erkennung laeuft jetzt auch auf Linux — ueber
   die XDG-Pfade statt ueber die Registry** — `game_detection.rs` war bis
   hierher faktisch windows-only: alle fuenf Discovery-Helfer

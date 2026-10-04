@@ -71,6 +71,45 @@ explicit counterpart — it drops the cache *and* clears the lists, because
 `enrich_executables()` deliberately skips games that already have
 executables. It is not wired into the picker refresh; a stale-but-instant
 list beats a correct-but-blocking one.
+## Launcher marks in the picker
+
+The scene-device picker shows a mark next to every section header, drawn by
+Rivulet itself (`rivulet-gui/src/launcher_icons.rs`). These are **not** the
+stores' logos, and that is a licensing decision, not a shortcut:
+
+| Vendor | Guideline | Consequence |
+| --- | --- | --- |
+| **Epic** | *Trademark Usage Guidelines (Non-Licensee)*: logos must not be used "without express written permission" | written permission required |
+| **Valve** | Steam Branding Guidelines: the logo must "stand alone and may not be combined with any object, including but not limited to other logos" | a row of launcher logos violates it |
+| **Blizzard** | own Logo & Trademark Guidelines | no blanket third-party grant |
+| **EA** | brand guidelines gate third-party branding | approval required |
+| **CD PROJEKT** | logotypes released via media contacts only | press use, not a blanket grant |
+
+So the marks are plain geometry painted with egui's `Painter` — bars,
+chevrons, a ring, a diamond, a hexagon, petals, and a window frame for the
+heuristic fallback. None of them reproduces a storefront logo: no gear, no
+shield, no ribbon, no wordmark. Colours are brand-*adjacent* but darkened and
+desaturated, so a store stays tellable apart without imitating its mark.
+
+Consequences of drawing them instead of shipping assets:
+
+- no third-party trademark is distributed by Rivulet,
+- no binary assets in the repo, and nothing to re-license on upgrade,
+- crisp at any DPI and follows the UI's own scaling,
+- `rivulet-core/tests/ci_pinning.rs`
+  (`launcher_marks_are_self_designed_and_embed_no_vendor_logos`) fails if a
+  vendor logo file is ever embedded in the GUI crate or if the marks stop
+  being painted geometry.
+
+| Launcher | Shape |
+| --- | --- |
+| Steam | ascending bars |
+| Epic | chevron pair |
+| GOG | ring with centre dot |
+| Origin | diamond |
+| EA app | hexagon |
+| Battle.net | four petals |
+| *(heuristic)* | window frame |
 
 ## Confidence model
 
