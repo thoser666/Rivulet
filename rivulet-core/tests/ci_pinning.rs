@@ -2474,6 +2474,112 @@ fn stale_pin_checker_runs_on_every_push_as_an_advisory_report() {
     );
 }
 
+/// The launcher marks in the scene-device picker are drawn by us, and this
+/// test freezes that decision.
+///
+/// Shipping the vendors' actual logos is not a free choice, which is why the
+/// icons are original geometry instead:
+///
+/// * **Epic** — its *Trademark Usage Guidelines (Non-Licensee)* require
+///   express written permission before any logo use.
+/// * **Valve** — the Steam Branding Guidelines require the logo to "stand
+///   alone and may not be combined with any object, including but not
+///   limited to other logos", which a row of launcher logos violates.
+/// * **Blizzard**, **EA** and **CD PROJEKT** gate logo use behind their own
+///   brand-guideline or media-contact process.
+///
+/// So the guard pins both halves of the contract: the marks exist and are
+/// painted from geometry, and no third-party logo file is embedded anywhere
+/// in the GUI. Dropping in a `steam_logo.png` would fail CI.
+#[test]
+fn launcher_marks_are_self_designed_and_embed_no_vendor_logos() {
+    let icons = read("rivulet-gui/src/launcher_icons.rs");
+    for needle in [
+        "pub enum GlyphShape",
+        "pub struct LauncherGlyph",
+        "pub fn launcher_glyph",
+        "pub fn heuristic_glyph",
+        "pub fn paint_glyph",
+        "pub const ICON_SIZE",
+        // Painted geometry, not rasterised assets.
+        "painter.rect_filled",
+        "painter.circle_filled",
+        "painter.line",
+    ] {
+        assert!(
+            icons.contains(needle),
+            "launcher_icons.rs must pin {needle}"
+        );
+    }
+
+    // The licensing rationale must stay in the file: it is the reason the
+    // marks are hand-drawn, and a future contributor needs it before they
+    // "just drop in the real logo".
+    for rationale in [
+        "express written permission",
+        "stand",
+        "alone",
+        "brand-guideline",
+    ] {
+        assert!(
+            icons.contains(rationale),
+            "launcher_icons.rs must keep documenting the licensing rationale ({rationale})"
+        );
+    }
+
+    // No vendor logo asset may be embedded anywhere in the GUI crate.
+    let gui_dir = repo_file("rivulet-gui/src");
+    let mut offenders = Vec::new();
+    for entry in fs::read_dir(&gui_dir).unwrap_or_else(|e| panic!("read_dir: {e}")) {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let Ok(source) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for banned in [
+            "steam_logo",
+            "epic_logo",
+            "gog_logo",
+            "origin_logo",
+            "battlenet_logo",
+            "ea_logo",
+        ] {
+            if source.contains(banned) {
+                offenders.push(format!("{}: {banned}", path.display()));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "the GUI must not embed vendor logo assets (found {})",
+        offenders.join(", ")
+    );
+
+    // And the picker must actually paint the marks, not merely define them.
+    let gui = read("rivulet-gui/src/app.rs");
+    for needle in [
+        "fn scene_device_group_icon",
+        "fn draw_scene_device_group_icon",
+        "launcher_icons::paint_glyph",
+        "launcher_icons::launcher_glyph",
+        "launcher_icons::heuristic_glyph",
+        "launcher_icons::ICON_SIZE",
+    ] {
+        assert!(
+            gui.contains(needle) || icons.contains(needle),
+            "missing {needle}"
+        );
+    }
+    let main = read("rivulet-gui/src/main.rs");
+    assert!(
+        main.contains("mod launcher_icons;"),
+        "main.rs must register the launcher_icons module"
+    );
+}
+
 #[test]
 fn apt_parity_checker_is_wired_up() {
     // The nightly build broke for over a week because `libasound2-dev` was
