@@ -321,8 +321,13 @@ Per-workstream status:
   summary with relative output paths). The `Render Smoke` job runs the shipped
   binary end-to-end on a clean runner and checks byte-identity, the PNG
   signature, the summary, and a real MP4 container.
-- **#190 (reproducible distribution)** — open: SHA-256 manifests and
-  post-publish verification.
+- **#190 (reproducible distribution)** — shipped: one tested
+  `scripts/release-manifest.py` generates and verifies `SHA256SUMS` for every
+  published artifact, and a post-publish `verify_release` job re-downloads the
+  live release and checks it. Per-channel bit-reproducibility is documented
+  honestly — installers are content-deterministic (timestamps, harvested
+  MSI GUIDs), not bit-identical, and `docs/release-platforms.md` says which is
+  which and why.
 - **#191 (inspector)** — shipped: `rivulet inspect`/`record --dry-run` print the
   pipeline the engine would build plus a capability report, and a failing run
   appends a machine-readable `failed` object naming the stage
