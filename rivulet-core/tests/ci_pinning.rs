@@ -7395,14 +7395,17 @@ fn launcher_game_detection_surface_is_pinned() {
     // probes instead of open-coding paths: that is what makes the Linux
     // layout verifiable from a Windows dev box and in CI. Slice the function
     // body out and reject hardcoded path literals inside it.
-    let glue_at = detection
+    // Normalise first: a Windows CI checkout has CRLF, so a multi-line
+    // needle would miss there while passing locally.
+    let detection_lf = detection.replace("\r\n", "\n");
+    let glue_at = detection_lf
         .find("fn steam_root() -> Option<PathBuf> {\n    steam_roots(")
         .expect("the non-Windows steam_root must delegate to steam_roots");
-    let glue_end = detection[glue_at..]
+    let glue_end = detection_lf[glue_at..]
         .find("\n}\n")
         .map(|offset| glue_at + offset + 3)
         .expect("steam_root must end");
-    let glue = &detection[glue_at..glue_end];
+    let glue = &detection_lf[glue_at..glue_end];
     assert!(
         glue.contains("steam_roots(") && glue.contains("xdg_data_home()"),
         "the non-Windows steam_root must go through steam_roots/xdg_data_home"
