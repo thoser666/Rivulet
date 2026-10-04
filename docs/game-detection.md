@@ -20,7 +20,7 @@ user actually owns.
 
 | Launcher | Installed games (catalog) | Running game | Status |
 | --- | --- | --- | --- |
-| **Steam** | `HKCU\SOFTWARE\Valve\Steam` → `SteamPath`; `steamapps\libraryfolders.vdf` lists every library; per game `steamapps\appmanifest_<appid>.acf` (`name`, `installdir`, `StateFlags` bit 2 = installed) | `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\Apps\<appid>` → `Running = DWORD:1` | ✅ shipped (`rivulet-core/src/game_detection.rs`) |
+| **Steam** | `HKCU\SOFTWARE\Valve\Steam` → `SteamPath`; `steamapps\libraryfolders.vdf` lists every library; per game `steamapps\appmanifest_<appid>.acf` (`name`, `installdir`, `StateFlags` bit 2 = installed); `installdir` resolves to `steamapps\common\<installdir>` and is scanned for launch executables on demand (see below) | `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\Apps\<appid>` → `Running = DWORD:1` | ✅ shipped (`rivulet-core/src/game_detection.rs`) |
 | **Epic Games Store** | `HKLM\SOFTWARE\WOW6432Node\Epic Games\EpicGamesLauncher` → `AppDataPath`; JSON manifests `...\Data\Manifests\*.item` (`AppName`, `DisplayName`, `InstallLocation`, `LaunchExecutable`) | — (foreground-window scoring) | ✅ shipped |
 | **GOG** | `HKLM\SOFTWARE\WOW6432Node\GOG.com\Games` per-game keys (`gameID`, `name`, `path`, `exe`) | — (foreground-window scoring) | ✅ shipped |
 | **Origin / EA app** | `%ProgramData%\Origin\LocalContent\<Game>\*.mfst` (`&id=` / `origin2://game/<id>`); EA app under `%ProgramData%\EA Desktop\LocalContent` | — (foreground-window scoring) | ✅ shipped |
@@ -33,6 +33,44 @@ window resolves to that manifest identity (`Score::Medium`) instead of
 staying a raw window title. The comparison is exact after normalization
 (case, ` - Steam`, ` :: …` decorations, punctuation are stripped), so
 `Diablo II` never matches `Diablo IV`.
+
+## Steam launch executables
+
+Steam's `appmanifest_*.acf` carries no `LaunchExecutable` — the field
+Epic and Battle.net publish and Steam does not. Without an executable list,
+a Steam game could only ever be matched by its display name, so a window
+titled after the binary (`hl2.exe`, `Cyberpunk2077.exe`) stayed a raw
+heuristic window.
+
+`scan_steam_executables(game_dir)` therefore reads the `.exe` files of the
+resolved install directory plus a bounded number of immediate
+subdirectories, sorted and deduplicated. Two hard bounds keep it cheap and
+predictable:
+
+- at most **32** executables per game (`MAX_EXECUTABLES_PER_GAME`) — a
+  folder can hold hundreds of `.exe` files (redist runtimes, launchers,
+  anti-cheat stubs) that can never own a top-level window;
+- at most **8** subdirectories per game (`MAX_SUBDIRS_PER_GAME`) —
+  Steam games nest their entry point one level down often enough
+  (`<game>/<publisher>/game.exe`), but a full recursive walk of a 100 GB
+  install tree is not worth a title comparison.
+
+The scan is **lazy, not eager**. `list_installed_games_in_library()` only
+resolves `installdir` to a real path and never touches the install tree,
+because it runs on the GUI thread. `detect_running_game()` first ranks by
+the free signals (Steam's registry `Running = 1`, display names) and only
+runs `enrich_executables()` if a heuristic window is still unexplained.
+The measured cost of the eager variant was **3.3 s for a 120-game
+library** on the GUI thread; lazy plus the per-session
+`STEAM_EXECUTABLE_CACHE` pays it at most once per game directory, and
+usually not at all.
+
+Trade-off: a game installed *while* Rivulet runs keeps an empty executable
+list until the cache is dropped. `rescan_steam_executables()` is the
+explicit counterpart — it drops the cache *and* clears the lists, because
+`enrich_executables()` deliberately skips games that already have
+executables. It is not wired into the picker refresh; a stale-but-instant
+list beats a correct-but-blocking one.
 
 ## Confidence model
 

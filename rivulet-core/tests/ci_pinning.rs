@@ -7346,6 +7346,22 @@ fn launcher_game_detection_surface_is_pinned() {
         "pub fn rank_candidates",
         "pub fn window_matches_game",
         "fn deduplicate_by_device_id",
+        // The Steam install-directory scan. Steam was the one launcher whose
+        // `executables` list stayed empty forever, because its manifest has
+        // no `LaunchExecutable` field -- so Steam games could never reach
+        // Score::Medium through foreground matching.
+        "pub fn scan_steam_executables",
+        "pub fn enrich_executables",
+        "pub fn rescan_steam_executables",
+        "pub fn clear_steam_executable_cache",
+        "STEAM_EXECUTABLE_CACHE",
+        "MAX_EXECUTABLES_PER_GAME",
+        "MAX_SUBDIRS_PER_GAME",
+        // Bounded work: the scan must stay capped and must not run on the
+        // catalog build path, which is on the GUI thread.
+        "const MAX_EXECUTABLES_PER_GAME: usize = 32",
+        "is_executable_file",
+        "eq_ignore_ascii_case(\"exe\")",
         "LauncherKind::BattleNet",
         "LauncherKind::EaApp",
         "pub fn all()",
@@ -7417,6 +7433,41 @@ fn launcher_game_detection_surface_is_pinned() {
             "game_detection.rs must read {source} locally"
         );
     }
+
+    // Laziness is the point: `list_installed_games` runs on the GUI thread
+    // when the picker opens, so building the catalog must not walk install
+    // trees. Measured cost of the eager variant was 3.3 s for a 120-game
+    // library, so the scan has to stay behind `detect_running_game`.
+    // Laziness is the point, and the *reader* is where it is decided --
+    // `list_installed_games()` delegates to `steam_installed_games()`, which
+    // delegates to `list_installed_games_in_library`. Checking a slice
+    // between the two public entry points would miss the reader itself,
+    // because it is defined earlier in the file, so slice its body out.
+    let reader_at = detection
+        .find("pub fn list_installed_games_in_library")
+        .expect("the Steam library reader must exist");
+    let reader_end = detection[reader_at + 1..]
+        .find("\npub fn ")
+        .map(|offset| reader_at + 1 + offset)
+        .expect("the Steam library reader must end before the next public fn");
+    let reader = &detection[reader_at..reader_end];
+    assert!(
+        !reader.contains("steam_executables("),
+        "the Steam library reader must not scan install directories; the scan is lazy"
+    );
+    assert!(
+        reader.contains("join(\"common\")"),
+        "the Steam library reader must still resolve installdir against steamapps/common"
+    );
+
+    // And the scan must be reachable from the detection entry point.
+    let detect_at = detection
+        .find("pub fn detect_running_game()")
+        .expect("detect_running_game must exist");
+    assert!(
+        detection[detect_at..].contains("enrich_executables(&mut"),
+        "detect_running_game must run the lazy executable pass"
+    );
 
     let gui = read("rivulet-gui/src/app.rs");
     for needle in [

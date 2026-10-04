@@ -1,5 +1,37 @@
 ## [Unreleased]
 
+- feat(game-detect): **Steam-Spiele ranken jetzt auch ueber ihr
+  Installationsverzeichnis auf `Score::Medium`** — Steam schreibt in
+  `appmanifest_*.acf` **kein** `LaunchExecutable`, das Epic und Battle.net
+  veroeffentlichen. Damit blieb die Executable-Liste eines Steam-Spiels
+  leer und ein Fenster mit dem Binarnamen im Titel (`hl2.exe`,
+  `Cyberpunk2077.exe`) blieb ein rohes Heuristik-Fenster statt auf die
+  Manifest-Identitaet aufgeloest zu werden. `scan_steam_executables()`
+  liest jetzt die `.exe`-Dateien des aufgeloesten Installationsverzeichnisses
+  (`installdir` → `steamapps\common\<installdir>`) plus eine
+  begrenzte Zahl Unterordner, sortiert und dedupliziert.
+  **Bewusst lazy, nicht eager:** `list_installed_games_in_library()` loest nur
+  den Pfad auf und fasst den Install-Baum nicht an — sie laeuft im
+  GUI-Thread. `detect_running_game()` rankt erst nach den kostenlosen Signalen
+  (Steam-Registry `Running = 1`, Anzeigenamen) und fuehrt `enrich_executables()`
+  nur dann aus, wenn ein Heuristik-Fenster unerklaert bleibt. Gemessene Kosten
+  der eager-Variante: **3,3 s bei 120 Spielen** im GUI-Thread; lazy plus
+  Session-Cache (`STEAM_EXECUTABLE_CACHE`) zahlt das hoechstens einmal pro
+  Verzeichnis und meist gar nicht.
+  **Zwei harte Grenzen:** max. **32** Executables pro Spiel (ein Ordner
+  enthaelt oft hunderte `.exe` — Redist-Runtimes, Launcher, Anti-Cheat-Stubs
+  — von denen keines ein Top-Level-Fenster besitzt) und max. **8**
+  Unterordner (Steam-Spiele legen ihren Einstiegspunkt oft eine Ebene tiefer
+  ab, ein rekursiver Lauf ueber 100 GB lohnt aber nicht fuer einen
+  Titelvergleich).
+  **Trade-off:** ein zur Laufzeit installiertes Spiel behaelt eine leere
+  Liste, bis der Cache verworfen wird; `rescan_steam_executables()` ist der
+  explizite Weg und leert zusaetzlich die Listen, weil `enrich_executables()`
+  bereits gefuellte Listen bewusst ueberspringt.
+  6 neue Unit-Tests gegen eingecheckte Fixtures, Guard in `ci_pinning`
+  (`launcher_game_detection_surface_is_pinned`) per **7 Negativproben**
+  abgesichert — u. a. gegen die Wiedereinfuehrung des Scans auf dem
+  Katalog-Build-Pfad.
 - feat(game-detect): **Epic, GOG, Origin/EA app und Battle.net erkannt —
   Foreground-Matching schliesst Slice 4** — Rivulet listete „Games" nur
   ueber eine Fenstergroessen-Heuristik und konnte ein Spiel nicht von einem
