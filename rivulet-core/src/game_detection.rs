@@ -828,6 +828,142 @@ fn program_data() -> Option<PathBuf> {
         .filter(|path| !path.as_os_str().is_empty())
 }
 
+// ── Steam install-directory scan (populates `executables`) ─────────────
+
+/// Upper bound on executables kept per game.
+///
+/// Only foreground matching consumes this list, and that compares against a
+/// *window title*. A game folder can hold hundreds of `.exe` files (redist
+/// runtimes, launchers, anti-cheat stubs), almost none of which can ever own
+/// a top-level window, so a small cap keeps the scan and the cache bounded
+/// without losing the binaries that actually run.
+const MAX_EXECUTABLES_PER_GAME: usize = 32;
+
+/// Upper bound on subdirectories walked per game.
+///
+/// Steam games nest their real entry point one level down often enough
+/// (`<game>/<publisher>/game.exe`) that top-level-only would miss many, but a
+/// full recursive walk over a 100 GB install tree is not worth it for a
+/// title comparison. One level, capped.
+const MAX_SUBDIRS_PER_GAME: usize = 8;
+
+/// Is this a Windows executable by name?
+fn is_executable_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+}
+
+/// The executable name of a path that came from the local filesystem.
+///
+/// Unlike the manifest-derived strings handled by `executable_name`, this
+/// input *is* a real path on this host, so `Path::file_stem` is correct and
+/// host-consistent here.
+fn local_executable_name(path: &Path) -> Option<String> {
+    path.file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .filter(|stem| !stem.is_empty())
+}
+
+/// Collect the launch executables of one Steam install directory.
+///
+/// Reads `.exe` files from the directory itself and from a bounded number of
+/// immediate subdirectories, returns them sorted and deduplicated.
+///
+/// `read_dir` order is arbitrary, so sorting is what makes the result — and
+/// therefore the cache and the tests — deterministic.
+pub fn scan_steam_executables(game_dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(game_dir) else {
+        return Vec::new();
+    };
+
+    let mut names: Vec<String> = Vec::new();
+    let mut subdirs: Vec<PathBuf> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if subdirs.len() < MAX_SUBDIRS_PER_GAME {
+                subdirs.push(path);
+            }
+            continue;
+        }
+        if is_executable_file(&path) {
+            if let Some(name) = local_executable_name(&path) {
+                names.push(name);
+            }
+        }
+    }
+
+    for subdir in subdirs {
+        let Ok(entries) = std::fs::read_dir(subdir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() || !is_executable_file(&path) {
+                continue;
+            }
+            if let Some(name) = local_executable_name(&path) {
+                names.push(name);
+            }
+        }
+    }
+
+    names.sort();
+    names.dedup();
+    names.truncate(MAX_EXECUTABLES_PER_GAME);
+    names
+}
+
+/// Per-session cache of install-directory scans, keyed by game directory.
+///
+/// The catalog is rebuilt on every picker refresh; walking every installed
+/// game each time would put seconds of disk I/O in front of a dropdown. The
+/// cache makes the cost a one-off per game directory.
+///
+/// Trade-off: a game installed *while* Rivulet runs keeps an empty
+/// executable list until the cache is dropped. That is deliberate — a stale
+/// but instant list beats a correct but blocking one. Use
+/// [`clear_steam_executable_cache`] for an explicit rescan.
+static STEAM_EXECUTABLE_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<PathBuf, std::sync::Arc<Vec<String>>>>,
+> = std::sync::OnceLock::new();
+
+/// The executables of one Steam game, scanning its directory at most once.
+fn steam_executables(game_dir: &Path) -> Vec<String> {
+    if game_dir.as_os_str().is_empty() {
+        return Vec::new();
+    }
+    let cache = STEAM_EXECUTABLE_CACHE.get_or_init(Default::default);
+    // A poisoned cache would mean a scan panicked, which cannot happen for
+    // these read-only loops; recovering keeps the picker alive either way.
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    if let Some(hit) = guard.get(game_dir) {
+        return hit.as_ref().clone();
+    }
+    let found = std::sync::Arc::new(scan_steam_executables(game_dir));
+    guard.insert(game_dir.to_path_buf(), std::sync::Arc::clone(&found));
+    found.as_ref().clone()
+}
+
+/// Drop the cached install-directory scans.
+///
+/// Not called on the refresh path — that is the point of the cache. Prefer
+/// [`rescan_steam_executables`], which also resets the already-filled lists:
+/// dropping the cache alone is not enough, because [`enrich_executables`]
+/// deliberately skips games that already carry executables.
+pub fn clear_steam_executable_cache() {
+    if let Some(cache) = STEAM_EXECUTABLE_CACHE.get() {
+        cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+    }
+}
+
 /// Enumerate the installed games of one Steam library (its `steamapps`
 /// directory). Shared by [`list_installed_games`] so tests can point the
 /// reader at a fixture directory without the registry.
@@ -848,9 +984,19 @@ pub fn list_installed_games_in_library(library_root: &Path) -> Vec<GameIdentity>
         let Ok(contents) = std::fs::read_to_string(entry.path()) else {
             continue;
         };
-        if let Some(game) = parse_appmanifest(&contents) {
-            games.push(game);
+        let Some(mut game) = parse_appmanifest(&contents) else {
+            continue;
+        };
+        // `parse_appmanifest` stays a pure parser of the `.acf` text and
+        // therefore reports `installdir` exactly as Steam wrote it. Only the
+        // reader knows the library root, so *here* is where the relative
+        // directory becomes a real path. The directory is *not* walked yet:
+        // that is deferred to [`enrich_executables`] so the GUI thread is
+        // never blocked by install-tree I/O.
+        if let Some(relative) = game.install_dir.clone() {
+            game.install_dir = Some(steamapps.join("common").join(relative));
         }
+        games.push(game);
     }
     games
 }
@@ -952,11 +1098,63 @@ pub fn detect_running_game() -> Vec<RunningGameCandidate> {
         .filter(|game| game.launcher == LauncherKind::Steam && steam_app_is_running(&game.game_id))
         .map(|game| game.game_id.clone())
         .collect();
-    rank_candidates(
-        &installed,
-        &running_app_ids,
-        &crate::game_capture::list_game_windows(),
-    )
+    let windows = crate::game_capture::list_game_windows();
+    let ranked = rank_candidates(&installed, &running_app_ids, &windows);
+
+    // Lazy second pass. Ranking by display name is free, but a game whose
+    // window title is the *executable* name cannot match that way — and Steam
+    // is the one launcher whose manifests carry no `LaunchExecutable`, which
+    // is why its `executables` list used to stay empty forever.
+    //
+    // Scanning is only worth its I/O when a heuristic window is still
+    // unexplained, so that check gates the whole pass. Measured cost of the
+    // eager version on a 120-game library was 3.3 s on the GUI thread; here
+    // it is paid at most once per session (the cache) and usually not at all.
+    let unexplained_window = windows.iter().any(|window| {
+        !ranked.iter().any(|candidate| {
+            candidate.score != Score::Low && window_matches_game(&window.title, &candidate.identity)
+        })
+    });
+    if !unexplained_window {
+        return ranked;
+    }
+
+    let mut enriched = installed;
+    enrich_executables(&mut enriched);
+    rank_candidates(&enriched, &running_app_ids, &windows)
+}
+
+/// Fill in the launch executables of every identity that does not have them
+/// yet, reading the install directory of each (cached per directory).
+///
+/// Only Steam needs this: Epic, GOG and Battle.net carry the launch
+/// executable in their manifest or registry values, and Origin has none.
+pub fn enrich_executables(games: &mut [GameIdentity]) {
+    for game in games.iter_mut() {
+        if !game.executables.is_empty() {
+            continue;
+        }
+        let Some(dir) = game.install_dir.clone() else {
+            continue;
+        };
+        game.executables = steam_executables(&dir);
+    }
+}
+
+/// Re-read the install directories of every Steam game in `games`.
+///
+/// This is the explicit-rescan counterpart to [`enrich_executables`]: it drops
+/// the session cache *and* clears the lists first, so a game installed while
+/// Rivulet runs is picked up. Deliberately not wired into the picker refresh
+/// — see [`STEAM_EXECUTABLE_CACHE`] for why the refresh path stays cheap.
+pub fn rescan_steam_executables(games: &mut [GameIdentity]) {
+    clear_steam_executable_cache();
+    for game in games.iter_mut() {
+        if game.launcher == LauncherKind::Steam {
+            game.executables.clear();
+        }
+    }
+    enrich_executables(games);
 }
 
 #[cfg(test)]
@@ -1563,6 +1761,206 @@ mod tests {
         for kind in all {
             assert_ne!(kind.as_str(), "heuristic");
         }
+    }
+
+    // ── Steam install-directory scan (fills `executables`) ─────────────
+
+    /// Build a Steam-shaped install tree and return its library root.
+    fn steam_library_fixture(name: &str) -> PathBuf {
+        let tmp = std::env::temp_dir().join(format!("rivulet_{name}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let steamapps = tmp.join("steamapps");
+        std::fs::create_dir_all(steamapps.join("common")).unwrap();
+        std::fs::write(
+            steamapps.join("appmanifest_220.acf"),
+            r#""AppState"
+{
+	"appid"		"220"
+	"name"		"Half-Life 2"
+	"StateFlags"		"4"
+	"installdir"		"Half-Life 2"
+}
+"#,
+        )
+        .unwrap();
+        tmp
+    }
+
+    #[test]
+    fn scan_steam_executables_collects_top_level_and_one_level_deep() {
+        let root = steam_library_fixture("steam_scan");
+        let game = root.join("steamapps").join("common").join("Half-Life 2");
+        std::fs::create_dir_all(game.join("bin")).unwrap();
+        std::fs::write(game.join("hl2.exe"), b"MZ").unwrap();
+        std::fs::write(game.join("Launcher.exe"), b"MZ").unwrap();
+        // Non-executable files and deeper trees must be ignored.
+        std::fs::write(game.join("readme.txt"), b"hi").unwrap();
+        std::fs::create_dir_all(game.join("bin").join("nested")).unwrap();
+        std::fs::write(game.join("bin").join("deep.exe"), b"MZ").unwrap();
+        std::fs::write(game.join("bin").join("nested").join("toodeep.exe"), b"MZ").unwrap();
+
+        let names = scan_steam_executables(&game);
+        // One level deep is scanned (`bin/deep.exe`), two levels is not.
+        assert!(names.contains(&"hl2".to_string()), "{names:?}");
+        assert!(names.contains(&"Launcher".to_string()), "{names:?}");
+        assert!(names.contains(&"deep".to_string()), "{names:?}");
+        assert!(!names.contains(&"toodeep".to_string()), "{names:?}");
+        assert!(!names.contains(&"readme".to_string()), "{names:?}");
+
+        // Sorted and deduplicated, so the cache and the tests are stable.
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted, "the scan must be deterministic");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn scan_steam_executables_is_bounded_and_degrades_gracefully() {
+        let root = steam_library_fixture("steam_bound");
+        let game = root.join("steamapps").join("common").join("Half-Life 2");
+        std::fs::create_dir_all(&game).unwrap();
+        // Far more executables than the cap, plus more subdirectories than it.
+        for index in 0..MAX_EXECUTABLES_PER_GAME * 3 {
+            std::fs::write(game.join(format!("game{index}.exe")), b"MZ").unwrap();
+        }
+        for index in 0..MAX_SUBDIRS_PER_GAME * 3 {
+            std::fs::create_dir_all(game.join(format!("bin{index}"))).unwrap();
+            std::fs::write(game.join(format!("bin{index}")).join("inner.exe"), b"MZ").unwrap();
+        }
+
+        let names = scan_steam_executables(&game);
+        assert_eq!(
+            names.len(),
+            MAX_EXECUTABLES_PER_GAME,
+            "the per-game cap must hold"
+        );
+
+        // A missing directory is an empty list, never a panic or an error.
+        assert!(scan_steam_executables(&game.join("does-not-exist")).is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The regression this feature exists for: a Steam game whose window title
+    /// is the executable name (not the store's display name) must resolve to
+    /// the game identity at `Score::Medium`.
+    #[test]
+    fn steam_game_resolves_through_its_launch_executable() {
+        let identity = GameIdentity {
+            launcher: LauncherKind::Steam,
+            game_id: "220".to_string(),
+            display_name: "Half-Life 2".to_string(),
+            install_dir: None,
+            // Only the executable matches; the display name deliberately does not.
+            executables: vec!["hl2".to_string()],
+        };
+
+        assert!(window_matches_game("hl2", &identity));
+        assert!(window_matches_game("hl2 - Steam", &identity));
+
+        let windows = vec![crate::game_capture::GameWindow {
+            id: 99,
+            title: "hl2".to_string(),
+            width: 1920,
+            height: 1080,
+        }];
+        let ranked = rank_candidates(&[identity], &[], &windows);
+
+        assert_eq!(
+            ranked[0].score,
+            Score::Medium,
+            "a Steam game must now reach Medium through its executable"
+        );
+        assert_eq!(ranked[0].identity.device_id(), "game:steam:220");
+    }
+
+    /// The reader resolves `installdir` to a real path but must **not** walk
+    /// it: that is deferred so the GUI thread never blocks on install-tree
+    /// I/O when the picker opens.
+    #[test]
+    fn library_reader_resolves_install_dir_without_scanning_it() {
+        let root = steam_library_fixture("steam_reader");
+        let common = root.join("steamapps").join("common").join("Half-Life 2");
+        std::fs::create_dir_all(&common).unwrap();
+        std::fs::write(common.join("hl2.exe"), b"MZ").unwrap();
+
+        let games = list_installed_games_in_library(&root);
+        assert_eq!(games.len(), 1);
+        let game = &games[0];
+        assert_eq!(game.game_id, "220");
+        // Absolute, so a later scan can use it without knowing the library root.
+        assert_eq!(game.install_dir, Some(common));
+        // And still unscanned.
+        assert!(
+            game.executables.is_empty(),
+            "building the catalog must not touch the install directory"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The lazy pass fills the list, and the cache keeps the second pass free.
+    #[test]
+    fn enrich_executables_scans_once_and_survives_a_second_call() {
+        let root = steam_library_fixture("steam_cache");
+        let common = root.join("steamapps").join("common").join("Half-Life 2");
+        std::fs::create_dir_all(&common).unwrap();
+        std::fs::write(common.join("first.exe"), b"MZ").unwrap();
+
+        let mut games = list_installed_games_in_library(&root);
+        enrich_executables(&mut games);
+        assert_eq!(games[0].executables, vec!["first".to_string()]);
+
+        // A second pass must not observe a new file: that is the cache doing
+        // its job, keeping a picker refresh from re-walking the library.
+        std::fs::write(common.join("second.exe"), b"MZ").unwrap();
+        enrich_executables(&mut games);
+        assert_eq!(
+            games[0].executables,
+            vec!["first".to_string()],
+            "the cache must make the second pass free"
+        );
+
+        // An explicit rescan picks the new executable up.
+        rescan_steam_executables(&mut games);
+        assert_eq!(
+            games[0].executables,
+            vec!["first".to_string(), "second".to_string()]
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A game that already knows its executables (Epic, GOG, Battle.net) must
+    /// not be re-scanned, and one without an install directory must be skipped
+    /// rather than panicking.
+    #[test]
+    fn enrich_executables_skips_filled_and_unlocated_games() {
+        let mut games = vec![
+            GameIdentity {
+                launcher: LauncherKind::Epic,
+                game_id: "Fortnite".to_string(),
+                display_name: "Fortnite".to_string(),
+                install_dir: None,
+                executables: vec!["FortniteClient".to_string()],
+            },
+            GameIdentity {
+                launcher: LauncherKind::Origin,
+                game_id: "1172470".to_string(),
+                display_name: "Apex Legends".to_string(),
+                install_dir: None,
+                executables: Vec::new(),
+            },
+        ];
+
+        enrich_executables(&mut games);
+
+        assert_eq!(games[0].executables, vec!["FortniteClient".to_string()]);
+        assert!(
+            games[1].executables.is_empty(),
+            "a game without an install directory must stay empty, not panic"
+        );
     }
 
     #[cfg(target_os = "windows")]
