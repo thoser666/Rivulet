@@ -42,8 +42,9 @@
   in `docs/release-platforms.md` — inklusive der Kanaele, bei denen nur das
   *Manifest* deterministisch ist (Scoop, Chocolatey, WinGet, AUR).
   **Tests:** `scripts/release-manifest.py --self-test` laeuft im *lints*-Job bei
-  jedem Push (18 Assertions: Determinismus, Tamper-Erkennung, Abdeckung jedes
+  jedem Push (20 Assertions: Determinismus, Tamper-Erkennung, Abdeckung jedes
   Files, verschachtelte Pfade, Namen mit Leerzeichen, fehlerhaftes Manifest,
+  der vollstaendige Release-Ablauf samt seiner Gegenseite,
   leerer Baum, exaktes `sha256sum`-Zeilenformat). Acht **Mutationsproben**
   belegen, dass jede Zusage des Self-Tests auch greift — inklusive der
   Sortier-Zusage, die man nicht durch blosses Entfernen von `sorted()`
