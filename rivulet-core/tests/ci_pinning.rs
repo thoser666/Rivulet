@@ -7316,9 +7316,14 @@ fn wasapi_device_capture_surface_is_pinned() {
 fn launcher_game_detection_surface_is_pinned() {
     // Issue #239 (all slices): launcher-based game identification must stay
     // local-only (registry + manifest files, no transport, no process
-    // memory), Windows-gated, and fixture-testable without any launcher
-    // installed. The parsers are pure, so a CI machine with no Steam, Epic,
-    // GOG, Origin or Battle.net still exercises every launcher path.
+    // memory) and fixture-testable without any launcher installed. The
+    // parsers are pure, so a CI machine with no Steam, Epic, GOG, Origin or
+    // Battle.net still exercises every launcher path.
+    //
+    // Epic/GOG/Origin/Battle.net stay Windows-gated; Steam additionally
+    // resolves through the XDG base directories off Windows (the Linux
+    // slice), which the needles below pin together with the privacy ceiling
+    // that goes with it.
     let detection = read("rivulet-core/src/game_detection.rs");
     for needle in [
         "pub struct GameIdentity",
@@ -7365,6 +7370,16 @@ fn launcher_game_detection_surface_is_pinned() {
         "LauncherKind::BattleNet",
         "LauncherKind::EaApp",
         "pub fn all()",
+        "pub fn xdg_data_home",
+        "fn xdg_data_dir",
+        "pub fn steam_roots",
+        "std::env::var_os(\"XDG_DATA_HOME\")",
+        ".join(\".local/share\")",
+        ".join(\".steam\")",
+        ".join(\".var\")",
+        ".join(\"com.valvesoftware.Steam\")",
+        "data_home.join(\"Steam\")",
+        "dirs::home_dir()",
         // Windows gating: the registry readers must not compile elsewhere.
         "cfg(target_os = \"windows\")",
         // Privacy invariants: only local sources.
@@ -7376,6 +7391,30 @@ fn launcher_game_detection_surface_is_pinned() {
             "game_detection.rs must pin {needle}"
         );
     }
+    // The non-Windows Steam root must delegate to the portable, unit-tested
+    // probes instead of open-coding paths: that is what makes the Linux
+    // layout verifiable from a Windows dev box and in CI. Slice the function
+    // body out and reject hardcoded path literals inside it.
+    // Normalise first: a Windows CI checkout has CRLF, so a multi-line
+    // needle would miss there while passing locally.
+    let detection_lf = detection.replace("\r\n", "\n");
+    let glue_at = detection_lf
+        .find("fn steam_root() -> Option<PathBuf> {\n    steam_roots(")
+        .expect("the non-Windows steam_root must delegate to steam_roots");
+    let glue_end = detection_lf[glue_at..]
+        .find("\n}\n")
+        .map(|offset| glue_at + offset + 3)
+        .expect("steam_root must end");
+    let glue = &detection_lf[glue_at..glue_end];
+    assert!(
+        glue.contains("steam_roots(") && glue.contains("xdg_data_home()"),
+        "the non-Windows steam_root must go through steam_roots/xdg_data_home"
+    );
+    assert!(
+        !glue.contains('"'),
+        "the non-Windows steam_root must not hardcode platform paths: {glue}"
+    );
+
     // No transport in the detection module (local reads only).
     for banned in [
         "ureq",
@@ -7383,6 +7422,13 @@ fn launcher_game_detection_surface_is_pinned() {
         "http://",
         "https://",
         "ReadProcessMemory",
+        // The Linux slice reaches Score::Medium and must stay there: reading
+        // another process' startup environment is the route issue #239 rules
+        // out. The banned literals are the procfs entry points such an
+        // implementation would need, so the module stays at Medium.
+        "/proc",
+        "/environ",
+        "/cmdline",
     ] {
         assert!(
             !detection.contains(banned),

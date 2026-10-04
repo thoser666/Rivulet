@@ -30,7 +30,25 @@
 //! keys on the user's own machine. No storefront API, no transport, and no
 //! process-memory inspection — reading another process' `SteamAppId` from
 //! its environment stays an explicit non-goal of issue #239.
-
+//!
+//! # Linux
+//!
+//! Steam is the one launcher whose *installed-game* source is not a Windows
+//! registry: on Linux/macOS the installation is located through the XDG base
+//! directories ([`steam_roots`]) instead of `HKCU\SOFTWARE\Valve\Steam`.
+//! Everything downstream of the root — [`list_installed_games_in_library`],
+//! `libraryfolders.vdf`, `appmanifest_*.acf`, [`rank_candidates`] — is the
+//! same code on every platform, so a Linux user gets real `game:steam:<id>`
+//! identities instead of an empty catalog.
+//!
+//! The rest stays Windows-gated: Epic, GOG, Origin/EA app and Battle.net are
+//! shipped for Windows in practice, and their registry readers have no
+//! honest XDG equivalent. Steam games therefore reach [`Score::Medium`]
+//! (foreground-window match) on Linux rather than [`Score::High`]: the
+//! `Running = 1` registry value has no counterpart, and reconstructing one
+//! from another process' startup environment would break the privacy
+//! posture documented above.
+//!
 use std::path::{Path, PathBuf};
 
 /// Which launcher identified a game. `Heuristic` is the existing size/title
@@ -667,12 +685,14 @@ pub fn rank_candidates(
     candidates
 }
 
-// ── Steam installation discovery + readers (Windows-gated) ─────────────
+// ── Steam installation discovery (registry vs. XDG) ────────────────────
 
 /// The Steam installation root: `HKCU\SOFTWARE\Valve\Steam` → `SteamPath`.
 ///
-/// Windows-only (the registry is the documented source); every other
-/// platform returns `None` in this slice.
+/// Windows uses the registry value, which is the documented source. Other
+/// platforms resolve the same *concept* through [`steam_roots`], so this
+/// function stays the single place the rest of the module asks "where is
+/// Steam installed?".
 #[cfg(target_os = "windows")]
 fn steam_root() -> Option<PathBuf> {
     use winreg::enums::HKEY_CURRENT_USER;
@@ -687,15 +707,97 @@ fn steam_root() -> Option<PathBuf> {
     }
 }
 
+/// The Steam installation root on non-Windows hosts: the first of the XDG
+/// probe candidates that exists.
+///
+/// Deliberately a three-line glue over [`xdg_data_home`], [`steam_roots`] and
+/// `dirs::home_dir` instead of open-coded path building: those are portable
+/// and unit-tested on *every* platform, so the Linux layout is verifiable on
+/// a Windows dev box and in CI, while this wrapper stays trivial enough that
+/// a platform-specific mistake cannot hide inside it.
 #[cfg(not(target_os = "windows"))]
 fn steam_root() -> Option<PathBuf> {
-    None
+    steam_roots(xdg_data_home().as_deref(), dirs::home_dir().as_deref())
+        .into_iter()
+        .next()
+}
+
+/// The user's XDG data directory: `$XDG_DATA_HOME`, else `~/.local/share`.
+///
+/// `None` when neither an absolute `$XDG_DATA_HOME` nor a home directory can
+/// be determined, and then the caller simply finds no Steam root.
+///
+/// Public because the non-Windows `steam_root()` above is its only production
+/// caller: a `cfg`-gated helper could not be unit-tested on the platforms
+/// where it is not compiled.
+pub fn xdg_data_home() -> Option<PathBuf> {
+    xdg_data_dir(std::env::var_os("XDG_DATA_HOME"), dirs::home_dir())
+}
+
+/// Resolve the XDG data directory from an explicit variable value and home.
+///
+/// Pure, so the Base Directory Specification rules are fixture-testable: a
+/// value that is **not an absolute path** must be ignored as if it were
+/// unset (the spec says so explicitly, and a relative `XDG_DATA_HOME` is a
+/// classic way to break path assumptions), and so must an empty one.
+fn xdg_data_dir(variable: Option<std::ffi::OsString>, home: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(configured) = variable
+        .map(PathBuf::from)
+        // Empty *and* relative both fall through to the `$HOME` default.
+        .filter(|path| !path.as_os_str().is_empty() && path.is_absolute())
+    {
+        return Some(configured);
+    }
+    Some(home?.join(".local/share"))
+}
+
+/// Every Steam installation root this host may use, in probe order.
+///
+/// Steam on Linux installs into the XDG data directory (`~/.local/share/Steam`
+/// by default). The `~/.steam/steam` and `~/.steam/root` entries are what the
+/// desktop entries and older clients point at """ + EM + """ usually symlinks *to* the
+/// XDG location, which is why the list is probed rather than merged: reading
+/// several aliases of one directory would enumerate the same games twice. The
+/// last entry is the Flatpak install, whose tree lives under
+/// `~/.var/app/com.valvesoftware.Steam/data`.
+///
+/// Only existing directories are returned, in probe order, so the caller can
+/// take the first one and get a single authoritative root. Pure over its
+/// arguments apart from the existence check, hence fixture-testable on every
+/// platform.
+pub fn steam_roots(data_home: Option<&Path>, home: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(data_home) = data_home {
+        candidates.push(data_home.join("Steam"));
+    }
+    if let Some(home) = home {
+        candidates.push(home.join(".steam").join("steam"));
+        candidates.push(home.join(".steam").join("root"));
+        candidates.push(
+            home.join(".var")
+                .join("app")
+                .join("com.valvesoftware.Steam")
+                .join("data")
+                .join("Steam"),
+        );
+    }
+    candidates
+        .into_iter()
+        .filter(|candidate| candidate.is_dir())
+        .collect()
 }
 
 /// Steam's running-game registry key:
 /// `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\Apps\<appid>` → `Running = 1`
 /// (Steam also writes the 64-bit view; the WOW6432Node path is the one its
 /// own docs reference). `None` when the game is not running / not present.
+///
+/// Windows-only by nature: there is no registry on the platforms that reach
+/// the stub below, and the only portable equivalent (Steam's `SteamAppId` in
+/// another process' startup environment) is the process-inspection route issue #239
+/// explicitly rules out. A Linux Steam game therefore tops out at
+/// [`Score::Medium`] through foreground matching — a deliberate, documented
+/// ceiling rather than a missing feature.
 #[cfg(target_os = "windows")]
 fn steam_app_is_running(app_id: &str) -> bool {
     use winreg::enums::HKEY_LOCAL_MACHINE;
@@ -707,6 +809,7 @@ fn steam_app_is_running(app_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Always `false` off Windows — see the note on the Windows variant.
 #[cfg(not(target_os = "windows"))]
 fn steam_app_is_running(_app_id: &str) -> bool {
     false
@@ -1961,6 +2064,138 @@ mod tests {
             games[1].executables.is_empty(),
             "a game without an install directory must stay empty, not panic"
         );
+    }
+
+    // ── XDG base directories / Steam root probing (Linux slice) ───────
+
+    /// A fresh, empty temp directory. Removed up front as well as afterwards,
+    /// so a leftover from a crashed run cannot make a test pass by accident.
+    fn scratch_dir(name: &str) -> PathBuf {
+        let tmp = std::env::temp_dir().join(format!("rivulet_xdg_{name}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        tmp
+    }
+
+    #[test]
+    fn xdg_data_dir_prefers_an_absolute_variable() {
+        let home = PathBuf::from("/home/tester");
+        // "Absolute" is a per-platform notion (a drive letter on Windows), so the
+        // fixture is taken from the host rather than hardcoded to a Unix root.
+        let absolute = std::env::temp_dir().join("xdg_data");
+        assert_eq!(
+            xdg_data_dir(Some(absolute.clone().into_os_string()), Some(home)),
+            Some(absolute),
+            "an absolute XDG_DATA_HOME wins over the $HOME default"
+        );
+    }
+
+    #[test]
+    fn xdg_data_dir_ignores_a_relative_or_empty_variable() {
+        let home = PathBuf::from("/home/tester");
+        let expected = Some(PathBuf::from("/home/tester/.local/share"));
+        // The Base Directory Specification: a value that is not an absolute
+        // path must be ignored as if it was unset.
+        assert_eq!(
+            xdg_data_dir(
+                Some(std::ffi::OsString::from("relative/data")),
+                Some(home.clone())
+            ),
+            expected
+        );
+        assert_eq!(
+            xdg_data_dir(Some(std::ffi::OsString::from("")), Some(home.clone())),
+            expected
+        );
+        assert_eq!(xdg_data_dir(None, Some(home)), expected);
+    }
+
+    #[test]
+    fn xdg_data_dir_is_none_without_any_anchor() {
+        assert_eq!(xdg_data_dir(None, None), None);
+        let absolute = std::env::temp_dir().join("xdg_data");
+        assert_eq!(
+            xdg_data_dir(Some(absolute.clone().into_os_string()), None),
+            Some(absolute),
+            "an absolute variable alone is already enough"
+        );
+    }
+
+    #[test]
+    fn steam_roots_probe_order_is_xdg_then_home() {
+        let home = scratch_dir("order");
+        // Only the Flatpak layout exists, so it is the single hit -- and it
+        // has to be found without the two earlier candidates existing.
+        let flatpak = home
+            .join(".var")
+            .join("app")
+            .join("com.valvesoftware.Steam")
+            .join("data")
+            .join("Steam");
+        std::fs::create_dir_all(&flatpak).unwrap();
+
+        let data_home = home.join(".local").join("share");
+        let roots = steam_roots(Some(&data_home), Some(&home));
+        assert_eq!(roots, vec![flatpak], "{roots:?}");
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn steam_roots_prefers_xdg_over_the_legacy_home_aliases() {
+        let home = scratch_dir("prefer");
+        let data_home = home.join(".local").join("share");
+        let xdg_steam = data_home.join("Steam");
+        let legacy = home.join(".steam").join("steam");
+        std::fs::create_dir_all(&xdg_steam).unwrap();
+        std::fs::create_dir_all(&legacy).unwrap();
+
+        let roots = steam_roots(Some(&data_home), Some(&home));
+        assert_eq!(
+            roots.first().map(|root| root.as_path()),
+            Some(xdg_steam.as_path()),
+            "the XDG install must win so the legacy symlink is never read twice"
+        );
+        assert_eq!(roots.len(), 2, "both existing candidates are reported");
+
+        // Without an XDG data home only the legacy alias is left.
+        let roots = steam_roots(None, Some(&home));
+        assert_eq!(roots, vec![legacy], "{roots:?}");
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn steam_roots_is_empty_when_steam_is_absent() {
+        let home = scratch_dir("absent");
+        assert!(steam_roots(Some(&home.join(".local").join("share")), Some(&home)).is_empty());
+        assert!(steam_roots(None, None).is_empty());
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn xdg_steam_layout_yields_real_game_identities() {
+        let home = scratch_dir("identity");
+        let data_home = home.join(".local").join("share");
+        let steamapps = data_home.join("Steam").join("steamapps");
+        std::fs::create_dir_all(&steamapps).unwrap();
+        std::fs::write(steamapps.join("appmanifest_730.acf"), MANIFEST).unwrap();
+
+        let roots = steam_roots(Some(&data_home), Some(&home));
+        let games: Vec<GameIdentity> = roots
+            .iter()
+            .flat_map(|root| list_installed_games_in_library(root))
+            .collect();
+        assert_eq!(
+            games.len(),
+            1,
+            "the Linux layout must yield a catalog entry"
+        );
+        assert_eq!(games[0].device_id(), "game:steam:730");
+        assert_eq!(games[0].display_name, "Counter-Strike 2");
+
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[cfg(target_os = "windows")]

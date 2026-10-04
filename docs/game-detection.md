@@ -20,7 +20,7 @@ user actually owns.
 
 | Launcher | Installed games (catalog) | Running game | Status |
 | --- | --- | --- | --- |
-| **Steam** | `HKCU\SOFTWARE\Valve\Steam` → `SteamPath`; `steamapps\libraryfolders.vdf` lists every library; per game `steamapps\appmanifest_<appid>.acf` (`name`, `installdir`, `StateFlags` bit 2 = installed); `installdir` resolves to `steamapps\common\<installdir>` and is scanned for launch executables on demand (see below) | `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\Apps\<appid>` → `Running = DWORD:1` | ✅ shipped (`rivulet-core/src/game_detection.rs`) |
+| **Steam** | `HKCU\SOFTWARE\Valve\Steam` → `SteamPath`; `steamapps\libraryfolders.vdf` lists every library; per game `steamapps\appmanifest_<appid>.acf` (`name`, `installdir`, `StateFlags` bit 2 = installed); `installdir` resolves to `steamapps\common\<installdir>` and is scanned for launch executables on demand (see below); the root itself comes from `HKCU\SOFTWARE\Valve\Steam` on Windows and from the XDG data directory elsewhere (see below) | `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\Apps\<appid>` → `Running = DWORD:1` | ✅ shipped (`rivulet-core/src/game_detection.rs`) |
 | **Epic Games Store** | `HKLM\SOFTWARE\WOW6432Node\Epic Games\EpicGamesLauncher` → `AppDataPath`; JSON manifests `...\Data\Manifests\*.item` (`AppName`, `DisplayName`, `InstallLocation`, `LaunchExecutable`) | — (foreground-window scoring) | ✅ shipped |
 | **GOG** | `HKLM\SOFTWARE\WOW6432Node\GOG.com\Games` per-game keys (`gameID`, `name`, `path`, `exe`) | — (foreground-window scoring) | ✅ shipped |
 | **Origin / EA app** | `%ProgramData%\Origin\LocalContent\<Game>\*.mfst` (`&id=` / `origin2://game/<id>`); EA app under `%ProgramData%\EA Desktop\LocalContent` | — (foreground-window scoring) | ✅ shipped |
@@ -87,6 +87,41 @@ GOG, Origin, EA app, Battle.net — with the raw heuristic windows last under
 an **"Other windows"** header. The ranking itself is the pure function
 `rank_candidates(installed, running_app_ids, windows)`, so the confidence
 order is unit-tested without any launcher or game installed.
+
+## Linux: XDG instead of the registry
+
+Steam is the one launcher whose *installed-game* source is not a Windows
+registry, and it is the one that works on Linux today. Instead of
+`HKCU\SOFTWARE\Valve\Steam` -> `SteamPath`, the root is resolved through the
+XDG base directories, in this probe order (first existing wins):
+
+1. `$XDG_DATA_HOME/Steam` (default `~/.local/share/Steam`) — where Steam
+   actually installs
+2. `~/.steam/steam` and `~/.steam/root` — the desktop-entry aliases, usually
+   symlinks *to* (1). Probing rather than merging is deliberate: reading
+   several aliases of one directory would enumerate the same games twice
+3. `~/.var/app/com.valvesoftware.Steam/data/Steam` — the Flatpak install
+
+A missing candidate is skipped and a completely absent Steam degrades to an
+empty catalog, never to an error. `$XDG_DATA_HOME` is honoured only when it is
+an **absolute** path, as the Base Directory Specification requires; empty and
+relative values fall through to `~/.local/share`.
+
+Everything downstream of the root — `libraryfolders.vdf`,
+`appmanifest_<appid>.acf`, `rank_candidates` — is the same code as on Windows,
+so a Linux user gets real `game:steam:<appid>` identities in the picker. The
+window list itself already comes from `xcap` on Linux.
+
+### Confidence ceiling on Linux
+
+Steam games reach **`Score::Medium`** there, not `Score::High`: the
+`Running = 1` registry value has no counterpart. The only portable equivalent
+is Steam's `SteamAppId` in another process' startup environment, and reading
+that is the process-inspection route issue #239 explicitly rules out — the
+`ci_pinning` guard bans the procfs entry points so the ceiling cannot be
+quietly lifted. Epic, GOG, Origin/EA app and Battle.net stay Windows-gated:
+their manifests are registry-backed and I did not find layouts for their Linux
+ports that I could verify rather than guess.
 
 ## Device-id convention
 
