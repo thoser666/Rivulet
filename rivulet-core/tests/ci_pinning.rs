@@ -7313,10 +7313,12 @@ fn wasapi_device_capture_surface_is_pinned() {
 }
 
 #[test]
-fn steam_game_detection_surface_is_pinned() {
-    // Issue #239 (Steam slice): launcher-based game identification must
-    // stay local-only (registry + manifest files, no transport, no process
-    // memory), Windows-gated, and fixture-testable without Steam installed.
+fn launcher_game_detection_surface_is_pinned() {
+    // Issue #239 (all slices): launcher-based game identification must stay
+    // local-only (registry + manifest files, no transport, no process
+    // memory), Windows-gated, and fixture-testable without any launcher
+    // installed. The parsers are pure, so a CI machine with no Steam, Epic,
+    // GOG, Origin or Battle.net still exercises every launcher path.
     let detection = read("rivulet-core/src/game_detection.rs");
     for needle in [
         "pub struct GameIdentity",
@@ -7331,6 +7333,22 @@ fn steam_game_detection_surface_is_pinned() {
         "pub fn list_installed_games",
         "pub fn detect_running_game",
         "state_flags.map(|flags| flags & 4 == 0)",
+        // Slices 2-4: every launcher reader, the pure parsers behind them,
+        // and the ranking that gives launchers without a running signal a
+        // Medium score via foreground-window matching.
+        "pub struct RegistryGameEntry",
+        "pub fn parse_epic_manifest",
+        "pub fn list_epic_games_in",
+        "pub fn gog_games_from_entries",
+        "pub fn parse_origin_mfst",
+        "pub fn list_origin_games_in",
+        "pub fn battlenet_games_from_entries",
+        "pub fn rank_candidates",
+        "pub fn window_matches_game",
+        "fn deduplicate_by_device_id",
+        "LauncherKind::BattleNet",
+        "LauncherKind::EaApp",
+        "pub fn all()",
         // Windows gating: the registry readers must not compile elsewhere.
         "cfg(target_os = \"windows\")",
         // Privacy invariants: only local sources.
@@ -7375,21 +7393,81 @@ fn steam_game_detection_surface_is_pinned() {
         "winreg must stay a Windows-only dependency"
     );
 
+    // Every launcher's local source must stay a documented registry key or
+    // manifest path. A storefront API call would show up here as a bare
+    // path/URL, so pin the sources we intend to read.
+    for source in [
+        // Each registry-backed launcher must actually be enumerated, not
+        // merely mentioned in a doc comment.
+        "gog_games_from_entries(&registry_game_entries(",
+        "battlenet_games_from_entries(&registry_game_entries(",
+        "r\"SOFTWARE\\WOW6432Node\\GOG.com\\Games\"",
+        "r\"SOFTWARE\\WOW6432Node\\Blizzard Entertainment\"",
+        "r\"SOFTWARE\\WOW6432Node\\Epic Games\\EpicGamesLauncher\"",
+        "AppDataPath",
+        // Assembled with Path::join, so the segments appear literally while
+        // the joined path does not.
+        "\"Origin\"",
+        "\"EA Desktop\"",
+        "\"LocalContent\"",
+        "ProgramData",
+    ] {
+        assert!(
+            detection.contains(source),
+            "game_detection.rs must read {source} locally"
+        );
+    }
+
     let gui = read("rivulet-gui/src/app.rs");
     for needle in [
         "fn refresh_installed_games",
         "list_installed_games()",
         "detect_running_game()",
         "game_detection_running_marker",
+        // The picker groups by launcher and keeps a heuristic fallback
+        // header, so the user can see which store a game came from.
+        "enum SceneDeviceGroup",
+        "struct SceneDeviceEntry",
+        "fn scene_device_group_label",
+        "SceneDeviceGroup::OtherWindows",
+        "rivulet_core::LauncherKind::all()",
+        "game_detection_group_steam",
+        "game_detection_group_epic",
+        "game_detection_group_gog",
+        "game_detection_group_origin",
+        "game_detection_group_eaapp",
+        "game_detection_group_battlenet",
+        "game_detection_group_other_windows",
     ] {
         assert!(gui.contains(needle), "GUI must pin {needle}");
     }
+
+    // Heuristic windows are not a launcher and must keep the pre-#239
+    // device id: adding a launcher segment would silently re-id every
+    // already-persisted scene source, because a raw window's id is the only
+    // stable key it has.
+    assert!(
+        detection.contains("LauncherKind::Heuristic => format!(\"game:{}\", self.game_id)"),
+        "heuristic windows must keep the game:<window-id> device id"
+    );
 
     // The running-game marker key is pinned in the shared feature-i18n
     // parity test at the end of this file.
 
     let docs = read("docs/game-detection.md");
-    for fragment in ["local reads only", "game:steam:", "Launcher matrix"] {
+    for fragment in [
+        "local reads only",
+        "game:steam:",
+        "Launcher matrix",
+        // Every launcher is now documented as shipped, not planned.
+        "Epic Games Store",
+        "GOG",
+        "Origin",
+        "Battle.net",
+        "game:gog:",
+        "game:epic:",
+        "game:battlenet:",
+    ] {
         assert!(
             docs.contains(fragment),
             "game-detection doc must pin {fragment}"
@@ -7660,8 +7738,15 @@ fn feature_i18n_keys_exist_in_both_locales() {
         // WASAPI device capture picker.
         "audio_source_pick_device",
         "audio_source_output_device_loopback_hint",
-        // Steam game detection.
+        // Launcher game detection.
         "game_detection_running_marker",
+        "game_detection_group_steam",
+        "game_detection_group_epic",
+        "game_detection_group_gog",
+        "game_detection_group_origin",
+        "game_detection_group_eaapp",
+        "game_detection_group_battlenet",
+        "game_detection_group_other_windows",
     ];
     for key in exactly_two {
         let needle = format!("(\"{key}\",");

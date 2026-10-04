@@ -1,6 +1,8 @@
 # Game detection (launcher-based)
 
-**Status:** Steam slice shipped (2026-09-25) — issue [#239](https://github.com/thoser666/Rivulet/issues/239).
+**Status:** all five launchers shipped (Steam 2026-09-25, Epic/GOG/Origin/
+EA app/Battle.net + foreground ranking 2026-10-04) — issue
+[#239](https://github.com/thoser666/Rivulet/issues/239).
 **Privacy posture:** local reads only. No storefront web/partner APIs, no
 telemetry transport, no process-memory inspection. Same contract as
 [`telemetry.md`](telemetry.md): detection reads manifest files and registry
@@ -19,28 +21,34 @@ user actually owns.
 | Launcher | Installed games (catalog) | Running game | Status |
 | --- | --- | --- | --- |
 | **Steam** | `HKCU\SOFTWARE\Valve\Steam` → `SteamPath`; `steamapps\libraryfolders.vdf` lists every library; per game `steamapps\appmanifest_<appid>.acf` (`name`, `installdir`, `StateFlags` bit 2 = installed) | `HKLM\SOFTWARE\WOW6432Node\Valve\Steam\Apps\<appid>` → `Running = DWORD:1` | ✅ shipped (`rivulet-core/src/game_detection.rs`) |
-| **Epic Games Store** | `HKLM\SOFTWARE\WOW6432Node\Epic Games\EpicGamesLauncher` → `AppDataPath`; JSON manifests `...\Data\Manifests\*.item` | — (foreground-window scoring) | planned slice |
-| **GOG** | `HKLM\SOFTWARE\WOW6432Node\GOG.com\Games` per-game keys | — (foreground-window scoring) | planned slice |
-| **Origin / EA app** | `C:\ProgramData\Origin\LocalContent\<Game>\*.mfst` (`&id=` game id); EA app config under `%ProgramData%\EA Desktop` | — (foreground-window scoring) | planned slice |
-| **Battle.net** | `HKLM\SOFTWARE\WOW6432Node\Blizzard Entertainment` per-title keys | — (foreground-window scoring) | planned slice |
+| **Epic Games Store** | `HKLM\SOFTWARE\WOW6432Node\Epic Games\EpicGamesLauncher` → `AppDataPath`; JSON manifests `...\Data\Manifests\*.item` (`AppName`, `DisplayName`, `InstallLocation`, `LaunchExecutable`) | — (foreground-window scoring) | ✅ shipped |
+| **GOG** | `HKLM\SOFTWARE\WOW6432Node\GOG.com\Games` per-game keys (`gameID`, `name`, `path`, `exe`) | — (foreground-window scoring) | ✅ shipped |
+| **Origin / EA app** | `%ProgramData%\Origin\LocalContent\<Game>\*.mfst` (`&id=` / `origin2://game/<id>`); EA app under `%ProgramData%\EA Desktop\LocalContent` | — (foreground-window scoring) | ✅ shipped |
+| **Battle.net** | `HKLM\SOFTWARE\WOW6432Node\Blizzard Entertainment` per-title keys (`InstallPath`, `ExecutablePath`) | — (foreground-window scoring) | ✅ shipped |
 
-Launchers without a running signal will still contribute to the
-high-confidence ranking through foreground-window matching: when the
-foreground window title/class matches an installed game's launch executable
-or display name, the window resolves to the manifest identity
-(`Score::Medium`) instead of staying a raw heuristic window.
+Launchers without a running signal (Epic, GOG, Origin/EA app, Battle.net)
+contribute through **foreground-window matching**: when a heuristic window's
+title matches an installed game's launch executable or display name, the
+window resolves to that manifest identity (`Score::Medium`) instead of
+staying a raw window title. The comparison is exact after normalization
+(case, ` - Steam`, ` :: …` decorations, punctuation are stripped), so
+`Diablo II` never matches `Diablo IV`.
 
 ## Confidence model
 
 | Score | Evidence |
 | --- | --- |
 | `High` | Launcher signal (Steam: `Running = 1` registry value) |
-| `Medium` | Foreground window matches an installed game's executable/name (later slices) |
+| `Medium` | Foreground window matches an installed game's executable/name |
 | `Low` | Size/title window heuristic (existing `enumerate_game_windows` list) |
 
-`detect_running_game()` returns ranked candidates; the scene-item picker
-offers the running game first, followed by the installed catalog, followed
-by the raw heuristic windows ("Other windows" fallback in later slices).
+`detect_running_game()` returns the ranked list: Steam's running signal
+(`High`), then foreground matches (`Medium`), then every heuristic window
+(`Low`). The scene-item picker renders it grouped by launcher — Steam, Epic,
+GOG, Origin, EA app, Battle.net — with the raw heuristic windows last under
+an **"Other windows"** header. The ranking itself is the pure function
+`rank_candidates(installed, running_app_ids, windows)`, so the confidence
+order is unit-tested without any launcher or game installed.
 
 ## Device-id convention
 
@@ -48,10 +56,19 @@ Scene sources persist the chosen identity as the source `device_id`,
 mirroring the `camera:`/`monitor:` conventions from #216:
 
 ```
-game:steam:<appid>     e.g. game:steam:730
-game:<launcher>:<id>   later launchers (game:epic:..., game:gog:...)
-game:<window-id>       heuristic windows (unchanged, no launcher segment)
+game:steam:<appid>        e.g. game:steam:730
+game:epic:<AppName>       e.g. game:epic:Fortnite
+game:gog:<gameID>         e.g. game:gog:1207658924
+game:origin:<id>          e.g. game:origin:1172470
+game:eaapp:<id>           EA app, its own namespace after the Origin migration
+game:battlenet:<title>    e.g. game:battlenet:Diablo IV
+game:<window-id>          heuristic windows (unchanged, no launcher segment)
 ```
+
+Heuristic windows deliberately keep the pre-#239 `game:<window-id>` form
+without a launcher segment: a raw window's id is the only stable key it has,
+so adding a segment would silently re-id every already-persisted scene
+source.
 
 ## Platform scope
 

@@ -2231,6 +2231,30 @@ impl Default for RivuletApp {
     }
 }
 
+/// Section a scene-device entry is listed under (issue #239).
+///
+/// Grouping keeps the launcher of a game visible in the picker, so the
+/// user can tell *which* store a game came from instead of seeing an
+/// undifferentiated wall of titles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SceneDeviceGroup {
+    /// Installed games identified by a storefront launcher.
+    Launcher(rivulet_core::LauncherKind),
+    /// Raw size/title heuristic windows, kept as the last-resort
+    /// fallback under their own header.
+    OtherWindows,
+}
+
+/// One row of the scene device picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SceneDeviceEntry {
+    /// Section this row belongs to; rendered as a header before the
+    /// first row of the section.
+    group: SceneDeviceGroup,
+    label: String,
+    device_id: String,
+}
+
 impl RivuletApp {
     // == Multi-track audio routing (issue #154 Phase 2) ==================
 
@@ -5347,7 +5371,7 @@ impl RivuletApp {
         let selected_label = self
             .selected_scene_device_idx
             .and_then(|idx| entries.get(idx))
-            .map(|(label, _)| label.as_str())
+            .map(|entry| entry.label.as_str())
             .unwrap_or_else(|| self.tr("composition_device_default"));
         egui::ComboBox::from_id_salt("scene_device_select")
             .selected_text(selected_label)
@@ -5361,11 +5385,26 @@ impl RivuletApp {
                 {
                     self.selected_scene_device_idx = None;
                 }
-                for (index, (label, _)) in entries.iter().enumerate() {
+                // Render a header whenever the section changes, so the list
+                // reads as "Steam / Epic / Other windows" instead of one flat
+                // undifferentiated column of titles.
+                let mut previous_group: Option<SceneDeviceGroup> = None;
+                for (index, entry) in entries.iter().enumerate() {
+                    if previous_group != Some(entry.group) {
+                        if previous_group.is_some() {
+                            ui.add_space(4.0);
+                        }
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(self.scene_device_group_label(entry.group))
+                                .strong()
+                                .small(),
+                        ));
+                        previous_group = Some(entry.group);
+                    }
                     if ui
                         .selectable_label(
                             self.selected_scene_device_idx == Some(index),
-                            label.as_str(),
+                            entry.label.as_str(),
                         )
                         .clicked()
                     {
@@ -5375,17 +5414,50 @@ impl RivuletApp {
             });
     }
 
+    /// Localized header for a picker section.
+    fn scene_device_group_label(&self, group: SceneDeviceGroup) -> &str {
+        let key = match group {
+            SceneDeviceGroup::Launcher(rivulet_core::LauncherKind::Steam) => {
+                "game_detection_group_steam"
+            }
+            SceneDeviceGroup::Launcher(rivulet_core::LauncherKind::Epic) => {
+                "game_detection_group_epic"
+            }
+            SceneDeviceGroup::Launcher(rivulet_core::LauncherKind::Gog) => {
+                "game_detection_group_gog"
+            }
+            SceneDeviceGroup::Launcher(rivulet_core::LauncherKind::Origin) => {
+                "game_detection_group_origin"
+            }
+            SceneDeviceGroup::Launcher(rivulet_core::LauncherKind::EaApp) => {
+                "game_detection_group_eaapp"
+            }
+            SceneDeviceGroup::Launcher(rivulet_core::LauncherKind::BattleNet) => {
+                "game_detection_group_battlenet"
+            }
+            SceneDeviceGroup::OtherWindows => "game_detection_group_other_windows",
+            // Unreachable by construction: a heuristic window is always
+            // filed under `OtherWindows`, never under a launcher. Mapped
+            // defensively rather than panicking in the GUI's draw loop, and
+            // to the same header, because it *is* a heuristic window.
+            SceneDeviceGroup::Launcher(rivulet_core::LauncherKind::Heuristic) => {
+                "game_detection_group_other_windows"
+            }
+        };
+        self.tr(key)
+    }
+
     /// Resolve the device id selected in the scene dialog, if any.
     fn scene_device_id_for(&self, kind: &rivulet_core::SourceKind) -> Option<String> {
         let entries = self.scene_device_entries(kind);
         self.selected_scene_device_idx
             .and_then(|idx| entries.get(idx))
-            .map(|(_, id)| id.clone())
+            .map(|entry| entry.device_id.clone())
     }
 
-    /// List `(label, device_id)` for the current source kind using the same
-    /// device tables as the record view.
-    fn scene_device_entries(&self, kind: &rivulet_core::SourceKind) -> Vec<(String, String)> {
+    /// List the pickable entries for the current source kind, grouped by
+    /// section, using the same device tables as the record view.
+    fn scene_device_entries(&self, kind: &rivulet_core::SourceKind) -> Vec<SceneDeviceEntry> {
         match kind {
             rivulet_core::SourceKind::Webcam => self
                 .camera_devices
@@ -5396,15 +5468,24 @@ impl RivuletApp {
                     } else {
                         camera.device_path.clone()
                     };
-                    (camera.name.clone(), format!("camera:{id}"))
+                    SceneDeviceEntry {
+                        // Webcams have no launcher; the section header is not
+                        // rendered for them because the picker only draws a
+                        // header when the group changes and Webcam rows are
+                        // never mixed with other kinds.
+                        group: SceneDeviceGroup::OtherWindows,
+                        label: camera.name.clone(),
+                        device_id: format!("camera:{id}"),
+                    }
                 })
                 .collect(),
             rivulet_core::SourceKind::GameCapture => {
                 // Issue #239: installed games first (launcher-identified,
                 // `game:<launcher>:<id>`), the running game on top; raw
-                // game-like windows follow as the heuristic fallback.
+                // game-like windows follow under their own "Other windows"
+                // header as the heuristic fallback.
                 #[allow(unused_mut)]
-                let mut entries: Vec<(String, String)> = Vec::new();
+                let mut entries: Vec<SceneDeviceEntry> = Vec::new();
                 #[cfg(target_os = "windows")]
                 {
                     let running_ids: std::collections::HashSet<&str> = self
@@ -5415,27 +5496,36 @@ impl RivuletApp {
                     // High-confidence running game first (spec: "offer it
                     // first"), with the localized running marker.
                     for candidate in &self.running_games {
-                        entries.push((
-                            format!(
+                        entries.push(SceneDeviceEntry {
+                            group: SceneDeviceGroup::Launcher(candidate.identity.launcher),
+                            label: format!(
                                 "{} — {}",
                                 candidate.identity.display_name,
                                 self.tr("game_detection_running_marker")
                             ),
-                            candidate.identity.device_id(),
-                        ));
+                            device_id: candidate.identity.device_id(),
+                        });
                     }
-                    for game in &self.installed_games {
-                        if running_ids.contains(game.game_id.as_str()) {
-                            continue;
+                    // Then the rest of the installed catalog, one row per
+                    // launcher section in a stable order.
+                    for launcher in rivulet_core::LauncherKind::all() {
+                        for game in self.installed_games.iter().filter(|game| {
+                            game.launcher == *launcher
+                                && !running_ids.contains(game.game_id.as_str())
+                        }) {
+                            entries.push(SceneDeviceEntry {
+                                group: SceneDeviceGroup::Launcher(*launcher),
+                                label: game.display_name.clone(),
+                                device_id: game.device_id(),
+                            });
                         }
-                        entries.push((game.display_name.clone(), game.device_id()));
                     }
                 }
-                entries.extend(
-                    self.game_windows
-                        .iter()
-                        .map(|window| (window.title.clone(), format!("game:{}", window.id))),
-                );
+                entries.extend(self.game_windows.iter().map(|window| SceneDeviceEntry {
+                    group: SceneDeviceGroup::OtherWindows,
+                    label: window.title.clone(),
+                    device_id: format!("game:{}", window.id),
+                }));
                 entries
             }
             rivulet_core::SourceKind::ScreenCapture => self.scene_monitor_entries(),
@@ -5444,7 +5534,7 @@ impl RivuletApp {
     }
 
     #[cfg(target_os = "windows")]
-    fn scene_monitor_entries(&self) -> Vec<(String, String)> {
+    fn scene_monitor_entries(&self) -> Vec<SceneDeviceEntry> {
         self.monitors
             .iter()
             .enumerate()
@@ -5461,13 +5551,20 @@ impl RivuletApp {
                         .map(|i| i.to_string())
                         .unwrap_or_else(|_| index.to_string())
                 );
-                (label, id)
+                SceneDeviceEntry {
+                    // Monitors have no launcher section; the group only
+                    // drives header rendering, and monitors are never
+                    // listed next to games.
+                    group: SceneDeviceGroup::OtherWindows,
+                    label,
+                    device_id: id,
+                }
             })
             .collect()
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    fn scene_monitor_entries(&self) -> Vec<(String, String)> {
+    fn scene_monitor_entries(&self) -> Vec<SceneDeviceEntry> {
         self.monitors
             .iter()
             .enumerate()
@@ -5484,7 +5581,14 @@ impl RivuletApp {
                         .map(|id| id.to_string())
                         .unwrap_or_else(|_| index.to_string())
                 );
-                (label, id)
+                SceneDeviceEntry {
+                    // Monitors have no launcher section; the group only
+                    // drives header rendering, and monitors are never
+                    // listed next to games.
+                    group: SceneDeviceGroup::OtherWindows,
+                    label,
+                    device_id: id,
+                }
             })
             .collect()
     }
@@ -16822,12 +16926,12 @@ mod tests {
 
         let webcam_entries = app.scene_device_entries(&rivulet_core::SourceKind::Webcam);
         assert_eq!(webcam_entries.len(), 1);
-        assert_eq!(webcam_entries[0].0, "Facecam");
-        assert_eq!(webcam_entries[0].1, "camera:/dev/video0");
+        assert_eq!(webcam_entries[0].label, "Facecam");
+        assert_eq!(webcam_entries[0].device_id, "camera:/dev/video0");
 
         let game_entries = app.scene_device_entries(&rivulet_core::SourceKind::GameCapture);
         assert_eq!(game_entries.len(), 1);
-        assert_eq!(game_entries[0].1, "game:42");
+        assert_eq!(game_entries[0].device_id, "game:42");
 
         // Issue #239 (Windows): the installed-game table feeds the same
         // picker; the running game is offered first with its marker.
@@ -16856,9 +16960,9 @@ mod tests {
                 3,
                 "running game + installed games + heuristic windows"
             );
-            assert_eq!(launcher_entries[0].1, "game:steam:570");
-            assert_eq!(launcher_entries[1].1, "game:steam:730");
-            assert_eq!(launcher_entries[2].1, "game:42");
+            assert_eq!(launcher_entries[0].device_id, "game:steam:570");
+            assert_eq!(launcher_entries[1].device_id, "game:steam:730");
+            assert_eq!(launcher_entries[2].device_id, "game:42");
             app.installed_games.clear();
             app.running_games.clear();
         }
@@ -16870,6 +16974,100 @@ mod tests {
         assert!(app
             .scene_device_entries(&rivulet_core::SourceKind::Browser)
             .is_empty());
+    }
+
+    /// Issue #239, slices 2-4: the picker groups installed games by
+    /// launcher and files the raw heuristic windows under their own
+    /// "Other windows" header, so the user can tell which store a game
+    /// came from.
+    #[test]
+    fn scene_device_picker_groups_installed_games_by_launcher() {
+        let mut app = RivuletApp::default();
+        app.game_windows.push(rivulet_core::GameWindow {
+            id: 42,
+            title: "Some Unidentified Game".to_owned(),
+            width: 1920,
+            height: 1080,
+        });
+
+        #[cfg(target_os = "windows")]
+        {
+            app.installed_games = vec![
+                rivulet_core::GameIdentity {
+                    launcher: rivulet_core::LauncherKind::Epic,
+                    game_id: "Fortnite".to_owned(),
+                    display_name: "Fortnite".to_owned(),
+                    install_dir: None,
+                    executables: Vec::new(),
+                },
+                rivulet_core::GameIdentity {
+                    launcher: rivulet_core::LauncherKind::Gog,
+                    game_id: "1207658924".to_owned(),
+                    display_name: "Baldur's Gate 3".to_owned(),
+                    install_dir: None,
+                    executables: Vec::new(),
+                },
+                rivulet_core::GameIdentity {
+                    launcher: rivulet_core::LauncherKind::Steam,
+                    game_id: "730".to_owned(),
+                    display_name: "Counter-Strike 2".to_owned(),
+                    install_dir: None,
+                    executables: Vec::new(),
+                },
+            ];
+
+            let entries = app.scene_device_entries(&rivulet_core::SourceKind::GameCapture);
+            assert_eq!(
+                entries.len(),
+                4,
+                "three installed games + one heuristic window"
+            );
+
+            // Each game is filed under its own launcher, and the launcher
+            // order is the documented matrix order (Steam, Epic, GOG, ...),
+            // not the insertion order of the catalog.
+            assert_eq!(
+                entries[0].group,
+                SceneDeviceGroup::Launcher(rivulet_core::LauncherKind::Steam)
+            );
+            assert_eq!(entries[0].device_id, "game:steam:730");
+            assert_eq!(
+                entries[1].group,
+                SceneDeviceGroup::Launcher(rivulet_core::LauncherKind::Epic)
+            );
+            assert_eq!(entries[1].device_id, "game:epic:Fortnite");
+            assert_eq!(
+                entries[2].group,
+                SceneDeviceGroup::Launcher(rivulet_core::LauncherKind::Gog)
+            );
+            assert_eq!(entries[2].device_id, "game:gog:1207658924");
+
+            // The heuristic window keeps its pre-#239 device id and is filed
+            // under the fallback header, never under a launcher.
+            assert_eq!(entries[3].group, SceneDeviceGroup::OtherWindows);
+            assert_eq!(entries[3].device_id, "game:42");
+
+            // The heuristic header is localized and distinct from every
+            // launcher header.
+            assert_eq!(
+                app.scene_device_group_label(SceneDeviceGroup::OtherWindows),
+                app.tr("game_detection_group_other_windows")
+            );
+            assert_ne!(
+                app.scene_device_group_label(SceneDeviceGroup::OtherWindows),
+                app.scene_device_group_label(SceneDeviceGroup::Launcher(
+                    rivulet_core::LauncherKind::Steam
+                ))
+            );
+
+            // A heuristic window is never rendered under a launcher header.
+            assert_eq!(
+                app.scene_device_group_label(SceneDeviceGroup::Launcher(
+                    rivulet_core::LauncherKind::Heuristic
+                )),
+                app.tr("game_detection_group_other_windows")
+            );
+        }
     }
 
     #[test]

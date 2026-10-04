@@ -13,9 +13,23 @@
 //! carries a `Running = DWORD:1` value while a game is running. The
 //! existing size/title window heuristic stays the low-confidence fallback.
 //!
-//! Later slices add the remaining launchers (GOG, Epic, Origin/EA app,
-//! Battle.net) as additional [`LauncherKind`] variants with their own
-//! readers, so the model below is deliberately launcher-generic already.
+//! All five storefront launchers from issue #239 are covered: Steam (its own
+//! `Running` registry signal), Epic Games Store, GOG, Origin/EA app and
+//! Battle.net. The manifest/registry *parsers* are pure functions over text
+//! or key-value slices, so every launcher is fixture-testable without the
+//! launcher being installed; only the thin discovery wrappers touch the
+//! registry or the filesystem.
+//!
+//! Launchers without a documented "running" signal (Epic, GOG, Origin/EA,
+//! Battle.net) still rank highly through
+//! [`rank_candidates`]: a foreground window whose title or class matches an
+//! installed game's launch executable resolves to that manifest identity at
+//! [`Score::Medium`] instead of staying a raw heuristic window.
+//!
+//! Privacy posture is unchanged and local-only: manifest files and registry
+//! keys on the user's own machine. No storefront API, no transport, and no
+//! process-memory inspection — reading another process' `SteamAppId` from
+//! its environment stays an explicit non-goal of issue #239.
 
 use std::path::{Path, PathBuf};
 
@@ -26,27 +40,34 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LauncherKind {
     Steam,
-    /// Reserved for later #239 slices; never constructed yet.
-    #[allow(dead_code)]
     Epic,
-    /// Reserved for later #239 slices; never constructed yet.
-    #[allow(dead_code)]
     Gog,
-    /// Reserved for later #239 slices; never constructed yet.
-    #[allow(dead_code)]
     Origin,
-    /// Reserved for later #239 slices; never constructed yet.
-    #[allow(dead_code)]
+    /// EA app (the successor of Origin); kept separate so a migrated
+    /// library keeps its own `game:eaapp:` device-id namespace.
     EaApp,
-    /// Reserved for later #239 slices; never constructed yet.
-    #[allow(dead_code)]
     BattleNet,
     /// The size/title window heuristic (lowest confidence).
-    #[allow(dead_code)]
     Heuristic,
 }
 
 impl LauncherKind {
+    /// Every real launcher, in the order the picker groups them.
+    ///
+    /// [`LauncherKind::Heuristic`] is deliberately absent: heuristic windows
+    /// are not a launcher and are listed separately as the last-resort
+    /// fallback.
+    pub fn all() -> &'static [LauncherKind] {
+        &[
+            LauncherKind::Steam,
+            LauncherKind::Epic,
+            LauncherKind::Gog,
+            LauncherKind::Origin,
+            LauncherKind::EaApp,
+            LauncherKind::BattleNet,
+        ]
+    }
+
     /// Lower-case name used in device ids (`game:steam:<id>`) and reports.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -103,8 +124,15 @@ impl GameIdentity {
     /// The device-id convention for scene sources (mirrors `camera:` /
     /// `monitor:` from #216): `game:<launcher>:<id>`, e.g.
     /// `game:steam:730`.
+    /// Heuristic windows are not a launcher, so they keep the pre-#239
+    /// convention `game:<window-id>` with no launcher segment. Adding one
+    /// would silently re-id every already-persisted scene source, because the
+    /// window id is the only stable key a raw window has.
     pub fn device_id(&self) -> String {
-        format!("game:{}:{}", self.launcher.as_str(), self.game_id)
+        match self.launcher {
+            LauncherKind::Heuristic => format!("game:{}", self.game_id),
+            _ => format!("game:{}:{}", self.launcher.as_str(), self.game_id),
+        }
     }
 }
 
@@ -250,6 +278,395 @@ pub fn parse_libraryfolders(contents: &str) -> Vec<PathBuf> {
     libraries
 }
 
+// ── Epic Games Store manifests (pure, fixture-testable) ────────────────
+
+/// Reduce a launch command to a comparable executable name.
+///
+/// Deliberately **not** `Path::file_stem()`: the launcher manifests always
+/// carry Windows paths (`C:\\Games\\bg3.exe`), and on a non-Windows host a
+/// backslash is an ordinary character, not a path separator, so `Path`
+/// would return the whole path instead of `bg3`. These parsers are pure
+/// and are exercised by the Linux CI runner, so the result must not depend
+/// on the host's path semantics.
+fn executable_name(raw: &str) -> String {
+    let segment = raw
+        .rsplit(['/', '\\'])
+        .find(|part| !part.trim().is_empty())
+        .unwrap_or(raw)
+        .trim();
+    match segment.rfind('.') {
+        // A leading dot belongs to the name (".helper"), not an extension.
+        Some(dot) if dot > 0 => segment[..dot].to_string(),
+        _ => segment.to_string(),
+    }
+}
+
+/// Parse one Epic Games Store `.item` manifest into a [`GameIdentity`].
+///
+/// Epic writes a JSON document per installed game under
+/// `<AppDataPath>\Data\Manifests\`. Only four fields matter for
+/// identification: `AppName` (the stable id), `DisplayName` (shown to the
+/// user), `InstallLocation` and `LaunchExecutable` (the latter feeds
+/// foreground-window matching in [`rank_candidates`]).
+///
+/// Pure over the file text, so tests run against checked-in fixture JSON
+/// without Epic installed. A document that is not valid JSON, or that lacks
+/// an id or a display name, yields `None` — an unreadable manifest must not
+/// break the rest of the catalog.
+pub fn parse_epic_manifest(contents: &str) -> Option<GameIdentity> {
+    let value: serde_json::Value = serde_json::from_str(contents).ok()?;
+
+    // Epic's schema repeats the game fields at the top level *and* nests them
+    // in an `AppPath` object (older manifest generation). Accept the
+    // documented top-level shape first, then the nested one, so both
+    // manifest generations identify.
+    let nested = value.get("AppPath");
+    let field = |name: &str| -> Option<&str> {
+        value
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| {
+                nested
+                    .and_then(|n| n.get(name))
+                    .and_then(serde_json::Value::as_str)
+            })
+            .filter(|s| !s.trim().is_empty())
+    };
+
+    let game_id = field("AppName")?.trim().to_string();
+    let display_name = field("DisplayName")?.trim().to_string();
+
+    let install_dir = field("InstallLocation")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    // At most one launch executable per Epic manifest, hence the Option ->
+    // single-element vec rather than a filter/map/collect chain.
+    let executables: Vec<String> = field("LaunchExecutable")
+        .map(executable_name)
+        .into_iter()
+        .collect();
+
+    Some(GameIdentity {
+        launcher: LauncherKind::Epic,
+        game_id,
+        display_name,
+        install_dir,
+        executables,
+    })
+}
+
+/// Enumerate the installed Epic games of one manifest directory. Shared with
+/// [`list_installed_games`] so tests can point the reader at a fixture
+/// directory without the registry.
+pub fn list_epic_games_in(app_data_path: &Path) -> Vec<GameIdentity> {
+    let manifests = app_data_path.join("Data").join("Manifests");
+    let Ok(entries) = std::fs::read_dir(&manifests) else {
+        return Vec::new();
+    };
+    let mut games = Vec::new();
+    for entry in entries.flatten() {
+        if entry.path().extension().and_then(|ext| ext.to_str()) != Some("item") {
+            continue;
+        }
+        let Ok(contents) = std::fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        if let Some(game) = parse_epic_manifest(&contents) {
+            games.push(game);
+        }
+    }
+    games
+}
+
+// ── GOG registry entries (pure, fixture-testable) ───────────────────────
+
+/// One `HKLM\SOFTWARE\WOW6432Node\GOG.com\Games\<id>` subkey as a flat
+/// name/value list, already read from the registry.
+///
+/// The reader in [`gog_games_from_entries`] is pure so the GOG catalog can be
+/// tested without a GOG installation: tests feed checked-in fixtures shaped
+/// exactly like this.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistryGameEntry {
+    /// The subkey name — GOG's numeric `gameID`.
+    pub key: String,
+    /// Flat name/value pairs of that subkey.
+    pub values: Vec<(String, String)>,
+}
+
+impl RegistryGameEntry {
+    /// Case-insensitive value lookup (GOG's own registry mixes cases).
+    pub fn value(&self, name: &str) -> Option<&str> {
+        self.values
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+            .filter(|value| !value.trim().is_empty())
+    }
+}
+
+/// Build the GOG catalog from registry entries.
+///
+/// GOG keys its games by numeric `gameID`; the human-readable title lives in
+/// `name`, the install path in `path`, and the launch executable (used for
+/// foreground matching) in `exe`. A subkey without a title is skipped rather
+/// than guessed — a nameless entry would render as an empty row in the
+/// picker.
+pub fn gog_games_from_entries(entries: &[RegistryGameEntry]) -> Vec<GameIdentity> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let display_name = entry.value("name")?.trim().to_string();
+            let game_id = entry
+                .value("gameID")
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .unwrap_or_else(|| entry.key.trim())
+                .to_string();
+            if game_id.is_empty() {
+                return None;
+            }
+            let install_dir = entry
+                .value("path")
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from);
+            let executables = entry
+                .value("exe")
+                .map(str::trim)
+                .filter(|exe| !exe.is_empty())
+                .map(executable_name)
+                .into_iter()
+                .collect();
+            Some(GameIdentity {
+                launcher: LauncherKind::Gog,
+                game_id,
+                display_name,
+                install_dir,
+                executables,
+            })
+        })
+        .collect()
+}
+
+// ── Origin / EA app manifests (pure, fixture-testable) ─────────────────
+
+/// Extract the numeric game id from an Origin `.mfst` manifest.
+///
+/// Origin's `*.mfst` files embed a command line such as
+/// `origin2://game/12345?offerIds=…`; the id after `/game/` is the stable
+/// key. Pure over the file text so tests need no Origin installation.
+/// Returns `None` when no `&id=`/game id can be found.
+pub fn parse_origin_mfst(contents: &str) -> Option<String> {
+    // Modern EA app manifests use an explicit `&id=` parameter.
+    if let Some(id) = contents.split("&id=").nth(1) {
+        let id: String = id.chars().take_while(char::is_ascii_digit).collect();
+        if !id.is_empty() {
+            return Some(id);
+        }
+    }
+    // Classic Origin manifests use the `origin2://game/<id>` URL form.
+    if let Some(rest) = contents.split("origin2://game/").nth(1) {
+        let id: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        if !id.is_empty() {
+            return Some(id);
+        }
+    }
+    None
+}
+
+/// Enumerate installed Origin games under one `LocalContent` root.
+///
+/// `origin2://game/<id>` gives the stable id; the *display name* is the
+/// `.mfst` file's own stem (Origin has no title field in the manifest), so the
+/// file name is the best local identifier. Reads are independent per file, so
+/// one unreadable manifest degrades to the rest.
+pub fn list_origin_games_in(local_content: &Path) -> Vec<GameIdentity> {
+    let Ok(entries) = std::fs::read_dir(local_content) else {
+        return Vec::new();
+    };
+    let mut games = Vec::new();
+    for entry in entries.flatten() {
+        // Each game owns a folder (`<Game>\*.mfst`).
+        let Ok(manifests) = std::fs::read_dir(entry.path()) else {
+            continue;
+        };
+        for manifest in manifests.flatten() {
+            let file_name = manifest.file_name();
+            let Some(stem) = Path::new(&file_name).file_stem() else {
+                continue;
+            };
+            if stem.to_string_lossy().eq_ignore_ascii_case("_manifest") {
+                continue;
+            }
+            let Ok(contents) = std::fs::read_to_string(manifest.path()) else {
+                continue;
+            };
+            let Some(game_id) = parse_origin_mfst(&contents) else {
+                continue;
+            };
+            games.push(GameIdentity {
+                launcher: LauncherKind::Origin,
+                game_id,
+                display_name: stem.to_string_lossy().into_owned(),
+                install_dir: Some(entry.path()),
+                executables: Vec::new(),
+            });
+            // One manifest per game folder is the documented layout; stop
+            // here so duplicate `.mfst` variants cannot double-list a game.
+            break;
+        }
+    }
+    games
+}
+
+// ── Battle.net registry entries (pure, fixture-testable) ───────────────
+
+/// Build the Battle.net catalog from `HKLM\SOFTWARE\WOW6432Node\Blizzard
+/// Entertainment` subkeys.
+///
+/// Battle.net keys games by *title* (`Diablo IV`), which doubles as the
+/// stable id and the display name. `InstallPath` locates the game;
+/// `InstallPath` + the well-known `Binaries\<exe>` layout is where the
+/// launch executable comes from, so foreground matching can resolve a
+/// running Battle.net game to this identity.
+pub fn battlenet_games_from_entries(entries: &[RegistryGameEntry]) -> Vec<GameIdentity> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let display_name = entry
+                .value("DisplayName")
+                .or_else(|| entry.value("GameName"))
+                .unwrap_or_else(|| entry.key.trim())
+                .trim()
+                .to_string();
+            if display_name.is_empty() {
+                return None;
+            }
+            let install_dir = entry
+                .value("InstallPath")
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from);
+            let executables = entry
+                .value("ExecutablePath")
+                .map(str::trim)
+                .filter(|exe| !exe.is_empty())
+                .map(executable_name)
+                .into_iter()
+                .collect();
+            Some(GameIdentity {
+                launcher: LauncherKind::BattleNet,
+                game_id: entry.key.trim().to_string(),
+                display_name,
+                install_dir,
+                executables,
+            })
+        })
+        .collect()
+}
+
+// ── Foreground-window matching (pure) ───────────────────────────────────
+
+/// Normalize a window title or executable for comparison: lowercase, and
+/// strip everything the launcher adds around the name (`- Steam`,
+/// `(64-bit, ...)`, ` :: ` suffixes, punctuation).
+fn normalize_for_match(value: &str) -> String {
+    value
+        .to_lowercase()
+        .trim()
+        .split(" :: ")
+        .next()
+        .unwrap_or_default()
+        .split(" - ")
+        .next()
+        .unwrap_or_default()
+        .trim_matches(|c: char| c.is_whitespace() || c == '-' || c == '|' || c == '\u{2014}')
+        .to_string()
+}
+
+/// Does a foreground window's title identify `game`?
+///
+/// Matching is deliberately conservative and pure: an exact (normalized)
+/// match on the launch executable wins, otherwise the window title must
+/// contain the whole normalized display name. Substring-free name matching
+/// avoids the classic false positive where "Diablo" matches "Diablo II".
+pub fn window_matches_game(title: &str, game: &GameIdentity) -> bool {
+    let title_key = normalize_for_match(title);
+    if title_key.is_empty() {
+        return false;
+    }
+    if game
+        .executables
+        .iter()
+        .any(|exe| normalize_for_match(exe) == title_key)
+    {
+        return true;
+    }
+    let name_key = normalize_for_match(&game.display_name);
+    !name_key.is_empty() && title_key == name_key
+}
+
+/// Rank the candidates for the scene-item picker.
+///
+/// `High` first (a launcher running signal — currently Steam's `Running`
+/// registry value), then `Medium` (a foreground window that matches an
+/// installed game), then `Low` (the size/title heuristic windows). Within a
+/// score the catalog keeps its input order, so a launcher-enumerated game
+/// stays above a heuristic window of the same name.
+///
+/// Pure and slice-driven: callers pass the installed catalog, the app ids a
+/// launcher reports as running, and the heuristic windows. That keeps the
+/// ranking unit-testable with no launcher installed, and lets the Windows
+/// wrapper [`detect_running_game`] keep doing only the I/O.
+pub fn rank_candidates(
+    installed: &[GameIdentity],
+    running_app_ids: &[String],
+    windows: &[crate::game_capture::GameWindow],
+) -> Vec<RunningGameCandidate> {
+    let mut candidates: Vec<RunningGameCandidate> = Vec::new();
+
+    for game in installed {
+        if running_app_ids.iter().any(|id| id == &game.game_id) {
+            candidates.push(RunningGameCandidate {
+                identity: game.clone(),
+                score: Score::High,
+            });
+        }
+    }
+    for game in installed {
+        let already_high = candidates
+            .iter()
+            .any(|c| &c.identity == game && c.score == Score::High);
+        if already_high {
+            continue;
+        }
+        if windows.iter().any(|w| window_matches_game(&w.title, game)) {
+            candidates.push(RunningGameCandidate {
+                identity: game.clone(),
+                score: Score::Medium,
+            });
+        }
+    }
+    // Heuristic windows stay available as the last-resort fallback, and keep
+    // their raw window id as the device id (`game:<window-id>`).
+    for window in windows {
+        candidates.push(RunningGameCandidate {
+            identity: GameIdentity {
+                launcher: LauncherKind::Heuristic,
+                game_id: window.id.to_string(),
+                display_name: window.title.clone(),
+                install_dir: None,
+                executables: Vec::new(),
+            },
+            score: Score::Low,
+        });
+    }
+
+    candidates
+}
+
 // ── Steam installation discovery + readers (Windows-gated) ─────────────
 
 /// The Steam installation root: `HKCU\SOFTWARE\Valve\Steam` → `SteamPath`.
@@ -295,6 +712,122 @@ fn steam_app_is_running(_app_id: &str) -> bool {
     false
 }
 
+// ── Generic registry enumeration (Windows-gated) ───────────────────────
+
+/// Read every value of an open registry key as a flat name/value list.
+///
+/// Deliberately value-agnostic: GOG and Battle.net both store one game per
+/// subkey, and the readers that consume [`RegistryGameEntry`] are pure, so
+/// enumerating the (possibly heterogeneous) value types happens exactly once,
+/// here. Non-string values are read as their lossy display form, because the
+/// only consumers are path/name strings.
+#[cfg(target_os = "windows")]
+fn registry_values(key: &winreg::RegKey) -> Vec<(String, String)> {
+    let mut values = Vec::new();
+    for (name, _value) in key.enum_values().flatten() {
+        let rendered = key
+            .get_value::<String, _>(&name)
+            .or_else(|_| key.get_value::<u32, _>(&name).map(|v| v.to_string()))
+            .or_else(|_| key.get_value::<u64, _>(&name).map(|v| v.to_string()))
+            .unwrap_or_default();
+        if !rendered.is_empty() {
+            values.push((name, rendered));
+        }
+    }
+    values
+}
+
+/// Enumerate the direct child subkeys of `root_path` as [`RegistryGameEntry`]
+/// values, for the launchers that key one game per subkey.
+#[cfg(target_os = "windows")]
+fn registry_game_entries(root_path: &str) -> Vec<RegistryGameEntry> {
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    use winreg::RegKey;
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let Ok(root) = hklm.open_subkey(root_path) else {
+        return Vec::new();
+    };
+    root.enum_keys()
+        .flatten()
+        .filter_map(|subkey| {
+            let child = root.open_subkey(&subkey).ok()?;
+            Some(RegistryGameEntry {
+                key: subkey,
+                values: registry_values(&child),
+            })
+        })
+        .collect()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn registry_game_entries(_root_path: &str) -> Vec<RegistryGameEntry> {
+    Vec::new()
+}
+
+// ── Epic Games Store discovery (Windows-gated) ──────────────────────────
+
+/// `HKLM\SOFTWARE\WOW6432Node\Epic Games\EpicGamesLauncher` → `AppDataPath`,
+/// the directory whose `Data\Manifests\*.item` describe installed games.
+#[cfg(target_os = "windows")]
+fn epic_app_data_path() -> Option<PathBuf> {
+    use winreg::enums::HKEY_LOCAL_MACHINE;
+    use winreg::RegKey;
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let path: String = hklm
+        .open_subkey(r"SOFTWARE\WOW6432Node\Epic Games\EpicGamesLauncher")
+        .ok()?
+        .get_value("AppDataPath")
+        .ok()?;
+    if path.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(path))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn epic_app_data_path() -> Option<PathBuf> {
+    None
+}
+
+// ── Origin / EA app discovery (Windows-gated) ───────────────────────────
+
+/// Origin's per-user `LocalContent` root, which holds one folder plus
+/// `*.mfst` per installed game.
+#[cfg(target_os = "windows")]
+fn origin_local_content() -> Option<PathBuf> {
+    program_data().map(|root| root.join("Origin").join("LocalContent"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn origin_local_content() -> Option<PathBuf> {
+    None
+}
+
+/// The EA app (Origin's successor) keeps its own install root; the manifest
+/// layout matches Origin's, so the same parser serves both launchers.
+#[cfg(target_os = "windows")]
+fn ea_app_local_content() -> Option<PathBuf> {
+    program_data().map(|root| root.join("EA Desktop").join("LocalContent"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn ea_app_local_content() -> Option<PathBuf> {
+    None
+}
+
+/// `%ProgramData%`, where both Origin and the EA app keep their manifests.
+///
+/// Only the Windows-gated callers above reach this, so the helper itself is
+/// Windows-only: a non-Windows stub would be dead code that `-D warnings`
+/// rejects on the Linux/macOS CI runners.
+#[cfg(target_os = "windows")]
+fn program_data() -> Option<PathBuf> {
+    std::env::var_os("ProgramData")
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
 /// Enumerate the installed games of one Steam library (its `steamapps`
 /// directory). Shared by [`list_installed_games`] so tests can point the
 /// reader at a fixture directory without the registry.
@@ -330,6 +863,45 @@ pub fn list_installed_games_in_library(library_root: &Path) -> Vec<GameIdentity>
 /// to an empty result — never an error: the picker falls back to the
 /// window heuristic.
 pub fn list_installed_games() -> Vec<GameIdentity> {
+    let mut games = steam_installed_games();
+
+    // Each remaining launcher is read independently: a missing launcher (or a
+    // folder that moved) degrades to nothing contributed, never to an error
+    // that would hide the launchers that did work.
+    if let Some(app_data_path) = epic_app_data_path() {
+        games.extend(list_epic_games_in(&app_data_path));
+    }
+    games.extend(gog_games_from_entries(&registry_game_entries(
+        r"SOFTWARE\WOW6432Node\GOG.com\Games",
+    )));
+    games.extend(battlenet_games_from_entries(&registry_game_entries(
+        r"SOFTWARE\WOW6432Node\Blizzard Entertainment",
+    )));
+    if let Some(local_content) = origin_local_content() {
+        games.extend(list_origin_games_in(&local_content));
+    }
+    if let Some(local_content) = ea_app_local_content() {
+        // Same manifest layout, different launcher identity: retag so the
+        // device id stays in the `game:eaapp:` namespace.
+        games.extend(
+            list_origin_games_in(&local_content)
+                .into_iter()
+                .map(|mut game| {
+                    game.launcher = LauncherKind::EaApp;
+                    game
+                }),
+        );
+    }
+
+    // A game installed under two launchers would appear twice with different
+    // device ids; that is intentional (each launcher entry is selectable),
+    // but a duplicate *within* one launcher is a catalog bug.
+    deduplicate_by_device_id(games)
+}
+
+/// The Steam half of [`list_installed_games`], split out so the other
+/// launchers can be added without touching the library logic.
+fn steam_installed_games() -> Vec<GameIdentity> {
     let Some(root) = steam_root() else {
         return Vec::new();
     };
@@ -350,21 +922,41 @@ pub fn list_installed_games() -> Vec<GameIdentity> {
     games
 }
 
-/// Detect the currently running game: Steam's `Running` registry signal over
-/// the installed catalog (ranked [`Score::High`]). The size/title window
-/// heuristic is *not* re-implemented here — the GUI keeps its existing
-/// window list as the `Score::Low` fallback, so callers combine both lists.
+/// Drop repeated `game:<launcher>:<id>` rows, keeping the first occurrence so
+/// enumeration order stays deterministic.
+fn deduplicate_by_device_id(games: Vec<GameIdentity>) -> Vec<GameIdentity> {
+    let mut seen = std::collections::HashSet::new();
+    games
+        .into_iter()
+        .filter(|game| seen.insert(game.device_id()))
+        .collect()
+}
+
+/// Detect the currently running game, ranked.
+///
+/// Steam's `Running` registry value yields [`Score::High`]; a heuristic window
+/// whose title matches an installed game's name or launch executable yields
+/// [`Score::Medium`], which is how Epic, GOG, Origin/EA and Battle.net games
+/// (none of which publish a running signal) can still resolve to a real
+/// identity instead of a raw window title. Every heuristic window is kept at
+/// [`Score::Low`] as the last-resort fallback.
+///
+/// The ranking itself lives in [`rank_candidates`], which is pure; this
+/// function only performs the I/O (catalog, Steam's running signal, the
+/// heuristic window list) and hands them over. That keeps the confidence
+/// ordering testable without any launcher or game installed.
 pub fn detect_running_game() -> Vec<RunningGameCandidate> {
-    let mut candidates = Vec::new();
-    for game in list_installed_games() {
-        if steam_app_is_running(&game.game_id) {
-            candidates.push(RunningGameCandidate {
-                identity: game,
-                score: Score::High,
-            });
-        }
-    }
-    candidates
+    let installed = list_installed_games();
+    let running_app_ids: Vec<String> = installed
+        .iter()
+        .filter(|game| game.launcher == LauncherKind::Steam && steam_app_is_running(&game.game_id))
+        .map(|game| game.game_id.clone())
+        .collect();
+    rank_candidates(
+        &installed,
+        &running_app_ids,
+        &crate::game_capture::list_game_windows(),
+    )
 }
 
 #[cfg(test)]
@@ -521,6 +1113,456 @@ mod tests {
     fn score_ranking_orders_launcher_over_heuristic() {
         assert!(Score::High > Score::Medium);
         assert!(Score::Medium > Score::Low);
+    }
+
+    // ── Epic Games Store (slice 2) ────────────────────────────────────
+
+    const EPIC_MANIFEST: &str = r#"{
+        "AppName": "Fortnite",
+        "DisplayName": "Fortnite",
+        "InstallLocation": "C:\\Program Files\\Epic Games\\Fortnite",
+        "LaunchExecutable": "C:\\Program Files\\Epic Games\\Fortnite\\Binaries\\Win64\\FortniteClient-Win64-Shipping.exe",
+        "AppVersion": "28.10.00.28.10.00"
+    }"#;
+
+    #[test]
+    fn parse_epic_manifest_reads_identity_and_launch_executable() {
+        let game = parse_epic_manifest(EPIC_MANIFEST).expect("epic manifest parses");
+        assert_eq!(game.launcher, LauncherKind::Epic);
+        assert_eq!(game.game_id, "Fortnite");
+        assert_eq!(game.display_name, "Fortnite");
+        assert_eq!(
+            game.install_dir,
+            Some(PathBuf::from("C:\\Program Files\\Epic Games\\Fortnite"))
+        );
+        // Foreground matching compares basenames, so the manifest's full
+        // launch path must be reduced to its file stem.
+        assert_eq!(
+            game.executables,
+            vec!["FortniteClient-Win64-Shipping".to_string()]
+        );
+        assert_eq!(game.device_id(), "game:epic:Fortnite");
+    }
+
+    #[test]
+    fn parse_epic_manifest_accepts_the_nested_app_path_shape() {
+        // Older Epic manifests nest the fields under AppName -> AppPath.
+        let nested = r#"{
+            "AppName": "RocketLeague",
+            "AppPath": {
+                "DisplayName": "Rocket League",
+                "InstallLocation": "C:\\RocketLeague",
+                "LaunchExecutable": "RocketLeague.exe"
+            }
+        }"#;
+        let game = parse_epic_manifest(nested).expect("nested shape parses");
+        assert_eq!(game.game_id, "RocketLeague");
+        assert_eq!(game.display_name, "Rocket League");
+        assert_eq!(game.executables, vec!["RocketLeague".to_string()]);
+    }
+
+    #[test]
+    fn parse_epic_manifest_rejects_unusable_documents() {
+        // Not JSON.
+        assert!(parse_epic_manifest("not json at all").is_none());
+        // Valid JSON but no id, or no display name: unusable as an identity.
+        assert!(parse_epic_manifest(r#"{"DisplayName": "Nameless"}"#).is_none());
+        assert!(parse_epic_manifest(r#"{"AppName": "OnlyId"}"#).is_none());
+        // Blank strings must not become an empty-named row in the picker.
+        assert!(parse_epic_manifest(r#"{"AppName": "  ", "DisplayName": "Blank"}"#).is_none());
+        assert!(parse_epic_manifest("").is_none());
+    }
+
+    #[test]
+    fn list_epic_games_in_reads_fixture_manifests() {
+        let tmp = std::env::temp_dir().join(format!("rivulet_epic_fix_{}", std::process::id()));
+        let manifests = tmp.join("Data").join("Manifests");
+        std::fs::create_dir_all(&manifests).unwrap();
+        std::fs::write(manifests.join("Fortnite.item"), EPIC_MANIFEST).unwrap();
+        // Non-.item files and unreadable JSON must be ignored, not fatal.
+        std::fs::write(manifests.join("notes.txt"), "ignore me").unwrap();
+        std::fs::write(manifests.join("Broken.item"), "{oops").unwrap();
+
+        let games = list_epic_games_in(&tmp);
+        assert_eq!(games.len(), 1, "only the valid manifest is listed");
+        assert_eq!(games[0].game_id, "Fortnite");
+
+        // A launcher that is not installed degrades to an empty list.
+        assert!(list_epic_games_in(&tmp.join("nope")).is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── GOG (slice 2) ─────────────────────────────────────────────────
+
+    fn gog_fixture() -> Vec<RegistryGameEntry> {
+        vec![
+            RegistryGameEntry {
+                key: "1207658924".to_string(),
+                values: vec![
+                    ("gameID".to_string(), "1207658924".to_string()),
+                    ("name".to_string(), "Baldur's Gate 3".to_string()),
+                    ("path".to_string(), "C:\\GOG Games\\BG3".to_string()),
+                    (
+                        "exe".to_string(),
+                        "C:\\GOG Games\\BG3\\bin\\bg3.exe".to_string(),
+                    ),
+                ],
+            },
+            // A game without a title must be skipped, not rendered blank.
+            RegistryGameEntry {
+                key: "999".to_string(),
+                values: vec![("gameID".to_string(), "999".to_string())],
+            },
+        ]
+    }
+
+    #[test]
+    fn gog_games_from_entries_reads_identity_case_insensitively() {
+        let games = gog_games_from_entries(&gog_fixture());
+        assert_eq!(games.len(), 1, "the unnamed entry is skipped");
+        let game = &games[0];
+        assert_eq!(game.launcher, LauncherKind::Gog);
+        assert_eq!(game.game_id, "1207658924");
+        assert_eq!(game.display_name, "Baldur's Gate 3");
+        assert_eq!(game.install_dir, Some(PathBuf::from("C:\\GOG Games\\BG3")));
+        assert_eq!(game.executables, vec!["bg3".to_string()]);
+        assert_eq!(game.device_id(), "game:gog:1207658924");
+    }
+
+    #[test]
+    fn gog_games_from_entries_falls_back_to_the_subkey_name() {
+        // Older GOG installs omit the explicit gameID value; the subkey name
+        // is the id in that case.
+        let entries = vec![RegistryGameEntry {
+            key: "1440163901".to_string(),
+            values: vec![("Name".to_string(), "Cyberpunk 2077".to_string())],
+        }];
+        let games = gog_games_from_entries(&entries);
+        assert_eq!(games[0].game_id, "1440163901");
+        assert_eq!(games[0].display_name, "Cyberpunk 2077");
+    }
+
+    #[test]
+    fn gog_games_from_entries_degrades_on_an_empty_registry() {
+        assert!(gog_games_from_entries(&[]).is_empty());
+    }
+
+    // ── Origin / EA app (slice 3) ─────────────────────────────────────
+
+    #[test]
+    fn parse_origin_mfst_extracts_the_game_id() {
+        let modern = r#"<manifest gameid="12345">
+  <version>1.0</version>
+  <launch>&id=12345&itemid=987&amp;platform=windows</launch>
+</manifest>"#;
+        assert_eq!(parse_origin_mfst(modern).as_deref(), Some("12345"));
+
+        let classic = r#"
+<game>
+  <launch>origin2://game/5567?offerIds=abc</launch>
+</game>"#;
+        assert_eq!(parse_origin_mfst(classic).as_deref(), Some("5567"));
+    }
+
+    #[test]
+    fn parse_origin_mfst_rejects_manifests_without_an_id() {
+        assert!(parse_origin_mfst("<manifest/>").is_none());
+        assert!(parse_origin_mfst("").is_none());
+        // An `&id=` marker with no digits behind it is not an id.
+        assert!(parse_origin_mfst("&id=&platform=windows").is_none());
+    }
+
+    #[test]
+    fn list_origin_games_in_reads_fixture_manifests() {
+        let tmp = std::env::temp_dir().join(format!("rivulet_origin_fix_{}", std::process::id()));
+        let game_dir = tmp.join("Apex Legends");
+        std::fs::create_dir_all(&game_dir).unwrap();
+        std::fs::write(
+            game_dir.join("Apex Legends.mfst"),
+            "<launch>origin2://game/1172470?offerIds=x</launch>",
+        )
+        .unwrap();
+        // A game folder without a usable manifest contributes nothing.
+        let broken = tmp.join("Uninstalled Game");
+        std::fs::create_dir_all(&broken).unwrap();
+        std::fs::write(broken.join("Uninstalled Game.mfst"), "<manifest/>").unwrap();
+        // A loose file at the root is not a game folder.
+        std::fs::write(tmp.join("stray.mfst"), "origin2://game/1").unwrap();
+
+        let games = list_origin_games_in(&tmp);
+        assert_eq!(games.len(), 1, "only the manifested game is listed");
+        assert_eq!(games[0].launcher, LauncherKind::Origin);
+        assert_eq!(games[0].game_id, "1172470");
+        // Origin has no title in the manifest, so the file stem is the name.
+        assert_eq!(games[0].display_name, "Apex Legends");
+        assert_eq!(games[0].install_dir, Some(game_dir));
+        assert_eq!(games[0].device_id(), "game:origin:1172470");
+
+        assert!(list_origin_games_in(&tmp.join("nope")).is_empty());
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── Battle.net (slice 3) ──────────────────────────────────────────
+
+    #[test]
+    fn battlenet_games_from_entries_uses_the_title_key_as_id_and_name() {
+        let entries = vec![
+            RegistryGameEntry {
+                key: "Diablo IV".to_string(),
+                values: vec![
+                    (
+                        "InstallPath".to_string(),
+                        "C:\\Program Files (x86)\\Diablo IV".to_string(),
+                    ),
+                    (
+                        "ExecutablePath".to_string(),
+                        "C:\\Program Files (x86)\\Diablo IV\\Diablo IV.exe".to_string(),
+                    ),
+                ],
+            },
+            RegistryGameEntry {
+                key: "StarCraft II".to_string(),
+                values: vec![(
+                    "DisplayName".to_string(),
+                    "StarCraft II: Legacy".to_string(),
+                )],
+            },
+        ];
+        let games = battlenet_games_from_entries(&entries);
+        assert_eq!(games.len(), 2);
+
+        // No explicit display name: the title key is both id and name.
+        let diablo = games
+            .iter()
+            .find(|g| g.game_id == "Diablo IV")
+            .expect("Diablo IV is listed");
+        assert_eq!(diablo.display_name, "Diablo IV");
+        assert_eq!(diablo.executables, vec!["Diablo IV".to_string()]);
+        assert_eq!(diablo.device_id(), "game:battlenet:Diablo IV");
+
+        // An explicit display name wins over the key for the label.
+        let starcraft = games
+            .iter()
+            .find(|g| g.game_id == "StarCraft II")
+            .expect("StarCraft II is listed");
+        assert_eq!(starcraft.display_name, "StarCraft II: Legacy");
+    }
+
+    #[test]
+    fn battlenet_games_from_entries_skits_blank_keys() {
+        let entries = vec![RegistryGameEntry {
+            key: "   ".to_string(),
+            values: Vec::new(),
+        }];
+        assert!(battlenet_games_from_entries(&entries).is_empty());
+        assert!(battlenet_games_from_entries(&[]).is_empty());
+    }
+
+    /// Regression test for a host-dependent bug the Linux CI runner found:
+    /// the launcher manifests always contain **Windows** paths, but
+    /// `Path::file_stem()` only treats `\` as a separator on Windows, so on
+    /// Linux the whole path was stored as the "executable name" and
+    /// foreground matching silently stopped resolving these games.
+    #[test]
+    fn executable_name_is_independent_of_the_host_path_semantics() {
+        // Windows separators — the real shape of the manifest values.
+        assert_eq!(executable_name(r"C:\GOG Games\BG3\bin\bg3.exe"), "bg3");
+        assert_eq!(
+            executable_name(r"C:\Program Files (x86)\Diablo IV\Diablo IV.exe"),
+            "Diablo IV"
+        );
+        // Forward slashes must behave identically.
+        assert_eq!(executable_name("/opt/games/bg3.exe"), "bg3");
+        // No extension, bare name, trailing separators.
+        assert_eq!(executable_name("FortniteClient"), "FortniteClient");
+        assert_eq!(executable_name(r"C:\Games\Game.exe\"), "Game");
+        // A leading dot belongs to the name, not to an extension.
+        assert_eq!(executable_name(".hidden"), ".hidden");
+        // Empty input must not panic.
+        assert_eq!(executable_name(""), "");
+
+        // End-to-end through the parser, using a Windows path regardless of
+        // the host this test runs on.
+        let game = parse_epic_manifest(
+            r#"{"AppName":"Fortnite","DisplayName":"Fortnite","LaunchExecutable":"C:\\Games\\Fortnite\\Binaries\\FortniteClient-Win64-Shipping.exe"}"#,
+        )
+        .expect("manifest parses");
+        assert_eq!(
+            game.executables,
+            vec!["FortniteClient-Win64-Shipping".to_string()],
+            "the launch executable must be a bare name on every host"
+        );
+    }
+
+    // ── Foreground-window matching + ranking (slice 4) ────────────────
+
+    fn heuristic_window(id: u64, title: &str) -> crate::game_capture::GameWindow {
+        crate::game_capture::GameWindow {
+            id,
+            title: title.to_string(),
+            width: 1920,
+            height: 1080,
+        }
+    }
+
+    #[test]
+    fn window_matches_game_ignores_launcher_decorations() {
+        let game = GameIdentity {
+            launcher: LauncherKind::Steam,
+            game_id: "730".to_string(),
+            display_name: "Counter-Strike 2".to_string(),
+            install_dir: None,
+            executables: Vec::new(),
+        };
+        // The exact title matches.
+        assert!(window_matches_game("Counter-Strike 2", &game));
+        // Launcher decorations are stripped.
+        assert!(window_matches_game("Counter-Strike 2 - Steam", &game));
+        assert!(window_matches_game("Counter-Strike 2 :: In-Game", &game));
+        // Case-insensitive.
+        assert!(window_matches_game("counter-strike 2", &game));
+        // A different window does not.
+        assert!(!window_matches_game(
+            "Counter-Strike 2 (Server Browser)",
+            &game
+        ));
+        assert!(!window_matches_game("", &game));
+    }
+
+    #[test]
+    fn window_matches_game_prefers_the_launch_executable() {
+        // A GOG game whose manifest title does not appear in the window
+        // title at all still resolves through its launch executable.
+        let game = GameIdentity {
+            launcher: LauncherKind::Gog,
+            game_id: "1207658924".to_string(),
+            display_name: "Baldur's Gate 3".to_string(),
+            install_dir: None,
+            executables: vec!["bg3".to_string()],
+        };
+        assert!(window_matches_game("bg3", &game));
+        // Matching is on the exact normalized stem, not a loose substring:
+        // an unrelated window must not be swept in.
+        assert!(!window_matches_game("Notepad", &game));
+        assert!(!window_matches_game("bg3 launcher", &game));
+    }
+
+    #[test]
+    fn rank_candidates_orders_launcher_over_foreground_over_heuristic() {
+        let installed = vec![
+            GameIdentity {
+                launcher: LauncherKind::Steam,
+                game_id: "730".to_string(),
+                display_name: "Counter-Strike 2".to_string(),
+                install_dir: None,
+                executables: Vec::new(),
+            },
+            GameIdentity {
+                launcher: LauncherKind::Epic,
+                game_id: "Fortnite".to_string(),
+                display_name: "Fortnite".to_string(),
+                install_dir: None,
+                executables: vec!["FortniteClient-Win64-Shipping".to_string()],
+            },
+        ];
+        let windows = vec![
+            heuristic_window(42, "FortniteClient-Win64-Shipping"),
+            heuristic_window(7, "Counter-Strike 2"),
+        ];
+
+        let ranked = rank_candidates(&installed, &["730".to_string()], &windows);
+
+        // Steam's running signal ranks above the Epic foreground match, which
+        // ranks above every heuristic window.
+        assert_eq!(ranked[0].identity.game_id, "730");
+        assert_eq!(ranked[0].score, Score::High);
+        assert_eq!(ranked[0].identity.device_id(), "game:steam:730");
+
+        assert_eq!(ranked[1].identity.game_id, "Fortnite");
+        assert_eq!(ranked[1].score, Score::Medium);
+        assert_eq!(ranked[1].identity.device_id(), "game:epic:Fortnite");
+
+        // Both heuristic windows remain available as the fallback.
+        let low: Vec<_> = ranked
+            .iter()
+            .filter(|c| c.score == Score::Low)
+            .map(|c| c.identity.game_id.clone())
+            .collect();
+        assert_eq!(low, vec!["42".to_string(), "7".to_string()]);
+        assert_eq!(ranked[2].identity.launcher, LauncherKind::Heuristic);
+        assert_eq!(ranked[2].identity.device_id(), "game:42");
+    }
+
+    #[test]
+    fn rank_candidates_does_not_list_a_running_game_twice() {
+        // A game that is both Steam-running and foreground-matching must
+        // appear once, at High — not again at Medium.
+        let installed = vec![GameIdentity {
+            launcher: LauncherKind::Steam,
+            game_id: "730".to_string(),
+            display_name: "Counter-Strike 2".to_string(),
+            install_dir: None,
+            executables: Vec::new(),
+        }];
+        let windows = vec![heuristic_window(7, "Counter-Strike 2")];
+        let ranked = rank_candidates(&installed, &["730".to_string()], &windows);
+
+        let identity_hits = ranked
+            .iter()
+            .filter(|c| c.identity.launcher == LauncherKind::Steam)
+            .count();
+        assert_eq!(identity_hits, 1, "the running game is listed once");
+        assert_eq!(ranked[0].score, Score::High);
+        // The heuristic window is still offered as a fallback.
+        assert_eq!(ranked[1].score, Score::Low);
+    }
+
+    #[test]
+    fn rank_candidates_degrades_to_heuristic_windows_without_a_catalog() {
+        // No launcher installed at all: the picker must still offer windows.
+        let windows = vec![heuristic_window(42, "Some Game")];
+        let ranked = rank_candidates(&[], &[], &windows);
+        assert_eq!(ranked.len(), 1);
+        assert_eq!(ranked[0].score, Score::Low);
+        assert_eq!(ranked[0].identity.device_id(), "game:42");
+    }
+
+    #[test]
+    fn deduplicate_by_device_id_keeps_the_first_occurrence() {
+        let dup = GameIdentity {
+            launcher: LauncherKind::Steam,
+            game_id: "730".to_string(),
+            display_name: "Counter-Strike 2".to_string(),
+            install_dir: Some(PathBuf::from("first")),
+            executables: Vec::new(),
+        };
+        let mut second = dup.clone();
+        second.install_dir = Some(PathBuf::from("second"));
+        let mut other = dup.clone();
+        other.launcher = LauncherKind::Epic;
+        other.game_id = "730".to_string();
+
+        let deduped = deduplicate_by_device_id(vec![dup.clone(), second, other]);
+        assert_eq!(
+            deduped.len(),
+            2,
+            "same device id collapses, other launcher stays"
+        );
+        assert_eq!(deduped[0].install_dir, Some(PathBuf::from("first")));
+        assert_eq!(deduped[1].launcher, LauncherKind::Epic);
+    }
+
+    #[test]
+    fn launcher_kind_all_covers_every_real_launcher_without_the_heuristic() {
+        let all = LauncherKind::all();
+        // Steam, Epic, GOG, Origin, EA app, Battle.net.
+        assert_eq!(all.len(), 6);
+        assert!(!all.contains(&LauncherKind::Heuristic));
+        for kind in all {
+            assert_ne!(kind.as_str(), "heuristic");
+        }
     }
 
     #[cfg(target_os = "windows")]

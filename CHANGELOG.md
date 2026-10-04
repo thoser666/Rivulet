@@ -1,5 +1,50 @@
 ## [Unreleased]
 
+- feat(game-detect): **Epic, GOG, Origin/EA app und Battle.net erkannt —
+  Foreground-Matching schliesst Slice 4** — Rivulet listete „Games" nur
+  ueber eine Fenstergroessen-Heuristik und konnte ein Spiel nicht von einem
+  grossen Browserfenster unterscheiden. Nach dem Steam-Slice (#240) sind
+  jetzt **alle fuenf** Storefront-Launcher abgedeckt, und die Slices 2-4 des
+  Issues #239 sind erledigt:
+  **Epic** aus den JSON-Manifests `Data\Manifests\*.item`
+  (`AppName`/`DisplayName`/`InstallLocation`/`LaunchExecutable`, beide
+  Manifest-Generationen inkl. verschachteltem `AppPath`),
+  **GOG** aus `HKLM\...\WOW6432Node\GOG.com\Games` (`gameID`, `name`,
+  `path`, `exe`, case-insensitive, Subkey-Name als id-Fallback),
+  **Origin** aus `%ProgramData%\Origin\LocalContent\<Game>\*.mfst`
+  (`&id=` **und** die aeltere `origin2://game/<id>`-Form) sowie die
+  **EA app** unter `%ProgramData%\EA Desktop\LocalContent` — mit eigenem
+  `game:eaapp:`-Namespace, damit eine migrierte Bibliothek ihre
+  Geraete-Ids behaelt — und **Battle.net** aus
+  `HKLM\...\Blizzard Entertainment` (Titelschluessel dienen als Id *und*
+  Anzeigename).
+  **Slice 4:** Launcher ohne publiziertes „running"-Signal (Epic, GOG,
+  Origin/EA, Battle.net) ranken jetzt ueber **Foreground-Matching** auf
+  `Score::Medium`, statt als roher Fenstertitel zu erscheinen. Der Vergleich
+  ist bewusst exakt nach Normalisierung (Case, `- Steam`, ` :: …`-Dekorationen,
+  Satzzeichen), damit `Diablo II` niemals `Diablo IV` trifft — genau die
+  Verwechslung, an der eine Grossbuchstaben-/Substring-Heuristik scheitert.
+  Das gesamte Ranking liegt jetzt in der reinen Funktion
+  `rank_candidates(installed, running_app_ids, windows)`; nur
+  `detect_running_game()` macht noch I/O. Damit ist die
+  Konfidenz-Reihenfolge `High > Medium > Low` **ohne installierten Launcher
+  und ohne laufendes Spiel** testbar — 22 neue Unit-Tests gegen
+  eingecheckte Fixtures.
+  **Ein Bug dabei gefunden und behoben:** `GameIdentity::device_id()`
+  vergab fuer heuristische Fenster `game:heuristic:<window-id>` und damit
+  die bestehende `game:<window-id>`-Konvention gebrochen, die jedes bereits
+  persistierte Szenen-Quellgeraet stillschweigend um-idifiziert haette. Der
+  Test dafuer steht jetzt im `ci_pinning`-Guard.
+  **GUI:** der Szenen-Geraete-Picker gruppiert nach Launcher (Steam, Epic,
+  GOG, Origin, EA app, Battle.net) mit lokalisierten Ueberschriften EN+DE;
+  die rohen Heuristik-Fenster bleiben unter **„Other windows" /
+  „Sonstige Fenster"** als Fallback erreichbar.
+  **Privacy unveraendert:** weiterhin nur lokale Registry-Keys und
+  Manifest-Dateien, kein Storefront-API, kein Transport, kein
+  `ReadProcessMemory`. Jeder Launcher wird unabhaengig gelesen — fehlt er
+  oder ist sein Ordner umgezogen, liefert er nichts und die uebrigen
+  Launchers bleiben sichtbar.
+
 - ci: **Stale-Pin-Drift jetzt in der regulären CI sichtbar, nicht erst nachts** —
   der Pin-Checker lief bisher nur im Nightly (einmal täglich 02:17 UTC), ein
   verrutschter Pin fiel also erst nach bis zu 24h auf — praktisch erst, wenn
