@@ -96,6 +96,27 @@ jobs:
       - name: Check action pin table is up to date
         run: python3 scripts/generate-action-pins.py --check
 
+      - name: Report stale action pins (advisory)
+        # The nightly workflow owns the *gate* for stale action pins. This step
+        # runs the same checker on every push and pull request purely as an
+        # early-warning report, so a moved rolling-branch pin (e.g.
+        # dtolnay/rust-toolchain@stable) becomes visible within minutes instead
+        # of at the next 02:17 UTC nightly, and lands in this run's step
+        # summary as the same Markdown table the nightly publishes.
+        # It stays advisory on purpose:
+        #   * continue-on-error: an upstream action commit must never redden a
+        #     push or a contributor's pull request,
+        #   * no --fail-on-major: newer-major gaps stay owned by the nightly,
+        #   * no --fail-on-branch-drift: a rolled branch pin is not staleness,
+        #     the pinned SHA still fixes the action code and the compiler is
+        #     pinned by rust-toolchain.toml.
+        # See docs/ci-action-pins.md ("Enforcement").
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 scripts/check-action-pins.py --comment | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: Check generated assets are up to date
         run: |
           # Run generation + comparison in a pinned ImageMagick image so the

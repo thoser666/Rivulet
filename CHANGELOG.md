@@ -1,5 +1,30 @@
 ## [Unreleased]
 
+- ci: **Stale-Pin-Drift jetzt in der regulären CI sichtbar, nicht erst nachts** —
+  der Pin-Checker lief bisher nur im Nightly (einmal täglich 02:17 UTC), ein
+  verrutschter Pin fiel also erst nach bis zu 24h auf — praktisch erst, wenn
+  jemand den roten Nightly-Lauf liest. Genau das war beim Roll-Branch-Pin
+  `dtolnay/rust-toolchain@stable` der Fall, der den Nightly zweimal binnen
+  drei Wochen rot setzte (#173, 8+ Tage). Neu ruft [ci.yml](../.github/workflows/ci.yml)
+  im Lints-Job denselben Checker als **reinen Report** auf
+  (`Report stale action pins (advisory)`, `--comment`,
+  `| tee -a "$GITHUB_STEP_SUMMARY"`): Drift landet damit in der Step-Summary
+  jedes Push/PR, während der Commit, der einen Pin angefasst hat, noch offen
+  ist. Bewusst **kein zweites Gate**: der Schritt trägt `continue-on-error: true`
+  und setzt weder `--fail-on-major` noch `--fail-on-branch-drift`, damit ein
+  Upstream-Commit bei einer fremden Action niemals den PR eines
+  Contributors rot färbt. Das Nightly bleibt das einzige fatale Gate — ein
+  zweites wäre nur eine zweite Quelle roter Builds. Beide Aufrufe nutzen
+  `set -o pipefail`, damit der Exit-Code des Checkers die Pipe überlebt und die
+  Step-Summary auch bei rotem Checker geschrieben wird.
+  Abgesichert in [ci_pinning.rs](../rivulet-core/tests/ci_pinning.rs) durch
+  `stale_pin_checker_runs_on_every_push_as_an_advisory_report`: der Test
+  extrahiert den Schritt strukturell (nächster `- name:`) und erzwingt
+  Aufruf im `--comment`-Modus, `continue-on-error`, `pipefail` sowie das
+  *Fehlen* beider Fatal-Flags — und dass das Nightly-Gate unangetastet bleibt.
+  Doku in [ci-action-pins.md](../docs/ci-action-pins.md) um die Tabelle
+  „Zwei Aufrufstellen: eines gate't, eines meldet" ergänzt.
+
 - ci: **Nightly wieder grün — veralteter `dtolnay/rust-toolchain`-Pin** — der
   Job „Check for stale action pins" lief seit dem 2. Oktober rot:
   `**1 outdated within major** (of 15)`, `dtolnay/rust-toolchain` @ `stable`.
