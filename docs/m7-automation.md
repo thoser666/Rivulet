@@ -469,9 +469,12 @@ What the script adds over the pipeline it replaced:
 **Acceptance criteria**
 
 - [x] A release produces a `SHA256SUMS` manifest covering every published
-  artifact — `generate --dir release-assets` runs before the release is
-  created, and the post-publish job re-checks it against what was actually
-  uploaded.
+  **build artifact** — `generate --dir release-assets` runs before the
+  release is created, and the post-publish job re-checks it against what was
+  actually uploaded. The five documentation assets the release also attaches by
+  path are deliberately *not* in the manifest and are excluded from the
+  coverage check; `docs/release-platforms.md` spells out why, and the guard
+  pins that exclusion list against the workflows.
 - [x] Post-publish verification passes on the latest release (or documents
   per-channel deviations honestly) — **deviation, stated plainly**: the
   signature check only runs when the release actually carries a detached
