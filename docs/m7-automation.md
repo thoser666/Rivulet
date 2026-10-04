@@ -430,24 +430,62 @@ an MP4 header.
 
 ### W4 — Reproducible distribution inputs — issue [#190](https://github.com/thoser666/Rivulet/issues/190)
 
+**Status: shipped.** Two changes and one honest limit.
+
+The manifest generation was already inline in both publishing paths
+(`find | sort | xargs sha256sum`, once in `ci.yml`, once in `release.yml`).
+Two copies of a shell pipeline that nobody can test is one copy too many, so
+it moved to [`scripts/release-manifest.py`](../scripts/release-manifest.py),
+which is the single implementation for every channel.
+
+What the script adds over the pipeline it replaced:
+
+- **Determinism** — entries sorted by path, `sha256sum`-compatible
+  `<digest><two spaces><name>` lines, LF endings. Two runs over one tree
+  produce byte-identical output.
+- **Verification**, which did not exist at all. `verify` checks *both*
+  directions: every listed file must exist and hash to the recorded digest, and
+  every file in the tree must be listed. The second direction is the one worth
+  having — a manifest that quietly omits an artifact publishes it without
+  integrity coverage, and nothing downstream would notice.
+- **A self-test** (`--self-test`) that runs in the *lints* job on every push,
+  so a regression in the release-critical path is caught by CI rather than by
+  the next release.
+
 **DoD**
 
-- Audit each distribution channel (EXE zip, MSI, Scoop, Chocolatey, WinGet,
-  AUR, Flatpak) for build reproducibility gaps; document them.
-- Generate SHA-256 manifests per release artifact set as part of the release
-  job.
-- Post-publish verification job: re-download published artifacts, verify
-  hashes and (where signing exists) signatures.
-- Document which channels can be bit-reproducible and which are
+- [x] Audit each distribution channel (EXE zip, MSI, Scoop, Chocolatey, WinGet,
+  AUR, Flatpak) for build reproducibility gaps; document them — see the
+  determinism table in
+  [`release-platforms.md`](release-platforms.md#per-channel-determinism).
+- [x] Generate SHA-256 manifests per release artifact set as part of the
+  release job — both channels call the one script.
+- [x] Post-publish verification job: re-download published artifacts, verify
+  hashes and (where signing exists) signatures — the new `verify_release`
+  job in `release.yml` and `ci.yml`.
+- [x] Document which channels can be bit-reproducible and which are
   content-deterministic only (installer GUIDs, timestamps).
 
 **Acceptance criteria**
 
-- [ ] A release produces a `SHA256SUMS` manifest covering every published
-  artifact.
-- [ ] Post-publish verification passes on the latest release (or documents
-  per-channel deviations honestly).
-- [ ] The spec lists per-channel determinism status with reasons.
+- [x] A release produces a `SHA256SUMS` manifest covering every published
+  artifact — `generate --dir release-assets` runs before the release is
+  created, and the post-publish job re-checks it against what was actually
+  uploaded.
+- [x] Post-publish verification passes on the latest release (or documents
+  per-channel deviations honestly) — **deviation, stated plainly**: the
+  signature check only runs when the release actually carries a detached
+  signature. Signing is secret-gated, so unsigned alpha/tag builds report that
+  instead of failing. Nothing pretends to verify a signature that does not
+  exist.
+- [x] The spec lists per-channel determinism status with reasons — see the
+  table linked above; the short version is that **no published installer is
+  currently bit-reproducible**, and claiming otherwise would be the easy lie.
+
+**The one thing that is not automated yet:** a rebuild-and-compare job. Proving
+*bit* reproducibility means building the same commit twice and diffing, which
+needs a second full runner per platform and is not wired up. The manifest
+guarantees integrity and coverage, not bit-identity, and the table says so.
 
 ### W5 — Pipeline inspector/diagnostics — issue [#191](https://github.com/thoser666/Rivulet/issues/191)
 

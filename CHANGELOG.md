@@ -1,5 +1,47 @@
 ## [Unreleased]
 
+- ci(release): **SHA256SUMS aus einem getesteten Skript, plus echte
+  Post-Publish-Verifikation** (Issue #190, M7 W4) — die Manifest-Erzeugung
+  gab es bereits, aber als **zweimal kopierte** Inline-Pipeline
+  (`find | sort | xargs sha256sum`, einmal in `ci.yml`, einmal in
+  `release.yml`). Zwei Kopien einer Shell-Pipeline, die niemand testen kann,
+  sind eine zu viel; jetzt liegt sie in `scripts/release-manifest.py` —
+  **deterministisch** (Eintraege nach Pfad sortiert, `sha256sum`-kompatibles
+  `<digest><zwei Leerzeichen><name>`, LF) und vor allem **verifizierbar**,
+  was vorher gar nicht ging: `verify` prueft in **beide** Richtungen — jede
+  gelistete Datei muss existieren und zum Digest passen, und jede Datei im
+  Baum muss gelistet sein. Die zweite Richtung ist die wichtige: ein Manifest,
+  das ein Artefakt stillschweigend auslaesst, veroeffentlicht es ohne
+  Integritaetsabdeckung, und niemand weiter unten wuerde es merken.
+  **Neu: der `verify_release`-Job** in `release.yml` und `ci.yml`. Er laedt die
+  bereits veroeffentlichte Release per `gh release download` herunter und
+  prueft sie — nicht das Staging-Verzeichnis, das der Release-Job gehasht
+  hat, denn die relevante Frage lautet "was wuerde ein Nutzer tatsaechlich
+  herunterladen?". Ein abgeschnittener oder ersetzter Upload ist so der
+  einzige Fall, der auffaellt.
+  **Ehrliche Abweichung:** Signaturen werden nur geprueft, wenn die Release
+  eine wirklich mitbringt. Signieren ist secret-getaktet, also melden
+  unsignierte Alpha-/Tag-Builds das explizit, statt so zu tun, als waere
+  etwas geprueft. Nichts behauptet eine Signaturpruefung fuer eine Signatur,
+  die es nicht gibt.
+  **Und die Grenze, die nicht wegdefiniert wird:** kein veroeffentlichter
+  Installer ist derzeit **bit-reproduzierbar**. ZIP-Container speichern
+  mtimes, squashfs ebenso, das DMG einen Erstellungszeitstempel, WiX vergibt
+  beim Harvesten automatische Komponenten-GUIDs. Inhaltlich sind sie
+  deterministisch, bitweise nicht. Die Matrix steht mit Begruendung pro Kanal
+  in `docs/release-platforms.md` — inklusive der Kanaele, bei denen nur das
+  *Manifest* deterministisch ist (Scoop, Chocolatey, WinGet, AUR).
+  **Tests:** `scripts/release-manifest.py --self-test` laeuft im *lints*-Job bei
+  jedem Push (18 Assertions: Determinismus, Tamper-Erkennung, Abdeckung jedes
+  Files, verschachtelte Pfade, Namen mit Leerzeichen, fehlerhaftes Manifest,
+  leerer Baum, exaktes `sha256sum`-Zeilenformat). Acht **Mutationsproben**
+  belegen, dass jede Zusage des Self-Tests auch greift — inklusive der
+  Sortier-Zusage, die man nicht durch blosses Entfernen von `sorted()`
+  nachweisen kann, weil manche Dateisysteme bereits sortiert aufzaehlen. Der
+  `ci_pinning`-Guard pinnt die Verdrahtung in beiden Workflows und die
+  Updater-Konstante `CHECKSUMS_ASSET_NAME`, per acht weiteren Negativproben
+  abgesichert.
+
 - ui(game-detect): **selbst gezeichnete Launcher-Marken im Szenen-Geraete-Picker**
   — die Sektionen des Pickers tragen jetzt je eine eigene, von Rivulet
   gezeichnete Marke (Balken, Chevrons, Ring, Raute, Sechseck, Blueten; fuer

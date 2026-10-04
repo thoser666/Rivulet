@@ -88,6 +88,14 @@ jobs:
       - name: Check release-notes completeness checker
         run: python3 scripts/check-release-notes.py --self-test
 
+      - name: Test the release SHA256SUMS manifest tool
+        # Issue #190: the release job's manifest generation and the
+        # post-publish verification both call this script, so its guarantees
+        # (determinism, tamper detection, coverage of every file) are
+        # regression-tested on every push instead of first being exercised on
+        # a published release.
+        run: python3 scripts/release-manifest.py --self-test
+
       - name: Check user-guide freshness (AppView + feature coverage)
         run: |
           python3 scripts/check-user-guide-freshness.py --self-test
@@ -787,14 +795,13 @@ jobs:
           # must cover exactly the files attached to the release, because the
           # updater refuses any installer that is not listed (or whose digest
           # differs). docs/opengraph.png is the release card image and must
-          # NOT be part of the manifest. The pipeline writes to a temp file
-          # OUTSIDE the scanned directory (shellcheck SC2094).
-          (cd release-assets \
-            && find . -type f ! -name opengraph.png ! -name SHA256SUMS -printf '%P\0' \
-            | sort -z \
-            | xargs -0 -r sha256sum) > SHA256SUMS.tmp
-          mv SHA256SUMS.tmp release-assets/SHA256SUMS
-          cat release-assets/SHA256SUMS
+          # NOT be part of the manifest.
+          #
+          # Issue #190: this used to be a second, slightly different copy of
+          # release.yml's inline find|sha256sum pipeline. Both now call
+          # scripts/release-manifest.py, which is self-tested in the lints
+          # job and can also verify a manifest it did not produce.
+          python3 scripts/release-manifest.py generate --dir release-assets
 
       - name: Generate release notes from commits since last tag
         run: |
@@ -828,3 +835,61 @@ jobs:
           # Mark beta/rc tags (and alpha tags) as pre-release,
           # stable tags (e.g. v1.0.0) as a full release.
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+
+  verify_release:
+    name: Verify published release (post-publish)
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, 'alpha')
+    needs: github_release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          token: ${{ github.token }}
+
+      - name: Download the published assets
+        # Verify what a user would actually download, not the staging folder
+        # this workflow hashed before uploading: a re-download is the only
+        # way to catch a truncated or replaced upload.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p published
+          gh release download "${{ github.ref_name }}" --dir published --repo "$GITHUB_REPOSITORY"
+
+      - name: Verify every published artifact against SHA256SUMS
+        run: |
+          set -euo pipefail
+          python3 scripts/release-manifest.py verify --dir published
+
+      - name: Verify detached signatures where they were published
+        run: |
+          set -euo pipefail
+          # A signature can only be checked when the release carries one.
+          # Signing is secret-gated, so an unsigned release has nothing to
+          # verify and must not fail here; the guard pins this shape.
+          found=0
+          for signature in published/*.asc; do
+            [ -e "$signature" ] || continue
+            target="${signature%.asc}"
+            if [ ! -f "$target" ]; then
+              echo "FAIL detached signature without its artifact: $signature" >&2
+              exit 1
+            fi
+            found=$((found + 1))
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "No detached signature (.asc) published; signing secrets are not configured for this channel."
+          else
+            echo "$found detached signature(s) published; signature bytes are covered by the manifest."
+          fi
+
+      - name: Report the verified inventory
+        run: |
+          set -euo pipefail
+          echo "Verified $(grep -c . published/SHA256SUMS) entries of the published release:"
+          sed -n 's/^/  /p' published/SHA256SUMS

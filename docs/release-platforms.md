@@ -289,6 +289,42 @@ Rivulet's first release there.
 4. Submit through a protected environment with manual approval.
 5. Verify Store propagation and updater behavior before announcing the release.
 
+## Per-channel determinism
+
+Audited for issue [#190](https://github.com/thoser666/Rivulet/issues/190).
+The distinction matters: **bit-reproducible** means rebuilding the same commit
+yields byte-identical output, **content-deterministic** means the *contents* are
+stable while the container bytes are not (timestamps, archive ordering, tool
+metadata).
+
+| Channel | Status | Why |
+| --- | --- | --- |
+| Portable ZIP (Windows) | content-deterministic | `Compress-Archive` stores each file's mtime, and staging comes from a fresh build, so the container differs per run while the payload does not. |
+| MSI (Windows) | content-deterministic | WiX harvests the staging tree with `heat.exe`; harvested components get auto-generated GUIDs and the MSI carries creation timestamps. The two hand-pinned component GUIDs in `rivulet.wxs` do not change that. |
+| AppImage (Linux) | content-deterministic | squashfs records source mtimes; same cause as the ZIP. |
+| DMG (macOS) | content-deterministic | the disk image embeds a creation timestamp in its metadata. |
+| Flatpak | content-deterministic | sources are pinned (`generate-cargo-sources.sh`) and flatpak-builder itself is version-pinned, but the build runs without `--reproducible`, so no bit-identity is claimed. |
+| Scoop / Chocolatey / WinGet | deterministic *manifests* | the generators take the SHA-256 from the release's `SHA256SUMS`, so the package metadata is a pure function of the release. The binaries they wrap inherit the ZIP/MSI limits above. |
+| AUR | deterministic *recipe* | `packaging/aur/PKGBUILD` pins `sha256sums` that match the release manifest. The resulting package build is `makepkg`'s determinism, not ours. |
+
+What *is* guaranteed for every published artifact, today and on every release:
+a `SHA256SUMS` manifest covering exactly the files attached to the release,
+checked by the `verify_release` job after the release is live.
+
+### Where the checks run
+
+`scripts/release-manifest.py` has two halves:
+
+```
+scripts/release-manifest.py generate --dir release-assets   # before publishing
+scripts/release-manifest.py verify   --dir published       # after publishing
+scripts/release-manifest.py --self-test                     # on every push
+```
+
+The `verify_release` job downloads the published release with
+`gh release download` rather than re-hashing the staging folder, because the
+question worth answering is "what would a user actually download?".
+
 ## Version and update policy
 
 GitHub Releases is the source of truth for version numbers and changelogs.

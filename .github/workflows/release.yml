@@ -315,15 +315,14 @@ jobs:
           # SHA256SUMS (or whose digest differs), so the manifest must cover
           # exactly the files attached to the release. docs/opengraph.png is
           # used as the release card image by softprops and must NOT be part
-          # of the manifest (see the files list below). The pipeline writes
-          # to a temp file OUTSIDE the scanned directory so it never reads
-          # and writes the same file in one pipeline (shellcheck SC2094).
-          (cd release-assets \
-            && find . -type f ! -name opengraph.png ! -name SHA256SUMS -printf '%P\0' \
-            | sort -z \
-            | xargs -0 -r sha256sum) > SHA256SUMS.tmp
-          mv SHA256SUMS.tmp release-assets/SHA256SUMS
-          cat release-assets/SHA256SUMS
+          # of the manifest (see the files list below).
+          #
+          # Issue #190 moved this out of an inline find|sha256sum pipeline:
+          # the same block was duplicated in ci.yml, and the inline form had
+          # no way to be tested or to verify a manifest it did not produce.
+          # The script is byte-compatible with sha256sum output and sorts its
+          # entries, so the manifest is reproducible run over run.
+          python3 scripts/release-manifest.py generate --dir release-assets
 
       - name: Generate release notes from commits since last tag
         run: |
@@ -400,6 +399,67 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ needs.version.outputs.tag }}
           RELEASE_BRANCH: ${{ needs.version.outputs.release_branch }}
+
+  verify_release:
+    name: Verify published release (post-publish)
+    needs: [check, version, github_release]
+    if: ${{ needs.check.outputs.should_release == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+          token: ${{ github.token }}
+
+      - name: Download the published assets
+        # The point of this job: verify what a *user* would actually download,
+        # not the staging folder the release job hashed. A re-download is the
+        # only way to catch an upload that was truncated, replaced or served
+        # by a different object than the one that was hashed.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p published
+          gh release download "$TAG" --dir published --repo "$GITHUB_REPOSITORY"
+
+      - name: Verify every published artifact against SHA256SUMS
+        run: |
+          set -euo pipefail
+          python3 scripts/release-manifest.py verify --dir published
+
+      - name: Verify detached signatures where they were published
+        run: |
+          set -euo pipefail
+          # Honest scope: a signature can only be checked when the release
+          # actually carries one. Signing is secret-gated, so an unsigned
+          # alpha release has nothing to verify and must not fail here. The
+          # guard in ci_pinning pins this shape.
+          found=0
+          for signature in published/*.asc; do
+            [ -e "$signature" ] || continue
+            target="${signature%.asc}"
+            if [ ! -f "$target" ]; then
+              echo "FAIL detached signature without its artifact: $signature" >&2
+              exit 1
+            fi
+            found=$((found + 1))
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "No detached signature (.asc) published; signing secrets are not configured for this channel."
+          else
+            echo "$found detached signature(s) published; signature bytes travel in the manifest-covered asset set."
+          fi
+
+      - name: Report the verified inventory
+        run: |
+          set -euo pipefail
+          echo "Verified $(grep -c . published/SHA256SUMS) entries of the published release:"
+          sed -n 's/^/  /p' published/SHA256SUMS
 
   ################################################################
   # CLEANUP: the release branch was temporary scaffolding. The tag

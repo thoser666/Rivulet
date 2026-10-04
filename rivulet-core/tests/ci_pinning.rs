@@ -4078,14 +4078,14 @@ fn updater_verifies_release_checksums_before_install() {
         "the release workflow must generate the checksum manifest"
     );
     assert!(
-        workflow.contains("sha256sum) > SHA256SUMS.tmp"),
+        workflow.contains("release-manifest.py generate --dir release-assets"),
         "the manifest must cover every attached asset (relative paths, sorted) \
-         and be written outside the scanned directory (shellcheck SC2094)"
+         and come from the tested implementation (#190)"
     );
-    assert!(
-        workflow.contains("release-assets/SHA256SUMS"),
-        "the generated manifest must be attached to the release"
-    );
+    // #190: the manifest is written into `release-assets` by the script, so
+    // the glob below is what attaches it. The explicit `release-assets/SHA256SUMS`
+    // line this assertion used to pin was only there because the retired
+    // inline pipeline spelled the move out (`mv SHA256SUMS.tmp ...`).
     // Regression (v0.65.0-alpha.138): the files list named SHA256SUMS twice
     // (`release-assets/*` glob AND the explicit `release-assets/SHA256SUMS`
     // line), so softprops uploaded the same asset twice concurrently; one
@@ -4811,10 +4811,14 @@ fn tag_based_release_attaches_checksums_and_generated_notes() {
     // notes body instead of GitHub's PR-based auto-notes, verified for
     // completeness before the release is created.
     let ci = read(".github/workflows/ci.yml");
+    // #190: generated into `release-assets` by the tested script; the
+    // `release-assets/*` glob in the release step is what attaches it (the
+    // explicit SHA256SUMS line was only there for the retired inline
+    // pipeline's `mv`).
     assert!(
         ci.contains("Generate SHA256SUMS manifest")
-            && ci.contains("sha256sum) > SHA256SUMS.tmp")
-            && ci.contains("release-assets/SHA256SUMS"),
+            && ci.contains("release-manifest.py generate --dir release-assets")
+            && ci.contains("release-assets/*"),
         "the tag-based release path must generate and attach SHA256SUMS"
     );
     assert!(
@@ -8143,5 +8147,127 @@ fn open_code_scanning_alerts_are_triaged_in_ci() {
     assert!(
         security.contains("- name: Require security checks to pass"),
         "the triage step must not replace the existing security gate"
+    );
+}
+
+#[test]
+fn release_manifest_generation_and_post_publish_verification_are_pinned() {
+    // Issue #190 (M7 W4): reproducible distribution inputs. Two halves that
+    // used to be missing or duplicated:
+    //
+    // 1. ONE implementation of the SHA256SUMS manifest. The inline
+    //    `find | sort | xargs sha256sum` pipeline was copy-pasted into ci.yml
+    //    and release.yml, where the two copies could drift and neither could
+    //    be tested.
+    // 2. A post-publish verification job, which did not exist at all:
+    //    re-download what a user would actually fetch and verify it.
+    //
+    // Normalise line endings before any multi-line slice: a Windows CI
+    // checkout is CRLF, so a `\n`-based needle would miss there while passing
+    // locally.
+    let ci = read(".github/workflows/ci.yml").replace("\r\n", "\n");
+    let release = read(".github/workflows/release.yml").replace("\r\n", "\n");
+    let script = read("scripts/release-manifest.py").replace("\r\n", "\n");
+
+    for (name, workflow) in [("ci.yml", &ci), ("release.yml", &release)] {
+        assert!(
+            workflow.contains("python3 scripts/release-manifest.py generate --dir release-assets"),
+            "{name} must generate the manifest through the tested script"
+        );
+        assert!(
+            !workflow.contains("xargs -0 -r sha256sum"),
+            "{name} must not reintroduce the inline find|sha256sum pipeline"
+        );
+        assert!(
+            !workflow.contains("SHA256SUMS.tmp"),
+            "{name} must not reintroduce the temp-file manifest pipeline"
+        );
+    }
+
+    // Post-publish verification: download the published assets, verify them,
+    // and report the inventory. Both channels, because both publish.
+    for (name, workflow) in [("ci.yml", &ci), ("release.yml", &release)] {
+        assert!(
+            workflow.contains("verify_release:"),
+            "{name} must have a post-publish verification job (#190)"
+        );
+        assert!(
+            workflow.contains("gh release download"),
+            "{name} verification must re-download the published release"
+        );
+        assert!(
+            workflow.contains("python3 scripts/release-manifest.py verify --dir published"),
+            "{name} verification must check the published assets against SHA256SUMS"
+        );
+        // Verification must run against the release, not the staging folder
+        // the release job hashed -- otherwise it proves nothing.
+        assert!(
+            workflow.contains("--dir published"),
+            "{name} verification must operate on the downloaded release"
+        );
+    }
+    assert!(
+        release.contains("needs: [check, version, github_release]"),
+        "the alpha verification job must run after the release is published"
+    );
+    assert!(
+        ci.contains("needs: github_release"),
+        "the tag-path verification job must run after the release is published"
+    );
+
+    // Signature checking is honest about its scope: signing is secret-gated,
+    // so an unsigned release must report that instead of failing, while a
+    // signature whose artifact is missing must fail.
+    for (name, workflow) in [("ci.yml", &ci), ("release.yml", &release)] {
+        assert!(
+            workflow.contains("published/*.asc"),
+            "{name} must check detached signatures where they exist"
+        );
+        assert!(
+            workflow.contains("signing secrets are not configured"),
+            "{name} must document the unsigned-channel deviation"
+        );
+    }
+
+    // The script's guarantees, pinned in code rather than in prose.
+    for needle in [
+        "MANIFEST_NAME = \"SHA256SUMS\"",
+        "DEFAULT_EXCLUDES = (\"opengraph.png\", MANIFEST_NAME)",
+        "def render(",
+        "def parse(",
+        "def verify(",
+        // Both directions, not just "does it still hash to the same value".
+        "listed but missing:",
+        "digest mismatch:",
+        "present but not listed:",
+        "manifest is empty",
+        "not a sha256sum entry",
+        // Determinism and the updater-compatible line shape.
+        "return sorted(found)",
+        "{digest}  {name}",
+        "newline=\"\\n\"",
+    ] {
+        assert!(
+            script.contains(needle),
+            "scripts/release-manifest.py must pin {needle}"
+        );
+    }
+
+    // The self-test is the regression net and must run in the lints job on
+    // every push, not first on a published release.
+    assert!(
+        script.contains("--self-test"),
+        "the manifest script must ship a self-test"
+    );
+    assert!(
+        ci.contains("python3 scripts/release-manifest.py --self-test"),
+        "the manifest self-test must run in the lints job"
+    );
+
+    // The updater's contract must not drift away from what we publish.
+    let updater = read("rivulet-updater/src/lib.rs").replace("\r\n", "\n");
+    assert!(
+        updater.contains("pub const CHECKSUMS_ASSET_NAME: &str = \"SHA256SUMS\""),
+        "the updater must keep consuming the manifest this workflow writes"
     );
 }
