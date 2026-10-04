@@ -308,8 +308,17 @@ metadata).
 | AUR | deterministic *recipe* | `packaging/aur/PKGBUILD` pins `sha256sums` that match the release manifest. The resulting package build is `makepkg`'s determinism, not ours. |
 
 What *is* guaranteed for every published artifact, today and on every release:
-a `SHA256SUMS` manifest covering exactly the files attached to the release,
+a `SHA256SUMS` manifest covering every **build artifact** of the release,
 checked by the `verify_release` job after the release is live.
+
+The scope is worth stating precisely: the release steps attach five
+documentation assets by path (`docs/opengraph.png` and friends) next to the
+`release-assets/*` glob. They are not build output, so they are not in the
+manifest — and because `gh release download` fetches *every* release asset,
+the verification tool excludes exactly those five. Its exclusion list is pinned
+against the `files:` block of both release workflows, so an asset attached
+outside `release-assets/` cannot silently turn every release into a
+false "present but not listed" failure.
 
 ### Where the checks run
 
