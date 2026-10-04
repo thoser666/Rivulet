@@ -1,5 +1,47 @@
 ## [Unreleased]
 
+- feat(game-detect): **Steam-Erkennung laeuft jetzt auch auf Linux — ueber
+  die XDG-Pfade statt ueber die Registry** — `game_detection.rs` war bis
+  hierher faktisch windows-only: alle fuenf Discovery-Helfer
+  (`steam_root`, `epic_app_data_path`, `registry_game_entries`,
+  `origin_local_content`, `ea_app_local_content`) waren
+  `cfg(target_os = "windows")` mit `None`-Stubs, also lieferte
+  `list_installed_games()` auf Linux konstant nichts und der Picker blieb bei
+  der Fenstergroessen-Heuristik. Steam ist der einzige Launcher, dessen
+  Installationsquelle *keine* Registry ist: `steam_root()` fragt jetzt
+  `$XDG_DATA_HOME/Steam` (Default `~/.local/share/Steam`), dann die
+  Desktop-Entry-Aliase `~/.steam/steam` und `~/.steam/root` und zuletzt den
+  Flatpak-Baum `~/.var/app/com.valvesoftware.Steam/data/Steam` ab — erster
+  existierender Kandidat gewinnt. **Probing statt Merging ist Absicht:** die
+  `~/.steam`-Eintraege sind Symlinks auf dieselbe XDG-Directory, ein
+  Zusammenfuehren wuerde dieselben Spiele doppelt aufzaehlen. Ein
+  `$XDG_DATA_HOME` wird nur dann verwendet, wenn es ein **absoluter** Pfad
+  ist — so verlangt es die Base Directory Specification; leere und
+  relative Werte fallen auf `~/.local/share` zurueck. Alles unterhalb der
+  Wurzel (`libraryfolders.vdf`, `appmanifest_*.acf`, `rank_candidates`) ist
+  derselbe Code wie unter Windows, ein Linux-Nutzer bekommt also echte
+  `game:steam:<appid>`-Identitaeten.
+  **Konstruiert fuer Testbarkeit auf jeder Plattform:** die XDG-Aufloesung
+  und die Kandidatenliste sind portable, reine Funktionen (`xdg_data_home`,
+  `steam_roots`), nur das `cfg(not(windows))`-`steam_root()` ist Glue mit
+  drei Zeilen. So ist das Linux-Layout von einer Windows-Developerkiste und
+  in CI verifizierbar, statt in einem `cfg`-Zweig zu verstecken — die
+  bekannte Falle, dass lokales Clippy Nicht-Windows-Stubs gar nicht prueft.
+  **Konfidenz-Obergrenze auf Linux: `Score::Medium`, nicht `High`.** Der
+  `Running = 1`-Registrywert hat dort keine Entsprechung; die einzige
+  portable waere Steam's `SteamAppId` in der Startup-Umgebung eines anderen
+  Prozesses — genau die Prozessinspektion, die #239 ausschliesst. Der
+  `ci_pinning`-Guard verbietet dafuer die procfs-Einstiegspunkte, damit die
+  Obergrenze nicht stillschweigend weggebrochen wird.
+  **Scope bewusst klein gehalten:** Epic, GOG, Origin/EA app und Battle.net
+  bleiben Windows-gegated — ihre Manifeste sind Registry-basiert, und zu
+  ihren Linux-Ports fand ich kein Layout, das ich verifizieren statt raten
+  konnte. Lutris (`$XDG_CONFIG_HOME/lutris/games/*.yml`) ist als naechster
+  Kandidat belegt und waere der eine Weg, unter Linux auch GOG-/Epic-Titel
+  zu erfassen.
+  7 neue Unit-Tests (39 im Modul) plus ein Guard-Abschnitt mit **9
+  Negativproben**, darunter gegen eine zurueckgebauten Root-Probe und gegen
+  eingeschmuggelte Prozessinspektion.
 - feat(game-detect): **Steam-Spiele ranken jetzt auch ueber ihr
   Installationsverzeichnis auf `Score::Medium`** — Steam schreibt in
   `appmanifest_*.acf` **kein** `LaunchExecutable`, das Epic und Battle.net
