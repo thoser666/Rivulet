@@ -1415,6 +1415,87 @@ fn m6_audio_backend_phases_are_pinned() {
 }
 
 #[test]
+fn m6_push_latency_measurement_is_robust_to_scheduler_preemption() {
+    // A healthy Windows runner failed `routed_push_stays_below_the_frame_budget_when_paced`
+    // with p99 8,756 us against a 5,000 us budget, while passing 8/8 locally.
+    // Cause: the harness thread itself is descheduled, and one stalled round
+    // lands a single ~8.7 ms sample among 360 healthy ~30 us ones. A percentile
+    // over raw per-push samples therefore measures the machine's scheduler.
+    //
+    // The fix reduces to the per-source minimum across the paced rounds. Pin it:
+    // reverting to a raw-sample percentile would silently restore the flake,
+    // and it would do so in a way that still looks like a working gate.
+    let harness = read("rivulet-core/tests/m6_resource_report.rs");
+
+    for required in [
+        "fn per_source_min_percentile",
+        "let (p99, per_source_us) = per_source_min_percentile(&rounds_by_slot, SOURCES, 0.99)",
+        // The regression test for the estimator itself, both directions.
+        "fn per_source_min_absorbs_a_single_descheduled_round_but_not_a_real_regression",
+        "fn per_source_min_rejects_a_round_with_the_wrong_slot_count",
+        // The budget must stay put: the estimator changed, the gate did not.
+        "const PUSH_BUDGET_US: f64 = 5_000.0",
+    ] {
+        assert!(
+            harness.contains(required),
+            "push-latency harness must pin {required}"
+        );
+    }
+
+    // The estimator must consume one sample per source slot per round --
+    // that shape is what keeps the real-time pacing of #276 intact. A loop
+    // that pushes several frames per period to get more samples would
+    // reintroduce the overdriven pipeline the pacer exists to prevent.
+    //
+    // Pinned as one contiguous slice rather than as separate substrings:
+    // `pacer.wait_for_next_frame();` alone occurs four times in this file,
+    // so a needle on its own cannot say *where* the pacing has to stay. The
+    // slice is unique and covers the whole measured loop -- one push per
+    // source, record the round, then wait out the frame period.
+    let paced_loop = [
+        "    for _ in 0..LATENCY_ROUNDS {",
+        "        let mut round = Vec::with_capacity(SOURCES);",
+        "        for id in &ids {",
+        "            let t = Instant::now();",
+        "            let _ = engine.push_audio_source(*id, &audio);",
+        "            round.push(t.elapsed().as_secs_f64() * 1e6);",
+        "        }",
+        "        rounds_by_slot.push(round);",
+        "        pacer.wait_for_next_frame();",
+        "    }",
+    ]
+    .join("\n");
+    assert!(
+        harness.replace("\r\n", "\n").contains(&paced_loop),
+        "the measured loop must keep its real-time pacing (#276): exactly one push \
+         per source per frame period, the round recorded, then the wait"
+    );
+    // And the burst shape it must never take: several pushes per period to
+    // manufacture extra samples would still "reduce" fine while quietly
+    // re-creating the overdrive.
+    assert!(
+        !harness
+            .replace("\r\n", "\n")
+            .contains("rounds_by_slot.push(round);\n            engine."),
+        "the push loop must not acquire additional pushes per period"
+    );
+    assert!(
+        !harness.contains("let mut push_us = Vec::with_capacity(LATENCY_ROUNDS * SOURCES)"),
+        "the raw per-push sample vector must be gone; that estimator is what flaked"
+    );
+
+    // The report must document WHY the minimum is taken, so the next reader
+    // does not "simplify" it back into a raw percentile.
+    let report = read("docs/m6-audio-resource-report.md");
+    for required in ["per_source_min_percentile", "audio_push_per_source_min_us"] {
+        assert!(
+            report.contains(required),
+            "M6 resource report must document {required}"
+        );
+    }
+}
+
+#[test]
 fn m6_resource_report_harness_is_pinned() {
     // The harness must keep measuring the full gate surface: 5+ sources with
     // complete filter chains, real latency percentiles, CPU/memory sampling,
