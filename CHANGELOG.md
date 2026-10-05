@@ -1,5 +1,35 @@
 ## [Unreleased]
 
+- test(core): **Frame-Budget-Gate misst den Producer-Pfad statt des
+  Schedulers** — `routed_push_stays_below_the_frame_budget_when_paced` ist auf
+  einem gesunden Windows-Runner mit p99 8,756 µs gegen ein 5,000-µs-Budget
+  rot gelaufen, waehrend es lokal 8/8 durchlief. Ursache: der Harness-Thread
+  selbst wird deschedult, und *eine* verzoegerte Runde landet als Einzelprobe
+  von ~8,7 ms unter lauter ~30-µs-Proben. Ein Perzentil ueber Rohproben
+  misst damit die Scheduler-Vorlage des Runners, nicht den Producer-Pfad.
+  **Der Fix reduziert auf das Minimum pro Source-Slot ueber die gepacten
+  Runden** (`per_source_min_percentile`), bevor die Perzentile gebildet werden.
+  Eine Verzoegerung kann nur *eine* Runde anheben, nie alle 60, also ist das
+  Minimum die am wenigsten kontaminierte Schaetzung. Das **stellt den
+  uebersteuerten Push aus #276 nicht wieder her**: der Harness schiebt
+  weiterhin genau einen Frame pro Source und 10 ms. Es waere naheliegend,
+  "mehr Proben" durch mehrere Pushes pro Periode zu gewinnen — das ist genau
+  der Bug, den der Pacer verhindert, deshalb ist die Rundform im `ci_pinning`
+  Guard mitgepinnt. **Das Budget bleibt unveraendert** — der Schaetzer hat
+  sich geaendert, das Gate nicht.
+  **Der ehrliche Trade-off:** eine Regression, die nur eine *Minderheit* der
+  Runden trifft, liegt unter diesem Schaetzer — genauso wie das
+  Scheduler-Rauschen, das den Test unbrauchbar gemacht hat. Beide Richtungen
+  sind gepinnt: der eine deschedulte Round muss absorbiert werden, eine
+  Regression in *jeder* Runde muss das Budget weiterhin reißen
+  (`per_source_min_absorbs_a_single_descheduled_round_but_not_a_real_regression`).
+  Die Minderheits-Regression deckt stattdessen das Sustained-CPU-Fenster im
+  Haupt-Harness. Die Per-Source-Minima landen als
+  `audio_push_per_source_min_us` im Report-JSON, damit ein Lauf
+  nachpruefbar ist statt geglaubt werden muss.
+  Zehn Negativproben auf den Guard und fuenf auf die Statistik selbst greifen
+  alle — darunter der Push-Burst, der zurueck auf #276 wuerde.
+
 - ci(release): **SHA256SUMS aus einem getesteten Skript, plus echte
   Post-Publish-Verifikation** (Issue #190, M7 W4) — die Manifest-Erzeugung
   gab es bereits, aber als **zweimal kopierte** Inline-Pipeline
