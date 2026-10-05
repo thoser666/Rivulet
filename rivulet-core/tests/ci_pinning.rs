@@ -251,6 +251,158 @@ fn user_guide_is_linked_and_covers_core_workflows() {
     }
 }
 
+/// M7 closeout (milestone "Automation & Determinism"): all seven workstream
+/// issues #186–#192 are closed and merged, so the roadmap, the spec and the
+/// quality gate have to agree with that and link the completion report.
+///
+/// The stale-status assertions are the point of this guard. While every M7
+/// issue was already closed, `docs/m7-automation.md` still said "Planned",
+/// the quality gate still said "**Status: Planned**" with #192 "open", and
+/// the README roadmap row still said "In progress" — a reader would conclude
+/// the milestone had not started. A completion report alone would not have
+/// fixed that; these assertions keep it fixed.
+#[test]
+fn m7_completion_report_is_linked_and_records_follow_ups() {
+    let readme = read("README.md");
+    let gates = read("docs/milestone-quality-gates.md");
+    let spec = read("docs/m7-automation.md");
+    let report = read("docs/m7-automation-completion-report.md");
+
+    // The report must be reachable from every surface that states M7 status.
+    for (name, doc) in [
+        ("README.md", &readme),
+        ("docs/milestone-quality-gates.md", &gates),
+        ("docs/m7-automation.md", &spec),
+    ] {
+        assert!(
+            doc.contains("docs/m7-automation-completion-report.md"),
+            "{name} must link the M7 completion report"
+        );
+    }
+
+    for required in [
+        "## Summary",
+        "## Findings and explicit follow-ups",
+        "## Decision",
+        "CONDITIONAL PASS",
+        "F-M7-001",
+        "F-M7-002",
+        "#288",
+        "#289",
+    ] {
+        assert!(
+            report.contains(required),
+            "M7 completion report must contain {required}"
+        );
+    }
+
+    // Every workstream issue must appear in the delivery evidence, so a
+    // "complete" verdict cannot silently skip a workstream.
+    for issue in ["#186", "#187", "#188", "#189", "#190", "#191", "#192"] {
+        assert!(
+            report.contains(issue),
+            "M7 completion report must record workstream issue {issue}"
+        );
+    }
+
+    // A follow-up only counts as *assigned* if its own table row names a
+    // tracking issue — a mention in prose is not an assignment.
+    for finding in ["F-M7-001", "F-M7-002"] {
+        let row = report
+            .lines()
+            .find(|line| line.starts_with(&format!("| {finding} ")))
+            .unwrap_or_else(|| panic!("{finding} must be a row in the findings table"));
+        assert!(
+            row.contains("/issues/"),
+            "{finding} must name a tracking issue in its findings row: {row}"
+        );
+    }
+
+    // The verdict has to be the honest one. An unconditional pass next to two
+    // assigned follow-ups is the failure mode this milestone is prone to.
+    assert!(
+        report.contains("- [x] Conditional pass"),
+        "the M7 report must record the conditional-pass decision"
+    );
+    assert!(
+        !report.contains("- [x] M7 gate passed without conditions."),
+        "M7 must not claim an unconditional pass while follow-ups are assigned"
+    );
+
+    // Scope the two roadmap sections by ASCII anchors so the assertions below
+    // cannot be satisfied (or broken) by an unrelated part of the file.
+    let m7_gate_section = gates
+        .split("### M7: Automation and Determinism")
+        .nth(1)
+        .and_then(|rest| rest.split("### M8:").next())
+        .unwrap_or_default();
+    assert!(
+        !m7_gate_section.is_empty(),
+        "the quality gate must still have an M7 section"
+    );
+    let readme_m7_section = readme
+        .split("Automation & Determinism (\"Render-First\")")
+        .nth(1)
+        .and_then(|rest| rest.split("Embeddable Engine & API").next())
+        .unwrap_or_default();
+    assert!(
+        !readme_m7_section.is_empty(),
+        "the README must still have an M7 section"
+    );
+
+    // Spec: the status header drives "which issue do I start with", so it must
+    // not point at a next step that is already merged.
+    let spec_header = spec.split("## Problem").next().unwrap_or_default();
+    assert!(
+        !spec_header.contains("Planned"),
+        "the M7 spec status header must not claim Planned while #186–#192 are closed"
+    );
+    assert!(
+        !spec.contains("- [ ]"),
+        "no M7 acceptance criterion may stay unchecked while the milestone is shipped"
+    );
+
+    // Quality gate: a Complete status, and no workstream may drop out of the
+    // per-workstream evidence list.
+    assert!(
+        m7_gate_section.contains("Status: Complete"),
+        "the M7 quality gate must state a Complete status"
+    );
+    assert!(
+        !m7_gate_section.contains("**Status: Planned**"),
+        "the M7 quality gate must not stay Planned"
+    );
+    for issue in ["#186", "#187", "#188", "#189", "#190", "#191", "#192"] {
+        assert!(
+            m7_gate_section.contains(issue),
+            "the M7 quality gate must keep the per-workstream note for {issue}"
+        );
+    }
+
+    // Roadmap: 7/7 checked, a real status line, no "In progress" row, and the
+    // OBS parity table must not advertise copy/paste as open after #192.
+    assert!(
+        readme_m7_section.contains("**Status: Complete"),
+        "the README M7 section must state a Complete status"
+    );
+    assert!(
+        !readme_m7_section.contains("**Status: Planned"),
+        "the README M7 section must not claim Planned while #186–#192 are closed"
+    );
+    assert!(
+        !readme_m7_section.contains("- [ ]"),
+        "every M7 roadmap checkbox must be checked while the milestone is shipped"
+    );
+    assert!(
+        !readme.contains("In progress (CLI MVP shipped"),
+        "the README milestone table must not keep the M7 row at 'In progress'"
+    );
+    assert!(
+        !readme.contains("| Scene-item copy/paste (API) | Open (M7"),
+        "the OBS parity table must not keep copy/paste open after #192 shipped"
+    );
+}
+
 #[test]
 fn m3_completion_report_is_linked_and_records_follow_ups() {
     let readme = read("README.md");

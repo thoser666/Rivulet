@@ -1,8 +1,10 @@
 # M7 — Automation & Determinism ("Render-First")
 
-**Status:** Planned — 7 workstream issues on the
-[M7 milestone](https://github.com/thoser666/Rivulet/milestone/7), none started.
-Issue #186 (headless CLI) is the recommended first implementation step.
+**Status:** Shipped — all 7 workstream issues on the
+[M7 milestone](https://github.com/thoser666/Rivulet/milestone/7) (#186–#192) are
+closed and merged. Completion review, evidence, and the two assigned follow-ups
+(F-M7-001, F-M7-002):
+[`docs/m7-automation-completion-report.md`](m7-automation-completion-report.md).
 
 *Differentiation pillar #1: OBS is interactive-first, Rivulet is deterministic.
 This milestone is the reason a developer or team **cannot** use OBS but **can**
@@ -43,7 +45,8 @@ first-class citizens.
 - WebGPU/zero-copy rendering — M9.
 - Streaming over the CLI: the first CLI milestone ships `record` (plus inspect
   and render); a streaming subcommand is a follow-up once the CLI surface is
-  proven.
+  proven. (Surface proven; tracked as
+  [#289](https://github.com/thoser666/Rivulet/issues/289).)
 
 ## Platform scope
 
@@ -564,6 +567,15 @@ The introspection half of the CLI story, analogous to `gst-inspect` /
   (duplicate semantics, not move).
 - [x] Undo restores the pre-paste scene state exactly.
 - [x] The operation is covered by the deterministic-test helpers from W2b.
+
+**Status: shipped** (PR #226). `copy_scene_item` captures source plus binding
+verbatim (transforms, crop, lock, visibility, order); `paste_scene_item`
+duplicates into any scene with a `" copy"` suffix and, with
+`with_deterministic_ids` (UUIDv5 from source ID + target scene), makes scripted
+pastes idempotent. Every paste lands on a paste-scoped undo/redo stack in the M2
+pattern, which the GUI undo dispatch prefers. Pinned by the
+`scene_item_copy_paste_surface_is_pinned` ci_pinning guard.
+
 ## CLI surface reference
 
 ```
@@ -573,7 +585,12 @@ rivulet record --config recording.toml [--output FILE] [--duration SECS]
 rivulet inspect --config recording.toml [--json]            (shipped, W5)
 rivulet render --config scene.toml --frame N --png out.png    (shipped, W3)
 rivulet render --config-dir scenes/ --out-dir renders/        (shipped, W3 batch)
+rivulet stream --config streaming.toml [--json]       (NOT shipped — #289)
 ```
+
+`rivulet stream` is deliberately absent from the shipped set: streaming over the
+CLI was an M7 non-goal, and the surface it would reuse is now proven. It is
+tracked as a follow-up, not advertised as shipped functionality.
 
 Flags override the TOML config (`--output` wins over `output.path`, etc.).
 Without `--config`, flags alone define the run; `output.path` is always
