@@ -19120,70 +19120,37 @@ mod tests {
     }
 
     /// Local fixture that answers the requests the YouTube read path makes
-    /// (the live-chat page, then a poll every cycle) so the worker reaches
-    /// its connected state without touching the network.
+    /// (the live-chat page and repeated `get_live_chat` polls) so the worker
+    /// reaches its connected state without touching the network.
     ///
     /// It keeps serving for as long as the returned guard is alive: the
-    /// worker polls in a loop, so a fixture that answers a fixed number of
+    /// worker polls in a loop, so a fixture that answers a fixed *number* of
     /// requests would leave the listener gone, the next poll would fail and
     /// the worker would stay `Disconnected` — the test then waits out its
     /// whole window for a state that can never return.
+    ///
+    /// Each connection is served on its own thread and the response is chosen
+    /// by the request **path**, never by arrival order. Both matter: a single
+    /// sequential server blocks every later request behind one slow read, and
+    /// an order-based choice answers the page with a poll payload as soon as
+    /// the worker reconnects once.
     fn spawn_youtube_poll_fixture() -> (String, String, YouTubePollFixture) {
-        use std::io::{Read, Write};
         use std::net::TcpListener;
 
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture");
         let addr = listener.local_addr().expect("addr").to_string();
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker_stop = std::sync::Arc::clone(&stop);
+        let accept_stop = std::sync::Arc::clone(&stop);
         std::thread::spawn(move || {
-            // The very first request is the live-chat page (it carries the
-            // continuation token); every later one is a poll.
-            let mut first = true;
-            while !worker_stop.load(std::sync::atomic::Ordering::SeqCst) {
-                let Ok((mut stream, _)) = listener.accept() else {
+            while !accept_stop.load(std::sync::atomic::Ordering::SeqCst) {
+                let Ok((stream, _)) = listener.accept() else {
                     return;
                 };
-                let is_page = std::mem::take(&mut first);
-                // Drain the request completely before answering: on Windows a
-                // half-read request closes with WSAECONNRESET.
-                let mut buf = Vec::new();
-                let mut chunk = [0u8; 4096];
-                loop {
-                    let header_end = buf
-                        .windows(4)
-                        .position(|window| window == b"\r\n\r\n")
-                        .map(|pos| pos + 4);
-                    if let Some(header_end) = header_end {
-                        let head = String::from_utf8_lossy(&buf[..header_end]).to_lowercase();
-                        let content_length = head
-                            .lines()
-                            .find_map(|line| {
-                                line.strip_prefix("content-length:")
-                                    .and_then(|value| value.trim().parse::<usize>().ok())
-                            })
-                            .unwrap_or(0);
-                        if buf.len() >= header_end + content_length {
-                            break;
-                        }
-                    }
-                    match stream.read(&mut chunk) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => buf.extend_from_slice(&chunk[..n]),
-                    }
-                }
-                let body: String = if is_page {
-                    r#"<script>var ytInitialData={"continuation":"TOKEN"};</script>"#.to_owned()
-                } else {
-                    r#"{"actions":[{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"authorName":{"simpleText":"Viewer"},"message":{"runs":[{"text":"hi"}]}}}}}],"continuations":[{"invalidationContinuationData":{"continuation":"TOKEN"}}]}"#.to_owned()
-                };
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
-                let _ = stream.write_all(response.as_bytes());
-                let _ = stream.flush();
+                let connection_stop = std::sync::Arc::clone(&worker_stop);
+                std::thread::spawn(move || {
+                    serve_youtube_fixture_connection(stream, connection_stop);
+                });
             }
         });
         (
@@ -19191,6 +19158,77 @@ mod tests {
             format!("http://{addr}/get_live_chat"),
             YouTubePollFixture { stop },
         )
+    }
+
+    /// Answer one fixture connection. Split out of the accept loop so each
+    /// request is served on its own thread.
+    fn serve_youtube_fixture_connection(
+        mut stream: std::net::TcpStream,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) {
+        use std::io::{Read, Write};
+
+        const PAGE_BODY: &str = r#"<script>var ytInitialData={"continuation":"TOKEN"};</script>"#;
+        // The parser reads `/continuationContents/liveChatContinuation/...`,
+        // so a top-level `actions`/`continuations` payload would parse as
+        // "no next continuation": the session would end, the worker would
+        // drop back to its retry chain and the connected window this test
+        // waits for would only be about a second wide.
+        const POLL_BODY: &str = r#"{"continuationContents":{"liveChatContinuation":{"actions":[{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"authorName":{"simpleText":"Viewer"},"message":{"runs":[{"text":"hi"}]}}}}}],"continuations":[{"invalidationContinuationData":{"continuation":"TOKEN"}}]}}}"#;
+
+        // Drain the request completely before answering: on Windows a
+        // half-read request closes with WSAECONNRESET.
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            if stop.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            let header_end = buf
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .map(|pos| pos + 4);
+            if let Some(header_end) = header_end {
+                let head = String::from_utf8_lossy(&buf[..header_end]).to_lowercase();
+                let content_length = head
+                    .lines()
+                    .find_map(|line| {
+                        line.strip_prefix("content-length:")
+                            .and_then(|value| value.trim().parse::<usize>().ok())
+                    })
+                    .unwrap_or(0);
+                if buf.len() >= header_end + content_length {
+                    break;
+                }
+            }
+            match stream.read(&mut chunk) {
+                Ok(0) | Err(_) => return,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            }
+        }
+
+        // Path decides the response, not arrival order: the worker may
+        // reconnect, and a page answered with a poll payload (or the reverse)
+        // would leave the fixture thread spinning through the worker's retry
+        // chain — which is exactly how a flaky connection turns into a 20 s
+        // timeout.
+        let request_line = String::from_utf8_lossy(&buf)
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        let body = if request_line.contains("/get_live_chat") {
+            POLL_BODY
+        } else {
+            PAGE_BODY
+        };
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(response.as_bytes());
+        let _ = stream.flush();
     }
 
     /// Keeps `spawn_youtube_poll_fixture` answering until the test drops it.
