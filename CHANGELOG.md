@@ -1,5 +1,61 @@
 ## [Unreleased]
 
+- docs(m8): **M8 „Embeddable Engine & API" eroeffnet — sechs
+  Workstream-Issues, und ein ehrlicher Befund zum Ist-Zustand statt eines
+  Etiketts allein.** Das Meilenstein existierte auf GitHub, hatte aber
+  **null Issues** und stand in README und Quality-Gate auf „Planned" —
+  es war nie wirklich eroeffnet worden. Der Aufruf „In progress" ist
+  trotzdem heikel: bei **null** gelieferten Workstreams behauptet er
+  Fortschritt, den niemand zeigen kann, und das ist schlechter als
+  „Planned", weil ein Leser daraus schliesst, es arbeite jemand dran. Genau
+  die Spiegelbahn zu M7, wo drei Dokumente das Gegenteil des Status
+  behaupteten. Deshalb ist der Oeffnungszustand **belegt** festgehalten und
+  gepinnt, nicht nur beschriftet:
+  - **[#292](https://github.com/thoser666/Rivulet/issues/292)** —
+    stabilisierte oeffentliche API: `#![warn(missing_docs)]`,
+    crate-spezifische Typen, semver-Politik, Deprecation-Pfad, und pro
+    Handle dokumentierte Thread-Safety-/Lifecycle-Zusagen
+  - **[#293](https://github.com/thoser666/Rivulet/issues/293)** —
+    `rivulet-core/examples/` mit sechs Beispielen (Aufnahme, Stream,
+    Dual-Output, Encoder-Wahl, Frame-Streaming, Downstream-Smoke), die in
+    CI **ausgefuehrt** werden, nicht nur gebaut
+  - **[#294](https://github.com/thoser666/Rivulet/issues/294)** —
+    In-Process-Capture-API: eine fremde Crate nimmt eine Aufnahme ohne
+    Start der App auf; Konfigurationsfehler scheitern **vor** dem ersten
+    Frame typisiert und benannt
+  - **[#295](https://github.com/thoser666/Rivulet/issues/295)** —
+    `detect_available_encoders()` und Fallback als abfragbare API mit
+    maschinenlesbarem Grund statt Log-Parsing
+  - **[#296](https://github.com/thoser666/Rivulet/issues/296)** —
+    Capture-Backends hinter **einem** stabilen Trait (xcap, PipeWire,
+    Metal/WGC) mit expliziten Thread-Safety-Zusagen
+  - **[#297](https://github.com/thoser666/Rivulet/issues/297)** — Exit-
+    Evidenz: Downstream-Consumer-Smoke-Test, Docs-Build, Beispiel-Matrix,
+    oeffentliche API-Review und der M8-Abschlussbericht. Startet **erst**,
+    wenn #292 geliefert ist; dieser Punkt schliesst das Meilenstein ab,
+    er arbeitet nicht darauf zu.
+  **Empfohlener erster Schritt: #292.** Er gatet den Rest — Beispiele,
+    Capture-Einstiegspunkt und Backend-Traits brauchen alle eine stabile
+    Oberflaeche, und eine dokumentierte bewegliche Oberflaeche ist
+    weggeworfene Arbeit.
+  **Der Ist-Zustand steht als Zahl drin, nicht als Adjektiv:**
+    `rivulet-core` ist `0.65.0-alpha.55` — unter semver `0.x` ist jeder
+    Minor-Bump breaking, ein externer Konsument kann sich also noch auf
+    nichts verlassen; die Crate hat **66 `pub mod` ohne
+    `#![warn(missing_docs)]`**, **keine** `examples/`-Krate, und
+    Feature-Erkennung ist ueber Log-Zeilen und GUI-Labels erreichbar statt
+    ueber die API. Genau das ist die Luecke, die M8 schliesst.
+  **Neu gepinnt in `ci_pinning`:**
+  `m8_opening_is_pinned_to_the_six_workstream_issues` haelt den
+  Oeffnungszustand fest — beide Flaechen muessen „In progress" sagen und
+  duerfen **weder** „Planned" **noch** „Complete" behaupten, alle sechs
+  Issues muessen in README **und** Gate genannt sein, die Checkbox-Liste
+  muss zur Issue-Liste passen (6 = 6), und der empfohlene erste Schritt muss
+  #292 bleiben. Dazu die negativen Seiten: keine unbelegte
+  „gate passed"-Aussage neben sechs offenen Issues, und #297 traegt seine
+  Abhaengigkeit von #292 sichtbar mit sich. Neun Negativproben feuern alle.
+  Das Gate bleibt ausdruecklich **offen** — kein Kriterium ist bisher als
+  erfuellt ausgewiesen.
 - feat(diagnostics): **Crashreport als kopierfertiger Bugreport — Settings
   → Crash report.** Bisher gab es Crashdiagnostik nur manuell: Tageslog
   finden, Crash-Block plus ~50 Zeilen herauskopieren, Secrets und Pfade

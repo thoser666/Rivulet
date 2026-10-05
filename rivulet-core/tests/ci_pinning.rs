@@ -6054,6 +6054,153 @@ fn crash_report_stays_local_and_redacted() {
 }
 
 #[test]
+fn m8_opening_is_pinned_to_the_six_workstream_issues() {
+    // Opening a milestone is exactly the moment a documentation lie becomes
+    // possible: "In progress" on a milestone where nothing is delivered, with
+    // no issues, is worse than "Planned", because a reader concludes someone
+    // is working on it. M7 had the mirror failure — three documents claiming
+    // the opposite of reality. So the opening state is pinned: the status
+    // must name the issues, and the milestone must not claim progress it
+    // cannot show.
+    let readme = read("README.md");
+    let gates = read("docs/milestone-quality-gates.md");
+
+    // Scope both sections by ASCII anchors so the assertions cannot be
+    // satisfied or broken by an unrelated part of the file. The README anchor
+    // has to be the full section header, not the plain title: the milestone
+    // table row above carries the same wording and would win otherwise.
+    let readme_m8_section = readme
+        .split("### 📦 M8 – Embeddable Engine & API")
+        .nth(1)
+        .and_then(|rest| rest.split("### ⚡ M9").next())
+        .unwrap_or_default();
+    assert!(
+        !readme_m8_section.is_empty(),
+        "the README must still have an M8 section"
+    );
+    let gates_m8_section = gates
+        .split("### M8: Embeddable Engine and API")
+        .nth(1)
+        .and_then(|rest| rest.split("### M9:").next())
+        .unwrap_or_default();
+    assert!(
+        !gates_m8_section.is_empty(),
+        "the quality gate must still have an M8 section"
+    );
+
+    // Both surfaces say "in progress", never "planned" — and never "complete"
+    // either, because no workstream has been delivered.
+    for (label, section) in [
+        ("README M8 section", readme_m8_section),
+        ("M8 quality gate", gates_m8_section),
+    ] {
+        assert!(
+            section.contains("In progress"),
+            "the {label} must state that M8 is in progress"
+        );
+        assert!(
+            !section.contains("**Status: Planned"),
+            "the {label} must not still claim Planned while #292-#297 are open"
+        );
+        assert!(
+            !section.contains("Complete") && !section.contains("**Status: Complete"),
+            "the {label} must not claim Complete while no workstream is delivered"
+        );
+    }
+
+    // The milestone table row, scoped so the M9/M10 rows cannot satisfy it.
+    let m8_row = readme
+        .lines()
+        .find(|line| line.starts_with("| M8 – Embeddable Engine & API |"))
+        .expect("the README milestone table must still have an M8 row");
+    assert!(
+        m8_row.contains("In progress"),
+        "the README M8 milestone row must show the work as started"
+    );
+    assert!(
+        !m8_row.contains("Planned"),
+        "the README M8 milestone row must not stay Planned while #292-#297 are open"
+    );
+
+    // All six workstream issues are named in both surfaces. The gate maps them
+    // to criteria; the README maps them to the roadmap checkboxes.
+    for issue in ["#292", "#293", "#294", "#295", "#296", "#297"] {
+        assert!(
+            readme_m8_section.contains(issue),
+            "the README M8 section must reference {issue}"
+        );
+        assert!(
+            gates_m8_section.contains(issue),
+            "the M8 quality gate must reference {issue}"
+        );
+    }
+    // The roadmap checkboxes and the issues are the same six items, so both
+    // lists have to stay complete — a missing checkbox or a missing issue is
+    // the same silent drift the M7 guard caught.
+    assert_eq!(
+        readme_m8_section.matches("- [ ]").count(),
+        6,
+        "the README M8 section must carry one open checkbox per workstream issue"
+    );
+    assert_eq!(
+        gates_m8_section
+            .matches("https://github.com/thoser666/Rivulet/issues/29")
+            .count(),
+        6,
+        "the M8 quality gate must link each workstream issue exactly once"
+    );
+
+    // A started milestone has to name where to start, and the named issue must
+    // be the one that unblocks the rest.
+    assert!(
+        readme_m8_section.contains("Recommended first implementation step"),
+        "the README M8 section must name a recommended first implementation step"
+    );
+    let first_step = readme_m8_section
+        .split("Recommended first implementation step")
+        .nth(1)
+        .and_then(|rest| rest.split("**Goal:**").next())
+        .unwrap_or_default();
+    assert!(
+        first_step.contains("#292"),
+        "the recommended first implementation step must be #292, the API \
+         contract the other workstreams build against"
+    );
+
+    // The opening state is recorded with numbers, not adjectives: a reader
+    // must be able to check the claims. These are the facts that make M8
+    // "Planned -> In progress" more than a label.
+    assert!(
+        readme_m8_section.contains("0.65.0-alpha.55")
+            && readme_m8_section.contains("66 public modules")
+            && readme_m8_section.contains("missing_docs"),
+        "the README M8 section must record the concrete opening state (version, \
+         module count, missing_docs)"
+    );
+    assert!(
+        gates_m8_section.contains("0.65.0-alpha.55")
+            && gates_m8_section.contains("66 public modules"),
+        "the M8 quality gate must record the same opening state as the README"
+    );
+
+    // Honest bookkeeping: the gate must stay open while the workstreams run.
+    assert!(
+        gates_m8_section.contains("The gate stays **open**"),
+        "the M8 quality gate must state that it is still open"
+    );
+    assert!(
+        !gates_m8_section.contains("gate passed"),
+        "no unconditional gate pass may sit next to six open workstream issues"
+    );
+    // The exit-evidence issue closes the milestone, it does not work toward
+    // it; saying otherwise would let someone "finish" M8 with a smoke test.
+    assert!(
+        gates_m8_section.contains("Starts only once #292 is delivered"),
+        "the exit-evidence issue must be marked as depending on #292"
+    );
+}
+
+#[test]
 fn local_pre_push_hook_mirrors_the_ci_lints_job() {
     // Commit 06792c6 shipped four GUI tests that were clean under a plain
     // `cargo clippy` but failed CI's `-- -D warnings` Lints job
