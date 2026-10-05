@@ -29,6 +29,63 @@
   nachpruefbar ist statt geglaubt werden muss.
   Zehn Negativproben auf den Guard und fuenf auf die Statistik selbst greifen
   alle — darunter der Push-Burst, der zurueck auf #276 wuerde.
+- feat(chat): **YouTube kann jetzt ueber die offizielle Live-Streaming-API
+  senden — die Doku behauptete es seit langem, der Code konnte es nicht**
+  (Issue #100, M10 Platform-Compliance-Baseline). `send_message` auf einem
+  YouTube-Konto gab konstant `false` zurueck, `can_send` schloss die
+  Plattform hart aus, und es gab weder Quota-Budget noch `parentId` —
+  waehrend README und das M10-Gate den offiziellen Sendepfad als erledigt
+  fuehrten. Der Innertube-Poller kann per Konstruktion nicht schreiben
+  (`get_live_chat` hat keine Schreibseite); die fehlende Haelfte ist jetzt
+  die dokumentierte API: `liveChatMessages.insert` mit
+  `snippet.liveChatId`, `snippet.type=textMessageEvent` und
+  `snippet.textOriginal`, als `Authorization: Bearer` plus `?part=snippet&key=`,
+  Body form-urlencoded — und **Antworten echten Thread**, weil
+  `snippet.parentId` die Message-Id aus `ChatMessage.id` durchreicht.
+  **Drei Eingaben, sonst Observer-Modus:** OAuth-Token (Scope
+  `youtube.force-ssl`), Data-API-Key und die `liveChatId` des laufenden
+  Broadcasts. Beide Secrets liegen im Vault (zweiter Slot neben dem Token,
+  `ChatTokenStore::save_api_key`/`load_api_key`), die `liveChatId`
+  persistiert im Kanal-Feld. Fehlt eine, bleibt der Worker beim Lesen und
+  meldet es im Dock statt still zu scheitern — `can_send()` fragt jetzt den
+  Worker, nicht mehr eine Plattform-Blackliste.
+  **Quota wird lokal vorher verbraucht, nicht hinterher von Google
+  abgelehnt:** `insert` kostet ~200 der 10 000 Einheiten/Tag, also **~50
+  Sendungen/Tag**. `YouTubeQuota` zaehlt das mit injizierbarer UTC-Uhr,
+  `try_acquire` verweigert die 51. Sendung, `roll_day` setzt an der
+  Tagesgrenze zurueck. Ein Server-Refusal (`quotaExceeded`,
+  `dailyLimitExceeded`, `rateLimitExceeded`) wird als *Quota* klassifiziert
+  und pinnt das Konto fuer den Rest des UTC-Tags auf read-only — dafuer muss
+  der Body lesbar bleiben, also laeuft der ureq-Agent mit
+  `http_status_as_error(false)`; sonst waere ein erschöpftes Budget nicht von
+  einem kaputten Token zu unterscheiden.
+  **Der Drossel-Fenster-Fehler von nebenan mitkorrigiert:**
+  `rate_limit::youtube_default()` stand auf `window_secs: 86_400` (1 Sendung
+  pro Tag) bei einer Werbung von ~50/Tag — der Default war also **zehnmal
+  strenger als dokumentiert**; jetzt `1_728` s, exakt 50/Tag, und die
+  bestehende Nadel im `ci_pinning`-Guard vergleicht ihn mit
+  `YouTubeQuotaConfig::documented().sends_per_day()`, damit die beiden Zahlen
+  nicht mehr auseinanderlaufen koennen.
+  **Credentials bleiben unsichtbar:** `YouTubeSendCredentials` hat einen
+  manuellen `Debug` (`<missing>` / `<set: N chars>`), alle Log-Zeilen des
+  Sendepfads sind statischer Text (CodeQL `rust/cleartext-logging`), und das
+  Dock zeigt eine **✓/✗-Auth-Matrix je Konto** (Praesenz, nie ein Wert) —
+  samt getrenntem Quota-Hinweis ("YouTube ist heute Nur-Leser"), damit eine
+  verbrauchte Quote nicht als fehlende Konfiguration missverstanden wird.
+  **Tests:** 28 in `youtube_chat` (Insert gegen lokalen HTTP-Listener mit
+  Methoden-, Header-, Key- und Encoding-Pruefung; `parentId`-Threading;
+  Quota-Stopp, UTC-Tageswechsel, Refusal-Klassifikation; Observer-Fallback
+  fuer jede unvollstaendige Eingabekombination; Maskierung), 5 neue in der
+  Fassade (YouTube-Sendepfad, Matrix ohne Werte, halbkonfiguriert =
+  read-only, Budget < ein Insert = read-only ohne erfundenen Config-Fehler)
+  und 3 im Dock. Neu gepinnt in `ci_pinning`:
+  `youtube_official_send_path_is_quota_accounted_and_masked` haelt die
+  README-/Gate-/Doku-Aussage an den Code — inklusive Negativnadel gegen die
+  alte Plattform-Blackliste im Sende-Input. Doku in
+  [`docs/twitch-chat.md`](docs/twitch-chat.md) um einen eigenen Abschnitt
+  "YouTube official send path" (Endpunkt, Body, Quota, Observer-Fallback,
+  Credential-Hygiene) ergaenzt; die veralteten Read-only-Zusaenge in
+  Featureliste, Setup und Testabschnitt sind korrigiert.
 - docs(m7): **M7-Abschlussbericht — "Automation & Determinism" ist
   funktional fertig (Conditional Pass)** — alle sieben Workstream-Issues
   (#186–#192) sind geschlossen und gemergt, aber drei Dokumente behaupteten

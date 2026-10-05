@@ -3,7 +3,8 @@
 Rivulet can display the live chat of a streaming platform directly in the
 app — no browser source or overlay needed for monitoring chat while
 streaming. The dock supports **Twitch** (IRC), **Kick** (Pusher WebSocket)
-and **YouTube** (Innertube polling) from one unified UI.
+and **YouTube** (Innertube polling, plus an official Live Streaming API
+send path) from one unified UI.
 
 ## Features
 
@@ -37,11 +38,17 @@ and **YouTube** (Innertube polling) from one unified UI.
   channel slug to its chatroom id via the Kick API, connects to the Pusher
   WebSocket, subscribes to the chatroom channel and parses
   `App\Events\ChatMessageEvent` payloads (username, color, badges).
-- **YouTube polling client** (`rivulet-core::youtube_chat`): fetches the
+- **YouTube client** (`rivulet-core::youtube_chat`): fetches the
   live-chat page to extract the continuation token, then polls the Innertube
   `get_live_chat` endpoint for new messages (author, color, badges). Best
   effort: YouTube's endpoints are not a stable public API, so a failure
   surfaces as a connection error instead of pretending chat works.
+- **Official YouTube sending** (Live Streaming API): with an OAuth token, a
+  Data API key and the broadcast's `liveChatId` the same worker *sends* via
+  `liveChatMessages.insert` and threads replies through `snippet.parentId`.
+  Without the complete contract — or with the daily budget spent — the
+  worker stays a read-only observer instead of failing the send silently.
+  See [YouTube official send path](#youtube-official-send-path).
 - **Chat dock on the Stream page**: the chat is embedded in the **Stream**
   workspace (Meld-style single broadcast page) — left column, with the
   combined alerts dock beside it and the stream status/health to the right.
@@ -49,13 +56,18 @@ and **YouTube** (Innertube polling) from one unified UI.
   auto-scrolling message list render in the dock; the chat no longer has its
   own sidebar entry.
 - **Anonymous by default**: read-only chat works without any token on
-  Twitch and Kick. With a token you get colors and badges for your own
-  messages.
+  Twitch, Kick and YouTube. With a token you get colors and badges for your
+  own messages. On YouTube *sending* additionally needs a Data API key and
+  the `liveChatId`; a read-only account still receives everything.
 - **Reply in chat**: Twitch and Kick show a message input under the chat
   list when connected and a token is configured (Twitch OAuth `chat:send`,
   Kick session token) — type and press Enter (or click **Send**). Sending
-  is **non-blocking** (enqueued to the worker thread). **YouTube is
-  read-only** (anonymous clients cannot send); a hint replaces the input.
+  is **non-blocking** (enqueued to the worker thread). **YouTube shows the
+  input only once the official send contract is complete**; otherwise the
+  worker is an observer and the hint explains which half is missing. An
+  account that *was* able to send and has since spent its daily quota is
+  reported separately ("YouTube is read-only today") so a spent budget is
+  not mistaken for missing configuration.
 - **Send-budget indicator**: directly above the input field the dock shows
   how many platform messages are still allowed right now (e.g. “Send
   budget: 17/20 messages”). The line turns warning-colored at ≤ ¼ capacity
@@ -86,12 +98,17 @@ and **YouTube** (Innertube polling) from one unified UI.
    - **Twitch**: channel name without `#`, e.g. `yourtwitchname`.
    - **Kick**: channel slug, e.g. `forsen`.
    - **YouTube**: live video id, e.g. the `v=` value of the live stream URL.
+     For *sending* you also enter the broadcast's `liveChatId` (the dock
+     copies it from the live-chat URL) — reads work without it.
 4. Click **Connect**. The status line shows `Connected` / `Disconnected —
    retrying` / `Off`.
 5. Optional: paste a token into the token field **before** connecting —
    Twitch OAuth (`oauth:...`, `chat:read` to read with colors, `chat:send`
    to reply) or a Kick session token (`x-sess-token`, required to send).
-   YouTube needs no token.
+   YouTube needs no token to read. To send, supply an OAuth token
+  (scope `https://www.googleapis.com/auth/youtube.force-ssl`) **and** a
+  Data API key; both go into the credential vault, the `liveChatId` into the
+  channel field. A half-configured YouTube account stays read-only.
 
 ## Configuration notes
 
@@ -175,7 +192,7 @@ can never burst against a platform limit:
 | --- | --- | --- |
 | Twitch | 20 msgs / 30 s | documented global ceiling for non-broadcaster/mod/VIP accounts |
 | Kick | 10 msgs / 30 s | undocumented API — deliberately more conservative than Twitch |
-| YouTube | 1 msg / day (burst 1) | official `insert` costs ~200 quota units; serialized sends never overdraw |
+| YouTube | 1 msg / 29 min (burst 1) | `insert` costs ~200 of the 10 000 units/day, i.e. ~50 sends/day; serialized sends never overdraw |
 
 - The default applies when `ChatConfig::rate_limit` is `None`; a custom
   `RateLimitConfig { capacity, window_secs }` overrides it per platform.
@@ -190,6 +207,60 @@ can never burst against a platform limit:
   warning at ≤ ¼ capacity, pause notice while empty. The tooltip
   (`chat_rate_window`) names the platform and the window the limit
   applies over.
+
+### YouTube official send path
+
+The Innertube poller is fine for *reading* chat, but it cannot send: the
+`get_live_chat` endpoint has no write side, and the unofficial trick of
+posting through the website form is exactly the kind of thing that breaks
+without notice. Sending therefore goes through the documented **Live
+Streaming API**:
+
+| Input | Where it goes | Why it is needed |
+| --- | --- | --- |
+| OAuth token, scope `youtube.force-ssl` | vault, next to the account | authorizes the write |
+| Data API key | vault, next to the account | `liveChatMessages.insert` requires `?key=` |
+| `liveChatId` of the running broadcast | persisted channel field | addresses the live chat, not the video |
+
+With all three present, `youtube_send_message` issues
+`POST https://www.googleapis.com/youtube/v3/liveChat/messages?part=snippet&key=<key>`
+with `Authorization: Bearer <token>` and a form-urlencoded body:
+
+```
+snippet.liveChatId=<liveChatId>&snippet.type=textMessageEvent
+&snippet.textOriginal=<url-encoded text>[&snippet.parentId=<id>]
+```
+
+`snippet.parentId` is what makes a reply a reply — the same `id` the dock
+puts in the `↩` affordance, mirrored from `ChatMessage.id`.
+
+**Quota accounting (`YouTubeQuota`).** The insert costs ~200 of the
+project's 10 000 units/day, i.e. **~50 sends per day**. `YouTubeQuota`
+tracks that locally with an injectable UTC clock, so the budget is spent
+*before* Google refuses rather than after:
+
+- `try_acquire()` denies the 51st send; the dock then shows
+  "YouTube is read-only today" instead of an input field.
+- A server refusal (`quotaExceeded` / `dailyLimitExceeded` /
+  `rateLimitExceeded`) is classified by `youtube_quota_exhausted` and pins
+  the account read-only for the rest of the UTC day — the response body has
+  to stay readable for that, which is why the HTTP agent runs with
+  `http_status_as_error(false)`.
+- `roll_day()` resets the budget at the UTC day boundary, so a long stream
+  recovers on its own without a restart.
+
+**Observer fallback.** Any incomplete contract — no token, no key, no
+`liveChatId`, or an empty budget — leaves the worker in the same read-only
+mode it always had: chat keeps scrolling, and the send path is simply not
+offered. `can_send()` asks the worker instead of a hard-coded platform
+blacklist, so a fully configured YouTube account really can send while an
+unconfigured one cannot.
+
+**Credentials.** Both halves are secrets: `YouTubeSendCredentials` has a
+manual `Debug` impl that prints `<missing>` / `<set: N chars>` and never a
+value, and every log line on the send path is static text (CodeQL
+`rust/cleartext-logging`). The dock shows a per-platform ✓/✗ credential
+matrix so you can see what is configured without ever seeing it.
 
 ### Threaded replies and phone verification (Twitch)
 
@@ -216,13 +287,15 @@ rivulet-core::chat                         # unified facade
   ├─ twitch_chat  parse_irc_line -> Option<ChatMessage>   # pure, deterministic
   ├─ kick_chat    parse_kick_event / kick_chatroom_id     # pure + API resolution
   └─ youtube_chat parse_youtube_payload / youtube_initial_continuation
+                 youtube_send_message / YouTubeQuota  # official insert
   └─ worker_loop(rx, cfg, stop)            # dedicated thread per platform, I/O here
 
 rivulet-gui::app
   ├─ chat_action_pending / ChatAction          # Connect/Disconnect/Send/SendReply
   ├─ reconcile_chat()                          # one action per frame
   ├─ send_chat_message(text)                   # token + platform gate
-  ├─ send_chat_reply(text, parent_id)          # threaded reply (Twitch)
+  ├─ send_chat_reply(text, parent_id)          # threaded reply
+  ├─ chat_auth_matrix() / chat_sendable_platforms()  # ticks, never a value
   ├─ chat_rate_budget()                        # live (remaining, capacity)
   ├─ draw_chat_dock(ui, max_list_height)       # platform selector + inputs + reply
   │                                            #   affordance + phone warning +
@@ -254,7 +327,12 @@ rivulet-gui::app
   - Kick: local HTTP listener serves the chatroom resolution and a local
     WebSocket server (`tungstenite::accept`) delivers a parsed chat event.
   - YouTube: a local HTTP listener serves the initial page (continuation)
-    and one `get_live_chat` poll response.
+    and one `get_live_chat` poll response. The send path is covered against
+    the same kind of local listener: `insert_reaches_the_official_endpoint_and_carries_bearer_and_key`
+    asserts method, `?part=snippet&key=`, the bearer header and the
+    percent-encoded `snippet.textOriginal`; the threaded-reply case asserts
+    `snippet.parentId`; `quota_refusal_is_classified_as_exhausted_not_as_a_bad_token`
+    pins that a 403 quota body is read as *quota*, not as a broken token.
 - **Windows RST hygiene**: every local HTTP fixture (YouTube page +
   `get_live_chat` poll, Kick chatroom-resolution endpoints) fully drains
   the incoming request — headers plus any `Content-Length` body
@@ -262,8 +340,18 @@ rivulet-gui::app
   while request bytes are still unread makes Windows close the socket
   with `WSAECONNRESET` (os error 10054) instead of a clean FIN, which
   intermittently failed the YouTube worker smoke on windows-latest until
-  fixed; the Kick WebSocket fixture is unaffected (tungstenite performs
-  the full HTTP upgrade read itself).
+  fixed; the Kick WebSocket fixture is unaffected (tungstenite performs the
+  full HTTP upgrade read itself).
+- **Fixture lifetime must cover the worker loop, not just one cycle.** The
+  YouTube worker polls in a loop (3 s interval), so a fixture that answers a
+  fixed *number* of requests goes away mid-session: the next poll fails, the
+  worker falls back to `Disconnected` with growing backoff against a closed
+  port, and a test waiting for a `Connected` worker then waits out its whole
+  window for a state that can never return. This is platform-timing
+  dependent, not deterministic — it passed on windows-latest and failed on
+  ubuntu/macos-latest in the same run. Local listeners for looping workers
+  therefore serve until their guard is dropped (`YouTubePollFixture`), not
+  `for _ in 0..N`.
 - `rivulet-gui`: navigation contract (no standalone chat sidebar entry; chat
   is part of the Stream workspace), view coverage and i18n parity, plus
   behavior tests for the send and threaded-reply paths (no token / no
@@ -272,7 +360,11 @@ rivulet-gui::app
   consumes the armed reply target, an empty submit keeps the target, and
   `cancel_chat_reply` (banner ✕) disarms without touching the draft) and
   source-contract tests that the reply input only renders when connected,
-  a token is configured and the platform can send, and that the
+  a token is configured and **the worker itself reports `can_send()`**
+  (`chat_send_input_follows_worker_capability_not_the_platform_list`, so a
+  fully configured YouTube account is not hidden by a platform blacklist),
+  plus `chat_auth_matrix_marks_a_youtube_account_read_only_without_credentials`
+  and `youtube_quota_state_is_reported_separately_from_configuration`, and that the
   “Replying to <user>” banner (translated, above the input) keeps its ✕
   cancel affordance wired to the testable cancel helper.
 - `ci_pinning.rs`: guards that the chat dock stays embedded in the Stream
@@ -280,8 +372,12 @@ rivulet-gui::app
   send path (`send_message` / `ChatAction::Send` / `PRIVMSG`) stays covered,
   Twitch replies stay threaded (`send_reply` / `@reply-parent-msg-id` /
   `chat_reply_target` / `submit_chat_input` / `ChatAction::SendReply`) with
-  the phone-verification flag surfaced in the dock and i18n,  and Kick/YouTube wiring (platform selector, read-only gate, i18n keys,
-  docs) cannot silently regress. The send-budget indicator is pinned too
+  the phone-verification flag surfaced in the dock and i18n, and the
+  YouTube send path itself
+  (`youtube_official_send_path_is_quota_accounted_and_masked`: official
+  endpoint, quota constants and accounting, masked credentials, observer
+  fallback, both-locale i18n keys and this documentation) cannot silently
+  regress. The send-budget indicator is pinned too
   (`chat_rate_budget` helper + rendered keys + translated strings).
 
 ## Roadmap
