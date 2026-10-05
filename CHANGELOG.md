@@ -29,6 +29,40 @@
   nachpruefbar ist statt geglaubt werden muss.
   Zehn Negativproben auf den Guard und fuenf auf die Statistik selbst greifen
   alle — darunter der Push-Burst, der zurueck auf #276 wuerde.
+- docs(m7): **M7-Abschlussbericht — "Automation & Determinism" ist
+  funktional fertig (Conditional Pass)** — alle sieben Workstream-Issues
+  (#186–#192) sind geschlossen und gemergt, aber drei Dokumente behaupteten
+  das Gegenteil: `docs/m7-automation.md` fuehrte im Status-Header weiter
+  "Planned — none started" und empfahl #186 als "recommended first
+  implementation step", das Quality-Gate `**Status: Planned**` mit #192
+  als "open", und die README-Meilensteinspalte stand auf "In progress
+  (CLI MVP shipped)". Wer nur die Roadmap gelesen hat, konnte schliessen,
+  das Meilenstein habe nicht begonnen. Korrigiert und belegt:
+  **Neu**
+  [`docs/m7-automation-completion-report.md`](docs/m7-automation-completion-report.md)
+  mit Summary, Lieferuebersicht je Workstream (PR-Nummern, ci_pinning-Guards),
+  Gate-Kriterien-Tabelle, Findings und Decision — nach dem Muster von
+  `docs/m6-creator-toolkit-completion-report.md`.
+  **Zwei Findings ehrlich zugewiesen statt weggeredet:** F-M7-001
+  (Release-Artefakte sind *auditiert und download-verifiziert*, aber nicht
+  *gemessen bit-reproduzierbar* — es gibt keinen Rebuild-and-compare-Job;
+  neu: [#288](https://github.com/thoser666/Rivulet/issues/288)) und
+  F-M7-002 (`rivulet stream` war explizites Non-Goal; die CLI-Oberflaeche
+  ist inzwischen bewiesen, der Subcommand unblocked, aber nicht
+  ausgeliefert — neu:
+  [#289](https://github.com/thoser666/Rivulet/issues/289)). Signaturpruefung
+  steht bewusst *nicht* als Finding: sie ist secret-gegated und haengt an
+  [#50](https://github.com/thoser666/Rivulet/issues/50).
+  **Neu: Gate `m7_completion_report_is_linked_and_records_follow_ups`**
+  in `ci_pinning` — es pinnt nicht nur Existenz und Links des Berichts,
+  sondern die stale Statusaussagen selbst: Spec-Header ohne "Planned",
+  Gate-Sektion mit "Status: Complete" und **allen sieben**
+  Workstream-Notizen, README-M7-Abschnitt ohne offene Checkbox und mit
+  Complete-Status, Roadmap-Zeile nicht mehr "In progress", Parity-Tabelle
+  ohne "copy/paste open", jede F-M7-Zeile mit Tracking-Issue in derselben
+  Tabellenzeile und **kein** unbedingtes "gate passed" neben vergebenen
+  Follow-ups. Der Bericht selbst nennt 1137 Core-Lib-Tests und 116
+  Pinning-Tests als Beleg.
 
 - ci(release): **SHA256SUMS aus einem getesteten Skript, plus echte
   Post-Publish-Verifikation** (Issue #190, M7 W4) — die Manifest-Erzeugung

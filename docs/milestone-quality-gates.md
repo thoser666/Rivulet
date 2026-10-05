@@ -287,7 +287,12 @@ resource report for active creator sessions.
 
 ### M7: Automation and Determinism
 
-**Status: Planned** — spec: [`docs/m7-automation.md`](m7-automation.md); workstream issues #186–#192 on the M7 milestone (headless CLI, deterministic clock, golden-frame tests, CI rendering, reproducible distribution, inspector, scene-item copy/paste). Per-criterion status notes are added as workstreams ship.
+**Status: Complete (conditional: two assigned follow-ups)** — spec:
+[`docs/m7-automation.md`](m7-automation.md); workstream issues #186–#192 on the
+M7 milestone (headless CLI, deterministic clock, golden-frame tests, CI
+rendering, reproducible distribution, inspector, scene-item copy/paste) are all
+closed and merged. Completion review:
+[`docs/m7-automation-completion-report.md`](m7-automation-completion-report.md).
 
 This is a developer-experience gate as well as a UI gate:
 
@@ -333,7 +338,24 @@ Per-workstream status:
   appends a machine-readable `failed` object naming the stage
   (`usage`/`config`/`output`/`engine`/`finalize`) — the exit code is derived from
   that stage, so the report and the exit status cannot disagree.
-- **#192 (scene-item copy/paste)** — open.
+- **#192 (scene-item copy/paste)** — shipped: `copy_scene_item` captures source
+  plus binding verbatim (transforms, crop, lock, visibility, order),
+  `paste_scene_item` duplicates into any scene (`" copy"` suffix) and can do so
+  deterministically via `with_deterministic_ids` (UUIDv5 from source ID + target
+  scene, so scripted pastes are idempotent); every paste lands on a paste-scoped
+  undo/redo stack that the GUI undo dispatch prefers, plus copy/paste buttons and
+  Scenes-view-scoped Ctrl+C/Ctrl+V and three i18n keys (EN/DE).
+
+Exit evidence recorded by the completion report: the `Render Smoke` CI job runs
+the shipped binary on a clean runner (byte-identity, PNG signature, batch
+summary, real MP4 container), the `Verify published release` job re-downloads and
+verifies the live release, and the schema guards in `ci_pinning` pin the CLI
+status/exit-code contracts. Two Medium findings are assigned rather than
+silently accepted: F-M7-001 (rebuild-and-compare, so bit-reproducible artifacts
+are not yet *measured*, only audited —
+[#288](https://github.com/thoser666/Rivulet/issues/288)) and F-M7-002
+(`rivulet stream` unblocked but unshipped —
+[#289](https://github.com/thoser666/Rivulet/issues/289)).
 
 ### M8: Embeddable Engine and API
 
