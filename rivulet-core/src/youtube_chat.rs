@@ -1056,8 +1056,13 @@ fn worker_loop(
 ) {
     let mut backoff = 1u64;
     while !stop.load(Ordering::SeqCst) {
-        conn.store(1, Ordering::SeqCst);
-        match run_session(&cfg, &msg_tx, &alert_tx, &rx, &quota) {
+        // Deliberately *not* Connected yet: the session owns that transition
+        // and performs it once the live-chat page actually answered. Marking
+        // it here would let the dock report "Connected" for a worker that is
+        // still in its first HTTP request, and a failed first attempt would
+        // then be hidden by a backoff sleep instead of being visible.
+        conn.store(2, Ordering::SeqCst);
+        match run_session(&cfg, &msg_tx, &alert_tx, &rx, &quota, &conn) {
             Ok(()) => {
                 if stop.load(Ordering::SeqCst) {
                     break;
@@ -1129,6 +1134,7 @@ fn run_session(
     alert_tx: &Sender<crate::alerts_ingest::AlertEvent>,
     rx: &Receiver<Msg>,
     quota: &Mutex<YouTubeQuota>,
+    conn: &std::sync::atomic::AtomicU8,
 ) -> anyhow::Result<()> {
     let video_id = cfg.channel.trim();
     // 1. Fetch the live-chat page and extract the first continuation token.
@@ -1141,6 +1147,11 @@ fn run_session(
     let mut continuation = youtube_initial_continuation(&page).ok_or_else(|| {
         anyhow::anyhow!("no live-chat continuation found (stream may have ended)")
     })?;
+
+    // The connection exists from here: the page answered and a continuation
+    // token was found, so the poll loop is live. This is the transition the
+    // dock's status line reports, and it must not happen before it is true.
+    conn.store(1, Ordering::SeqCst);
 
     // Static message: no config-derived value in log sinks (rust/
     // cleartext-logging; the video id derives from the same struct as
@@ -1330,6 +1341,66 @@ mod tests {
             !chat.send_message("hello"),
             "YouTube chat is read-only without an authenticated session"
         );
+    }
+
+    /// Regression: the worker used to store `Connected` at the top of the
+    /// retry loop, so the dock reported "Connected" while the first HTTP
+    /// request was still in flight — and a failed first attempt hid behind
+    /// an exponentially growing backoff (1…30 s). On a loaded CI runner that
+    /// race turned `chat_send_input_follows_worker_capability_not_the_platform_list`
+    /// red while Windows stayed green.
+    ///
+    /// Pinned here rather than in the GUI test because the bug is in the
+    /// core: the transition belongs to the session, not the retry loop.
+    #[test]
+    fn the_worker_is_not_connected_before_the_live_chat_page_answers() {
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicU8, Ordering};
+
+        // Bind but never accept: the connect succeeds, the response never
+        // does. That is the state the old code called Connected.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr").to_string();
+        std::thread::spawn(move || {
+            // Hold the listener open without answering for the whole test.
+            std::thread::sleep(Duration::from_millis(800));
+            drop(listener);
+        });
+
+        let conn = std::sync::Arc::new(AtomicU8::new(0));
+        let (msg_tx, _msg_rx) = unbounded();
+        let (alert_tx, _alert_rx) = unbounded();
+        let cfg = YouTubeChatConfig {
+            channel: "abc123".to_owned(),
+            page_endpoint: format!("http://{addr}/live_chat?is_popout=1&v="),
+            poll_endpoint: format!("http://{addr}/get_live_chat"),
+            ..Default::default()
+        };
+        let (_tx, rx): (_, Receiver<Msg>) = unbounded();
+        let quota = Mutex::new(YouTubeQuota::new(YouTubeQuotaConfig::default()));
+        // The test keeps its own handle to observe the same flag the session
+        // writes, which is the whole point of the assertion.
+        let session_conn = std::sync::Arc::clone(&conn);
+        std::thread::spawn(move || {
+            let _ = run_session(&cfg, &msg_tx, &alert_tx, &rx, &quota, &session_conn);
+        });
+
+        // Give the page request time to be in flight; the state must still
+        // not claim a connection that does not exist.
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(
+            conn.load(Ordering::SeqCst),
+            0,
+            "the worker must not report Connected before the page answered"
+        );
+
+        // Sanity check on the mapping used by `connection_state`.
+        let reported = match conn.load(Ordering::SeqCst) {
+            2 => ChatConnState::Disconnected,
+            1 => ChatConnState::Connected,
+            _ => ChatConnState::Off,
+        };
+        assert_eq!(reported, ChatConnState::Off);
     }
 
     /// End-to-end smoke: the real worker fetches the page (continuation

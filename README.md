@@ -728,7 +728,17 @@ and attach to bug reports. When reporting a crash, include the relevant daily
 log and the app version, but remove personal paths or stream keys first. If the
 app starts with an empty log, verify that you are inspecting today's file and
 run once with `RUST_LOG=info`; see [docs/logging.md](docs/logging.md) for
-startup troubleshooting and the logging fallback behavior. Windows packages
+startup troubleshooting and the logging fallback behavior.
+
+**Settings → Crash report** builds that report for you: it extracts the crash
+blocks and the ~50 log lines before each one, redacts every stream URL (SRT
+passphrases included) and your home directory, copies the result to the
+clipboard, and opens a GitHub issue composer that is already filled in. Every
+redaction is counted in the report header, so you can see what was removed.
+**Rivulet itself transmits nothing** — there is no token and no sender, and
+what leaves the machine is only what you paste. See
+[docs/logging.md](docs/logging.md) for the manual procedure that remains the
+fallback. Windows packages
 also include a dependency-free launcher that records pre-Rust failures and can
 opt in to WER crash dumps with `RIVULET_ENABLE_CRASH_DUMPS=1`.
 

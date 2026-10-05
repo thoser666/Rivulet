@@ -26,6 +26,7 @@ pub use chat_rooms::{
 pub use twitch_chat::{ChatConnState, ChatMessage, TwitchChat, TwitchChatConfig};
 pub mod kick_chat;
 pub use kick_chat::{KickChat, KickChatConfig};
+pub mod crash_report;
 pub mod youtube_chat;
 pub use youtube_chat::{
     chat_auth_matrix, form_encode_component, youtube_insert_body, youtube_quota_exhausted,
