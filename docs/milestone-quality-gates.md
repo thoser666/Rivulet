@@ -359,6 +359,9 @@ are not yet *measured*, only audited —
 
 ### M8: Embeddable Engine and API
 
+**Status: In progress** — opened 2026-10-05, six workstream issues, none
+delivered yet.
+
 Review the API as a product consumed by another developer:
 
 - Public names, defaults, error types, lifecycle, and thread-safety guarantees
@@ -372,6 +375,34 @@ Review the API as a product consumed by another developer:
 
 Exit evidence: docs build, example build/run matrix, public API review, and a
 small downstream-consumer smoke test.
+
+Workstream issues:
+
+- [#292](https://github.com/thoser666/Rivulet/issues/292) — stabilized public
+  API (`missing_docs`, crate-style types, semver policy, deprecation path).
+  Covers the first, fourth and part of the second criterion.
+- [#293](https://github.com/thoser666/Rivulet/issues/293) — API docs plus a
+  `rivulet-core/examples/` crate whose examples are **run**, not just built.
+  Covers the example and the GUI-independence criterion.
+- [#294](https://github.com/thoser666/Rivulet/issues/294) — in-process capture
+  API so a foreign crate can record without starting the app. Covers the
+  early-typed-errors criterion and the embedding promise itself.
+- [#295](https://github.com/thoser666/Rivulet/issues/295) — feature detection
+  and fallback as a queryable API with a machine-readable reason.
+  Covers the detection criterion.
+- [#296](https://github.com/thoser666/Rivulet/issues/296) — capture backends
+  behind one stable trait, with explicit lifecycle and thread-safety promises.
+  Feeds the first criterion.
+- [#297](https://github.com/thoser666/Rivulet/issues/297) — exit evidence:
+  downstream-consumer smoke test, docs build, example run matrix, public API
+  review and the M8 completion report. **Starts only once #292 is delivered**;
+  it closes the milestone, it does not work toward it.
+
+The gate stays **open**. No criterion is claimed as met yet, and the opening
+state is recorded rather than glossed: `rivulet-core` is `0.65.0-alpha.55`
+(under semver `0.x` every minor bump is breaking), carries 66 public modules
+without a `#![warn(missing_docs)]`, has no `examples/` crate, and exposes
+feature detection through log output rather than through the API.
 
 ### M9: Modern Architecture
 
