@@ -172,7 +172,7 @@ werden.
 | M6 – Creator Toolkit & Interactivity | Chat auto-clips, Restream, Remote, Multi-track Audio Routing | ✅ Complete (milestone closed; see [`docs/m6-creator-toolkit-completion-report.md`](docs/m6-creator-toolkit-completion-report.md)) | — | [![M6](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F11&query=open_issues&label=M6&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/11) |
 | M6.9 – Scene & Stream Polish | Interims-Backlog: per-Platform Chat-Metadaten, Browser-Engine, Device-Picker, natives Scene-Compositing | ✅ Complete (milestone closed; browser-source shipped as backend contract + Windows WebView2 POC — production adapter remains a follow-up) | — | [![M6.9](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F13&query=open_issues&label=M6.9&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/13) |
 | M7 – Automation & Determinism | Headless CLI, CI Rendering, Reproducible Pipelines | ✅ Complete (milestone closed; see [`docs/m7-automation-completion-report.md`](docs/m7-automation-completion-report.md)) | — | [![M7](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F7&query=open_issues&label=M7&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/7) |
-| M8 – Embeddable Engine & API | Stable `rivulet-core` API, Docs, Tooling | 📅 Planned | — | [![M8](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F8&query=open_issues&label=M8&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/8) |
+| M8 – Embeddable Engine & API | Stable `rivulet-core` API, Docs, Tooling | 🚧 In progress | — | [![M8](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F8&query=open_issues&label=M8&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/8) |
 | M9 – Modern Architecture | WebGPU, Zero-copy, Compute Filters | 📅 Planned | — | [![M9](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F9&query=open_issues&label=M9&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/9) |
 | M10 – AI Chat Assistant | Local-first LLM Chat Bot for Streamers | 📅 Planned | — | [![M10](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F10&query=open_issues&label=M10&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/10) |
 | M11 – Extensible UI & Plugin Platform | Persisted layouts, view registry, declarative/WASM plugins, permissions, OBS compat bridge | 📅 Planned | — | [![M11](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fthoser666%2FRivulet%2Fmilestones%2F12&query=open_issues&label=M11&color=blue)](https://api.github.com/repos/thoser666/Rivulet/milestones/12) |
@@ -438,15 +438,20 @@ must not be implied by beta parity.
 
 ### 📦 M8 – Embeddable Engine & API
 
-**Status: Planned**
+**Status: In progress** (opened 2026-10-05 — six workstream issues, none delivered yet; [recommended first implementation step](#-m8--embeddable-engine--api): [#292](https://github.com/thoser666/Rivulet/issues/292))
 
 *Differentiation pillar #2: `rivulet-core` is a normal library, not a monolith with retrofitted API.*
 
-- [ ] Stabilized public API for `rivulet-core` (semver 1.0, `#![warn(missing_docs)]`, crate-style types)
-- [ ] Comprehensive API docs + examples (recording, streaming, dual output, encoder selection, frame streaming)
-- [ ] In-process capture API: embed a recording feature in any Rust app (audio/video capture, encoding, file/stream)
-- [ ] Feature detection and runtime diagnostics as an API (`detect_available_encoders()`, encoder fallback)
-- [ ] Abstraction of capture backends (xcap, PipeWire, Metal/WGC) behind stable traits
+- [ ] Stabilized public API for `rivulet-core` (semver 1.0, `#![warn(missing_docs)]`, crate-style types) — [#292](https://github.com/thoser666/Rivulet/issues/292)
+- [ ] Comprehensive API docs + examples (recording, streaming, dual output, encoder selection, frame streaming) — [#293](https://github.com/thoser666/Rivulet/issues/293)
+- [ ] In-process capture API: embed a recording feature in any Rust app (audio/video capture, encoding, file/stream) — [#294](https://github.com/thoser666/Rivulet/issues/294)
+- [ ] Feature detection and runtime diagnostics as an API (`detect_available_encoders()`, encoder fallback) — [#295](https://github.com/thoser666/Rivulet/issues/295)
+- [ ] Abstraction of capture backends (xcap, PipeWire, Metal/WGC) behind stable traits — [#296](https://github.com/thoser666/Rivulet/issues/296)
+- [ ] Exit evidence: docs build, example run matrix, public API review, downstream-consumer smoke test — [#297](https://github.com/thoser666/Rivulet/issues/297)
+
+**Where this stands.** The promise of M8 is directional — "`rivulet-core` is a normal library" — and promises of that kind fail quietly: nothing breaks, the crate just becomes unusable again at some point nobody notices. The opening state is therefore recorded honestly rather than optimistically. Today `rivulet-core` sits at `0.65.0-alpha.55` with **66 public modules and no `#![warn(missing_docs)]`**, there is **no `examples/` crate**, and feature detection is reachable through log lines and GUI labels rather than through the API. Under semver `0.x`, every minor bump is breaking, so an external consumer can rely on nothing yet — that is what [#292](https://github.com/thoser666/Rivulet/issues/292) is for.
+
+**Recommended first implementation step:** [#292](https://github.com/thoser666/Rivulet/issues/292) (stabilized public API). It gates the rest: examples, the in-process capture entry point and the backend traits all need a stable surface to be written against, and documenting a moving target is wasted work.
 
 **Goal:** "Recording you can embed into your product" — the use case OBS is architecturally not built for.
 
