@@ -27,7 +27,11 @@ pub use twitch_chat::{ChatConnState, ChatMessage, TwitchChat, TwitchChatConfig};
 pub mod kick_chat;
 pub use kick_chat::{KickChat, KickChatConfig};
 pub mod youtube_chat;
-pub use youtube_chat::{YouTubeChat, YouTubeChatConfig};
+pub use youtube_chat::{
+    chat_auth_matrix, form_encode_component, youtube_insert_body, youtube_quota_exhausted,
+    youtube_send_message, ChatCredentialSlot, YouTubeChat, YouTubeChatConfig, YouTubeQuota,
+    YouTubeQuotaConfig, YouTubeSendCredentials, YouTubeSendOutcome,
+};
 pub mod chat;
 pub use chat::{Chat, ChatAccount, ChatConfig, ChatPlatform, ChatTokenStore, MultiChat};
 pub mod telemetry;

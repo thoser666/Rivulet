@@ -52,13 +52,18 @@ impl RateLimitConfig {
     }
 
     /// YouTube: `liveChatMessages.insert` costs ~200 quota units against a
-    /// 10 000-unit daily budget → ~50 sends/day. A burst of 1 (send only when
-    /// a token is available) with the daily refill rate never overdraws the
-    /// quota.
+    /// 10 000-unit daily project budget → ~50 sends/day. A burst of 1
+    /// (never two messages back to back) refilling one token per 1 728 s
+    /// lands on exactly that 50/day, so the bucket spaces sends out and
+    /// `youtube_chat::YouTubeQuota` is the hard stop that keeps the project
+    /// inside its budget.
+    ///
+    /// The earlier 86 400 s window allowed a single message per day — 50×
+    /// stricter than the documented quota, which no platform requires.
     pub const fn youtube_default() -> Self {
         Self {
             capacity: 1,
-            window_secs: 86_400,
+            window_secs: 1_728,
         }
     }
 
@@ -192,8 +197,17 @@ mod tests {
         assert_eq!(config.capacity, 1, "YouTube sends must be serialized");
         let per_day = config.refill_per_sec() * 86_400.0;
         assert!(
-            (per_day - 1.0).abs() < 1e-9,
-            "one token per day at the documented ~50-sends quota budget"
+            (per_day - 50.0).abs() < 1e-9,
+            "the bucket must allow exactly the documented ~50 sends/day"
+        );
+        // The bucket may never be the looser gate: the API budget is 10 000
+        // units against ~200 per insert, so 50/day is the ceiling and
+        // `YouTubeQuota` is what enforces it.
+        let budget = crate::youtube_chat::YouTubeQuotaConfig::documented();
+        assert_eq!(
+            per_day as u32,
+            budget.sends_per_day(),
+            "bucket and quota budget must agree on the daily send count"
         );
     }
 

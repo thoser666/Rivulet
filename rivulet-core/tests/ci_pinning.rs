@@ -5241,7 +5241,7 @@ fn chat_dock_surfaces_are_pinned() {
         "the GUI must manage a chat account list (combined dock)"
     );
     assert!(
-        app.contains("rivulet_core::MultiChat::new(&self.chat_accounts")
+        app.contains("rivulet_core::MultiChat::from_configs(&configs)")
             && app.contains("send_chat_message")
             && app.contains("send_chat_reply"),
         "the GUI reconcile must spawn the multi-platform worker and route sends through it"
@@ -5575,7 +5575,7 @@ fn chat_outbound_is_rate_limited_per_platform() {
     // documented global ceiling is 20 messages / 30 s for non-privileged
     // accounts; Kick has no published limits (undocumented API) so its default
     // throttles harder; YouTube's official insert costs ~200 quota units, so
-    // its default is quota-bounded (1/day burst). All defaults are
+    // its default is quota-bounded (one send per ~29 min burst). All defaults are
     // configurable per platform.
     let limiter = read("rivulet-core/src/rate_limit.rs");
     for marker in [
@@ -5595,10 +5595,11 @@ fn chat_outbound_is_rate_limited_per_platform() {
         );
     }
     // The defaults must encode the documented/conservative ceilings: Twitch
-    // 20/30s, Kick lower than Twitch, YouTube capacity 1 (serialized sends).
+    // 20/30s, Kick lower than Twitch, YouTube capacity 1 (serialized sends)
+    // refilling once per 1_728 s — exactly the ~50 sends/day its API quota allows.
     assert!(limiter.contains("capacity: 20") && limiter.contains("window_secs: 30"));
     assert!(limiter.contains("capacity: 10") && limiter.contains("window_secs: 30"));
-    assert!(limiter.contains("capacity: 1") && limiter.contains("window_secs: 86_400"));
+    assert!(limiter.contains("capacity: 1") && limiter.contains("window_secs: 1_728"));
     // The chat facade must apply the limiter before enqueueing and expose the
     // remaining budget for the status line.
     let chat = read("rivulet-core/src/chat.rs");
@@ -5651,6 +5652,203 @@ fn chat_outbound_is_rate_limited_per_platform() {
     assert!(readme.contains("20 messages/30 s"));
     let gates = read("docs/milestone-quality-gates.md");
     assert!(gates.contains("20-messages/30-s"));
+}
+
+#[test]
+fn youtube_official_send_path_is_quota_accounted_and_masked() {
+    // M10 issue #100 claims YouTube sends through the official Live
+    // Streaming API with quota accounting and falls back to the read-only
+    // Innertube poller without or over quota. This guard pins that claim to
+    // the code so the docs cannot drift back into describing a send path
+    // that does not exist.
+    let youtube = read("rivulet-core/src/youtube_chat.rs");
+    for marker in [
+        "pub fn youtube_send_message",
+        "liveChatMessages.insert",
+        "pub const INSERT_UNITS: u32 = 200;",
+        "pub const DAILY_UNITS: u32 = 10_000;",
+    ] {
+        assert!(
+            youtube.contains(marker),
+            "youtube_chat.rs must provide {marker}"
+        );
+    }
+    // The insert call itself: official snippet fields, the parentId threading,
+    // and a percent-encoded form body (chat text is full of spaces).
+    for marker in [
+        "snippet.liveChatId",
+        "snippet.textOriginal",
+        "snippet.parentId",
+        "part=snippet&key=",
+        "youtube.force-ssl",
+        "form_encode_component",
+    ] {
+        assert!(
+            youtube.contains(marker),
+            "the official insert path must carry {marker}"
+        );
+    }
+    // Quota accounting: a local budget that stops sends before Google does,
+    // a server-side refusal that pins the account to read-only for the day,
+    // and a UTC day rollover.
+    for marker in [
+        "pub struct YouTubeQuota",
+        "pub fn try_acquire",
+        "pub fn exhaust",
+        "pub fn remaining_sends",
+        "fn roll_day",
+        "youtube_quota_exhausted",
+        "quotaExceeded",
+        "dailyLimitExceeded",
+    ] {
+        assert!(
+            youtube.contains(marker),
+            "the YouTube quota contract must contain {marker}"
+        );
+    }
+    assert!(
+        youtube.contains("http_status_as_error(false)"),
+        "a quota refusal must keep its body readable, otherwise an exhausted \
+         budget is indistinguishable from a bad token"
+    );
+    // Observer mode is the documented fallback, and it has to hold for every
+    // incomplete combination of the three required inputs.
+    assert!(
+        youtube.contains("worker_stays_read_only_when_the_send_contract_is_incomplete"),
+        "the incomplete-contract fallback must be covered by a test"
+    );
+    // Secrets stay out of Debug output and out of the logs.
+    assert!(
+        youtube.contains("masked_secret")
+            && youtube.contains("<missing>")
+            && youtube.contains("<set:"),
+        "credential Debug output must mask the values"
+    );
+    for marker in [
+        "credentials_are_masked_in_debug_output",
+        "quota_stops_sends_once_the_daily_budget_is_spent",
+        "quota_resets_at_the_utc_day_boundary",
+        "quota_refusal_is_classified_as_exhausted_not_as_a_bad_token",
+        "insert_reaches_the_official_endpoint_and_carries_bearer_and_key",
+        "worker_sends_through_the_official_api_and_threads_replies",
+    ] {
+        assert!(
+            youtube.contains(marker),
+            "the YouTube send path must be covered by the test {marker}"
+        );
+    }
+
+    // The facade must actually open YouTube: no hard-coded read-only branch,
+    // and replies routed through parentId rather than refused.
+    let chat = read("rivulet-core/src/chat.rs");
+    for marker in [
+        "pub fn can_send",
+        "ChatInner::YouTube(c) => c.can_send()",
+        "ChatInner::YouTube(c) => c.send_reply(text, reply_to_id)",
+        "pub fn quota_exhausted",
+        "pub fn any_quota_exhausted",
+        "pub fn save_api_key",
+        "pub fn load_api_key",
+        "youtube_api_key",
+        "youtube_live_chat_id",
+    ] {
+        assert!(chat.contains(marker), "the chat facade must carry {marker}");
+    }
+    assert!(
+        !chat.contains("!matches!(self.inner, ChatInner::YouTube(_))"),
+        "the YouTube branch must not blanket-refuse sends any more"
+    );
+    for marker in [
+        "youtube_sends_only_with_the_complete_official_contract",
+        "a_budget_smaller_than_one_insert_is_read_only_without_faking_a_config_error",
+    ] {
+        assert!(
+            chat.contains(marker),
+            "the facade behaviour must be covered by the test {marker}"
+        );
+    }
+
+    // The masked auth/scope matrix: presence only, never a value.
+    assert!(
+        chat.contains("auth_matrix_reports_presence_but_never_a_value")
+            && chat.contains("auth_matrix_names_the_platform_specific_requirements"),
+        "the auth/scope matrix must be covered by tests"
+    );
+
+    // The dock asks the workers whether they can send and shows the matrix.
+    let gui = read("rivulet-gui/src/app.rs");
+    for marker in [
+        "fn chat_sendable_platforms",
+        "fn chat_auth_matrix",
+        "rivulet_core::chat_auth_matrix",
+        "chat_youtube_read_only",
+        "chat_api_key_hint_youtube",
+        "chat_oauth_hint_youtube",
+        "chat_live_chat_id_hint",
+        "chat_youtube_quota_hint",
+        "MultiChat::any_quota_exhausted",
+        "load_api_key",
+        "youtube_live_chat_id",
+    ] {
+        assert!(gui.contains(marker), "the chat dock must carry {marker}");
+    }
+    assert!(
+        !gui.contains(".any(|a| a.platform != rivulet_core::ChatPlatform::YouTube)"),
+        "the send input must follow real worker capability, not a platform \
+         blacklist that would also hide a fully configured YouTube account"
+    );
+    for marker in [
+        "chat_send_input_follows_worker_capability_not_the_platform_list",
+        "chat_auth_matrix_marks_a_youtube_account_read_only_without_credentials",
+        "youtube_quota_state_is_reported_separately_from_configuration",
+    ] {
+        assert!(
+            gui.contains(marker),
+            "the dock behaviour must be covered by the test {marker}"
+        );
+    }
+
+    // Every new credential string exists in both locales (the shared
+    // feature-i18n parity test checks the key sets match).
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in [
+        "chat_oauth_hint_youtube",
+        "chat_api_key_hint_youtube",
+        "chat_live_chat_id_hint",
+        "chat_youtube_quota_hint",
+        "chat_youtube_read_only",
+    ] {
+        assert_eq!(
+            i18n.matches(&format!("\"{key}\"")).count(),
+            2,
+            "{key} must exist in both the English and the German locale"
+        );
+    }
+
+    // The documented gate wording stays in sync with the implementation.
+    let gates = read("docs/milestone-quality-gates.md");
+    assert!(
+        gates.contains("YouTube sends through the official Live Streaming API")
+            && gates.contains("`insert` ≈ 200 units"),
+        "the M10 gate must keep describing the official send path"
+    );
+    let docs = read("docs/twitch-chat.md");
+    for marker in [
+        "liveChatMessages.insert",
+        "liveChatId",
+        "parentId",
+        "YouTubeQuota",
+    ] {
+        assert!(
+            docs.contains(marker),
+            "docs/twitch-chat.md must document {marker}"
+        );
+    }
+    let readme = read("README.md");
+    assert!(
+        readme.contains("read-only Innertube poller"),
+        "the README must keep documenting the read-only fallback"
+    );
 }
 
 #[test]
