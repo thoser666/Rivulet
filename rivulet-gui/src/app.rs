@@ -18909,12 +18909,14 @@ mod tests {
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker_stop = std::sync::Arc::clone(&stop);
         std::thread::spawn(move || {
-            let mut index = 0usize;
+            // The very first request is the live-chat page (it carries the
+            // continuation token); every later one is a poll.
+            let mut first = true;
             while !worker_stop.load(std::sync::atomic::Ordering::SeqCst) {
                 let Ok((mut stream, _)) = listener.accept() else {
                     return;
                 };
-                index = index.wrapping_add(1);
+                let is_page = std::mem::take(&mut first);
                 // Drain the request completely before answering: on Windows a
                 // half-read request closes with WSAECONNRESET.
                 let mut buf = Vec::new();
@@ -18942,7 +18944,7 @@ mod tests {
                         Ok(n) => buf.extend_from_slice(&chunk[..n]),
                     }
                 }
-                let body: String = if index == 1 {
+                let body: String = if is_page {
                     r#"<script>var ytInitialData={"continuation":"TOKEN"};</script>"#.to_owned()
                 } else {
                     r#"{"actions":[{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"authorName":{"simpleText":"Viewer"},"message":{"runs":[{"text":"hi"}]}}}}}],"continuations":[{"invalidationContinuationData":{"continuation":"TOKEN"}}]}"#.to_owned()
