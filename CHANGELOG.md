@@ -1,5 +1,52 @@
 ## [Unreleased]
 
+- feat(diagnostics): **Crashreport als kopierfertiger Bugreport — Settings
+  → Crash report.** Bisher gab es Crashdiagnostik nur manuell: Tageslog
+  finden, Crash-Block plus ~50 Zeilen herauskopieren, Secrets und Pfade
+  selbst entfernen, Issue von Hand formulieren. Die Prozedur stand in
+  `docs/logging.md`, aber nichts hat sie abgenommen. Der neue Knopf
+  erledigt genau diesen Schritt **lokal**: er liest das heutige Log, zieht
+  die `RIVULET CRASH`-Bloecke samt Kontext heraus, **redigiert**,
+  kopiert das Ergebnis in die Zwischenablage und oeffnet ein bereits
+  ausgefuelltes GitHub-Issue.
+  **Rivulet sendet selbst nichts.** Kein Token, kein Endpunkt, kein
+  Hintergrund-Sender — was das Geraet verlaesst, ist nur das, was der
+  Nutzer selbst einfuegt. Das ist der entscheidende Punkt: ein
+  Crashlog ist genau die Datenmenge, die nicht ungefragt hochgeladen
+  werden darf, und ein "Issue automatisch melden" braucht ein
+  Personal-Access-Token in der App. Die Auslieferungsform ist deshalb
+  **Zwischenablage plus vorbereiteter Issue-Entwurf**, nicht Auto-Filing
+  (die bewusst zurueckgestellte Alternative bleibt in `docs/telemetry.md`
+  als undokumentierter Follow-up stehen).
+  **Redaktion ist nicht optional und nicht still.** Es gibt keine
+  oeffentliche Funktion, die einen unredigierten Report zurueckgibt; der
+  einzige Einstieg ist `build_report`, und der redigiert immer.
+  Jede Ersetzung wird **gezaehlt und im Report ausgewiesen**
+  (`stream URLs redacted: 1`, `home paths redacted: 3`) — stille
+  Bereinigung wuerde den Nutzern beibringen, das Tool habe sauber
+  aufgeraeumt. Abgedeckt: `rtmp(s)`/`rtmpt`-URLs, **`srt://` samt
+  Passphrase im Query**, das Home-Verzeichnis und der Benutzername.
+  Die Pfadredaktion ist **segmentbewusst**: `/home/thouser` ist ein
+  Praefix von `/home/thouser2`, und eine naive Ersetzung wuerde daraus
+  `<user>2/file.mp4` machen — der Report wuerde dann einen Pfad
+  beschuldigen, den es nie gab, was schlimmer ist als keine Redaktion.
+  **Ein leeres Log wird als leer gemeldet**, nicht als Erfolg: ohne
+  Crash-Block sagt der Report das und bittet um Beschreibung, statt
+  einen Log-Dump ohne Defekt zu liefern. Die Windows-Startup-Variante
+  (`RIVULET PRE-RUST DIAGNOSTIC` statt `RIVULET CRASH`) bleibt
+  auffindbar. Begrenzt auf 3 Bloecke und 24 000 Zeichen, vom Ende
+  her abgeschnitten — ein Runaway-Log darf keinen Paste erzeugen, den
+  keine Issue-Box annimmt.
+  **Tests:** 15 im neuen Modul (`rivulet-core/src/crash_report.rs`) und 4
+  im Dock. Neu gepinnt in `ci_pinning`:
+  `crash_report_stays_local_and_redacted` haelt das **Privacy-Versprechen
+  an den Code** — kein `ureq`/`reqwest`/Socket im Modul, kein
+  `GITHUB_TOKEN` in der GUI, kein unredigierter Ausstieg, genau **eine**
+  Drain-Stelle (sonst öffnet sich der Browser in jedem Frame erneut), und
+  die Doku muss „Rivulet transmits nothing" sagen, während die manuelle
+  Prozedur als Fallback dokumentiert bleibt. **Dreizehn Negativproben**
+  feuern alle.
+
 - test(core): **Frame-Budget-Gate misst den Producer-Pfad statt des
   Schedulers** — `routed_push_stays_below_the_frame_budget_when_paced` ist auf
   einem gesunden Windows-Runner mit p99 8,756 µs gegen ein 5,000-µs-Budget

@@ -979,6 +979,16 @@ pub struct RivuletApp {
     /// frame). Not persisted.
     #[serde(skip)]
     chat_action_pending: Option<ChatAction>,
+    /// One-shot crash-report request, drained once per frame. The report
+    /// itself is built on the UI thread and only reads the daily log, so
+    /// this stays a flag rather than a worker.
+    crash_report_pending: bool,
+    /// Result of the last crash-report run, shown as a status line.
+    crash_report_status: Option<String>,
+    /// The redacted report body and its prefilled issue URL, waiting for the
+    /// UI layer to copy and open them (the clipboard needs an egui context).
+    crash_report_text: Option<String>,
+    crash_report_url: Option<String>,
 
     /// Chat dock: stream-info editor — per-platform title drafts, indexed
     /// by [`rivulet_core::InfoPlatform::index`]. Not persisted (pure input
@@ -1882,6 +1892,10 @@ impl Default for RivuletApp {
             chat_worker_multi: None,
             chat_messages: Vec::new(),
             chat_action_pending: None,
+            crash_report_pending: false,
+            crash_report_status: None,
+            crash_report_text: None,
+            crash_report_url: None,
             chat_info_title: Default::default(),
             chat_info_game: Default::default(),
             chat_info_scope: None,
@@ -2267,6 +2281,11 @@ struct SceneDeviceEntry {
     label: String,
     device_id: String,
 }
+
+/// Repository the prefilled crash-report issue targets. A constant, not a
+/// setting: the report is a bug report for *this* project, and a build of a
+/// fork should still point at the tracker that will act on it.
+const CRASH_REPORT_REPOSITORY: &str = "thoser666/Rivulet";
 
 impl RivuletApp {
     // == Multi-track audio routing (issue #154 Phase 2) ==================
@@ -7411,6 +7430,73 @@ impl RivuletApp {
         self.chat_state = state;
     }
 
+    /// Build a redacted crash report from today's log and return the URL of
+    /// a prefilled GitHub issue plus the report body.
+    ///
+    /// Pure with respect to the network: it reads the daily log and the
+    /// environment, redacts, and returns strings. Nothing is transmitted —
+    /// the caller decides what to do with them, and the only thing the UI
+    /// does is copy to the clipboard and open the browser. Splitting it out
+    /// is what makes the redaction testable without a window.
+    fn build_crash_report(&self) -> rivulet_core::crash_report::CrashReport {
+        let log = std::fs::read_to_string(crate::logging::log_path(
+            &crate::logging::LogConfig::default_directory(),
+            chrono::Local::now().date_naive(),
+        ))
+        .unwrap_or_default();
+        rivulet_core::crash_report::build_report(&rivulet_core::crash_report::CrashReportInput {
+            app_version: env!("CARGO_PKG_VERSION"),
+            platform: rivulet_core::telemetry::platform_code(),
+            home_dir: dirs::home_dir().as_deref(),
+            log: &log,
+        })
+    }
+
+    /// Drain the pending crash-report request: build the report, put it on
+    /// the clipboard, and open the prefilled issue in the browser.
+    ///
+    /// The clipboard is the actual deliverable — the browser only pre-fills
+    /// the composer. If opening fails, the report is still on the clipboard
+    /// and the status line says so, so the feature degrades to "copy" rather
+    /// than to "nothing happened".
+    fn reconcile_crash_report(&mut self) {
+        if !std::mem::take(&mut self.crash_report_pending) {
+            return;
+        }
+        let report = self.build_crash_report();
+        let url = rivulet_core::crash_report::issue_url(CRASH_REPORT_REPOSITORY, &report);
+        self.crash_report_status = Some(if report.has_crash {
+            self.tr_fmt(
+                "crash_report_ready",
+                &[
+                    report.redacted_stream_urls.to_string(),
+                    report.redacted_home_paths.to_string(),
+                ],
+            )
+            .to_owned()
+        } else {
+            self.tr("crash_report_no_crash").to_owned()
+        });
+        // Store the body for the UI layer, which owns the egui context and
+        // is the only place a clipboard write is allowed.
+        self.crash_report_text = Some(report.body);
+        self.crash_report_url = Some(url);
+    }
+
+    /// Hand the produced report over exactly once.
+    ///
+    /// Extracted so the clipboard/open path has a single definition: the
+    /// update loop and the tests must not be able to drift into draining it
+    /// twice (reopening the browser behind the user's back) or never.
+    fn drain_crash_report(&mut self) -> Option<(String, String)> {
+        match (self.crash_report_text.take(), self.crash_report_url.take()) {
+            (Some(report), Some(url)) => Some((report, url)),
+            // Half a report cannot happen through the UI path, but returning
+            // None beats handing a URL to the browser without its body.
+            _ => None,
+        }
+    }
+
     fn reconcile_chat(&mut self) {
         match self.chat_action_pending.take() {
             Some(ChatAction::Connect) => {
@@ -11135,6 +11221,15 @@ impl eframe::App for RivuletApp {
         // and drain incoming chat messages (non-blocking).
         self.reconcile_chat();
 
+        // Build the crash report if Settings asked for one, then hand it to
+        // the clipboard and the browser. Done here because the clipboard
+        // write needs the egui context the update callback owns.
+        self.reconcile_crash_report();
+        if let Some((report, url)) = self.drain_crash_report() {
+            ctx.copy_text(report);
+            let _ = open::that(url);
+        }
+
         // Apply the color scheme (fonts + palette + preference) on startup
         // and whenever the user changes it in Settings.
         if self.theme_applied != Some(self.theme) {
@@ -12832,6 +12927,25 @@ impl eframe::App for RivuletApp {
                         }
                         ui.small(telemetry_note);
 
+                        // Settings: build a redacted crash report for the
+                        // clipboard and open a prefilled GitHub issue. Local
+                        // only — nothing is transmitted (see docs/logging.md).
+                        let crash_section = self.tr("crash_report_section");
+                        let crash_button = self.tr("crash_report_button");
+                        let crash_note = self.tr("crash_report_note");
+                        ui.separator();
+                        ui.label(egui::RichText::new(crash_section).strong());
+                        if ui.button(crash_button).clicked() {
+                            self.crash_report_pending = true;
+                            self.crash_report_status = None;
+                            self.crash_report_text = None;
+                            self.crash_report_url = None;
+                        }
+                        ui.small(crash_note);
+                        if let Some(status) = self.crash_report_status.clone() {
+                            ui.small(status);
+                        }
+
                         // Settings: native alert ingestion (follows/subs/
                         // donations/raids) surfaced in the chat dock. Purely
                         // local, never transmitted; the optional loopback
@@ -14221,6 +14335,120 @@ fn on_file_dialog_cancelled() {
 
 #[cfg(test)]
 mod tests {
+    /// The Settings button must build a report, hand it to the clipboard and
+    /// open a prefilled issue — and the report itself must be redacted
+    /// *before* it reaches either. The clipboard is the real deliverable, so
+    /// losing the URL must still leave a usable report behind.
+    #[test]
+    fn crash_report_action_fills_the_clipboard_and_opens_a_prefilled_issue() {
+        let mut app = RivuletApp {
+            crash_report_pending: true,
+            ..Default::default()
+        };
+        app.reconcile_crash_report();
+
+        let report = app
+            .crash_report_text
+            .clone()
+            .expect("the report must be built for the clipboard");
+        assert!(report.contains("Crash report"));
+        assert!(
+            report.contains("Nothing was transmitted"),
+            "the report must state that Rivulet sent nothing"
+        );
+        assert!(
+            !report.contains("https://github.com/"),
+            "the body must not embed the URL"
+        );
+
+        // Draining is the step that reaches the clipboard and the browser,
+        // so it is where the prefilled URL has to be correct.
+        let (drained_report, url) = app
+            .drain_crash_report()
+            .expect("the report must be handed over exactly once");
+        assert_eq!(drained_report, report);
+        assert!(
+            url.starts_with("https://github.com/thoser666/Rivulet/issues/new?"),
+            "{url}"
+        );
+        assert!(url.contains("labels=bug"));
+        assert!(
+            url.contains("title="),
+            "the composer must be prefilled: {url}"
+        );
+        assert!(url.contains("body="), "the report must be prefilled: {url}");
+
+        // The pending flag is one-shot and the drain is too: a second frame
+        // must not rebuild the report or reopen the browser behind the
+        // user's back.
+        assert!(!app.crash_report_pending);
+        app.reconcile_crash_report();
+        assert!(
+            app.crash_report_url.is_none(),
+            "the URL must be drained once"
+        );
+        assert!(
+            app.crash_report_text.is_none(),
+            "the body must be drained once"
+        );
+        assert!(
+            app.drain_crash_report().is_none(),
+            "a drained report must not come back"
+        );
+    }
+
+    /// The status line has to distinguish "here is your crash" from "your log
+    /// has no crash", because an empty log with a wrong claim sends the
+    /// maintainer looking for a defect that was never recorded.
+    #[test]
+    fn crash_report_status_distinguishes_a_missing_crash_block() {
+        let app = RivuletApp {
+            crash_report_pending: true,
+            ..Default::default()
+        };
+        // No log directory is seeded in tests, so the input log is empty.
+        let report = app.build_crash_report();
+        assert!(!report.has_crash);
+        assert!(report.body.contains("no `RIVULET CRASH` block"));
+    }
+
+    /// The redaction must be part of the assembly, not an optional extra step:
+    /// the only entry point the GUI uses takes no flag that could skip it.
+    #[test]
+    fn crash_report_is_redacted_before_it_reaches_the_clipboard() {
+        let app = RivuletApp::default();
+        let report = app.build_crash_report();
+        assert_eq!(report.redacted_stream_urls, 0);
+        assert_eq!(report.redacted_home_paths, 0);
+        // The report always discloses the counts, even when zero, so a reader
+        // never has to guess whether cleaning happened.
+        assert!(report.body.contains("stream URLs redacted: 0"));
+        assert!(report.body.contains("home paths redacted: 0"));
+    }
+
+    /// The button must reset the previous run's output, otherwise a second
+    /// press that produced nothing would still show the first report.
+    #[test]
+    fn pressing_the_button_clears_the_previous_report() {
+        let mut app = RivuletApp {
+            crash_report_text: Some("old report".to_owned()),
+            crash_report_url: Some("https://example.invalid/old".to_owned()),
+            crash_report_status: Some("old status".to_owned()),
+            ..Default::default()
+        };
+        app.crash_report_pending = true;
+        app.crash_report_status = None;
+        app.crash_report_text = None;
+        app.crash_report_url = None;
+        app.reconcile_crash_report();
+        assert_ne!(app.crash_report_text.as_deref(), Some("old report"));
+        assert_ne!(
+            app.crash_report_url.as_deref(),
+            Some("https://example.invalid/old")
+        );
+        assert_ne!(app.crash_report_status.as_deref(), Some("old status"));
+    }
+
     use super::*;
     use rivulet_core::test_helpers::wait_until;
 

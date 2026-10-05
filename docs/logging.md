@@ -134,7 +134,47 @@ Default locations:
 - Windows: `%LOCALAPPDATA%\\Rivulet\\logs\\`
 - Linux/macOS: the local user data directory under `Rivulet/logs/`
 
-## Reporting a problem
+## Crash reports from the Settings tab
+
+**Settings → Crash report → *Copy crash report and open a prefilled issue***
+builds the bug report for you: it reads today's daily log, extracts the
+`RIVULET CRASH` blocks together with the ~50 log lines before each one, and
+then
+
+1. **redacts** the result — every `rtmp(s)`/`rtmpt`/`srt` URL (including an
+   SRT passphrase) becomes `<redacted stream URL>`, and your home directory
+   plus your user name become `<user>`,
+2. **copies** the finished report to the clipboard,
+3. **opens** a GitHub issue composer with the title and the body already
+   filled in.
+
+**Rivulet transmits nothing.** There is no token, no endpoint and no
+background sender — what leaves the machine is only what you paste into the
+issue yourself. That is deliberate: a crash log is exactly the data that must
+not be uploaded uninvited, and an "automatically file a report" feature would
+need a personal access token in the app.
+
+Two details worth knowing:
+
+- **Every redaction is counted and shown** in the report header (`stream URLs
+  redacted: 1`, `home paths redacted: 3`). Silent cleaning teaches you that
+  the tool already removed everything, so it does not.
+- **An empty log is reported as empty.** If today's file contains no crash
+  block, the report says so and asks you to describe the problem instead of
+  shipping a log dump with no defect in it. A Windows startup failure writes
+  `RIVULET PRE-RUST DIAGNOSTIC` instead of `RIVULET CRASH`; those are included
+  in the excerpt.
+
+The excerpt is bounded (3 crash blocks, 24 000 characters, oldest lines
+dropped first) so a runaway log cannot produce a paste that no issue box
+accepts. Paths are replaced segment-aware, so a neighbouring account such as
+`/home/thouser2` is not mangled into `<user>2`.
+
+## Reporting a problem manually
+
+The button is a shortcut, not a requirement — everything below works with a
+plain text editor, and stays the fallback if you prefer not to open a
+browser.
 
 1. Note the Rivulet version and operating system.
 2. Reproduce the issue once, if safe.

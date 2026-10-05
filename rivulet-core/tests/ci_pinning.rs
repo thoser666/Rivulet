@@ -5933,6 +5933,127 @@ fn youtube_official_send_path_is_quota_accounted_and_masked() {
 }
 
 #[test]
+fn crash_report_stays_local_and_redacted() {
+    // The failure this guards against is quiet and one-sided: a crash-report
+    // feature that silently grows an outbound transport. The user is told
+    // "nothing is transmitted", so a later `reqwest`/`ureq` call or a token
+    // in the config would break a privacy promise the UI makes in two
+    // languages. The core module must therefore have no transport, no
+    // secrets, and no way to produce an unredacted bundle.
+    let core = read("rivulet-core/src/crash_report.rs");
+    assert!(
+        core.contains("Generated on-device by Rivulet. Nothing was transmitted"),
+        "the report body must state that nothing left the device"
+    );
+    assert!(
+        core.contains("out.push_str(\"<user>\");")
+            && core.contains("out.push_str(\"<redacted stream URL>\");"),
+        "both redaction placeholders must be emitted, not merely mentioned"
+    );
+    assert!(
+        core.contains(r"- stream URLs redacted: {}\n- home paths redacted: {}\n"),
+        "every redaction must be disclosed in the report, not silent"
+    );
+    // No network client in the crash path. `ureq` appears elsewhere in
+    // rivulet-core (chat, stream info), so scope the check to this module.
+    for forbidden in [
+        "ureq::",
+        "reqwest",
+        "http://",
+        "https://api.github.com",
+        "TcpStream",
+    ] {
+        assert!(
+            !core.contains(forbidden),
+            "crash_report.rs must not reference {forbidden}: the report path stays local"
+        );
+    }
+    // The public surface must offer no unredacted accessor: the only way to
+    // get a body is `build_report`, which always redacts.
+    for entry in ["pub fn build_report(", "pub fn issue_url("] {
+        assert!(core.contains(entry), "the module must expose {entry}");
+    }
+    assert!(
+        !core.contains("pub fn raw_log") && !core.contains("pub fn unredacted"),
+        "the module must not expose an unredacted escape hatch"
+    );
+
+    // The GUI must hand the report to the clipboard, not to a socket, and the
+    // Settings button has to exist in both locales.
+    let gui = read("rivulet-gui/src/app.rs");
+    for marker in [
+        "crash_report_pending",
+        "crash_report_text",
+        "crash_report_url",
+        "fn build_crash_report",
+        "fn drain_crash_report",
+        "fn reconcile_crash_report",
+        "ctx.copy_text(report)",
+        "rivulet_core::crash_report::build_report",
+        "rivulet_core::crash_report::issue_url",
+    ] {
+        assert!(gui.contains(marker), "the GUI must carry {marker}");
+    }
+    // Exactly one drain point, and it must *take* the report: without the
+    // take the browser would reopen every frame, long after the user closed
+    // the tab.
+    assert_eq!(
+        gui.matches("fn drain_crash_report(&mut self)").count(),
+        1,
+        "the crash-report drain must have exactly one definition"
+    );
+    assert!(
+        gui.contains("self.crash_report_text.take()")
+            && gui.contains("self.crash_report_url.take()"),
+        "the drain must consume the report and the URL"
+    );
+    assert!(
+        gui.contains("if let Some((report, url)) = self.drain_crash_report()"),
+        "the update loop must go through the single drain point"
+    );
+    assert!(
+        !gui.contains("GITHUB_TOKEN") && !gui.contains("github_token"),
+        "the crash-report path must not need a token"
+    );
+
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in [
+        "crash_report_section",
+        "crash_report_button",
+        "crash_report_note",
+        "crash_report_ready",
+        "crash_report_no_crash",
+    ] {
+        assert_eq!(
+            i18n.matches(&format!("\"{key}\"")).count(),
+            2,
+            "{key} must exist in both the English and the German locale"
+        );
+    }
+
+    // The docs must keep telling the truth about the manual procedure, which
+    // is still the fallback when the button is not used.
+    let logging = read("docs/logging.md");
+    assert!(
+        logging.contains("Crash reports from the Settings tab")
+            && logging.contains("Copy crash report and open a prefilled issue"),
+        "docs/logging.md must document the crash-report button next to the manual procedure"
+    );
+    assert!(
+        logging.contains("Rivulet transmits nothing"),
+        "docs/logging.md must state plainly that the button transmits nothing"
+    );
+    assert!(
+        logging.contains("## Reporting a problem manually"),
+        "the manual procedure must stay documented as the fallback"
+    );
+    assert!(
+        !read("README.md").contains("Rivulet sends crash reports automatically"),
+        "the README must not claim automatic reporting"
+    );
+}
+
+#[test]
 fn local_pre_push_hook_mirrors_the_ci_lints_job() {
     // Commit 06792c6 shipped four GUI tests that were clean under a plain
     // `cargo clippy` but failed CI's `-- -D warnings` Lints job
