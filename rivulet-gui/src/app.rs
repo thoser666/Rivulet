@@ -18856,7 +18856,7 @@ mod tests {
         // The complete contract plus a *connected* worker is what makes the
         // same roster sendable, so the assertion needs a live local listener
         // for the Innertube page and poll requests.
-        let (page_endpoint, poll_endpoint) = spawn_youtube_poll_fixture();
+        let (page_endpoint, poll_endpoint, _fixture) = spawn_youtube_poll_fixture();
         let configured = RivuletApp {
             chat_accounts: vec![rivulet_core::ChatAccount::new(
                 rivulet_core::ChatPlatform::YouTube,
@@ -18891,20 +18891,30 @@ mod tests {
         assert_eq!(sendable, [rivulet_core::ChatPlatform::YouTube]);
     }
 
-    /// Local fixture that answers the two requests the YouTube read path
-    /// makes (live-chat page, then one poll) so the worker reaches its
-    /// connected state without touching the network.
-    fn spawn_youtube_poll_fixture() -> (String, String) {
+    /// Local fixture that answers the requests the YouTube read path makes
+    /// (the live-chat page, then a poll every cycle) so the worker reaches
+    /// its connected state without touching the network.
+    ///
+    /// It keeps serving for as long as the returned guard is alive: the
+    /// worker polls in a loop, so a fixture that answers a fixed number of
+    /// requests would leave the listener gone, the next poll would fail and
+    /// the worker would stay `Disconnected` — the test then waits out its
+    /// whole window for a state that can never return.
+    fn spawn_youtube_poll_fixture() -> (String, String, YouTubePollFixture) {
         use std::io::{Read, Write};
         use std::net::TcpListener;
 
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture");
         let addr = listener.local_addr().expect("addr").to_string();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_stop = std::sync::Arc::clone(&stop);
         std::thread::spawn(move || {
-            for index in 0..2 {
+            let mut index = 0usize;
+            while !worker_stop.load(std::sync::atomic::Ordering::SeqCst) {
                 let Ok((mut stream, _)) = listener.accept() else {
                     return;
                 };
+                index = index.wrapping_add(1);
                 // Drain the request completely before answering: on Windows a
                 // half-read request closes with WSAECONNRESET.
                 let mut buf = Vec::new();
@@ -18932,7 +18942,7 @@ mod tests {
                         Ok(n) => buf.extend_from_slice(&chunk[..n]),
                     }
                 }
-                let body: String = if index == 0 {
+                let body: String = if index == 1 {
                     r#"<script>var ytInitialData={"continuation":"TOKEN"};</script>"#.to_owned()
                 } else {
                     r#"{"actions":[{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"authorName":{"simpleText":"Viewer"},"message":{"runs":[{"text":"hi"}]}}}}}],"continuations":[{"invalidationContinuationData":{"continuation":"TOKEN"}}]}"#.to_owned()
@@ -18949,7 +18959,19 @@ mod tests {
         (
             format!("http://{addr}/live_chat?is_popout=1&v="),
             format!("http://{addr}/get_live_chat"),
+            YouTubePollFixture { stop },
         )
+    }
+
+    /// Keeps `spawn_youtube_poll_fixture` answering until the test drops it.
+    struct YouTubePollFixture {
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Drop for YouTubePollFixture {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
     }
 
     #[test]

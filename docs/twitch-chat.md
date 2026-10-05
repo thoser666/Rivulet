@@ -340,8 +340,18 @@ rivulet-gui::app
   while request bytes are still unread makes Windows close the socket
   with `WSAECONNRESET` (os error 10054) instead of a clean FIN, which
   intermittently failed the YouTube worker smoke on windows-latest until
-  fixed; the Kick WebSocket fixture is unaffected (tungstenite performs
-  the full HTTP upgrade read itself).
+  fixed; the Kick WebSocket fixture is unaffected (tungstenite performs the
+  full HTTP upgrade read itself).
+- **Fixture lifetime must cover the worker loop, not just one cycle.** The
+  YouTube worker polls in a loop (3 s interval), so a fixture that answers a
+  fixed *number* of requests goes away mid-session: the next poll fails, the
+  worker falls back to `Disconnected` with growing backoff against a closed
+  port, and a test waiting for a `Connected` worker then waits out its whole
+  window for a state that can never return. This is platform-timing
+  dependent, not deterministic — it passed on windows-latest and failed on
+  ubuntu/macos-latest in the same run. Local listeners for looping workers
+  therefore serve until their guard is dropped (`YouTubePollFixture`), not
+  `for _ in 0..N`.
 - `rivulet-gui`: navigation contract (no standalone chat sidebar entry; chat
   is part of the Stream workspace), view coverage and i18n parity, plus
   behavior tests for the send and threaded-reply paths (no token / no
