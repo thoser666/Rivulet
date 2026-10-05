@@ -8310,10 +8310,82 @@ fn release_manifest_generation_and_post_publish_verification_are_pinned() {
         );
     }
 
+    // The manifest's exclusion set must equal the non-artifact assets the
+    // release steps attach by path. `gh release download` fetches *every*
+    // release asset into the verification directory, so an asset attached
+    // outside `release-assets/` but missing from DEFAULT_EXCLUDES turns every
+    // release into a false "present but not listed" failure. This is the one
+    // place the two lists can drift apart, so pin their equality rather than
+    // a hand-copied list of names.
+    let excluded: Vec<&str> = script
+        .split("DEFAULT_EXCLUDES = (")
+        .nth(1)
+        .and_then(|block| block.split(')').next())
+        .map(|block| {
+            block
+                .lines()
+                .filter_map(|line| {
+                    let name = line.trim().trim_end_matches(',').trim_matches('"');
+                    (!name.is_empty() && name != "MANIFEST_NAME").then_some(name)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        !excluded.is_empty(),
+        "DEFAULT_EXCLUDES must be a readable tuple of asset names"
+    );
+    for (name, workflow) in [("ci.yml", &ci), ("release.yml", &release)] {
+        // Scan *every* `files: |` block: upload-artifact steps use the same key,
+        // so taking the first occurrence would read a step that attaches no
+        // documentation assets at all.
+        let mut attached: Vec<String> = Vec::new();
+        for block in workflow.split("files: |").skip(1) {
+            for line in block.lines() {
+                // The block starts right after the `|` and therefore begins with
+                // an empty line; skipping it avoids breaking out immediately.
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if !line.starts_with("  ") {
+                    break;
+                }
+                if line.trim_start().starts_with("docs/") {
+                    let asset = line
+                        .trim()
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or_default()
+                        .to_string();
+                    if !attached.contains(&asset) {
+                        attached.push(asset);
+                    }
+                }
+            }
+        }
+        assert!(
+            !attached.is_empty(),
+            "{name} must still attach its documentation assets"
+        );
+        for asset in &attached {
+            assert!(
+                excluded.contains(&asset.as_str()),
+                "{name} attaches {asset} outside release-assets/, so the manifest tool must \
+                 exclude it or post-publish verification fails on every release"
+            );
+        }
+        assert_eq!(
+            attached.len(),
+            excluded.len(),
+            "{name} attaches {} assets outside release-assets/ but the manifest excludes \
+             {excluded:?} - the lists must match exactly",
+            attached.len(),
+        );
+    }
+
     // The script's guarantees, pinned in code rather than in prose.
     for needle in [
         "MANIFEST_NAME = \"SHA256SUMS\"",
-        "DEFAULT_EXCLUDES = (\"opengraph.png\", MANIFEST_NAME)",
         "def render(",
         "def parse(",
         "def verify(",

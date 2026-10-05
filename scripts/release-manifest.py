@@ -43,9 +43,24 @@ import tempfile
 #: release contract (``rivulet-updater::CHECKSUMS_ASSET_NAME``).
 MANIFEST_NAME = "SHA256SUMS"
 
-#: Release-card images are attached to the release but are not build output,
-#: so they must never appear in the manifest.
-DEFAULT_EXCLUDES = ("opengraph.png", MANIFEST_NAME)
+#: Assets that ride along with a release but are not build output, so they
+#: must never appear in the manifest.
+#:
+#: This is not cosmetic. Both workflows attach five repository files *by path*
+#: alongside the `release-assets/*` glob, and `gh release download` puts every
+#: release asset into the verification directory. If these were not excluded
+#: from the coverage check, post-publish verification would report them as
+#: "present but not listed" and fail on every single release. Keep this list
+#: equal to the `docs/...` lines of the release steps; the ci_pinning guard
+#: fails when the two drift apart.
+DEFAULT_EXCLUDES = (
+    "opengraph.png",
+    "social-preview.png",
+    "rivulet-app-icon-512.png",
+    "rivulet-rich-presence-1024.png",
+    "activity-status.md",
+    MANIFEST_NAME,
+)
 
 _CHUNK = 1024 * 1024
 
@@ -331,7 +346,36 @@ def run_self_test() -> int:
     _expect(raw.endswith(b"\n"), "the manifest must end with a newline")
     _expect(len(raw.decode().splitlines()) == 1, "one file, one entry")
 
-    # 10. The exact `sha256sum` line shape the Rust updater and every other
+    # 10. The published-release shape: the manifest is generated over a
+    #     staging directory and then verified against a directory that also
+    #     holds the manifest itself and the doc assets the release attaches by
+    #     path. This is the case the post-publish job actually runs, and it is
+    #     the one that used to fail on four false "not listed" reports.
+    published = _tree({
+        "rivulet-linux-x86_64.AppImage": b"appimage",
+        "rivulet-windows-x86_64.msi": b"msi",
+        "LICENSE": b"MIT",
+    })
+    with open(os.path.join(published, MANIFEST_NAME), "w", encoding="utf-8", newline="\n") as out:
+        out.write(render(published, DEFAULT_EXCLUDES))
+    for extra in ("opengraph.png", "social-preview.png", "rivulet-app-icon-512.png",
+                  "rivulet-rich-presence-1024.png", "activity-status.md"):
+        with open(os.path.join(published, extra), "wb") as handle:
+            handle.write(b"doc asset")
+    problems = verify(published, os.path.join(published, MANIFEST_NAME), DEFAULT_EXCLUDES)
+    _expect(
+        problems == [],
+        f"a published release must verify, got {problems}",
+    )
+    # And the same directory *without* those exclusions must fail -- otherwise
+    # the exclusion list could be dropped and only the self-test would notice.
+    problems = verify(published, os.path.join(published, MANIFEST_NAME), (MANIFEST_NAME,))
+    _expect(
+        any("present but not listed" in problem for problem in problems),
+        f"doc assets must be reported when they are not excluded, got {problems}",
+    )
+
+    # 11. The exact `sha256sum` line shape the Rust updater and every other
     #     reader expect: `<64 hex><two spaces><name>`. Checking only what
     #     `parse` recovers would accept a single space, because the parser
     #     splits on any whitespace -- so compare against the literal format.
@@ -344,7 +388,8 @@ def run_self_test() -> int:
     _expect(len(digest) == 64 and name == "rivulet-linux-x86_64.AppImage",
             f"unexpected parse result: {digest} {name}")
 
-    for directory in (root, second_root, nested, broken, empty, generated):
+    for directory in (root, second_root, nested, broken, empty, generated,
+                  published):
         # rmtree, not unlink+rmdir: the nested fixture leaves sub-directories.
         shutil.rmtree(directory, ignore_errors=True)
 
