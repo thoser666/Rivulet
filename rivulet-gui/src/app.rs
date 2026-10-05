@@ -939,6 +939,16 @@ pub struct RivuletApp {
     chat_add_channel: String,
     #[serde(skip)]
     chat_add_token: String,
+    /// Chat dock: draft Data API key of the "add account" row (YouTube's
+    /// second credential, stored in the OS vault like the token).
+    /// Not persisted.
+    #[serde(skip)]
+    chat_add_api_key: String,
+    /// Chat dock: `liveChatId` of the YouTube broadcast the account was
+    /// added for. Not a secret (it names the stream, not the user), so it is
+    /// persisted with the roster.
+    #[serde(default)]
+    chat_youtube_live_chat_id: String,
     /// Chat dock: validation error of the last "add account" attempt
     /// (empty channel or duplicate platform). Cleared on a successful add.
     /// Not persisted.
@@ -1863,6 +1873,8 @@ impl Default for RivuletApp {
             chat_add_platform: rivulet_core::ChatPlatform::default(),
             chat_add_channel: String::new(),
             chat_add_token: String::new(),
+            chat_add_api_key: String::new(),
+            chat_youtube_live_chat_id: String::new(),
             chat_add_error: None,
             chat_last_send_outcomes: Vec::new(),
             chat_input: String::new(),
@@ -7415,13 +7427,34 @@ impl RivuletApp {
                 // resolver reads the vault at spawn time; a missing entry
                 // yields "" and the worker connects read-only/anonymous.
                 let store = rivulet_core::ChatTokenStore::default();
-                let multi =
-                    rivulet_core::MultiChat::new(&self.chat_accounts, |platform, channel| {
-                        store
-                            .load(platform, channel)
-                            .unwrap_or(None)
-                            .unwrap_or_default()
-                    });
+                let configs: Vec<rivulet_core::ChatConfig> = self
+                    .chat_accounts
+                    .iter()
+                    .map(|account| {
+                        let channel = account.channel.trim().to_owned();
+                        let mut config = rivulet_core::ChatConfig::new(
+                            account.platform,
+                            channel.clone(),
+                            store
+                                .load(account.platform, &channel)
+                                .unwrap_or(None)
+                                .unwrap_or_default(),
+                        );
+                        if account.platform == rivulet_core::ChatPlatform::YouTube {
+                            // The official insert needs the API key from the
+                            // vault next to the OAuth token; without both
+                            // halves the worker stays an observer.
+                            config.youtube_api_key = store
+                                .load_api_key(account.platform, &channel)
+                                .unwrap_or(None)
+                                .unwrap_or_default();
+                            config.youtube_live_chat_id =
+                                self.chat_youtube_live_chat_id.trim().to_owned();
+                        }
+                        config
+                    })
+                    .collect();
+                let multi = rivulet_core::MultiChat::from_configs(&configs);
                 self.apply_chat_state(multi.connection_state());
                 self.chat_worker_multi = Some(multi);
             }
@@ -7798,6 +7831,17 @@ impl RivuletApp {
     /// Remaining outbound chat budget `(available, capacity)` of the running
     /// worker's shared rate limiter. Thin wrapper over
     /// [`Self::chat_rate_limit_detail`]; kept for tests and status lines.
+    /// Platforms that can accept an outbound message right now. Asked of the
+    /// workers rather than derived from the roster, so the send input appears
+    /// exactly when a configured account really can send — including a
+    /// YouTube account that has the official credentials and quota.
+    fn chat_sendable_platforms(&self) -> Vec<rivulet_core::ChatPlatform> {
+        self.chat_worker_multi
+            .as_ref()
+            .map(|workers| workers.sendable_platforms())
+            .unwrap_or_default()
+    }
+
     fn chat_rate_budget(&self) -> Option<(f64, f64)> {
         self.chat_rate_limit_detail()
             .map(|(remaining, capacity, _, _)| (remaining, capacity as f64))
@@ -9494,13 +9538,14 @@ impl RivuletApp {
         self.chat_action_pending = Some(ChatAction::Disconnect);
     }
 
-    /// Persist the token entered in the add-account row into the OS
-    /// credential vault and clear the draft. Empty tokens (YouTube, or a
-    /// Kick read-only setup) skip the vault. Failure keeps a status hint but
-    /// the account stays configured — the token can be re-entered later.
+    /// Persist the credentials entered in the add-account row into the OS
+    /// credential vault and clear the drafts. Empty secrets skip the vault.
+    /// Failure keeps a status hint but the account stays configured — the
+    /// secret can be re-entered later.
     fn store_chat_account_token(&mut self) {
         let token = std::mem::take(&mut self.chat_add_token);
-        if token.trim().is_empty() {
+        let api_key = std::mem::take(&mut self.chat_add_api_key);
+        if token.trim().is_empty() && api_key.trim().is_empty() {
             return;
         }
         let Some(account) = self.chat_accounts.last() else {
@@ -9508,10 +9553,41 @@ impl RivuletApp {
         };
         let platform = account.platform;
         let channel = account.channel.clone();
-        if let Err(error) = rivulet_core::ChatTokenStore::default().save(platform, &channel, &token)
-        {
+        let store = rivulet_core::ChatTokenStore::default();
+        let token_result = if token.trim().is_empty() {
+            Ok(())
+        } else {
+            store.save(platform, &channel, &token)
+        };
+        let api_key_result = if api_key.trim().is_empty() {
+            Ok(())
+        } else {
+            store.save_api_key(platform, &channel, &api_key)
+        };
+        if let Err(error) = token_result.and(api_key_result) {
             self.chat_add_error = Some(self.tr_fmt("chat_token_store_failed", &[error]).to_owned());
         }
+    }
+
+    /// The masked auth/scope matrix for one configured account: every
+    /// credential the platform needs before the bot may send, with presence
+    /// flags only. Presence is read from the OS vault at draw time, so no
+    /// secret ever enters the app state, a screenshot or the config file.
+    fn chat_auth_matrix(
+        &self,
+        platform: rivulet_core::ChatPlatform,
+        channel: &str,
+    ) -> Vec<rivulet_core::ChatCredentialSlot> {
+        let store = rivulet_core::ChatTokenStore::default();
+        let token = store
+            .load(platform, channel)
+            .unwrap_or(None)
+            .is_some_and(|value| !value.trim().is_empty());
+        let api_key = store
+            .load_api_key(platform, channel)
+            .unwrap_or(None)
+            .is_some_and(|value| !value.trim().is_empty());
+        rivulet_core::chat_auth_matrix(platform, api_key, token)
     }
 
     /// Per-platform credentials for the stream-info editor. Tokens are
@@ -9745,6 +9821,20 @@ impl RivuletApp {
                 ui.label(platform_text);
                 ui.label(&channel_text);
                 ui.colored_label(state_color, state_text);
+                // Masked auth/scope matrix: presence per credential only, so
+                // a missing scope is visible without anything being exposed.
+                let colors = theme::StatusColors::for_ui(ui);
+                for slot in self.chat_auth_matrix(account.platform, &account.channel) {
+                    let mark = if slot.present { "✓ " } else { "✗ " };
+                    ui.small(egui::RichText::new(format!("{mark}{}", slot.label)).color(
+                        if slot.present {
+                            colors.success
+                        } else {
+                            colors.warning
+                        },
+                    ))
+                    .on_hover_text(slot.purpose);
+                }
                 // Removal is staged behind the confirmation dialog (a
                 // reconnect re-reads the list); a disconnected worker means
                 // the change takes effect on the next Connect.
@@ -9779,17 +9869,38 @@ impl RivuletApp {
                     .hint_text(channel_hint)
                     .desired_width(140.0),
             );
-            if self.chat_add_platform != rivulet_core::ChatPlatform::YouTube {
-                let oauth_hint = match self.chat_add_platform {
-                    rivulet_core::ChatPlatform::Twitch => self.tr("chat_oauth_hint"),
-                    _ => self.tr("chat_token_hint_kick"),
-                };
+            let oauth_hint = match self.chat_add_platform {
+                rivulet_core::ChatPlatform::Twitch => self.tr("chat_oauth_hint"),
+                rivulet_core::ChatPlatform::YouTube => self.tr("chat_oauth_hint_youtube"),
+                rivulet_core::ChatPlatform::Kick => self.tr("chat_token_hint_kick"),
+            };
+            ui.add(
+                egui::TextEdit::singleline(&mut self.chat_add_token)
+                    .password(true)
+                    .hint_text(oauth_hint)
+                    .desired_width(150.0),
+            );
+            // YouTube sends through the official Live Streaming API, which
+            // bills a Data API key separately from the OAuth token. Both are
+            // password fields and both go straight into the OS vault.
+            if self.chat_add_platform == rivulet_core::ChatPlatform::YouTube {
+                // Hints are read before the mutable borrow of the drafts, so
+                // the translation lookup does not alias the field it fills.
+                let api_key_hint = self.tr("chat_api_key_hint_youtube").to_owned();
+                let live_chat_id_hint = self.tr("chat_live_chat_id_hint").to_owned();
+                let quota_hint = self.tr("chat_youtube_quota_hint").to_owned();
                 ui.add(
-                    egui::TextEdit::singleline(&mut self.chat_add_token)
+                    egui::TextEdit::singleline(&mut self.chat_add_api_key)
                         .password(true)
-                        .hint_text(oauth_hint)
+                        .hint_text(api_key_hint)
                         .desired_width(150.0),
                 );
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.chat_youtube_live_chat_id)
+                        .hint_text(live_chat_id_hint)
+                        .desired_width(150.0),
+                );
+                ui.small(quota_hint);
             }
             if ui.button(self.tr("chat_account_add")).clicked() {
                 self.apply_chat_add_account();
@@ -10000,6 +10111,17 @@ impl RivuletApp {
             ui.colored_label(colors.warning, self.tr("chat_phone_verification"));
         }
 
+        // A spent YouTube API budget is a budget state, not a broken setup:
+        // the reader keeps working and the notice says so.
+        if self
+            .chat_worker_multi
+            .as_ref()
+            .is_some_and(rivulet_core::MultiChat::any_quota_exhausted)
+        {
+            let colors = theme::StatusColors::for_ui(ui);
+            ui.colored_label(colors.warning, self.tr("chat_youtube_read_only"));
+        }
+
         // Message list (newest at the bottom, autoscroll to the last
         // message). Each line carries a platform badge from the tag the
         // parsers set, so combined traffic stays attributable; alerts keep
@@ -10079,13 +10201,13 @@ impl RivuletApp {
         }
 
         // Send input: a broadcast goes to every capable account at once.
-        // Enabled while any worker is connected (per-account readiness and
-        // rate limits are enforced per platform; partial failures are
-        // reported below). A YouTube-only roster stays read-only.
-        let any_capable = self
-            .chat_accounts
-            .iter()
-            .any(|a| a.platform != rivulet_core::ChatPlatform::YouTube);
+        // Enabled while any worker is connected *and* able to send right now
+        // (per-account readiness, credentials and rate limits are enforced
+        // per platform; partial failures are reported below). Capability is
+        // asked of the workers rather than guessed from the platform list, so
+        // a read-only YouTube account keeps the input hidden while a fully
+        // configured one gets it.
+        let any_capable = !self.chat_sendable_platforms().is_empty();
         let can_send = self.chat_state == rivulet_core::ChatConnState::Connected && any_capable;
         if can_send {
             // When a reply target is armed, a banner names the message being
@@ -18682,6 +18804,185 @@ mod tests {
             app.chat_action_pending.is_none(),
             "nothing may be armed for an empty submit"
         );
+    }
+
+    #[test]
+    fn chat_auth_matrix_marks_a_youtube_account_read_only_without_credentials() {
+        // No vault entry for this account: every YouTube slot reads as
+        // missing, and nothing anywhere carries a value.
+        let app = RivuletApp::default();
+        let rows = app.chat_auth_matrix(rivulet_core::ChatPlatform::YouTube, "abc123");
+        let slots: Vec<&str> = rows.iter().map(|slot| slot.slot).collect();
+        assert_eq!(slots, ["api_key", "oauth", "live_chat_id"]);
+        assert!(
+            rows.iter().all(|slot| !slot.present),
+            "an unconfigured account must report every credential as missing"
+        );
+        // The row type is label + bool by construction: it cannot hold a
+        // secret, so rendering it can never leak one.
+        let rendered: String = rows.iter().map(|slot| slot.label).collect();
+        assert!(!rendered.contains("AIza"));
+        assert!(!rendered.is_empty());
+    }
+
+    #[test]
+    fn chat_send_input_follows_worker_capability_not_the_platform_list() {
+        // A YouTube-only roster used to hard-hide the input. Capability now
+        // comes from the workers, so the same roster behaves like any other:
+        // read-only while the official contract is missing.
+        let app = RivuletApp {
+            chat_accounts: vec![rivulet_core::ChatAccount::new(
+                rivulet_core::ChatPlatform::YouTube,
+                "abc123".to_owned(),
+            )],
+            chat_worker_multi: Some(rivulet_core::MultiChat::from_configs(&[
+                rivulet_core::ChatConfig {
+                    platform: rivulet_core::ChatPlatform::YouTube,
+                    channel: "abc123".to_owned(),
+                    youtube_page_endpoint: "http://127.0.0.1:1/live_chat".to_owned(),
+                    youtube_poll_endpoint: "http://127.0.0.1:1/poll".to_owned(),
+                    youtube_send_endpoint: "http://127.0.0.1:1/insert".to_owned(),
+                    ..Default::default()
+                },
+            ])),
+            chat_state: rivulet_core::ChatConnState::Connected,
+            ..Default::default()
+        };
+        assert!(
+            app.chat_sendable_platforms().is_empty(),
+            "a YouTube account without the official contract is not sendable"
+        );
+
+        // The complete contract plus a *connected* worker is what makes the
+        // same roster sendable, so the assertion needs a live local listener
+        // for the Innertube page and poll requests.
+        let (page_endpoint, poll_endpoint) = spawn_youtube_poll_fixture();
+        let configured = RivuletApp {
+            chat_accounts: vec![rivulet_core::ChatAccount::new(
+                rivulet_core::ChatPlatform::YouTube,
+                "abc123".to_owned(),
+            )],
+            chat_worker_multi: Some(rivulet_core::MultiChat::from_configs(&[
+                rivulet_core::ChatConfig {
+                    platform: rivulet_core::ChatPlatform::YouTube,
+                    channel: "abc123".to_owned(),
+                    token: "ya29.OAUTH".to_owned(),
+                    youtube_api_key: "AIzaKEY".to_owned(),
+                    youtube_live_chat_id: "LC_CHAT".to_owned(),
+                    youtube_page_endpoint: page_endpoint,
+                    youtube_poll_endpoint: poll_endpoint,
+                    youtube_send_endpoint: "http://127.0.0.1:1/insert".to_owned(),
+                    ..Default::default()
+                },
+            ])),
+            chat_state: rivulet_core::ChatConnState::Connected,
+            ..Default::default()
+        };
+        let sendable = wait_until(std::time::Duration::from_secs(20), || {
+            let platforms = configured.chat_sendable_platforms();
+            (!platforms.is_empty()).then_some(platforms)
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "a fully configured, connected YouTube account must be able to send; state was {:?}",
+                configured.chat_state
+            )
+        });
+        assert_eq!(sendable, [rivulet_core::ChatPlatform::YouTube]);
+    }
+
+    /// Local fixture that answers the two requests the YouTube read path
+    /// makes (live-chat page, then one poll) so the worker reaches its
+    /// connected state without touching the network.
+    fn spawn_youtube_poll_fixture() -> (String, String) {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind fixture");
+        let addr = listener.local_addr().expect("addr").to_string();
+        std::thread::spawn(move || {
+            for index in 0..2 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                // Drain the request completely before answering: on Windows a
+                // half-read request closes with WSAECONNRESET.
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let header_end = buf
+                        .windows(4)
+                        .position(|window| window == b"\r\n\r\n")
+                        .map(|pos| pos + 4);
+                    if let Some(header_end) = header_end {
+                        let head = String::from_utf8_lossy(&buf[..header_end]).to_lowercase();
+                        let content_length = head
+                            .lines()
+                            .find_map(|line| {
+                                line.strip_prefix("content-length:")
+                                    .and_then(|value| value.trim().parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        if buf.len() >= header_end + content_length {
+                            break;
+                        }
+                    }
+                    match stream.read(&mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                    }
+                }
+                let body: String = if index == 0 {
+                    r#"<script>var ytInitialData={"continuation":"TOKEN"};</script>"#.to_owned()
+                } else {
+                    r#"{"actions":[{"addChatItemAction":{"item":{"liveChatTextMessageRenderer":{"authorName":{"simpleText":"Viewer"},"message":{"runs":[{"text":"hi"}]}}}}}],"continuations":[{"invalidationContinuationData":{"continuation":"TOKEN"}}]}"#.to_owned()
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        (
+            format!("http://{addr}/live_chat?is_popout=1&v="),
+            format!("http://{addr}/get_live_chat"),
+        )
+    }
+
+    #[test]
+    fn youtube_quota_state_is_reported_separately_from_configuration() {
+        let app = RivuletApp {
+            chat_worker_multi: Some(rivulet_core::MultiChat::from_configs(&[
+                rivulet_core::ChatConfig {
+                    platform: rivulet_core::ChatPlatform::YouTube,
+                    channel: "abc123".to_owned(),
+                    token: "ya29.OAUTH".to_owned(),
+                    youtube_api_key: "AIzaKEY".to_owned(),
+                    youtube_live_chat_id: "LC_CHAT".to_owned(),
+                    youtube_page_endpoint: "http://127.0.0.1:1/live_chat".to_owned(),
+                    youtube_poll_endpoint: "http://127.0.0.1:1/poll".to_owned(),
+                    youtube_send_endpoint: "http://127.0.0.1:1/insert".to_owned(),
+                    // A budget that cannot even pay for one insert.
+                    youtube_quota: Some(rivulet_core::YouTubeQuotaConfig {
+                        insert_units: 200,
+                        daily_units: 100,
+                    }),
+                    ..Default::default()
+                },
+            ])),
+            ..Default::default()
+        };
+        assert!(
+            app.chat_worker_multi
+                .as_ref()
+                .expect("worker")
+                .any_quota_exhausted(),
+            "a budget below one insert is a quota state, not a config gap"
+        );
+        assert!(app.chat_sendable_platforms().is_empty());
     }
 
     #[test]

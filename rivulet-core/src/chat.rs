@@ -16,7 +16,9 @@ use crossbeam_channel::Receiver;
 use crate::kick_chat::{KickChat, KickChatConfig};
 use crate::rate_limit::{RateLimitConfig, RateLimiter};
 use crate::twitch_chat::{ChatConnState, ChatMessage, TwitchChat, TwitchChatConfig};
-use crate::youtube_chat::{YouTubeChat, YouTubeChatConfig};
+use crate::youtube_chat::{
+    YouTubeChat, YouTubeChatConfig, YouTubeQuotaConfig, YouTubeSendCredentials,
+};
 
 /// Supported chat platforms of the dock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -63,14 +65,23 @@ pub struct ChatConfig {
     pub youtube_page_endpoint: String,
     /// YouTube `get_live_chat` poll URL. Empty → default.
     pub youtube_poll_endpoint: String,
+    /// YouTube `liveChatMessages.insert` URL. Empty → default.
+    pub youtube_send_endpoint: String,
+    /// YouTube Data API key for the official send path. Empty → read-only.
+    pub youtube_api_key: String,
+    /// `liveChatId` of the running YouTube broadcast. Empty → read-only.
+    pub youtube_live_chat_id: String,
     /// Channel: Twitch channel / Kick slug / YouTube video id.
     pub channel: String,
-    /// Token: Twitch OAuth (`oauth:...`) or Kick session token. Sending is
-    /// gated on this; YouTube is read-only.
+    /// Token: Twitch OAuth (`oauth:...`), Kick session token, or the YouTube
+    /// OAuth token with the `youtube.force-ssl` scope.
     pub token: String,
     /// Outbound rate limit. `None` → the platform default (Twitch 20/30 s,
-    /// Kick 10/30 s, YouTube quota-bounded 1/day).
+    /// Kick 10/30 s, YouTube serialized at ~50/day to match its API quota).
     pub rate_limit: Option<RateLimitConfig>,
+    /// Daily YouTube API quota budget. `None` → the documented 200 units per
+    /// insert against a 10 000-unit daily project budget.
+    pub youtube_quota: Option<YouTubeQuotaConfig>,
 }
 
 impl ChatConfig {
@@ -82,9 +93,13 @@ impl ChatConfig {
             kick_api_base: String::new(),
             youtube_page_endpoint: String::new(),
             youtube_poll_endpoint: String::new(),
+            youtube_send_endpoint: String::new(),
+            youtube_api_key: String::new(),
+            youtube_live_chat_id: String::new(),
             channel,
             token,
             rate_limit: None,
+            youtube_quota: None,
         }
     }
 }
@@ -138,6 +153,14 @@ impl ChatTokenStore {
         format!("chat-token/{}/{}", platform.label(), channel.trim())
     }
 
+    /// Credential key of the second secret slot an account can carry: the
+    /// YouTube Data API key that pairs with the OAuth token. It is a distinct
+    /// vault entry, so neither secret is concatenated with the other and
+    /// clearing one cannot damage the other.
+    pub fn api_key(platform: ChatPlatform, channel: &str) -> String {
+        format!("chat-api-key/{}/{}", platform.label(), channel.trim())
+    }
+
     pub fn save(&self, platform: ChatPlatform, channel: &str, token: &str) -> Result<(), String> {
         keyring::Entry::new(&self.service, &Self::key(platform, channel))
             .map_err(|error| error.to_string())?
@@ -151,6 +174,35 @@ impl ChatTokenStore {
             .get_password()
         {
             Ok(token) => Ok(Some(token)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    /// Store the YouTube Data API key in its own vault entry.
+    pub fn save_api_key(
+        &self,
+        platform: ChatPlatform,
+        channel: &str,
+        api_key: &str,
+    ) -> Result<(), String> {
+        keyring::Entry::new(&self.service, &Self::api_key(platform, channel))
+            .map_err(|error| error.to_string())?
+            .set_password(api_key)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Read the YouTube Data API key back (`None` when none was stored).
+    pub fn load_api_key(
+        &self,
+        platform: ChatPlatform,
+        channel: &str,
+    ) -> Result<Option<String>, String> {
+        match keyring::Entry::new(&self.service, &Self::api_key(platform, channel))
+            .map_err(|error| error.to_string())?
+            .get_password()
+        {
+            Ok(key) => Ok(Some(key)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(error) => Err(error.to_string()),
         }
@@ -343,6 +395,14 @@ impl MultiChat {
             .unwrap_or(false)
     }
 
+    /// Whether any worker is configured to send but has spent its YouTube
+    /// API quota for today. The dock shows this as "read-only today" — a
+    /// budget state, not a configuration error — so the streamer knows the
+    /// account is fine and simply has nothing left to spend today.
+    pub fn any_quota_exhausted(&self) -> bool {
+        self.workers.iter().any(|(_, chat)| chat.quota_exhausted())
+    }
+
     /// Whether any Twitch worker was told by the server that its bot account
     /// must be phone-verified before it can send.
     pub fn phone_verification_required(&self) -> bool {
@@ -457,7 +517,26 @@ impl Chat {
                 } else {
                     config.youtube_poll_endpoint.clone()
                 },
+                send_endpoint: if config.youtube_send_endpoint.is_empty() {
+                    YouTubeChatConfig::default().send_endpoint
+                } else {
+                    config.youtube_send_endpoint.clone()
+                },
                 channel: config.channel.clone(),
+                live_chat_id: config.youtube_live_chat_id.clone(),
+                // The official insert needs *both* halves; a lone token (the
+                // common case for a chat account) must not look sendable.
+                send_credentials: if config.youtube_api_key.trim().is_empty()
+                    || config.token.trim().is_empty()
+                {
+                    None
+                } else {
+                    Some(YouTubeSendCredentials::new(
+                        config.youtube_api_key.clone(),
+                        config.token.clone(),
+                    ))
+                },
+                quota: config.youtube_quota,
             })),
         };
         let limit = config.rate_limit.unwrap_or_else(|| match config.platform {
@@ -518,10 +597,17 @@ impl Chat {
         }
     }
 
-    /// Whether the platform can send chat messages at all (YouTube is
-    /// read-only without an authenticated browser session).
+    /// Whether the platform can send chat messages right now.
+    ///
+    /// Twitch and Kick send whenever a worker runs; YouTube needs the full
+    /// official contract (API key, OAuth token, `liveChatId`) *and* quota
+    /// left today, so a half-configured or over-budget account correctly
+    /// reports itself read-only instead of offering an input that cannot work.
     pub fn can_send(&self) -> bool {
-        !matches!(self.inner, ChatInner::YouTube(_))
+        match &self.inner {
+            ChatInner::Twitch(_) | ChatInner::Kick(_) => true,
+            ChatInner::YouTube(c) => c.can_send(),
+        }
     }
 
     /// Enqueue a chat message to send. Returns `false` when the worker is
@@ -547,12 +633,12 @@ impl Chat {
         }
     }
 
-    /// Reply to a specific chat line. Only Twitch supports threading via
-    /// `reply-parent-msg-id`; Kick has no IRC-style parent ids and YouTube is
-    /// read-only, so both return `false`. Subject to the same shared rate
-    /// limiter as plain sends.
+    /// Reply to a specific chat line. Twitch threads via `reply-parent-msg-id`
+    /// and YouTube via the insert snippet's `parentId`; Kick has no
+    /// IRC-style parent ids and returns `false`. Subject to the same shared
+    /// rate limiter as plain sends.
     pub fn send_reply(&self, text: &str, reply_to_id: &str) -> bool {
-        if !matches!(self.inner, ChatInner::Twitch(_)) {
+        if !matches!(self.inner, ChatInner::Twitch(_) | ChatInner::YouTube(_)) {
             return false;
         }
         if reply_to_id.trim().is_empty() {
@@ -569,7 +655,18 @@ impl Chat {
         }
         match &self.inner {
             ChatInner::Twitch(c) => c.send_reply(text, reply_to_id),
-            ChatInner::Kick(_) | ChatInner::YouTube(_) => false,
+            ChatInner::YouTube(c) => c.send_reply(text, reply_to_id),
+            ChatInner::Kick(_) => false,
+        }
+    }
+
+    /// Whether the account is configured to send but has spent its daily
+    /// YouTube API quota — the dock shows "read-only today" rather than a
+    /// configuration error. `false` for the other platforms.
+    pub fn quota_exhausted(&self) -> bool {
+        match &self.inner {
+            ChatInner::YouTube(c) => c.quota_exhausted(),
+            ChatInner::Twitch(_) | ChatInner::Kick(_) => false,
         }
     }
 
@@ -717,7 +814,7 @@ mod tests {
     #[test]
     fn platform_default_rate_limits_are_applied() {
         // Twitch: 20/30 s. Kick: 10/30 s (conservative, undocumented API).
-        // YouTube: quota-bounded 1/day.
+        // YouTube: serialized, refilling at the documented ~50/day quota.
         let twitch = Chat::new(&ChatConfig::new(
             ChatPlatform::Twitch,
             "rivulet".to_owned(),
@@ -782,8 +879,9 @@ mod tests {
     }
 
     #[test]
-    fn send_reply_is_twitch_only_and_requires_a_parent_id() {
-        // YouTube is read-only: replies are rejected before the limiter.
+    fn send_reply_needs_a_parent_id_and_kick_has_no_threading() {
+        // An unconfigured YouTube account is an observer: replies are
+        // rejected before the limiter.
         let youtube = Chat::new(&ChatConfig::new(
             ChatPlatform::YouTube,
             "abc123".to_owned(),
@@ -835,6 +933,150 @@ mod tests {
             1.0,
             "read-only rejects must not consume limiter tokens"
         );
+    }
+
+    // ── YouTube official send path through the facade ─────────────────
+
+    /// A YouTube account with the full official contract but endpoints that
+    /// point nowhere: the facade must report it as sendable and forward the
+    /// message to the worker, which then fails the request. That is the
+    /// boundary this slice owns \u2014 the transport itself is covered by the
+    /// local-listener tests in `youtube_chat`.
+    fn youtube_sendable_config() -> ChatConfig {
+        ChatConfig {
+            platform: ChatPlatform::YouTube,
+            channel: "abc123".to_owned(),
+            token: "ya29.OAUTH".to_owned(),
+            youtube_api_key: "AIzaKEY".to_owned(),
+            youtube_live_chat_id: "LC_CHAT".to_owned(),
+            youtube_page_endpoint: "http://127.0.0.1:1/live_chat".to_owned(),
+            youtube_poll_endpoint: "http://127.0.0.1:1/poll".to_owned(),
+            youtube_send_endpoint: "http://127.0.0.1:1/insert".to_owned(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn youtube_sends_only_with_the_complete_official_contract() {
+        // Nothing configured at all: an observer.
+        let bare = Chat::new(&ChatConfig::new(
+            ChatPlatform::YouTube,
+            "abc123".to_owned(),
+            String::new(),
+        ));
+        assert!(!bare.can_send(), "no credentials means observer mode");
+        assert!(!bare.quota_exhausted(), "a config gap is not a quota gap");
+
+        // A token without an API key is still an observer: the official
+        // insert needs both, and half a contract must not look sendable.
+        let half = Chat::new(&ChatConfig {
+            platform: ChatPlatform::YouTube,
+            youtube_live_chat_id: "LC_CHAT".to_owned(),
+            channel: "abc123".to_owned(),
+            token: "ya29.OAUTH".to_owned(),
+            youtube_page_endpoint: "http://127.0.0.1:1/live_chat".to_owned(),
+            youtube_poll_endpoint: "http://127.0.0.1:1/poll".to_owned(),
+            ..Default::default()
+        });
+        assert!(!half.can_send(), "an OAuth token alone cannot insert");
+        assert!(!half.send_message("hi"), "an observer must refuse the send");
+
+        // Credentials but no liveChatId: the insert has no target.
+        let no_target = Chat::new(&ChatConfig {
+            platform: ChatPlatform::YouTube,
+            channel: "abc123".to_owned(),
+            token: "ya29.OAUTH".to_owned(),
+            youtube_api_key: "AIzaKEY".to_owned(),
+            youtube_page_endpoint: "http://127.0.0.1:1/live_chat".to_owned(),
+            youtube_poll_endpoint: "http://127.0.0.1:1/poll".to_owned(),
+            ..Default::default()
+        });
+        assert!(
+            !no_target.can_send(),
+            "insert needs the broadcast's liveChatId"
+        );
+
+        // The complete contract: sendable.
+        let full = Chat::new(&youtube_sendable_config());
+        assert!(full.can_send(), "the full contract must be sendable");
+        assert!(
+            full.send_message("hello"),
+            "a sendable account must forward the message to its worker"
+        );
+    }
+
+    #[test]
+    fn youtube_replies_thread_via_parent_id() {
+        let chat = Chat::new(&youtube_sendable_config());
+        assert!(
+            !chat.send_reply("hi", "   "),
+            "a blank parent id is not a reply"
+        );
+        assert!(chat.send_reply("hi", "PARENT-1"));
+    }
+
+    #[test]
+    fn a_budget_smaller_than_one_insert_is_read_only_without_faking_a_config_error() {
+        // A project whose daily budget cannot even pay for one insert can
+        // never send. The dock must report that as a quota state, not as a
+        // missing credential.
+        let starved = Chat::new(&ChatConfig {
+            youtube_quota: Some(crate::youtube_chat::YouTubeQuotaConfig {
+                insert_units: 200,
+                daily_units: 100,
+            }),
+            ..youtube_sendable_config()
+        });
+        assert!(!starved.can_send(), "no send fits into the daily budget");
+        assert!(
+            starved.quota_exhausted(),
+            "this is a quota state, not a configuration gap"
+        );
+        assert!(!starved.send_message("hi"));
+        // A read-only rejection must not charge the limiter either.
+        assert_eq!(
+            starved.rate_limit_remaining(),
+            1.0,
+            "a read-only rejection must not consume a limiter token"
+        );
+    }
+
+    // ── masked auth/scope matrix ──────────────────────────────────────
+
+    #[test]
+    fn auth_matrix_reports_presence_but_never_a_value() {
+        let rows = crate::youtube_chat::chat_auth_matrix(ChatPlatform::YouTube, true, false);
+        let api_key = rows
+            .iter()
+            .find(|r| r.slot == "api_key")
+            .expect("api_key row");
+        assert!(api_key.present, "the caller says the key is set");
+        let oauth = rows.iter().find(|r| r.slot == "oauth").expect("oauth row");
+        assert!(!oauth.present, "the caller says the token is missing");
+        // Nothing in the row type can carry a secret: it is a fixed label plus
+        // a bool, so the matrix cannot be logged by accident.
+        assert!(rows.iter().all(|r| !r.label.contains("AIza")));
+    }
+
+    #[test]
+    fn auth_matrix_names_the_platform_specific_requirements() {
+        let twitch: Vec<_> =
+            crate::youtube_chat::chat_auth_matrix(ChatPlatform::Twitch, false, true)
+                .into_iter()
+                .map(|r| r.slot)
+                .collect();
+        assert_eq!(twitch, ["oauth", "irc_tags", "phone_verified"]);
+        let kick: Vec<_> = crate::youtube_chat::chat_auth_matrix(ChatPlatform::Kick, false, true)
+            .into_iter()
+            .map(|r| r.slot)
+            .collect();
+        assert_eq!(kick, ["session"]);
+        let youtube: Vec<_> =
+            crate::youtube_chat::chat_auth_matrix(ChatPlatform::YouTube, true, true)
+                .into_iter()
+                .map(|r| r.slot)
+                .collect();
+        assert_eq!(youtube, ["api_key", "oauth", "live_chat_id"]);
     }
 
     // ── MultiChat: combined multi-platform dock facade ────────────────
@@ -911,13 +1153,16 @@ mod tests {
         assert_eq!(outcomes[0].0, ChatPlatform::Twitch);
         assert!(outcomes[0].1, "twitch enqueue must pass");
         assert_eq!(outcomes[1].0, ChatPlatform::YouTube);
-        assert!(!outcomes[1].1, "youtube is read-only");
+        assert!(
+            !outcomes[1].1,
+            "an unconfigured youtube account is read-only"
+        );
         // Twitch's 20/30 s bucket now sits below 1; YouTube's bucket stays
         // untouched — proving the per-platform rate-limit isolation.
         assert!(multi.rate_limit_detail(ChatPlatform::Twitch).unwrap().0 < 20.0);
         assert_eq!(
             multi.rate_limit_detail(ChatPlatform::YouTube).unwrap(),
-            (1.0, 1, 86_400),
+            (1.0, 1, 1_728),
             "read-only rejects must not consume the youtube bucket"
         );
     }
@@ -953,7 +1198,7 @@ mod tests {
         assert_eq!((remaining, capacity, window), (20.0, 20, 30));
         assert_eq!(
             multi.rate_limit_detail(ChatPlatform::YouTube).unwrap(),
-            (1.0, 1, 86_400)
+            (1.0, 1, 1_728)
         );
         assert!(multi.rate_limit_detail(ChatPlatform::Kick).is_none());
     }
