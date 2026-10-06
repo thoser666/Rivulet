@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Check beta-readiness against the six Beta-Gate criteria in README.md.
 
 The Beta-Gate (see README → Roadmap → Beta-Gate) is a manual, criteria-based
@@ -82,7 +82,7 @@ MACOS_SECRETS = [
     "APPLE_APP_PASSWORD",
     "APPLE_TEAM_ID",
 ]
-REQUIRED_SECRETS = WINDOWS_PFX_SECRETS + WINDOWS_SIGNPATH_SECRETS + MACOS_SECRETS
+REQUIRED_SECRETS = WINDOWS_PFX_SECRETS + WINDOWS_SIGNPATH_SECRETS  # macOS excluded from beta scope
 
 
 def windows_signing_satisfied(present):

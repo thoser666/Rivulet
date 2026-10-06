@@ -1,4 +1,4 @@
-# Code Signing
+﻿# Code Signing
 
 Release packages are signed automatically **when the matching secrets are
 configured**; without secrets, unsigned packages are built (the default, so
@@ -37,7 +37,7 @@ honest comparison (prices verified September 2026):
 1. **Re-apply at SignPath Foundation** once the project reaches higher visibility (more stars, downloads, community traction)
 2. **Purchase an OV certificate** (~$100-200/year) for Windows signing
 3. **Use Azure Artifact Signing** ($9.99/month) for Windows signing
-4. **Stay unsigned for now** (current state) — Windows artifacts work but show "unknown publisher" warnings
+4. **Stay unsigned for now** (current state) - Windows artifacts work but show "unknown publisher" warnings. **macOS:** Gatekeeper blocks unsigned apps entirely; for an external beta, macOS would require a paid Apple Developer Program membership and notarization (tracked in [#50](https://github.com/thoser666/Rivulet/issues/50)). For the current beta scope (Windows + Linux) macOS signing is deliberately deferred.
 
 Keep macOS on the paid Apple Developer Program when beta approaches (unavoidable platform tax), and stay on the existing free GPG signing for Linux.
 
