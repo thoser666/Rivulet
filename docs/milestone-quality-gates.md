@@ -399,10 +399,13 @@ Workstream issues:
   it closes the milestone, it does not work toward it.
 
 The gate stays **open**. No criterion is claimed as met yet, and the opening
-state is recorded rather than glossed: `rivulet-core` is `0.65.0-alpha.55`
-(under semver `0.x` every minor bump is breaking), carries 66 public modules
-without a `#![warn(missing_docs)]`, has no `examples/` crate, and exposes
-feature detection through log output rather than through the API.
+state is recorded rather than glossed. As recorded when the milestone opened,
+`rivulet-core` was `0.65.0-alpha.55` (under semver `0.x` every minor bump is
+breaking) with 66 public modules and no `#![warn(missing_docs)]`, no
+`examples/` crate, and feature detection reachable only through log output.
+The module count is a snapshot and has grown since; the missing attribute,
+the absent example crate and the log-only feature detection are the parts
+that still hold and that #292 has to close.
 
 ### M9: Modern Architecture
 
