@@ -449,7 +449,7 @@ must not be implied by beta parity.
 - [ ] Abstraction of capture backends (xcap, PipeWire, Metal/WGC) behind stable traits — [#296](https://github.com/thoser666/Rivulet/issues/296)
 - [ ] Exit evidence: docs build, example run matrix, public API review, downstream-consumer smoke test — [#297](https://github.com/thoser666/Rivulet/issues/297)
 
-**Where this stands.** The promise of M8 is directional — "`rivulet-core` is a normal library" — and promises of that kind fail quietly: nothing breaks, the crate just becomes unusable again at some point nobody notices. The opening state is therefore recorded honestly rather than optimistically. Today `rivulet-core` sits at `0.65.0-alpha.55` with **66 public modules and no `#![warn(missing_docs)]`**, there is **no `examples/` crate**, and feature detection is reachable through log lines and GUI labels rather than through the API. Under semver `0.x`, every minor bump is breaking, so an external consumer can rely on nothing yet — that is what [#292](https://github.com/thoser666/Rivulet/issues/292) is for.
+**Where this stands.** The promise of M8 is directional — "`rivulet-core` is a normal library" — and promises of that kind fail quietly: nothing breaks, the crate just becomes unusable again at some point nobody notices. The opening state is therefore recorded honestly rather than optimistically. When the milestone opened, `rivulet-core` sat at `0.65.0-alpha.55` with **66 public modules and no `#![warn(missing_docs)]`** (the module count is that snapshot and has grown since; the missing attribute has not), there is **no `examples/` crate**, and feature detection is reachable through log lines and GUI labels rather than through the API. Under semver `0.x`, every minor bump is breaking, so an external consumer can rely on nothing yet — that is what [#292](https://github.com/thoser666/Rivulet/issues/292) is for.
 
 **Recommended first implementation step:** [#292](https://github.com/thoser666/Rivulet/issues/292) (stabilized public API). It gates the rest: examples, the in-process capture entry point and the backend traits all need a stable surface to be written against, and documenting a moving target is wasted work.
 
@@ -738,7 +738,18 @@ redaction is counted in the report header, so you can see what was removed.
 **Rivulet itself transmits nothing** — there is no token and no sender, and
 what leaves the machine is only what you paste. See
 [docs/logging.md](docs/logging.md) for the manual procedure that remains the
-fallback. Windows packages
+fallback.
+
+**Help → Crash reports → *Upload previous crash report*** covers the case the
+Settings button cannot: a panic. The release build aborts on panic, so there
+is no window in which anything could be sent — the panic hook writes a small
+record to `Rivulet/crashes/` instead, and the **next** launch offers it from
+that menu entry (greyed out when the last session was clean). The record goes
+through the same redaction, is delivered the same way, and is deleted once
+you have dealt with it. This build has **no** upload destination wired up, so
+the menu item currently behaves exactly like the Settings button; the
+`CrashReportSink` trait is the seam a reviewed transport would use later.
+Windows packages
 also include a dependency-free launcher that records pre-Rust failures and can
 opt in to WER crash dumps with `RIVULET_ENABLE_CRASH_DUMPS=1`.
 

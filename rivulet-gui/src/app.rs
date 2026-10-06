@@ -989,6 +989,33 @@ pub struct RivuletApp {
     /// UI layer to copy and open them (the clipboard needs an egui context).
     crash_report_text: Option<String>,
     crash_report_url: Option<String>,
+    /// Whether the delivered URL belongs in the browser. A prefilled issue
+    /// composer is exactly what the user asked for and is opened; a link a
+    /// sink returned is only copied, because opening it would take the user
+    /// away from the status line that says where the report went.
+    crash_report_open_browser: bool,
+    /// The crash the previous run left behind, adopted at startup.
+    ///
+    /// This is the OBS path: a panic aborts the process, so there was no
+    /// chance to offer a report then. The next launch is where the upload
+    /// is offered, from a menu item the user clicks. Not persisted — the
+    /// next launch re-reads it from disk, and keeping it in the settings
+    /// blob would resurrect a crash the user already reported.
+    #[serde(skip)]
+    crash_record_pending: Option<rivulet_core::crash_record::CrashRecord>,
+    /// Directory those records are read from and cleared in. Not persisted
+    /// for the same reason, and pointed at a scratch directory by the tests
+    /// so a test run never touches the developer's own records.
+    #[serde(skip)]
+    crash_record_dir: std::path::PathBuf,
+    /// Optional upload destination for a rendered crash report.
+    ///
+    /// The shipping build wires **none**, exactly like the telemetry sink
+    /// (`docs/telemetry.md`): the seam exists so a reviewed transport can be
+    /// added later without touching the redaction path, not so that one
+    /// ships now.
+    #[serde(skip)]
+    crash_report_sink: Option<Box<dyn rivulet_core::CrashReportSink>>,
 
     /// Chat dock: stream-info editor — per-platform title drafts, indexed
     /// by [`rivulet_core::InfoPlatform::index`]. Not persisted (pure input
@@ -1896,6 +1923,13 @@ impl Default for RivuletApp {
             crash_report_status: None,
             crash_report_text: None,
             crash_report_url: None,
+            crash_report_open_browser: true,
+            // `new()` fills the record and its directory from disk. The
+            // default leaves both empty, so neither a test nor a restored
+            // settings blob can claim a crash that nothing found.
+            crash_record_pending: None,
+            crash_record_dir: std::env::temp_dir().join("rivulet-crash-records"),
+            crash_report_sink: None,
             chat_info_title: Default::default(),
             chat_info_game: Default::default(),
             chat_info_scope: None,
@@ -7430,6 +7464,20 @@ impl RivuletApp {
         self.chat_state = state;
     }
 
+    /// Ask for a crash report on the next frame.
+    ///
+    /// Both entry points — the Settings button and the *Crash reports* menu —
+    /// go through this, so neither can forget to reset the previous run's
+    /// output: a press that produced nothing must not keep showing the last
+    /// report as if it were new.
+    fn request_crash_report(&mut self) {
+        self.crash_report_pending = true;
+        self.crash_report_status = None;
+        self.crash_report_text = None;
+        self.crash_report_url = None;
+        self.crash_report_open_browser = true;
+    }
+
     /// Build a redacted crash report from today's log and return the URL of
     /// a prefilled GitHub issue plus the report body.
     ///
@@ -7438,12 +7486,26 @@ impl RivuletApp {
     /// the caller decides what to do with them, and the only thing the UI
     /// does is copy to the clipboard and open the browser. Splitting it out
     /// is what makes the redaction testable without a window.
+    ///
+    /// A crash record left behind by the previous run is appended as a crash
+    /// block first, so a session that died before it could write a single log
+    /// line is still represented — and travels through the same redaction.
     fn build_crash_report(&self) -> rivulet_core::crash_report::CrashReport {
-        let log = std::fs::read_to_string(crate::logging::log_path(
+        let mut log = std::fs::read_to_string(crate::logging::log_path(
             &crate::logging::LogConfig::default_directory(),
             chrono::Local::now().date_naive(),
         ))
         .unwrap_or_default();
+        // A pending crash record is appended as a crash block. It is the only
+        // trace a run that died before it could write a log line left behind,
+        // and going through the block means the existing redaction pass covers
+        // it exactly like the rest of the log.
+        if let Some(record) = &self.crash_record_pending {
+            if !log.is_empty() {
+                log.push('\n');
+            }
+            log.push_str(&record.as_log_block());
+        }
         rivulet_core::crash_report::build_report(&rivulet_core::crash_report::CrashReportInput {
             app_version: env!("CARGO_PKG_VERSION"),
             platform: rivulet_core::telemetry::platform_code(),
@@ -7459,28 +7521,80 @@ impl RivuletApp {
     /// the composer. If opening fails, the report is still on the clipboard
     /// and the status line says so, so the feature degrades to "copy" rather
     /// than to "nothing happened".
+    ///
+    /// When a sink is wired, it gets the report first and its URL replaces
+    /// the composer. The link is then *copied* rather than opened, so the
+    /// user keeps the window whose status line names the destination.
     fn reconcile_crash_report(&mut self) {
         if !std::mem::take(&mut self.crash_report_pending) {
             return;
         }
+        // Whether this run answers for a crash or for "today's log" decides
+        // both the wording and whether the record is cleared below.
+        let from_previous_crash = self.crash_record_pending.is_some();
         let report = self.build_crash_report();
-        let url = rivulet_core::crash_report::issue_url(CRASH_REPORT_REPOSITORY, &report);
-        self.crash_report_status = Some(if report.has_crash {
-            self.tr_fmt(
-                "crash_report_ready",
-                &[
-                    report.redacted_stream_urls.to_string(),
-                    report.redacted_home_paths.to_string(),
-                ],
-            )
-            .to_owned()
-        } else {
-            self.tr("crash_report_no_crash").to_owned()
-        });
+        let prefilled_issue =
+            rivulet_core::crash_report::issue_url(CRASH_REPORT_REPOSITORY, &report);
+        // A wired sink owns delivery and hands back the URL the report is
+        // reachable under. The shipping build wires none, so this is the
+        // clipboard path issue #299 established. `has_sink` is read first and
+        // the borrow ends with the statement, because the status text below
+        // needs `self` again.
+        let has_sink = self.crash_report_sink.is_some();
+        let uploaded = self
+            .crash_report_sink
+            .as_mut()
+            .and_then(|sink| sink.upload(&report));
+        let (status, url, open_browser) = match (has_sink, uploaded) {
+            (true, Some(uploaded)) => (
+                self.tr_fmt("crash_upload_ready", std::slice::from_ref(&uploaded)),
+                uploaded,
+                false,
+            ),
+            // A sink that cannot deliver must not leave the user with nothing:
+            // fall back to the manual path and say that is what happened.
+            (true, None) => (
+                self.tr("crash_upload_failed").to_owned(),
+                prefilled_issue,
+                true,
+            ),
+            (false, _) if from_previous_crash => (
+                self.tr("crash_upload_local").to_owned(),
+                prefilled_issue,
+                true,
+            ),
+            (false, _) if report.has_crash => (
+                self.tr_fmt(
+                    "crash_report_ready",
+                    &[
+                        report.redacted_stream_urls.to_string(),
+                        report.redacted_home_paths.to_string(),
+                    ],
+                ),
+                prefilled_issue,
+                true,
+            ),
+            (false, _) => (
+                self.tr("crash_report_no_crash").to_owned(),
+                prefilled_issue,
+                true,
+            ),
+        };
+        self.crash_report_status = Some(status);
+        self.crash_report_open_browser = open_browser;
         // Store the body for the UI layer, which owns the egui context and
         // is the only place a clipboard write is allowed.
         self.crash_report_text = Some(report.body);
         self.crash_report_url = Some(url);
+        // The crash has been handed over, so drop it: the next launch must
+        // not offer a crash the user already dealt with. Best effort — a
+        // record that survives is an annoyance, not a failure.
+        if from_previous_crash {
+            self.crash_record_pending = None;
+            if let Err(error) = rivulet_core::crash_record::clear(&self.crash_record_dir) {
+                tracing::warn!(%error, "Could not clear the reported crash records");
+            }
+        }
     }
 
     /// Hand the produced report over exactly once.
@@ -11161,6 +11275,18 @@ impl RivuletApp {
         // Discover plugin bundles so the Settings → Plugins list is populated
         // on first paint (re-scanned on demand via the Rescan button).
         app.rescan_plugins();
+        // Adopt the crash the previous run left behind. A panic aborts the
+        // process, so there was no chance to offer the report then; this is
+        // the next launch, which is where OBS offers its upload too.
+        app.crash_record_dir = crate::logging::crash_record_directory();
+        app.crash_record_pending = rivulet_core::crash_record::read_latest(&app.crash_record_dir);
+        if let Some(record) = &app.crash_record_pending {
+            tracing::warn!(
+                fingerprint = %record.fingerprint(),
+                location = %record.location,
+                "The previous session crashed; Help -> Crash reports can report it"
+            );
+        }
         app
     }
 }
@@ -11226,8 +11352,16 @@ impl eframe::App for RivuletApp {
         // write needs the egui context the update callback owns.
         self.reconcile_crash_report();
         if let Some((report, url)) = self.drain_crash_report() {
-            ctx.copy_text(report);
-            let _ = open::that(url);
+            if self.crash_report_open_browser {
+                ctx.copy_text(report);
+                let _ = open::that(url);
+            } else {
+                // A sink returned a link, not a composer. The link is the
+                // deliverable — the report is at that address — and opening it
+                // would take the user away from the status line that says
+                // where it went.
+                ctx.copy_text(url);
+            }
         }
 
         // Apply the color scheme (fonts + palette + preference) on startup
@@ -11543,6 +11677,25 @@ impl eframe::App for RivuletApp {
                                 self.locale = *locale;
                             }
                         }
+                    });
+                    // Help -> Crash reports, the OBS path. A panic aborts the
+                    // process, so the upload cannot be offered then; it is
+                    // offered here on the next launch, and only on a click.
+                    ui.menu_button(self.tr("help_menu"), |ui| {
+                        ui.menu_button(self.tr("crash_report_menu"), |ui| {
+                            let crashed = self.crash_record_pending.is_some();
+                            let upload = egui::Button::new(self.tr("crash_upload_previous"));
+                            if ui.add_enabled(crashed, upload).clicked() {
+                                self.request_crash_report();
+                            }
+                            if !crashed {
+                                ui.small(self.tr("crash_upload_none"));
+                            }
+                            ui.separator();
+                            if ui.button(self.tr("crash_report_button")).clicked() {
+                                self.request_crash_report();
+                            }
+                        });
                     });
                 });
             });
@@ -12936,10 +13089,7 @@ impl eframe::App for RivuletApp {
                         ui.separator();
                         ui.label(egui::RichText::new(crash_section).strong());
                         if ui.button(crash_button).clicked() {
-                            self.crash_report_pending = true;
-                            self.crash_report_status = None;
-                            self.crash_report_text = None;
-                            self.crash_report_url = None;
+                            self.request_crash_report();
                         }
                         ui.small(crash_note);
                         if let Some(status) = self.crash_report_status.clone() {
@@ -14447,6 +14597,161 @@ mod tests {
             Some("https://example.invalid/old")
         );
         assert_ne!(app.crash_report_status.as_deref(), Some("old status"));
+    }
+
+    /// The plain log-report path must keep its own wording: the
+    /// "no upload destination" note is only true for a report that was
+    /// answering for a crash of the previous session.
+    #[test]
+    fn a_log_report_says_nothing_about_upload_destinations() {
+        let mut app = RivuletApp {
+            crash_report_pending: true,
+            ..Default::default()
+        };
+        app.reconcile_crash_report();
+        let expected = app.tr("crash_report_no_crash");
+        assert_eq!(app.crash_report_status.as_deref(), Some(expected));
+    }
+
+    /// An app with a record from the previous run and a scratch record
+    /// directory, which is what `new()` produces on a launch after a crash.
+    fn app_with_previous_crash(dir: &std::path::Path) -> RivuletApp {
+        let record = rivulet_core::CrashRecord {
+            timestamp_unix: 1_700_000_000,
+            location: "rivulet_core::capture::run:412".to_owned(),
+            message: "device disappeared".to_owned(),
+        };
+        rivulet_core::crash_record::write_record(dir, &record).expect("seed record");
+        RivuletApp {
+            crash_record_dir: dir.to_path_buf(),
+            crash_record_pending: rivulet_core::crash_record::read_latest(dir),
+            ..Default::default()
+        }
+    }
+
+    /// The OBS path, end to end and without a sink in the build: the record
+    /// the previous run left behind reaches the report, the report is still
+    /// delivered (clipboard plus prefilled issue), and the record is gone
+    /// afterwards — otherwise the next launch would offer a crash the user
+    /// already dealt with.
+    #[test]
+    fn the_previous_crash_is_reported_from_the_menu_and_then_forgotten() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_with_previous_crash(dir.path());
+        app.request_crash_report();
+        app.reconcile_crash_report();
+
+        let report = app.crash_report_text.clone().expect("a report");
+        assert!(
+            report.contains("device disappeared"),
+            "the crash of the previous run must be in the report: {report}"
+        );
+        assert!(
+            report.contains("Nothing was transmitted"),
+            "the report still has to state that Rivulet sent nothing"
+        );
+        let url = app.crash_report_url.clone().expect("a URL");
+        assert!(
+            url.starts_with("https://github.com/thoser666/Rivulet/issues/new?"),
+            "{url}"
+        );
+        assert!(
+            app.crash_report_open_browser,
+            "no sink ships, so the prefilled issue is what gets opened"
+        );
+        let expected = app.tr("crash_upload_local");
+        assert_eq!(app.crash_report_status.as_deref(), Some(expected));
+        assert!(
+            app.crash_record_pending.is_none(),
+            "a reported crash must not stay offered"
+        );
+        assert!(
+            rivulet_core::crash_record::read_latest(dir.path()).is_none(),
+            "the record must be deleted once it has been handed over"
+        );
+    }
+
+    /// The sink seam has to work when something is wired into it: its URL
+    /// replaces the issue composer, it is copied rather than opened, and the
+    /// crash is still cleared. This is the only test that installs a sink —
+    /// the shipping build installs none.
+    #[test]
+    fn a_wired_sink_yields_a_link_to_copy_instead_of_a_issue_composer() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let saw_redacted_report = std::sync::Arc::new(AtomicBool::new(false));
+        let observed = saw_redacted_report.clone();
+        let mut app = app_with_previous_crash(dir.path());
+        app.crash_report_sink = Some(Box::new(
+            move |report: &rivulet_core::crash_report::CrashReport| {
+                observed.store(
+                    report.body.contains("Nothing was transmitted"),
+                    Ordering::SeqCst,
+                );
+                Some("https://example.invalid/crash/abc123".to_owned())
+            },
+        ));
+        app.request_crash_report();
+        app.reconcile_crash_report();
+
+        assert!(
+            saw_redacted_report.load(Ordering::SeqCst),
+            "the sink must receive the redacted report, not the raw log"
+        );
+        assert_eq!(
+            app.crash_report_url.as_deref(),
+            Some("https://example.invalid/crash/abc123")
+        );
+        assert!(
+            !app.crash_report_open_browser,
+            "the link is the deliverable; it is copied, not opened"
+        );
+        let status = app.crash_report_status.clone().expect("a status");
+        assert!(
+            status.contains("https://example.invalid/crash/abc123"),
+            "the status must name where the report went: {status}"
+        );
+        assert!(
+            rivulet_core::crash_record::read_latest(dir.path()).is_none(),
+            "an uploaded crash must not stay offered either"
+        );
+    }
+
+    /// A sink that cannot reach its service must not swallow the report:
+    /// the manual path takes over, and the status says that is what happened
+    /// instead of claiming an upload that never occurred.
+    #[test]
+    fn a_sink_that_cannot_deliver_falls_back_to_the_manual_path() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut app = app_with_previous_crash(dir.path());
+        app.crash_report_sink = Some(Box::new(|_: &rivulet_core::crash_report::CrashReport| None));
+        app.request_crash_report();
+        app.reconcile_crash_report();
+
+        let url = app.crash_report_url.clone().expect("a URL");
+        assert!(
+            url.starts_with("https://github.com/thoser666/Rivulet/issues/new?"),
+            "{url}"
+        );
+        assert!(app.crash_report_open_browser);
+        let expected = app.tr("crash_upload_failed");
+        assert_eq!(app.crash_report_status.as_deref(), Some(expected));
+        assert!(
+            rivulet_core::crash_record::read_latest(dir.path()).is_none(),
+            "the crash was dealt with, just by hand"
+        );
+    }
+
+    /// A crash record is app state, not settings: it must never be written
+    /// into the persisted blob, or a crash the user already reported would
+    /// come back on the next launch.
+    #[test]
+    fn a_pending_crash_is_not_persisted_with_the_settings() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let app = app_with_previous_crash(dir.path());
+        let blob = serde_json::to_value(&app).expect("serialize");
+        assert_eq!(blob.get("crash_record_pending"), None);
+        assert_eq!(blob.get("crash_report_sink"), None);
+        assert_eq!(blob.get("crash_record_dir"), None);
     }
 
     use super::*;

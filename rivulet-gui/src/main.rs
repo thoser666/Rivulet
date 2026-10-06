@@ -39,6 +39,12 @@ fn main() -> Result<(), eframe::Error> {
     #[cfg(target_os = "windows")]
     configure_bundled_gstreamer();
 
+    // Installed first, before logging and before GStreamer: a panic hook
+    // that is too late is a panic hook that misses the panic that mattered.
+    // The record has to reach the disk synchronously, because `panic =
+    // "abort"` ends the process the moment the hook returns.
+    rivulet_core::crash_record::install_panic_hook(logging::crash_record_directory());
+
     let log_config = logging::LogConfig::new(
         logging::LogConfig::default_directory(),
         std::env::var("RIVULET_LOG_RETENTION_DAYS")
