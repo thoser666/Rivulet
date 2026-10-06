@@ -170,6 +170,47 @@ dropped first) so a runaway log cannot produce a paste that no issue box
 accepts. Paths are replaced segment-aware, so a neighbouring account such as
 `/home/thouser2` is not mangled into `<user>2`.
 
+## Crash reports from the menu bar
+
+**Help → Crash reports → *Upload previous crash report*** is the OBS path, and
+it exists because of one structural fact: the release profile is
+`panic = "abort"`. A panic still runs the hook, but the process is gone the
+instant the hook returns — there is no unwinding, no worker thread, and no
+time for a network round trip. **An upload at the moment of the crash is
+therefore impossible**, so the chain is deliberately split:
+
+1. **The crash writes a record.** A panic hook installed as the first thing
+   `main()` does writes `crashes/crash-<timestamp>.txt` — panic site, message,
+   timestamp — synchronously, and keeps only the newest five so a crash loop
+   cannot fill the disk. The records live outside `logs/` so the retention
+   pass can never delete an unreported crash.
+2. **The next launch offers it.** Rivulet reads that directory at startup. If
+   a record is there, *Upload previous crash report* is enabled; otherwise it
+   is greyed out and says that the last session was clean.
+3. **You click it.** The record is appended to the daily log as a
+   `RIVULET CRASH` block, so it travels through the same redaction as
+   everything else, and is delivered like the report above.
+4. **It is then forgotten.** The records are deleted once they have been
+   handed over, so a crash you already dealt with is not offered again.
+
+**What the build does not do.** There is **no** upload destination wired up
+in the shipped build: no token, no endpoint, no background sender, and
+nothing is ever filed automatically. The `CrashReportSink` trait is the seam a
+reviewed transport would plug into later — modelled on the telemetry sink,
+unit-tested, and installed by nobody. Until one exists, clicking the menu
+item copies the redacted report to the clipboard and opens a prefilled issue,
+and the status line says exactly that rather than implying an upload.
+
+When a sink *is* wired, its URL is what you get, and it is **copied** rather
+than opened, so you keep the window you are reading. A sink that fails falls
+back to the manual path with a status that says the upload failed, instead of
+leaving you with nothing.
+
+Records carry only what the panic itself stated. A payload that is neither a
+string nor a `Debug` primitive becomes the fixed marker
+`non-string panic payload`, because formatting an arbitrary type would dump
+its fields — application state — into a file that is meant to be shareable.
+
 ## Reporting a problem manually
 
 The button is a shortcut, not a requirement — everything below works with a

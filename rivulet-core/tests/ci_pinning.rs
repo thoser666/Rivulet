@@ -9042,3 +9042,158 @@ fn release_manifest_generation_and_post_publish_verification_are_pinned() {
         "the updater must keep consuming the manifest this workflow writes"
     );
 }
+
+#[test]
+fn the_previous_crash_upload_is_a_seam_that_ships_empty() {
+    // What this guards against is the quiet, one-sided change: a public
+    // `CrashReportSink` trait is exactly the kind of API that later grows a
+    // default implementation plus an endpoint, and then the menu item that
+    // says "nothing is transmitted" quietly stops being true. So the trait
+    // must stay public and empty: no transport in the module that owns the
+    // data, no sink wired in the shipping application, and no token anywhere
+    // near the crash path.
+    let core = read("rivulet-core/src/crash_record.rs");
+    for marker in [
+        "pub trait CrashReportSink",
+        "pub fn install_panic_hook",
+        "pub fn read_latest",
+        "pub fn write_record",
+        "pub fn clear(",
+        "pub fn fingerprint",
+        "pub fn as_log_block",
+        "MAX_CRASH_RECORDS",
+        // The bounded-disk promise is the one that protects a user in a
+        // crash loop, so it has to stay a named, tested constant.
+        "pub const MAX_CRASH_RECORDS: usize = 5;",
+    ] {
+        assert!(core.contains(marker), "crash_record.rs must carry {marker}");
+    }
+    for forbidden in [
+        "ureq",
+        "reqwest",
+        "TcpStream",
+        "http://",
+        "api.github.com",
+        "obsproject",
+        "0x0.st",
+        "paste.",
+        "GITHUB_TOKEN",
+        "github_token",
+        "access_token",
+        "bearer",
+    ] {
+        assert!(
+            !core.contains(forbidden),
+            "crash_record.rs must not reference {forbidden}: the seam ships empty"
+        );
+    }
+    // `impl<F> CrashReportSink for F` is the blanket closure impl. A second,
+    // named impl in the same module would be a concrete transport again.
+    assert_eq!(
+        core.matches("impl CrashReportSink for").count(),
+        0,
+        "no concrete sink may be implemented in the module that owns the data"
+    );
+
+    // The GUI holds the sink as a field, so a downstream build can install
+    // one — but the shipping default is `None` and nothing in the binary
+    // constructs one.
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        gui.contains("crash_report_sink: Option<Box<dyn rivulet_core::CrashReportSink>>"),
+        "the app must be able to hold a sink"
+    );
+    assert!(
+        gui.contains("crash_report_sink: None,"),
+        "the shipping default must install no sink"
+    );
+    assert!(
+        !gui.contains("impl rivulet_core::CrashReportSink")
+            && !gui.contains("impl CrashReportSink for"),
+        "no concrete sink may live in the GUI"
+    );
+
+    // The hook has to be installed before anything that can panic, and the
+    // startup read is what turns a record into a menu entry.
+    let main_rs = read("rivulet-gui/src/main.rs");
+    let hook = main_rs
+        .find("crash_record::install_panic_hook")
+        .expect("main must install the panic hook");
+    let logging_init = main_rs
+        .find("logging::init")
+        .expect("main initializes logging");
+    let engine = main_rs
+        .find("RivuletEngine::new()")
+        .expect("main builds the engine");
+    assert!(
+        hook < logging_init && hook < engine,
+        "the crash hook must be installed before the app can panic"
+    );
+    for marker in [
+        "rivulet_core::crash_record::read_latest(&app.crash_record_dir)",
+        "rivulet_core::crash_record::clear(&self.crash_record_dir)",
+        "ui.add_enabled(crashed, upload)",
+        "self.tr(\"help_menu\")",
+        "self.tr(\"crash_report_menu\")",
+        "self.tr(\"crash_upload_previous\")",
+        "self.tr(\"crash_upload_none\")",
+    ] {
+        assert!(gui.contains(marker), "the GUI must carry {marker}");
+    }
+    // A sink that returns a link must not also open it: opening would take
+    // the user away from the status line that says where the report went.
+    assert!(
+        gui.contains("crash_report_open_browser"),
+        "the delivered link and the prefilled composer must not be conflated"
+    );
+
+    let logging = read("rivulet-gui/src/logging.rs");
+    assert!(
+        logging.contains("pub fn crash_record_directory()"),
+        "the record directory must be one named place, not a path spelled twice"
+    );
+    assert!(
+        !logging.contains("crash_record_directory()")
+            || !read("rivulet-gui/src/app.rs").contains("join(\"crashes\")"),
+        "the record directory must not be spelled out again in the GUI"
+    );
+
+    // Every new string exists in both locales.
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for key in [
+        "help_menu",
+        "crash_report_menu",
+        "crash_upload_previous",
+        "crash_upload_none",
+        "crash_upload_ready",
+        "crash_upload_failed",
+        "crash_upload_local",
+    ] {
+        assert_eq!(
+            i18n.matches(&format!("\"{key}\"")).count(),
+            2,
+            "{key} must exist in both the English and the German locale"
+        );
+    }
+
+    // The docs must keep stating the two facts a user relies on: the crash
+    // survives to the next launch, and nothing is transmitted.
+    let logging_doc = read("docs/logging.md");
+    assert!(
+        logging_doc.contains("Upload previous crash report")
+            && logging_doc.contains("Crash reports from the menu bar"),
+        "docs/logging.md must document the menu item next to the Settings button"
+    );
+    assert!(
+        logging_doc.contains("no** upload destination wired up"),
+        "docs/logging.md must state that no upload destination ships"
+    );
+    assert!(
+        read("README.md").contains("Upload previous crash report"),
+        "the README must document the menu item"
+    );
+    assert!(
+        !read("README.md").contains("Rivulet sends crash reports automatically"),
+        "the README must not claim automatic reporting"
+    );
+}

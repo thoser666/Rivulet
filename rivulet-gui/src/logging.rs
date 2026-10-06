@@ -31,6 +31,20 @@ impl LogConfig {
     }
 }
 
+/// Directory the crash records live in.
+///
+/// Deliberately next to, but not inside, the log directory: a crash record
+/// is a one-line marker the panic hook writes synchronously while the
+/// process is dying, not a log stream. Sharing the directory would let the
+/// retention pass delete an unreported crash, because a crash can happen on
+/// a day whose log was never written at all.
+pub fn crash_record_directory() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("Rivulet")
+        .join("crashes")
+}
+
 pub fn log_path(directory: &Path, date: NaiveDate) -> PathBuf {
     directory.join(format!("{LOG_PREFIX}{}.log", date.format("%Y-%m-%d")))
 }
@@ -154,6 +168,22 @@ mod tests {
         assert!(marker.contains("RIVULET CRASH"));
         assert!(marker.contains("context: startup"));
         assert!(marker.contains("error: pipeline failed"));
+    }
+
+    /// A crash record must not sit inside the log directory: the retention
+    /// pass deletes by age, and a crash can happen on a day whose log was
+    /// never written at all, so sharing the directory would silently drop
+    /// exactly the report the user has not sent yet.
+    #[test]
+    fn crash_records_are_kept_out_of_the_rotating_log_directory() {
+        let records = crash_record_directory();
+        let logs = LogConfig::default_directory();
+        assert!(records.ends_with("crashes"), "{records:?}");
+        assert_ne!(records, logs);
+        assert!(
+            !records.starts_with(&logs),
+            "the retention pass must not be able to reach a crash record: {records:?}"
+        );
     }
 
     #[test]

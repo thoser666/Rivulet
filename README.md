@@ -738,7 +738,18 @@ redaction is counted in the report header, so you can see what was removed.
 **Rivulet itself transmits nothing** — there is no token and no sender, and
 what leaves the machine is only what you paste. See
 [docs/logging.md](docs/logging.md) for the manual procedure that remains the
-fallback. Windows packages
+fallback.
+
+**Help → Crash reports → *Upload previous crash report*** covers the case the
+Settings button cannot: a panic. The release build aborts on panic, so there
+is no window in which anything could be sent — the panic hook writes a small
+record to `Rivulet/crashes/` instead, and the **next** launch offers it from
+that menu entry (greyed out when the last session was clean). The record goes
+through the same redaction, is delivered the same way, and is deleted once
+you have dealt with it. This build has **no** upload destination wired up, so
+the menu item currently behaves exactly like the Settings button; the
+`CrashReportSink` trait is the seam a reviewed transport would use later.
+Windows packages
 also include a dependency-free launcher that records pre-Rust failures and can
 opt in to WER crash dumps with `RIVULET_ENABLE_CRASH_DUMPS=1`.
 

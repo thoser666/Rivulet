@@ -1,5 +1,35 @@
 ## [Unreleased]
 
+- feat(diagnostics): **Crashreport wie in OBS — *Help → Crash reports → Upload
+  previous crash report* — ohne Token und ohne Auto-Filing.** Der
+  Settings-Knopf aus #299 half nur bei *abgefangenen* Fehlern: bei einem
+  Panic ist die App tot, bevor irgendetwas kopiert werden kann. Ein Upload im
+  Moment des Absturzes ist hier aber **strukturell** unmoeglich — das
+  Release-Profil ist `panic = "abort"`, der Hook laeuft noch, aber der
+  Prozess ist weg, sobald er zurueckkehrt. Die Kette ist deshalb bewusst
+  geteilt:
+  - Der Panic-Hook (erstes Statement in `main()`) schreibt **synchron** einen
+    Record nach `Rivulet/crashes/` — Panic-Stelle, Nachricht, Zeitstempel —
+    und rotiert auf die neuesten fuenf, damit eine Crash-Schleife die Platte
+    nicht fuellt. Die Records liegen bewusst neben `logs/`, damit die
+    Log-Retention einen noch nicht gemeldeten Absturz nicht loeschen kann.
+  - Der naechste Start liest sie beim Start und aktiviert den Menuepunkt; ist
+    nichts da, ist er ausgegraut und sagt das.
+  - Ein Klick haengt den Record als `RIVULET CRASH`-Block an das Log, geht
+    damit durch dieselbe Redaktion wie alles andere und wird danach geloescht
+    — ein erledigter Absturz wird nicht noch einmal angeboten.
+  - **Ausgeliefert wird kein Upload-Ziel.** `CrashReportSink` ist die Naht,
+    die ein spaeter gepruefter Transport benutzt (nach dem Telemetrie-Sink-
+    Muster, getestet, von niemandem verdrahtet). Ohne Sink landet der
+    redigierte Report wie bisher in der Zwischenablage plus vorbereitetem
+    Issue; mit Sink liefert dessen URL, die kopiert statt geoeffnet wird, und
+    ein fehlgeschlagener Upload faellt auf den manuellen Weg zurueck, statt
+    einen Upload zu behaupten, der nicht stattgefunden hat.
+  Tests: 16 in `crash_record.rs` (Persistenz, Rotation, Fingerprint,
+  Redaktion, Hook, Sink), 5 GUI-Tests fuer Menuepfad, Sink, Fallback und
+  Nicht-Persistenz, dazu ein CI-Guard, der einen verdrahteten Sink im
+  ausgelieferten Build verhindert. Siehe [docs/logging.md](docs/logging.md).
+
 - docs(m8): **M8 „Embeddable Engine & API" eroeffnet — sechs
   Workstream-Issues, und ein ehrlicher Befund zum Ist-Zustand statt eines
   Etiketts allein.** Das Meilenstein existierte auf GitHub, hatte aber
