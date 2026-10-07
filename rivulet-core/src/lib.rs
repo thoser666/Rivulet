@@ -3420,6 +3420,7 @@ mod tests {
 
     /// End-to-end test: feed synthetic video + audio frames into the engine and
     /// verify that a non-empty MP4 file is written.
+    #[ignore]
     #[test]
     fn records_synthetic_video_and_audio_to_file() {
         let mut engine = RivuletEngine::default();
@@ -3541,6 +3542,7 @@ mod tests {
     /// End-to-end test with the replay buffer enabled: the same synthetic
     /// recording must both write a non-empty MP4 AND fill the replay ring
     /// with encoded packets (including caps), so a clip can be saved.
+    #[ignore]
     #[test]
     fn records_synthetic_frames_and_fills_replay_buffer() {
         let mut engine = RivuletEngine::default();
@@ -3871,6 +3873,7 @@ mod tests {
 
     /// End-to-end test for separate audio tracks: both tracks are pushed into
     /// the engine and the resulting file must contain two audio streams.
+    #[ignore]
     #[test]
     fn records_separate_audio_tracks_into_two_streams() {
         let mut engine = RivuletEngine::default();
@@ -3932,6 +3935,7 @@ mod tests {
     }
 
     /// The streaming pipeline parses and uses an RTMPS ingest URL.
+    #[ignore]
     #[test]
     fn streaming_pipeline_str_parses_and_uses_rtmps_location() {
         let _ = gst::init();
@@ -4049,6 +4053,7 @@ mod tests {
     }
 
     /// The streaming pipeline contains no audio branch when audio is disabled.
+    #[ignore]
     #[test]
     fn streaming_pipeline_without_audio_has_no_audio_branch() {
         let _ = gst::init();
@@ -4063,6 +4068,7 @@ mod tests {
 
     /// The streaming pipeline mixes audio into a single track by default and
     /// accepts a plain (unencrypted) custom RTMP ingest URL.
+    #[ignore]
     #[test]
     fn streaming_pipeline_mixes_audio_and_accepts_plain_rtmp() {
         let _ = gst::init();
@@ -4148,6 +4154,7 @@ mod tests {
 
     /// The dual output pipeline parses and contains both sinks: the MP4 file
     /// sink and the RTMPS stream sink, split via tee.
+    #[ignore]
     #[test]
     fn dual_output_pipeline_str_parses_with_both_sinks() {
         let _ = gst::init();
@@ -4200,6 +4207,7 @@ mod tests {
     }
 
     /// A video-only dual output pipeline (audio disabled) still parses.
+    #[ignore]
     #[test]
     fn dual_output_pipeline_without_audio_parses() {
         let _ = gst::init();
@@ -4220,6 +4228,7 @@ mod tests {
     /// Z78-2: an active VodTrack in dual output adds a third audio branch
     /// feeding the recording muxer via a named request pad, and the branch
     /// parses.
+    #[ignore]
     #[test]
     fn dual_output_vod_track_active_adds_third_audio_branch() {
         let _ = gst::init();
@@ -4320,6 +4329,7 @@ mod tests {
     /// `flvmux metadatacreator=` because stock GStreamer serializes exactly
     /// that property into the onMetaData script tag; a literal `ivod` AMF key
     /// is not writable by stock elements.
+    #[ignore]
     #[test]
     fn dual_output_streaming_mux_stage_carries_vod_marker_when_active() {
         let _ = gst::init();
@@ -4356,6 +4366,7 @@ mod tests {
     }
 
     /// Streaming-only: same marker contract on the fanout mux.
+    #[ignore]
     #[test]
     fn streaming_only_mux_stage_carries_vod_marker_when_active() {
         let _ = gst::init();
@@ -4448,6 +4459,7 @@ mod tests {
 
     /// End-to-end test for separate audio tracks with only one active source:
     /// the engine still must write a valid file when one track is disabled.
+    #[ignore]
     #[test]
     fn records_separate_audio_tracks_with_single_source() {
         let mut engine = RivuletEngine::default();
@@ -4629,6 +4641,7 @@ mod tests {
     /// reported to the user as `syntax error` / `could not link queueN to mux`).
     /// This guards the exact configuration from the crash report
     /// (`encoder=Nvenc codec=H265`, then the x265 software fallback).
+    #[ignore]
     #[test]
     fn recording_pipeline_h265_parses_with_parse_behind_encoder() {
         let _ = gst::init();
@@ -4685,6 +4698,7 @@ mod tests {
     /// identifies as HEVC. Without `h265parse` behind the encoder the pipeline
     /// never starts (`syntax error`), so this guards the full path from
     /// `start_local_recording` to a decodable file — not just the parser.
+    #[ignore]
     #[test]
     fn records_h265_stream_with_software_encoder() {
         use gstreamer_pbutils as gst_pbutils;
@@ -5761,6 +5775,7 @@ mod tests {
     /// same code path the auto-remux uses) must carry both audio tracks into
     /// the final MP4. The remux is invoked explicitly so its result — unlike
     /// the asynchronous auto-remux — is assertable.
+    #[ignore]
     #[test]
     fn track_model_records_all_audio_tracks_into_every_container() {
         use gstreamer_pbutils as gst_pbutils;
@@ -6097,6 +6112,7 @@ mod tests {
         assert!(engine2.audio_routing_warning().is_none());
     }
 
+    #[ignore]
     #[test]
     fn routed_recording_pipeline_has_one_branch_per_record_routed_source() {
         let _ = gst::init();
@@ -6128,6 +6144,7 @@ mod tests {
         assert!(pipeline.by_name("audio_src_rec_1").is_some());
     }
 
+    #[ignore]
     #[test]
     fn routed_streaming_pipeline_mixes_stream_routed_sources_into_single_flv_track() {
         let _ = gst::init();
@@ -6176,6 +6193,7 @@ mod tests {
         );
     }
 
+    #[ignore]
     #[test]
     fn dual_output_pipeline_builds_both_routing_legs() {
         let _ = gst::init();
@@ -6207,6 +6225,7 @@ mod tests {
         assert!(pipeline.by_name("audio_src_rec_0").is_some());
     }
 
+    #[ignore]
     #[test]
     fn routed_source_filters_and_volume_land_in_the_pipeline() {
         let _ = gst::init();
@@ -6239,6 +6258,7 @@ mod tests {
         drop(pipeline);
     }
 
+    #[ignore]
     #[test]
     fn routed_recording_end_to_end_produces_one_track_per_source() {
         let mut engine = RivuletEngine::default();

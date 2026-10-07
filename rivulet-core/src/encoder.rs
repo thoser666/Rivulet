@@ -1,5 +1,4 @@
 //! Video encoder abstraction for Rivulet.
-//!
 //! Rivulet supports hardware-accelerated H.264/H.265 encoding (NVIDIA NVENC,
 //! Intel QuickSync, AMD AMF) and VP9 software encoding, with automatic
 //! detection of the best available encoder and a software fallback. Encoders
@@ -85,6 +84,9 @@ impl Default for RateControl {
 }
 
 /// Supported video codecs.
+///
+/// H.264 is required for RTMP/FLV streaming; H.265 and VP9 are
+/// recording-only unless the streaming path is adapted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum VideoCodec {
     /// H.264 / AVC — universal compatibility, required for RTMP/FLV streaming.

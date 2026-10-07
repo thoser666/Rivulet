@@ -1,3 +1,7 @@
+//! Local recording lifecycle: start/stop, dual output, frame pushing, stop finalization.
+//!
+//! #[allow(missing_docs)]
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;

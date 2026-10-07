@@ -23,3 +23,8 @@ mod tests {
         );
     }
 }
+
+//! Crate-level configuration bundles (engine, recording, stream defaults).
+//! 
+//! #[allow(missing_docs)]
+

@@ -20,6 +20,12 @@ use std::time::Instant;
 /// Reported in the machine-readable run report (spec: § Nondeterminism
 /// inventory — "Engine clock … deterministic under the virtual clock").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Clock policy used by the engine.
+///
+/// Determines how the engine derives wall-clock time from its virtual/
+/// engine clock (issue #283). See [`EngineClock::clock_mode`] for the
+/// selected mode and [`VirtualClock`] / [`SystemClock`] for the two
+/// underlying clock types.
 pub enum ClockMode {
     /// Wall-clock pacing (engine default; PTS = push time via
     /// `do-timestamp`).
@@ -64,6 +70,11 @@ pub trait EngineClock: Send + Sync {
 /// that into engine run time by subtracting the session start reading, so
 /// epoch choice never leaks into PTS.
 #[derive(Debug)]
+/// Wall-clock backend backed by the system realtime clock.
+///
+/// Returns monotonically increasing time anchored at a timestamp read at
+/// construction, so gaps in the OS clock (NTP adjustments, suspend) are
+/// reflected as jumps in the reported time.
 pub struct SystemClock {
     epoch: Instant,
 }
@@ -108,6 +119,10 @@ impl EngineClock for SystemClock {
 /// time forward (saturating at `u64::MAX`), so the engine's non-decreasing
 /// PTS contract holds without extra bookkeeping.
 #[derive(Debug, Default, Clone)]
+/// Deterministic virtual clock controlled by `step_frames` / `hold`.
+///
+/// Used by the engine clock so that frame-accurate timing, preview seeks,
+/// and rendering tests stay reproducible regardless of wall-clock drift.
 pub struct VirtualClock {
     state: Arc<Mutex<u64>>,
 }
@@ -179,6 +194,10 @@ pub fn frame_interval_ns(fps: (u32, u32)) -> u64 {
 /// Shared clock handle the engine holds. Cloned around freely; the mode is
 /// captured with the value.
 #[derive(Clone)]
+/// Thread-safe handle to an [`EngineClock`] implementation.
+///
+/// Cheaply `Clone`able and `Send + Sync`; the engine hands one to each
+/// pipeline/worker that needs monotonic time without a mutable reference.
 pub struct SharedClock(Arc<dyn EngineClock>);
 
 impl SharedClock {
