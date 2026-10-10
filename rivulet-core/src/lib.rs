@@ -2852,13 +2852,14 @@ impl RivuletEngine {
     ///
     /// When stream settings are configured as well ([`RivuletEngine::set_stream_settings`]),
     /// the engine records and streams simultaneously (dual output).
-    pub fn start_local_recording(&mut self, path: PathBuf) {
+    pub fn start_local_recording(&mut self, path: impl Into<std::path::PathBuf>) {
         if self.is_recording {
             return;
         }
         if let Some(warning) = self.audio_routing_warning() {
             tracing::warn!("{warning}");
         }
+        let path = path.into();
         tracing::info!(path = ?path, "Recording prepared");
         self.output_path = Some(path);
         self.is_recording = true;

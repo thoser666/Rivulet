@@ -381,7 +381,7 @@ Workstream issues:
 - [x] [#292](https://github.com/thoser666/Rivulet/issues/292) — stabilized public
   API (`missing_docs`, crate-style types, semver policy, deprecation path).
   Covers the first, fourth and part of the second criterion.
-- [#293](https://github.com/thoser666/Rivulet/issues/293) — API docs plus a
+- [x] [#293](https://github.com/thoser666/Rivulet/issues/293) — API docs plus a
   `rivulet-core/examples/` crate whose examples are **run**, not just built.
   Covers the example and the GUI-independence criterion.
 - [#294](https://github.com/thoser666/Rivulet/issues/294) — in-process capture

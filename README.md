@@ -443,7 +443,7 @@ must not be implied by beta parity.
 *Differentiation pillar #2: `rivulet-core` is a normal library, not a monolith with retrofitted API.*
 
 - [x] Stabilized public API for `rivulet-core` (semver 1.0, `#![warn(missing_docs)]`, crate-style types) — [#292](https://github.com/thoser666/Rivulet/issues/292)
-- [ ] Comprehensive API docs + examples (recording, streaming, dual output, encoder selection, frame streaming) — [#293](https://github.com/thoser666/Rivulet/issues/293)
+- [x] Comprehensive API docs + examples (recording, streaming, dual output, encoder selection, frame streaming) — [#293](https://github.com/thoser666/Rivulet/issues/293)
 - [ ] In-process capture API: embed a recording feature in any Rust app (audio/video capture, encoding, file/stream) — [#294](https://github.com/thoser666/Rivulet/issues/294)
 - [ ] Feature detection and runtime diagnostics as an API (`detect_available_encoders()`, encoder fallback) — [#295](https://github.com/thoser666/Rivulet/issues/295)
 - [ ] Abstraction of capture backends (xcap, PipeWire, Metal/WGC) behind stable traits — [#296](https://github.com/thoser666/Rivulet/issues/296)
