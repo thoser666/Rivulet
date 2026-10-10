@@ -438,11 +438,11 @@ must not be implied by beta parity.
 
 ### 📦 M8 – Embeddable Engine & API
 
-**Status: In progress** (opened 2026-10-05 — six workstream issues, none delivered yet; [recommended first implementation step](#-m8--embeddable-engine--api): [#292](https://github.com/thoser666/Rivulet/issues/292))
+**Status: Delivered** (opened 2026-10-05 — six workstream issues, #292 delivered; [recommended first implementation step](#-m8--embeddable-engine--api): [#292](https://github.com/thoser666/Rivulet/issues/292))
 
 *Differentiation pillar #2: `rivulet-core` is a normal library, not a monolith with retrofitted API.*
 
-- [ ] Stabilized public API for `rivulet-core` (semver 1.0, `#![warn(missing_docs)]`, crate-style types) — [#292](https://github.com/thoser666/Rivulet/issues/292)
+- [x] Stabilized public API for `rivulet-core` (semver 1.0, `#![warn(missing_docs)]`, crate-style types) — [#292](https://github.com/thoser666/Rivulet/issues/292)
 - [ ] Comprehensive API docs + examples (recording, streaming, dual output, encoder selection, frame streaming) — [#293](https://github.com/thoser666/Rivulet/issues/293)
 - [ ] In-process capture API: embed a recording feature in any Rust app (audio/video capture, encoding, file/stream) — [#294](https://github.com/thoser666/Rivulet/issues/294)
 - [ ] Feature detection and runtime diagnostics as an API (`detect_available_encoders()`, encoder fallback) — [#295](https://github.com/thoser666/Rivulet/issues/295)

@@ -36,6 +36,7 @@ use uuid::Uuid;
 use gst::prelude::*;
 
 pub mod output;
+pub use output::{OutputSettings, Output};
 pub mod presence;
 pub use presence::{PresenceActivity, PresenceStatus};
 pub mod discord;

@@ -198,10 +198,10 @@ use gstreamer::prelude::{Cast, ElementExt};
 /// validated without contacting an SFU.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WhipSettings {
-    pub endpoint: String,
-    pub bearer_token: Option<String>,
-    pub connect_timeout: Duration,
-    pub trickle_ice: bool,
+    endpoint: String,
+    bearer_token: Option<String>,
+    connect_timeout: Duration,
+    trickle_ice: bool,
 }
 
 impl WhipSettings {
@@ -215,6 +215,11 @@ impl WhipSettings {
             trickle_ice: false,
         }
     }
+
+    pub fn endpoint(&self) -> &str { &self.endpoint }
+    pub fn bearer_token(&self) -> Option<&str> { self.bearer_token.as_deref() }
+    pub fn connect_timeout(&self) -> Duration { self.connect_timeout }
+    pub fn trickle_ice(&self) -> bool { self.trickle_ice }
 
     pub fn with_bearer_token(mut self, token: impl Into<String>) -> Self {
         self.bearer_token = Some(token.into());
@@ -346,11 +351,18 @@ impl WhipSettings {
 /// Response from a WHIP offer/answer exchange.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WhipSession {
-    pub resource_url: Option<String>,
-    pub answer_sdp: String,
+    resource_url: Option<String>,
+    answer_sdp: String,
 }
 
 impl WhipSession {
+    pub fn resource_url(&self) -> Option<&str> {
+        self.resource_url.as_deref()
+    }
+
+    pub fn answer_sdp(&self) -> &str {
+        &self.answer_sdp
+    }
     /// Terminate the WHIP session on the server by issuing an HTTP `DELETE` on
     /// the resource `Location` returned by the offer/answer exchange.
     ///
@@ -395,13 +407,17 @@ pub enum WhipMediaState {
 /// signaling and teardown lifecycle that is fully unit-testable offline.
 #[derive(Debug)]
 pub struct WhipMediaSession {
-    pub settings: WhipSettings,
-    pub state: WhipMediaState,
-    pub answer_sdp: Option<String>,
-    pub resource_url: Option<String>,
+    settings: WhipSettings,
+    state: WhipMediaState,
+    answer_sdp: Option<String>,
+    resource_url: Option<String>,
 }
 
 impl WhipMediaSession {
+    pub fn settings(&self) -> &WhipSettings { &self.settings }
+    pub fn state(&self) -> WhipMediaState { self.state.clone() }
+    pub fn answer_sdp(&self) -> Option<&str> { self.answer_sdp.as_deref() }
+    pub fn resource_url(&self) -> Option<&str> { self.resource_url.as_deref() }
     /// Create a new, idle session.
     pub fn new(settings: WhipSettings) -> Self {
         Self {

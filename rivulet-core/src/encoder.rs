@@ -61,16 +61,26 @@ impl RateControlMode {
 /// quality/cap/options that are backend-specific.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RateControl {
-    /// The rate-control strategy.
-    pub mode: RateControlMode,
-    /// Upper bound for VBR/CQ-VBR in kbit/s. `0` means "backend default".
-    pub max_bitrate_kbps: u32,
-    /// Quality level backend-dependent. For x264/NVENC this is 0..=51 where a
-    /// lower value is higher quality (QP / constant-quality index).
-    pub quality: i32,
-    /// Free-form extra properties appended verbatim to the encoder fragment
-    /// (e.g. `key-int-max=250 bframes=3`). Empty by default.
-    pub custom_options: String,
+    mode: RateControlMode,
+    max_bitrate_kbps: u32,
+    quality: i32,
+    custom_options: String,
+}
+
+impl RateControl {
+    pub fn mode(&self) -> RateControlMode { self.mode }
+    pub fn max_bitrate_kbps(&self) -> u32 { self.max_bitrate_kbps }
+    pub fn quality(&self) -> i32 { self.quality }
+    pub fn custom_options(&self) -> &str { &self.custom_options }
+
+    pub fn new(mode: RateControlMode, max_bitrate_kbps: u32, quality: i32, custom_options: impl Into<String>) -> Self {
+        Self {
+            mode,
+            max_bitrate_kbps,
+            quality,
+            custom_options: custom_options.into(),
+        }
+    }
 }
 
 impl Default for RateControl {

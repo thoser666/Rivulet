@@ -5,11 +5,29 @@ use std::fmt::Debug;
 /// Output settings for recording/streaming
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputSettings {
-    pub width: u32,
-    pub height: u32,
-    pub fps: u32,
-    pub bitrate: u32,
-    pub encoder: String,
+    width: u32,
+    height: u32,
+    fps: u32,
+    bitrate: u32,
+    encoder: String,
+}
+
+impl OutputSettings {
+    pub fn width(&self) -> u32 { self.width }
+    pub fn height(&self) -> u32 { self.height }
+    pub fn fps(&self) -> u32 { self.fps }
+    pub fn bitrate(&self) -> u32 { self.bitrate }
+    pub fn encoder(&self) -> &str { &self.encoder }
+
+    pub fn new(width: u32, height: u32, fps: u32, bitrate: u32, encoder: impl Into<String>) -> Self {
+        Self {
+            width,
+            height,
+            fps,
+            bitrate,
+            encoder: encoder.into(),
+        }
+    }
 }
 
 impl Default for OutputSettings {
@@ -36,8 +54,8 @@ pub trait Output: Debug + Send + Sync {
 /// File recording output
 #[derive(Debug)]
 pub struct FileOutput {
-    pub file_path: String,
-    pub settings: OutputSettings,
+    file_path: String,
+    settings: OutputSettings,
     active: std::sync::atomic::AtomicBool,
 }
 
@@ -48,6 +66,14 @@ impl FileOutput {
             settings,
             active: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    pub fn file_path(&self) -> &str {
+        &self.file_path
+    }
+
+    pub fn settings(&self) -> &OutputSettings {
+        &self.settings
     }
 }
 
