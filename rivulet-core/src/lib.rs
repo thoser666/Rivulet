@@ -1,3 +1,25 @@
+//! # Rivulet Core
+//!
+//! `rivulet-core` is the embeddable recording and streaming engine for Rivulet.
+//! It provides a high-level interface for capturing video and audio, applying effects,
+//! and outputting to local files or remote streaming targets.
+//!
+//! ## Threading Model
+//!
+//! The engine is designed to be used from a single "Pipeline Owner" thread. While
+//! many of its internal components are `Send` and `Sync`, the core pipeline mutation
+//! methods (like `service_streaming` and `poll_stream_bus`) must be called from the
+//! same thread that owns the GStreamer pipeline context.
+//!
+//! ## Lifecycle
+//!
+//! 1. Create an engine instance via [`RivuletEngine::new`].
+//! 2. Configure output settings (e.g., [`RivuletEngine::set_stream_settings`]).
+//! 3. Start a session via [`RivuletEngine::start_local_recording`] or [`RivuletEngine::start_streaming`].
+//! 4. Periodically call [`RivuletEngine::service_streaming`] to handle reconnects and ABR.
+//! 5. Stop the session via [`RivuletEngine::stop_recording`].
+//!
+//! #![warn(missing_docs)]
 // In rivulet-core/src/lib.rs
 
 use gstreamer as gst;
@@ -265,6 +287,10 @@ static GSTREAMER_INIT: Lazy<()> = Lazy::new(|| {
 pub const AUDIO_SAMPLE_RATE: u32 = 48_000;
 pub const AUDIO_CHANNELS: u16 = 2;
 
+/// The primary recording and streaming engine.
+///
+/// `RivuletEngine` manages the GStreamer pipeline, handles audio/video routing,
+/// and provides the main interface for starting and stopping sessions.
 pub struct RivuletEngine {
     pipeline: Option<gst::Pipeline>,
     appsrc: Option<gst_app::AppSrc>,
@@ -503,6 +529,7 @@ pub fn redact_pipeline_for_log(pipeline: &str) -> String {
 }
 
 impl RivuletEngine {
+    /// Create a new engine instance with default settings.
     pub fn new() -> Self {
         tracing::info!("GStreamer ready.");
         Self::default()
@@ -522,14 +549,14 @@ impl RivuletEngine {
     /// Take (and clear) the most recent engine error, if any.
     ///
     /// Returns `None` when the engine has been operating normally since the
-    /// last call. Errors are reported at most once per consumer.
+    /// last call. Errors are reported as strings for GUI display.
     pub fn take_error(&mut self) -> Option<String> {
         self.last_error.take()
     }
 
     /// Configure the RTMP/RTMPS stream output. When set, the engine streams to
     /// the given ingest URL. If a local recording is started at the same time
-    /// (via [`RivuletEngine::start_local_recording`]) the engine runs in dual
+    /// (via [`RivuletEngine::start_local_recording]) the engine runs in dual
     /// output mode and records and streams simultaneously.
     ///
     /// Must be called before recording starts.
@@ -594,6 +621,7 @@ impl RivuletEngine {
         self.ndi_output.as_ref()
     }
 
+    /// Return the target states of the active streaming session.
     pub fn stream_target_states(&self) -> &[StreamTargetState] {
         &self.stream_target_states
     }
@@ -850,6 +878,7 @@ impl RivuletEngine {
         }
     }
 
+    /// Return targets currently in a backoff/retry state.
     pub fn retryable_stream_targets(&self) -> Vec<&str> {
         self.reconnect_supervisor
             .as_ref()

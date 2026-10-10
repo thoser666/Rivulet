@@ -1411,29 +1411,43 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
         std::thread::spawn(move || {
-            // Connection 1: the initial live-chat page GET.
-            let (mut stream, _) = listener.accept().expect("accept page");
-            let _ = drain_request(&mut stream);
-            let page = r#"<script>var ytInitialData={"continuation":"TOKEN_1"};</script>"#;
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                page.len(),
-                page
-            );
-            let _ = stream.write_all(response.as_bytes());
+            use std::io::Read;
+            loop {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(s) => s,
+                    Err(_) => break,
+                };
+                let mut buf = [0u8; 4096];
+                let n = match stream.read(&mut buf) {
+                    Ok(n) => n,
+                    Err(_) => continue,
+                };
+                let req = String::from_utf8_lossy(&buf[..n]);
+                if req.contains("get_live_chat") {
+                    let _ = drain_request(&mut stream);
+                    let body = payload_fixture();
+                    let response = format!("HTTP/1.1 200 OK
 
-            // Connection 2: the get_live_chat poll POST.
-            let (mut stream2, _) = listener.accept().expect("accept poll");
-            let _ = drain_request(&mut stream2);
-            let body = payload_fixture();
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream2.write_all(response.as_bytes());
+Content-Type: application/json
+Content-Length: {}
+Connection: close
+
+{}", body.len(), body);
+                    let _ = stream.write_all(response.as_bytes());
+                } else {
+                    let _ = drain_request(&mut stream);
+                    let page = r#"<script>var ytInitialData={"continuation":"TOKEN_1"};</script>"#;
+                    let response = format!("HTTP/1.1 200 OK
+
+Content-Type: text/html
+Content-Length: {}
+Connection: close
+
+{}", page.len(), page);
+                    let _ = stream.write_all(response.as_bytes());
+                }
+            }
         });
-
         let cfg = YouTubeChatConfig {
             page_endpoint: format!("http://{addr}/live_chat?is_popout=1&v="),
             poll_endpoint: format!("http://{addr}/get_live_chat"),
