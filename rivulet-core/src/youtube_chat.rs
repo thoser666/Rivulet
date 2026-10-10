@@ -1426,24 +1426,32 @@ mod tests {
                 if req.contains("get_live_chat") {
                     let _ = drain_request(&mut stream);
                     let body = payload_fixture();
-                    let response = format!("HTTP/1.1 200 OK
+                    let response = format!(
+                        "HTTP/1.1 200 OK
 
 Content-Type: application/json
 Content-Length: {}
 Connection: close
 
-{}", body.len(), body);
+{}",
+                        body.len(),
+                        body
+                    );
                     let _ = stream.write_all(response.as_bytes());
                 } else {
                     let _ = drain_request(&mut stream);
                     let page = r#"<script>var ytInitialData={"continuation":"TOKEN_1"};</script>"#;
-                    let response = format!("HTTP/1.1 200 OK
+                    let response = format!(
+                        "HTTP/1.1 200 OK
 
 Content-Type: text/html
 Content-Length: {}
 Connection: close
 
-{}", page.len(), page);
+{}",
+                        page.len(),
+                        page
+                    );
                     let _ = stream.write_all(response.as_bytes());
                 }
             }
