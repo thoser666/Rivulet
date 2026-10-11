@@ -6055,12 +6055,13 @@ fn crash_report_stays_local_and_redacted() {
 
 #[test]
 fn m8_opening_is_pinned_to_the_six_workstream_issues() {
-    // Opening a milestone is exactly the moment a documentation lie becomes
-    // possible: "In progress" on a milestone where nothing is delivered, with
-    // no issues, is worse than "Planned", because a reader concludes someone
-    // is working on it. M7 had the mirror failure — three documents claiming
-    // the opposite of reality. So the opening state is pinned: the status
-    // must name the issues, and the milestone must not claim progress it
+    // Documentation lies cluster at milestone boundaries: at opening, "In
+    // progress" where nothing is delivered is worse than "Planned", because a
+    // reader concludes someone is working on it; at delivery, "Delivered"
+    // where four workstreams are still open is worse than either. M7 had the
+    // mirror failure — three documents claiming the opposite of reality. So
+    // the milestone state is pinned as it moves: the status must name what is
+    // actually delivered, and the milestone must never claim progress it
     // cannot show.
     let readme = read("README.md");
     let gates = read("docs/milestone-quality-gates.md");
@@ -6089,7 +6090,9 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
     );
 
     // Both surfaces say "in progress", never "planned" — and never "complete"
-    // either, because no workstream has been delivered.
+    // or "delivered" either, because four workstreams (#294-#297) are still
+    // open. #292 and #293 ARE delivered, so both surfaces must name them as
+    // such: an unmentioned delivery is the same drift in the other direction.
     for (label, section) in [
         ("README M8 section", readme_m8_section),
         ("M8 quality gate", gates_m8_section),
@@ -6099,12 +6102,20 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
             "the {label} must state that M8 is in progress"
         );
         assert!(
+            section.contains("#292 and #293 delivered"),
+            "the {label} must name the two delivered workstreams"
+        );
+        assert!(
             !section.contains("**Status: Planned"),
             "the {label} must not still claim Planned while #292-#297 are open"
         );
         assert!(
             !section.contains("Complete") && !section.contains("**Status: Complete"),
-            "the {label} must not claim Complete while no workstream is delivered"
+            "the {label} must not claim Complete while four workstreams are open"
+        );
+        assert!(
+            !section.contains("**Status: Delivered"),
+            "the {label} must not claim the milestone Delivered while #294-#297 are open"
         );
     }
 
@@ -6136,12 +6147,38 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
     }
     // The roadmap checkboxes and the issues are the same six items, so both
     // lists have to stay complete — a missing checkbox or a missing issue is
-    // the same silent drift the M7 guard caught.
+    // the same silent drift the M7 guard caught. Exactly the two delivered
+    // workstreams may be checked: a premature "- [x]" on #294-#297, or a
+    // stale unchecked #292/#293, fails here.
+    assert_eq!(
+        readme_m8_section.matches("- [x]").count(),
+        2,
+        "the README M8 section must check exactly the two delivered workstreams"
+    );
     assert_eq!(
         readme_m8_section.matches("- [ ]").count(),
-        6,
-        "the README M8 section must carry one open checkbox per workstream issue"
+        4,
+        "the README M8 section must leave the four open workstreams unchecked"
     );
+    for (issue, expected) in [
+        ("#292", "- [x]"),
+        ("#293", "- [x]"),
+        ("#294", "- [ ]"),
+        ("#295", "- [ ]"),
+        ("#296", "- [ ]"),
+        ("#297", "- [ ]"),
+    ] {
+        let line = readme_m8_section
+            .lines()
+            .find(|line| line.starts_with("- [") && line.contains(issue))
+            .unwrap_or_else(|| {
+                panic!("the README M8 section must still carry a checkbox for {issue}")
+            });
+        assert!(
+            line.starts_with(expected),
+            "the README M8 checkbox for {issue} must be {expected}, got: {line}"
+        );
+    }
     assert_eq!(
         gates_m8_section
             .matches("https://github.com/thoser666/Rivulet/issues/29")

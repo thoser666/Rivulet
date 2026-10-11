@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+- test(m8): **Vertrags-, Wrapper- und Dokumentationsarbeit zum
+  Auslieferungsstand von #292/#293.** Sechs API-Beispiele und ein
+  GUI-Konstruktor kompilieren wieder gegen die stabilisierte API
+  (`RateControl::new` statt privater Felder, `RecordingPreset`-Varianten,
+  `Result`-Rueckgaben), `cargo clippy --workspace --all-targets --
+  -D warnings` bleibt gruen. Neue Regressionstests: `api_stability.rs`
+  pinnt die oeffentliche API (#292), `run_cmd.rs` prueft den auditebaren
+  Wrapper `scripts/run.cmd` (Ziel-Accept/Reject, Befehlszeile in der
+  Audit-Zeile, kein Durchreichen benutzter Umgebungsvariablen in den
+  Kindprozess) und `check_sanity.py` wird als Fire-and-Forget-Wrapper
+  getestet; `*.cmd` ist in `.gitattributes` auf `eol=crlf` fixiert, weil
+  `cmd.exe` LF-only-Batchdateien unzuverlaessig parst. README und
+  Quality-Gate nennen den M8-Ist-Zustand ehrlich (#292 und #293
+  geliefert, #294-#297 offen) — der ci_pinning-Guard pinnt genau diesen
+  Stand und laesst weder „Complete“ noch „Delivered“, solange Workstreams
+  offen bleiben. Siehe [docs/m8-api-contract.md](docs/m8-api-contract.md)
+  und [docs/regression-testing.md](docs/regression-testing.md).
+
 - feat(diagnostics): **Crashreport wie in OBS — *Help → Crash reports → Upload
   previous crash report* — ohne Token und ohne Auto-Filing.** Der
   Settings-Knopf aus #299 half nur bei *abgefangenen* Fehlern: bei einem
@@ -77,13 +95,16 @@
     ueber die API. Genau das ist die Luecke, die M8 schliesst.
   **Neu gepinnt in `ci_pinning`:**
   `m8_opening_is_pinned_to_the_six_workstream_issues` haelt den
-  Oeffnungszustand fest — beide Flaechen muessen „In progress" sagen und
-  duerfen **weder** „Planned" **noch** „Complete" behaupten, alle sechs
-  Issues muessen in README **und** Gate genannt sein, die Checkbox-Liste
-  muss zur Issue-Liste passen (6 = 6), und der empfohlene erste Schritt muss
-  #292 bleiben. Dazu die negativen Seiten: keine unbelegte
-  „gate passed"-Aussage neben sechs offenen Issues, und #297 traegt seine
-  Abhaengigkeit von #292 sichtbar mit sich. Neun Negativproben feuern alle.
+  Ist-Zustand fest — beide Flaechen muessen „In progress" sagen und
+  duerfen **weder** „Planned" **noch** „Complete" behaupten; dasselbe gilt fuer
+  „Delivered“, solange Workstreams offen bleiben. Alle sechs Issues muessen
+  in README **und** Gate genannt sein, und die Checkbox-Liste muss zur
+  Issue-Liste passen (6 = 6): #292 und #293 sind abgehakt (geliefert),
+  #294-#297 bleiben offen — ein vorzeitiges [x] bei den offenen
+  Workstreams oder ein zurueckgesetztes [ ] bei #292 schlaegt hier fehl.
+  Der empfohlene erste Schritt bleibt #292. Dazu die negativen Seiten: keine unbelegte
+  „gate passed"-Aussage neben offenen Issues, und #297 traegt seine
+  Abhaengigkeit von #292 sichtbar mit sich. Alle Negativproben feuern.
   Das Gate bleibt ausdruecklich **offen** — kein Kriterium ist bisher als
   erfuellt ausgewiesen.
 - feat(diagnostics): **Crashreport als kopierfertiger Bugreport — Settings
