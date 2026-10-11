@@ -13,13 +13,29 @@ pub struct OutputSettings {
 }
 
 impl OutputSettings {
-    pub fn width(&self) -> u32 { self.width }
-    pub fn height(&self) -> u32 { self.height }
-    pub fn fps(&self) -> u32 { self.fps }
-    pub fn bitrate(&self) -> u32 { self.bitrate }
-    pub fn encoder(&self) -> &str { &self.encoder }
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+    pub fn fps(&self) -> u32 {
+        self.fps
+    }
+    pub fn bitrate(&self) -> u32 {
+        self.bitrate
+    }
+    pub fn encoder(&self) -> &str {
+        &self.encoder
+    }
 
-    pub fn new(width: u32, height: u32, fps: u32, bitrate: u32, encoder: impl Into<String>) -> Self {
+    pub fn new(
+        width: u32,
+        height: u32,
+        fps: u32,
+        bitrate: u32,
+        encoder: impl Into<String>,
+    ) -> Self {
         Self {
             width,
             height,

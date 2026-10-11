@@ -1,6 +1,6 @@
-use rivulet_core::{RivuletEngine, RecordingPreset};
-use std::time::Duration;
+use rivulet_core::{RecordingPreset, RivuletEngine};
 use std::thread;
+use std::time::Duration;
 
 fn main() {
     tracing_subscriber::fmt::init();
@@ -13,10 +13,10 @@ fn main() {
 
     // Start local recording
     engine.start_local_recording("test_recording.mp4");
-    
+
     println!("Recording started successfully. Recording for 5 seconds...");
     thread::sleep(Duration::from_secs(5));
-    
+
     println!("Stopping recording...");
     engine.stop_recording();
     println!("Recording stopped. File saved as test_recording.mp4");

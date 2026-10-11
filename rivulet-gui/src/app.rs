@@ -4954,12 +4954,14 @@ impl RivuletApp {
     /// free-form extra encoder options) to the engine before a recording or a
     /// record+stream session starts.
     fn apply_rate_control(&mut self) {
-        self.engine.set_rate_control(rivulet_core::RateControl {
-            mode: self.rate_mode,
-            max_bitrate_kbps: self.rate_max_kbps,
-            quality: self.rate_quality,
-            custom_options: self.encoder_extra_options.clone(),
-        });
+        // RateControl's fields are intentionally private (M8 API contract, see
+        // docs/m8-api-contract.md) — construct it through the stable `new()`.
+        self.engine.set_rate_control(rivulet_core::RateControl::new(
+            self.rate_mode,
+            self.rate_max_kbps,
+            self.rate_quality,
+            self.encoder_extra_options.clone(),
+        ));
     }
 
     /// Default base filename for a new recording, derived from the engine's

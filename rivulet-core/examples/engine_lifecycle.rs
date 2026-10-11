@@ -1,6 +1,6 @@
 use rivulet_core::RivuletEngine;
-use std::time::Duration;
 use std::thread;
+use std::time::Duration;
 
 fn main() {
     tracing_subscriber::fmt::init();
@@ -9,9 +9,16 @@ fn main() {
     let mut engine = RivuletEngine::new();
 
     // 1. Start
+    //
+    // `start_local_recording` reports failures asynchronously through the
+    // engine's error slot (stable API) rather than a return value.
     println!("Attempting to start recording...");
-    if let Err(e) = engine.start_local_recording("lifecycle_test.mp4") {
-        eprintln!("Start failed: {}. This may happen if GStreamer is not configured.", e);
+    engine.start_local_recording("lifecycle_test.mp4");
+    if let Some(e) = engine.take_error() {
+        eprintln!(
+            "Start failed: {}. This may happen if GStreamer is not configured.",
+            e
+        );
         return;
     }
     println!("Engine is now RECORDING.");

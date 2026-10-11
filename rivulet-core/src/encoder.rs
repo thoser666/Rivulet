@@ -68,12 +68,25 @@ pub struct RateControl {
 }
 
 impl RateControl {
-    pub fn mode(&self) -> RateControlMode { self.mode }
-    pub fn max_bitrate_kbps(&self) -> u32 { self.max_bitrate_kbps }
-    pub fn quality(&self) -> i32 { self.quality }
-    pub fn custom_options(&self) -> &str { &self.custom_options }
+    pub fn mode(&self) -> RateControlMode {
+        self.mode
+    }
+    pub fn max_bitrate_kbps(&self) -> u32 {
+        self.max_bitrate_kbps
+    }
+    pub fn quality(&self) -> i32 {
+        self.quality
+    }
+    pub fn custom_options(&self) -> &str {
+        &self.custom_options
+    }
 
-    pub fn new(mode: RateControlMode, max_bitrate_kbps: u32, quality: i32, custom_options: impl Into<String>) -> Self {
+    pub fn new(
+        mode: RateControlMode,
+        max_bitrate_kbps: u32,
+        quality: i32,
+        custom_options: impl Into<String>,
+    ) -> Self {
         Self {
             mode,
             max_bitrate_kbps,

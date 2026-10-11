@@ -1,6 +1,6 @@
 use rivulet_core::{RivuletEngine, StreamSettings};
-use std::time::Duration;
 use std::thread;
+use std::time::Duration;
 
 fn main() {
     tracing_subscriber::fmt::init();
@@ -8,26 +8,27 @@ fn main() {
     println!("Starting simple streaming example...");
     let mut engine = RivuletEngine::new();
 
-    // Configure stream settings (using a dummy URL for the example)
-    let settings = StreamSettings {
-        ingest_url: "rtmps://live.twitch.tv/app".to_string(),
-        stream_key: "dummy_key_for_example".to_string(),
-        ..Default::default()
-    };
+    // Configure stream settings (using a dummy URL for the example).
+    // StreamSettings has no Default impl by design — the constructors carry
+    // the per-platform ingest URL so a custom URL can't drift from the
+    // platform's schema.
+    let settings = StreamSettings::twitch("dummy_key_for_example");
     engine.set_stream_settings(Some(settings));
 
-    // Start streaming
-    match engine.start_streaming() {
-        Ok(_) => {
-            println!("Streaming started. Streaming for 5 seconds...");
-            thread::sleep(Duration::from_secs(5));
-            
-            println!("Stopping stream...");
-            engine.stop_recording(); // stop_recording stops any active session
-            println!("Stream stopped.");
-        }
-        Err(e) => {
-            eprintln!("Failed to start streaming: {}. (This is expected if the stream key is invalid)", e);
-        }
+    // Start streaming. Failures surface asynchronously via take_error().
+    engine.start_streaming();
+    if let Some(e) = engine.take_error() {
+        eprintln!(
+            "Failed to start streaming: {}. (This is expected if the stream key is invalid)",
+            e
+        );
+        return;
     }
+
+    println!("Streaming started. Streaming for 5 seconds...");
+    thread::sleep(Duration::from_secs(5));
+
+    println!("Stopping stream...");
+    engine.stop_recording(); // stop_recording stops any active session
+    println!("Stream stopped.");
 }

@@ -216,10 +216,18 @@ impl WhipSettings {
         }
     }
 
-    pub fn endpoint(&self) -> &str { &self.endpoint }
-    pub fn bearer_token(&self) -> Option<&str> { self.bearer_token.as_deref() }
-    pub fn connect_timeout(&self) -> Duration { self.connect_timeout }
-    pub fn trickle_ice(&self) -> bool { self.trickle_ice }
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+    pub fn bearer_token(&self) -> Option<&str> {
+        self.bearer_token.as_deref()
+    }
+    pub fn connect_timeout(&self) -> Duration {
+        self.connect_timeout
+    }
+    pub fn trickle_ice(&self) -> bool {
+        self.trickle_ice
+    }
 
     pub fn with_bearer_token(mut self, token: impl Into<String>) -> Self {
         self.bearer_token = Some(token.into());
@@ -414,10 +422,18 @@ pub struct WhipMediaSession {
 }
 
 impl WhipMediaSession {
-    pub fn settings(&self) -> &WhipSettings { &self.settings }
-    pub fn state(&self) -> WhipMediaState { self.state.clone() }
-    pub fn answer_sdp(&self) -> Option<&str> { self.answer_sdp.as_deref() }
-    pub fn resource_url(&self) -> Option<&str> { self.resource_url.as_deref() }
+    pub fn settings(&self) -> &WhipSettings {
+        &self.settings
+    }
+    pub fn state(&self) -> WhipMediaState {
+        self.state.clone()
+    }
+    pub fn answer_sdp(&self) -> Option<&str> {
+        self.answer_sdp.as_deref()
+    }
+    pub fn resource_url(&self) -> Option<&str> {
+        self.resource_url.as_deref()
+    }
     /// Create a new, idle session.
     pub fn new(settings: WhipSettings) -> Self {
         Self {
