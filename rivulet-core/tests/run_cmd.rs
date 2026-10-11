@@ -8,7 +8,7 @@
 //! The wrapper's session directory is the parent of `scripts/` (the worktree
 //! root), so a target outside it must be refused, and only an explicit
 //! allow-list of environment variables may reach the child command.
-
+use std::path::PathBuf;
 use std::path::{Path, PathBuf};
 
 /// The repository root (parent of the `rivulet-core` crate directory).
