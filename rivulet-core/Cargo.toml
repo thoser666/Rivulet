@@ -106,3 +106,18 @@ tracing-subscriber = { version = "0.3.18", default-features = false, features = 
 # OpenSSF badge automation-proposal file). Already in Cargo.lock via the
 # workspace; adding it as a dev-dependency changes no locked version.
 serde_json = "1"
+
+[[test]]
+name = "check_sanity"
+path = "tests/check_sanity.rs"
+
+[[test]]
+name = "run_cmd"
+path = "tests/run_cmd.rs"
+
+# M8 API-contract proof: the public engine API must stay stable and
+# intentionally encapsulated. Regressions in the public surface or in the
+# encapsulation boundary must fail here rather than drifting silently.
+[[test]]
+name = "api_stability"
+path = "tests/api_stability.rs"

@@ -3,6 +3,12 @@
 # platform checkout. Binary assets are left untouched.
 *.md text eol=lf
 
+# Windows command wrappers must stay CRLF on every checkout: cmd.exe parses
+# batch files unreliably with LF-only endings (labels, goto, parenthesised
+# blocks). scripts/run.cmd is exercised by rivulet-core/tests/run_cmd.rs on
+# the Windows CI runner, which checks out this attribute's eol verbatim.
+*.cmd text eol=crlf
+
 # Binary assets must never be line-ending normalized.
 packaging/rivulet.icns binary
 packaging/rivulet.png binary
