@@ -1,5 +1,40 @@
 ## [Unreleased]
 
+- fix(chat): **Der YouTube-Worker-Smoke liefert wieder aus, statt im eigenen
+  Fail-fast zu panicken.** Auf CI war
+  `worker_connects_and_delivers_messages_to_local_http_listener` rot (1190
+  gruen, 1 rot). Ursache war das Fixture: die HTTP-Antwort stand als
+  mehrzeiliger String-Literal im Code, also mit einem echten Zeilenumbruch
+  statt `\r\n` — der Header-Block endete direkt nach der Statuszeile,
+  `Content-Length` landete im *Body*, der Poll-Payload lies sich nicht mehr
+  parsen, `run_session` sah keine Continuation und beendete mit `Ok(())`.
+  Der Worker meldete daraufhin Disconnected und die Warteschleife panickte.
+  Das Fixture las zudem mit einem ersten `read` in die Anfrage hinein und
+  weiter danach in einem frischen Puffer — genau die Bytes, auf die es dabei
+  wartete, waren bereits verloren. Beides behoben: `capture_request` liest
+  die Anfrage vollstaendig *und* behaelt sie (die Verzweigung braucht die
+  Request-Line), die Antworten sind wieder einzeilig mit escapten `\r\n`.
+  - **Der Worker meldet keinen Fehler, der noch nicht passiert ist.**
+    `worker_loop` schrieb oben in der Schleife `Disconnected`: ein erster
+    Versuch, der nur laengere Roundtrips braucht, sah damit aus wie eine
+    totale Trennung — genau das trifft einen beladenen Runner. Jetzt schreibt
+    nur noch die Session `Connected` und nur noch die `match`-Arme
+    `Disconnected`, wie schon bei Twitch und Kick; bis zum ersten Ergebnis
+    bleibt der Zustand `Off`.
+  - **Der Fail-fast muss einen ganzen Retry-Zyklus ueberstehen.** Eine
+    einzelne `Disconnected`-Beobachtung unterscheidet nicht zwischen „gibt
+    auf“ und „legt sich die Backoff vor dem naechsten Versuch“. Die drei
+    Smokes warten mit `fail_if_delivery_is_impossible` auf einen Zustand, der
+    laenger haelt als Backoff (1 s) plus Versuch; jede andere Staerke setzt
+    den Timer zurueck. Die 20-s-Deadline bleibt die eigentliche Pruefung.
+  Verifiziert: youtube-Modul 29/29, 25/25 Stresslaeufe der drei
+  Worker-Smokes, Chat-Familie 175/175, `ci_pinning` 121/121,
+  `cargo fmt --all --check` und `clippy --workspace --all-targets
+  -- -D warnings` gruen. Lokal bleibt die GStreamer-Pipeline-Gruppe wegen
+  eines Plugin-Pfad-Konflikts der Maschine rot — derselbe Fehler laeuft ohne
+  diese Aenderung (Einzeltest gegen den unveraenderten Baum); CI liest die
+  Gruppe gruen.
+
 - test(m8): **Vertrags-, Wrapper- und Dokumentationsarbeit zum
   Auslieferungsstand von #292/#293.** Sechs API-Beispiele und ein
   GUI-Konstruktor kompilieren wieder gegen die stabilisierte API

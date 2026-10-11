@@ -341,7 +341,18 @@ rivulet-gui::app
   with `WSAECONNRESET` (os error 10054) instead of a clean FIN, which
   intermittently failed the YouTube worker smoke on windows-latest until
   fixed; the Kick WebSocket fixture is unaffected (tungstenite performs the
-  full HTTP upgrade read itself).
+  full HTTP upgrade read itself). The drain must *keep* the bytes when the
+  fixture needs them: peeking at the request with one `read` and draining
+  into a fresh buffer afterwards loses exactly what the drain then waits for.
+- **Header framing is part of the fixture contract.** A response must carry
+  its headers *before* the blank line. The YouTube smoke once wrote that
+  response as a multi-line string literal — a literal line break instead of
+  `\r\n` — which ended the header block right after the status line, pushed
+  `Content-Length` into the body and made the poll payload unparseable:
+  `run_session` found no continuation, ended with `Ok(())`, the worker
+  reported `Disconnected` and the wait loop's fail-fast panicked on CI.
+  Same class as the read/drain bug above: complete on the way in, correctly
+  framed on the way out.
 - **Fixture lifetime must cover the worker loop, not just one cycle.** The
   YouTube worker polls in a loop (3 s interval), so a fixture that answers a
   fixed *number* of requests goes away mid-session: the next poll fails, the

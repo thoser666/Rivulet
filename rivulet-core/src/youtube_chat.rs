@@ -1056,12 +1056,16 @@ fn worker_loop(
 ) {
     let mut backoff = 1u64;
     while !stop.load(Ordering::SeqCst) {
-        // Deliberately *not* Connected yet: the session owns that transition
-        // and performs it once the live-chat page actually answered. Marking
-        // it here would let the dock report "Connected" for a worker that is
-        // still in its first HTTP request, and a failed first attempt would
-        // then be hidden by a backoff sleep instead of being visible.
-        conn.store(2, Ordering::SeqCst);
+        // Nothing is stored at the top of the loop: the session owns the
+        // Connected transition (it happens once the live-chat page actually
+        // answered) and the arms below own Disconnected (it happens once a
+        // session ended). Writing a state here would either claim Connected
+        // for a worker still in its first HTTP request, or report
+        // Disconnected for a first attempt that has not failed yet — the
+        // second reading is what the local-listener smokes trip over, since
+        // they read one Disconnected as "delivery is impossible" while the
+        // worker is merely connecting. Before the first session ends, the
+        // worker stays Off.
         match run_session(&cfg, &msg_tx, &alert_tx, &rx, &quota, &conn) {
             Ok(()) => {
                 if stop.load(Ordering::SeqCst) {
@@ -1403,6 +1407,33 @@ mod tests {
         assert_eq!(reported, ChatConnState::Off);
     }
 
+    /// Give up from inside a `wait_until` closure — but only once giving up
+    /// is the honest reading of the state.
+    ///
+    /// A single `Disconnected` observation proves nothing: the worker reports
+    /// it while a session is ending *and* while it sleeps off its backoff
+    /// before the next attempt, and only the session can turn it back into
+    /// Connected. So the fail-fast needs a Disconnected that has lasted
+    /// through a whole retry cycle (the 1 s backoff plus the attempt); any
+    /// other state resets the timer.
+    fn fail_if_delivery_is_impossible(
+        chat: &YouTubeChat,
+        disconnected_since: &mut Option<std::time::Instant>,
+        pending: &str,
+    ) {
+        if chat.connection_state() != ChatConnState::Disconnected {
+            *disconnected_since = None;
+            return;
+        }
+        let since = *disconnected_since.get_or_insert_with(std::time::Instant::now);
+        let elapsed = since.elapsed();
+        if elapsed >= Duration::from_secs(5) {
+            panic!(
+                "worker disconnected before delivering the {pending} (Disconnected for {elapsed:?})"
+            );
+        }
+    }
+
     /// End-to-end smoke: the real worker fetches the page (continuation
     /// extraction) and polls the get_live_chat endpoint from a local HTTP
     /// listener, delivering the parsed message.
@@ -1411,44 +1442,37 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
         std::thread::spawn(move || {
-            use std::io::Read;
             loop {
                 let (mut stream, _) = match listener.accept() {
                     Ok(s) => s,
                     Err(_) => break,
                 };
-                let mut buf = [0u8; 4096];
-                let n = match stream.read(&mut buf) {
-                    Ok(n) => n,
-                    Err(_) => continue,
+                // Read the whole request before answering — draining is what
+                // keeps Windows from resetting the socket (see
+                // `drain_request`) — and keep it instead of discarding it:
+                // the branch below needs the request line, and a peeking
+                // first read followed by a drain loses exactly the bytes the
+                // drain is still waiting for.
+                let Ok(req) = capture_request(&mut stream) else {
+                    continue;
                 };
-                let req = String::from_utf8_lossy(&buf[..n]);
-                if req.contains("get_live_chat") {
-                    let _ = drain_request(&mut stream);
+                // Both responses are one line with escaped `\r\n` on purpose:
+                // a literal line break inside the headers ends the header
+                // block right after the status line, which pushes
+                // `Content-Length` into the body and leaves the poll payload
+                // unparseable — the smoke would then never see a message.
+                if req.head.contains("get_live_chat") {
                     let body = payload_fixture();
                     let response = format!(
-                        "HTTP/1.1 200 OK
-
-Content-Type: application/json
-Content-Length: {}
-Connection: close
-
-{}",
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                         body.len(),
                         body
                     );
                     let _ = stream.write_all(response.as_bytes());
                 } else {
-                    let _ = drain_request(&mut stream);
                     let page = r#"<script>var ytInitialData={"continuation":"TOKEN_1"};</script>"#;
                     let response = format!(
-                        "HTTP/1.1 200 OK
-
-Content-Type: text/html
-Content-Length: {}
-Connection: close
-
-{}",
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                         page.len(),
                         page
                     );
@@ -1466,28 +1490,27 @@ Connection: close
         assert!(chat.enabled());
 
         // The worker performs two sequential HTTP round trips (page fetch +
-        // first poll) before the message is delivered. The fixture drains
-        // each request completely before answering (see drain_request): on
-        // Windows, answering while request bytes are still unread makes the
-        // socket close with WSAECONNRESET instead of a clean FIN, which
+        // first poll) before the message is delivered. The fixture reads
+        // each request completely before answering (see `capture_request`):
+        // on Windows, answering while request bytes are still unread makes
+        // the socket close with WSAECONNRESET instead of a clean FIN, which
         // failed this smoke intermittently (~1-in-8 locally and on
-        // windows-latest) until fixed. The generous deadline below and the
-        // fail-fast on Disconnected are defense-in-depth: after a session
-        // error the worker retries against the already-exhausted local
-        // listener, which can never succeed, so waiting out the deadline
-        // would only slow the failure down.
+        // windows-latest) until fixed.
+        //
+        // The deadline below is generous; `fail_if_delivery_is_impossible`
+        // is the fast way out of it. It fires only after the worker has been
+        // Disconnected for longer than a full retry cycle needs, so a slow
+        // first attempt or a failed attempt that a retry recovers from are
+        // not mistaken for a dead end — the listener keeps serving retries
+        // and the deadline still catches a run that never delivers.
+        let mut disconnected_since = None;
         let msg = wait_until(Duration::from_secs(20), || {
             if let Some(rx) = chat.messages() {
                 if let Ok(msg) = rx.try_recv() {
                     return Some(msg);
                 }
             }
-            if chat.connection_state() == ChatConnState::Disconnected {
-                // Fail fast instead of waiting out the deadline: after a
-                // session error the worker retries against the already
-                // exhausted local listener, which can never succeed.
-                panic!("worker disconnected before delivering the message");
-            }
+            fail_if_delivery_is_impossible(&chat, &mut disconnected_since, "message");
             None
         })
         .expect("message delivered");
@@ -1658,29 +1681,27 @@ Connection: close
         assert!(chat.enabled());
 
         // The plain chat line arrives on the message receiver…
+        let mut disconnected_since = None;
         let chat_delivered = wait_until(Duration::from_secs(20), || {
             if let Some(rx) = chat.messages() {
                 if let Ok(msg) = rx.try_recv() {
                     return Some(msg);
                 }
             }
-            if chat.connection_state() == ChatConnState::Disconnected {
-                panic!("worker disconnected before delivering the chat line");
-            }
+            fail_if_delivery_is_impossible(&chat, &mut disconnected_since, "chat line");
             None
         });
         assert_eq!(chat_delivered.expect("chat delivered").text, "plain line");
 
         // …and the Super Chat lands on the alert receiver.
+        let mut disconnected_since = None;
         let alert_delivered = wait_until(Duration::from_secs(20), || {
             if let Some(rx) = chat.alerts() {
                 if let Ok(event) = rx.try_recv() {
                     return Some(event);
                 }
             }
-            if chat.connection_state() == ChatConnState::Disconnected {
-                panic!("worker disconnected before delivering the alert");
-            }
+            fail_if_delivery_is_impossible(&chat, &mut disconnected_since, "alert");
             None
         });
         let event = alert_delivered.expect("alert delivered");
