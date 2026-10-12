@@ -8,7 +8,7 @@
 //! The wrapper's session directory is the parent of `scripts/` (the worktree
 //! root), so a target outside it must be refused, and only an explicit
 //! allow-list of environment variables may reach the child command.
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// The repository root (parent of the `rivulet-core` crate directory).
 fn repo_root() -> PathBuf {
@@ -50,6 +50,7 @@ fn run_cmd_wrapper_exists_in_the_scripts_directory() {
 #[cfg(windows)]
 mod windows_execution {
     use super::*;
+    use std::path::Path;
     use std::process::{Command, Stdio};
 
     /// Configure a `cmd /c run.cmd ...` invocation from a chosen working
