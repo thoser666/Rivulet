@@ -43,6 +43,7 @@ gehören in einen eigenen, klar betitelten Commit (z.&nbsp;B. `chore:` oder
 | Pfad / Muster | Regel | Begründung |
 | --- | --- | --- |
 | `*.md` | `text eol=lf` | Alle Markdown-Quellen werden im Repo als LF normalisiert, unabhängig von der Plattform. Verhindert CRLF/LF-Wechseldiffs (siehe unten). |
+| `*.cmd` | `text eol=crlf` | Windows-Batch-Wrapper (z. B. `scripts/run.cmd`) müssen in jedem Checkout CRLF haben: mit LF-only zeilenbehandelt `cmd.exe` Labels/`goto`/Klammerblöcke unzuverlässig. Wird von `rivulet-core/tests/run_cmd.rs` auf dem Windows-CI-Laufwerk geprüft. |
 | Icons, Fonts, Bilder, Zertifikate | `binary` | `packaging/rivulet.icns`, `rivulet-gui/assets/fonts/*.ttf`, `docs/*.png`, `rivulet-gui/assets/rivulet_logo.*` etc. dürfen **niemals** zeilenender-normalisiert oder diff-umschrieben werden. |
 
 Regeln für **neue** binäre Assets: Bei Hinzufügen eines neuen Binär-Pfads ist

@@ -438,18 +438,18 @@ must not be implied by beta parity.
 
 ### 📦 M8 – Embeddable Engine & API
 
-**Status: In progress** (opened 2026-10-05 — six workstream issues, none delivered yet; [recommended first implementation step](#-m8--embeddable-engine--api): [#292](https://github.com/thoser666/Rivulet/issues/292))
+**Status: In progress** (opened 2026-10-05 — six workstream issues, #292 and #293 delivered, four open; [recommended first implementation step](#-m8--embeddable-engine--api): [#292](https://github.com/thoser666/Rivulet/issues/292))
 
 *Differentiation pillar #2: `rivulet-core` is a normal library, not a monolith with retrofitted API.*
 
-- [ ] Stabilized public API for `rivulet-core` (semver 1.0, `#![warn(missing_docs)]`, crate-style types) — [#292](https://github.com/thoser666/Rivulet/issues/292)
-- [ ] Comprehensive API docs + examples (recording, streaming, dual output, encoder selection, frame streaming) — [#293](https://github.com/thoser666/Rivulet/issues/293)
+- [x] Stabilized public API for `rivulet-core` (semver 1.0, `#![warn(missing_docs)]`, crate-style types) — [#292](https://github.com/thoser666/Rivulet/issues/292)
+- [x] Comprehensive API docs + examples (recording, streaming, dual output, encoder selection, frame streaming) — [#293](https://github.com/thoser666/Rivulet/issues/293)
 - [ ] In-process capture API: embed a recording feature in any Rust app (audio/video capture, encoding, file/stream) — [#294](https://github.com/thoser666/Rivulet/issues/294)
 - [ ] Feature detection and runtime diagnostics as an API (`detect_available_encoders()`, encoder fallback) — [#295](https://github.com/thoser666/Rivulet/issues/295)
 - [ ] Abstraction of capture backends (xcap, PipeWire, Metal/WGC) behind stable traits — [#296](https://github.com/thoser666/Rivulet/issues/296)
 - [ ] Exit evidence: docs build, example run matrix, public API review, downstream-consumer smoke test — [#297](https://github.com/thoser666/Rivulet/issues/297)
 
-**Where this stands.** The promise of M8 is directional — "`rivulet-core` is a normal library" — and promises of that kind fail quietly: nothing breaks, the crate just becomes unusable again at some point nobody notices. The opening state is therefore recorded honestly rather than optimistically. When the milestone opened, `rivulet-core` sat at `0.65.0-alpha.55` with **66 public modules and no `#![warn(missing_docs)]`** (the module count is that snapshot and has grown since; the missing attribute has not), there is **no `examples/` crate**, and feature detection is reachable through log lines and GUI labels rather than through the API. Under semver `0.x`, every minor bump is breaking, so an external consumer can rely on nothing yet — that is what [#292](https://github.com/thoser666/Rivulet/issues/292) is for.
+**Where this stands.** The promise of M8 is directional — "`rivulet-core` is a normal library" — and promises of that kind fail quietly: nothing breaks, the crate just becomes unusable again at some point nobody notices. The opening state is therefore recorded honestly rather than optimistically. When the milestone opened, `rivulet-core` sat at `0.65.0-alpha.55` with **66 public modules and no `#![warn(missing_docs)]`** (the module count is that snapshot and has grown since; `#![warn(missing_docs)]` arrived with #292), there was **no `examples/` crate**, and feature detection is reachable through log lines and GUI labels rather than through the API. Under semver `0.x`, every minor bump is breaking, so an external consumer can rely on nothing yet — that is what [#292](https://github.com/thoser666/Rivulet/issues/292) is for.
 
 **Recommended first implementation step:** [#292](https://github.com/thoser666/Rivulet/issues/292) (stabilized public API). It gates the rest: examples, the in-process capture entry point and the backend traits all need a stable surface to be written against, and documenting a moving target is wasted work.
 

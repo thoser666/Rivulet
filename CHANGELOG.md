@@ -1,5 +1,58 @@
 ## [Unreleased]
 
+- fix(chat): **Der YouTube-Worker-Smoke liefert wieder aus, statt im eigenen
+  Fail-fast zu panicken.** Auf CI war
+  `worker_connects_and_delivers_messages_to_local_http_listener` rot (1190
+  gruen, 1 rot). Ursache war das Fixture: die HTTP-Antwort stand als
+  mehrzeiliger String-Literal im Code, also mit einem echten Zeilenumbruch
+  statt `\r\n` — der Header-Block endete direkt nach der Statuszeile,
+  `Content-Length` landete im *Body*, der Poll-Payload lies sich nicht mehr
+  parsen, `run_session` sah keine Continuation und beendete mit `Ok(())`.
+  Der Worker meldete daraufhin Disconnected und die Warteschleife panickte.
+  Das Fixture las zudem mit einem ersten `read` in die Anfrage hinein und
+  weiter danach in einem frischen Puffer — genau die Bytes, auf die es dabei
+  wartete, waren bereits verloren. Beides behoben: `capture_request` liest
+  die Anfrage vollstaendig *und* behaelt sie (die Verzweigung braucht die
+  Request-Line), die Antworten sind wieder einzeilig mit escapten `\r\n`.
+  - **Der Worker meldet keinen Fehler, der noch nicht passiert ist.**
+    `worker_loop` schrieb oben in der Schleife `Disconnected`: ein erster
+    Versuch, der nur laengere Roundtrips braucht, sah damit aus wie eine
+    totale Trennung — genau das trifft einen beladenen Runner. Jetzt schreibt
+    nur noch die Session `Connected` und nur noch die `match`-Arme
+    `Disconnected`, wie schon bei Twitch und Kick; bis zum ersten Ergebnis
+    bleibt der Zustand `Off`.
+  - **Der Fail-fast muss einen ganzen Retry-Zyklus ueberstehen.** Eine
+    einzelne `Disconnected`-Beobachtung unterscheidet nicht zwischen „gibt
+    auf“ und „legt sich die Backoff vor dem naechsten Versuch“. Die drei
+    Smokes warten mit `fail_if_delivery_is_impossible` auf einen Zustand, der
+    laenger haelt als Backoff (1 s) plus Versuch; jede andere Staerke setzt
+    den Timer zurueck. Die 20-s-Deadline bleibt die eigentliche Pruefung.
+  Verifiziert: youtube-Modul 29/29, 25/25 Stresslaeufe der drei
+  Worker-Smokes, Chat-Familie 175/175, `ci_pinning` 121/121,
+  `cargo fmt --all --check` und `clippy --workspace --all-targets
+  -- -D warnings` gruen. Lokal bleibt die GStreamer-Pipeline-Gruppe wegen
+  eines Plugin-Pfad-Konflikts der Maschine rot — derselbe Fehler laeuft ohne
+  diese Aenderung (Einzeltest gegen den unveraenderten Baum); CI liest die
+  Gruppe gruen.
+
+- test(m8): **Vertrags-, Wrapper- und Dokumentationsarbeit zum
+  Auslieferungsstand von #292/#293.** Sechs API-Beispiele und ein
+  GUI-Konstruktor kompilieren wieder gegen die stabilisierte API
+  (`RateControl::new` statt privater Felder, `RecordingPreset`-Varianten,
+  `Result`-Rueckgaben), `cargo clippy --workspace --all-targets --
+  -D warnings` bleibt gruen. Neue Regressionstests: `api_stability.rs`
+  pinnt die oeffentliche API (#292), `run_cmd.rs` prueft den auditebaren
+  Wrapper `scripts/run.cmd` (Ziel-Accept/Reject, Befehlszeile in der
+  Audit-Zeile, kein Durchreichen benutzter Umgebungsvariablen in den
+  Kindprozess) und `check_sanity.py` wird als Fire-and-Forget-Wrapper
+  getestet; `*.cmd` ist in `.gitattributes` auf `eol=crlf` fixiert, weil
+  `cmd.exe` LF-only-Batchdateien unzuverlaessig parst. README und
+  Quality-Gate nennen den M8-Ist-Zustand ehrlich (#292 und #293
+  geliefert, #294-#297 offen) — der ci_pinning-Guard pinnt genau diesen
+  Stand und laesst weder „Complete“ noch „Delivered“, solange Workstreams
+  offen bleiben. Siehe [docs/m8-api-contract.md](docs/m8-api-contract.md)
+  und [docs/regression-testing.md](docs/regression-testing.md).
+
 - feat(diagnostics): **Crashreport wie in OBS — *Help → Crash reports → Upload
   previous crash report* — ohne Token und ohne Auto-Filing.** Der
   Settings-Knopf aus #299 half nur bei *abgefangenen* Fehlern: bei einem
@@ -77,13 +130,16 @@
     ueber die API. Genau das ist die Luecke, die M8 schliesst.
   **Neu gepinnt in `ci_pinning`:**
   `m8_opening_is_pinned_to_the_six_workstream_issues` haelt den
-  Oeffnungszustand fest — beide Flaechen muessen „In progress" sagen und
-  duerfen **weder** „Planned" **noch** „Complete" behaupten, alle sechs
-  Issues muessen in README **und** Gate genannt sein, die Checkbox-Liste
-  muss zur Issue-Liste passen (6 = 6), und der empfohlene erste Schritt muss
-  #292 bleiben. Dazu die negativen Seiten: keine unbelegte
-  „gate passed"-Aussage neben sechs offenen Issues, und #297 traegt seine
-  Abhaengigkeit von #292 sichtbar mit sich. Neun Negativproben feuern alle.
+  Ist-Zustand fest — beide Flaechen muessen „In progress" sagen und
+  duerfen **weder** „Planned" **noch** „Complete" behaupten; dasselbe gilt fuer
+  „Delivered“, solange Workstreams offen bleiben. Alle sechs Issues muessen
+  in README **und** Gate genannt sein, und die Checkbox-Liste muss zur
+  Issue-Liste passen (6 = 6): #292 und #293 sind abgehakt (geliefert),
+  #294-#297 bleiben offen — ein vorzeitiges [x] bei den offenen
+  Workstreams oder ein zurueckgesetztes [ ] bei #292 schlaegt hier fehl.
+  Der empfohlene erste Schritt bleibt #292. Dazu die negativen Seiten: keine unbelegte
+  „gate passed"-Aussage neben offenen Issues, und #297 traegt seine
+  Abhaengigkeit von #292 sichtbar mit sich. Alle Negativproben feuern.
   Das Gate bleibt ausdruecklich **offen** — kein Kriterium ist bisher als
   erfuellt ausgewiesen.
 - feat(diagnostics): **Crashreport als kopierfertiger Bugreport — Settings

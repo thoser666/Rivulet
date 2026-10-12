@@ -37,12 +37,14 @@ Regression coverage is tracked in two places:
 
 ### Current status
 
-As of 2026-09-04 the repository has no publicly reported *resolved
-vulnerabilities* in the last 12 months; the regression policy applies to all
-functional bug fixes. Bug-fix PRs merged recently (e.g., reconnect backoff
-rebuild, screenshot redaction, Windows recorder finalize, obs-websocket auth
-close-code, YouTube/Kick/Twitch chat smoke) each shipped an accompanying
-regression test in the same change set.
+The repository has no publicly reported *resolved vulnerabilities* in the last
+12 months; the regression policy applies to all functional bug fixes. Recent
+bug-fix PRs (reconnect backoff rebuild, screenshot redaction, Windows recorder
+finalize, obs-websocket auth close-code, YouTube/Kick/Twitch chat smoke) each
+shipped an accompanying regression test in the same change set. As of the M8
+stability work the suite also covers the safeguarded Python sanity-check wrapper
+(`check_sanity.py`) and the starter auditable command wrapper (`scripts/run.cmd`):
+see `rivulet-core/tests/check_sanity.rs` and `rivulet-core/tests/run_cmd.rs`.
 
 ## Why this exists (OpenSSF Silver)
 

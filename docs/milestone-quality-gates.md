@@ -359,8 +359,8 @@ are not yet *measured*, only audited —
 
 ### M8: Embeddable Engine and API
 
-**Status: In progress** — opened 2026-10-05, six workstream issues, none
-delivered yet.
+**Status: In progress** — opened 2026-10-05, six workstream issues:
+#292 and #293 delivered, four still open.
 
 Review the API as a product consumed by another developer:
 
@@ -378,10 +378,10 @@ small downstream-consumer smoke test.
 
 Workstream issues:
 
-- [#292](https://github.com/thoser666/Rivulet/issues/292) — stabilized public
+- [x] [#292](https://github.com/thoser666/Rivulet/issues/292) — stabilized public
   API (`missing_docs`, crate-style types, semver policy, deprecation path).
   Covers the first, fourth and part of the second criterion.
-- [#293](https://github.com/thoser666/Rivulet/issues/293) — API docs plus a
+- [x] [#293](https://github.com/thoser666/Rivulet/issues/293) — API docs plus a
   `rivulet-core/examples/` crate whose examples are **run**, not just built.
   Covers the example and the GUI-independence criterion.
 - [#294](https://github.com/thoser666/Rivulet/issues/294) — in-process capture

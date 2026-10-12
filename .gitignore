@@ -61,6 +61,10 @@ logs/
 *.temp
 ~*
 
+# Repo-root scratch/session dir created by rivulet-core/tests/run_cmd.rs
+# (the wrapper under test runs inside it); never versioned.
+/tmp/
+
 # Build scripts
 *.exe
 !target/release/*.exe
