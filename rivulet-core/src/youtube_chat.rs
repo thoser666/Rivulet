@@ -1447,21 +1447,37 @@ mod tests {
                     Ok(s) => s,
                     Err(_) => break,
                 };
-                // Read the whole request before answering — draining is what
+                // Read the *whole* request before answering — draining is what
                 // keeps Windows from resetting the socket (see
-                // `drain_request`) — and keep it instead of discarding it:
-                // the branch below needs the request line, and a peeking
-                // first read followed by a drain loses exactly the bytes the
-                // drain is still waiting for.
-                let Ok(req) = capture_request(&mut stream) else {
-                    continue;
-                };
+                // `drain_request`): answering while request bytes are still
+                // unread makes the close a WSAECONNRESET instead of a clean
+                // FIN, which failed this smoke intermittently. The bytes are
+                // kept instead of discarded because the branch below needs the
+                // request line. Both requests the worker sends are bodiless
+                // GETs, so the header terminator ends the request; the loop
+                // still tolerates the header arriving in several segments,
+                // which a single `read` would not.
+                let mut captured = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    match stream.read(&mut chunk) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            captured.extend_from_slice(&chunk[..n]);
+                            if captured.windows(4).any(|w| w == b"\r\n\r\n") {
+                                break;
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                let req = String::from_utf8_lossy(&captured);
                 // Both responses are one line with escaped `\r\n` on purpose:
                 // a literal line break inside the headers ends the header
                 // block right after the status line, which pushes
                 // `Content-Length` into the body and leaves the poll payload
                 // unparseable — the smoke would then never see a message.
-                if req.head.contains("get_live_chat") {
+                if req.contains("get_live_chat") {
                     let body = payload_fixture();
                     let response = format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -1491,11 +1507,12 @@ mod tests {
 
         // The worker performs two sequential HTTP round trips (page fetch +
         // first poll) before the message is delivered. The fixture reads
-        // each request completely before answering (see `capture_request`):
-        // on Windows, answering while request bytes are still unread makes
-        // the socket close with WSAECONNRESET instead of a clean FIN, which
-        // failed this smoke intermittently (~1-in-8 locally and on
-        // windows-latest) until fixed.
+        // each request completely before answering (the read loop above, the
+        // same guarantee `drain_request`/`capture_request` give the other
+        // fixtures): on Windows, answering while request bytes are still
+        // unread makes the socket close with WSAECONNRESET instead of a
+        // clean FIN, which failed this smoke intermittently (~1-in-8 locally
+        // and on windows-latest) until fixed.
         //
         // The deadline below is generous; `fail_if_delivery_is_impossible`
         // is the fast way out of it. It fires only after the worker has been
