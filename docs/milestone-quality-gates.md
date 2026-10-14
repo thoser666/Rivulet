@@ -384,6 +384,14 @@ Workstream issues:
 - [x] [#293](https://github.com/thoser666/Rivulet/issues/293) — API docs plus a
   `rivulet-core/examples/` crate whose examples are **run**, not just built.
   Covers the example and the GUI-independence criterion.
+  - **Evidence:** the `Run rivulet-core examples (M8 #293)` step in the
+    Build & Test job executes all six examples (`simple_record`,
+    `simple_stream`, `dual_output`, `encoder_config`, `engine_lifecycle`,
+    `audio_routing`) on every push and fails on a non-zero exit, so an
+    example that stops running turns CI red instead of staying silently
+    broken. The same six are listed in the `rivulet-core` crate
+    documentation ("Examples" section) and linked from the README M8
+    overview; `ci_pinning` pins step, list and both links.
 - [#294](https://github.com/thoser666/Rivulet/issues/294) — in-process capture
   API so a foreign crate can record without starting the app. Covers the
   early-typed-errors criterion and the embedding promise itself.

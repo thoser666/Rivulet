@@ -19,6 +19,29 @@
 //! 4. Periodically call [`RivuletEngine::service_streaming`] to handle reconnects and ABR.
 //! 5. Stop the session via [`RivuletEngine::stop_recording`].
 //!
+//! ## Examples
+//!
+//! Six runnable examples in [`examples/`](https://github.com/thoser666/Rivulet/tree/develop/rivulet-core/examples)
+//! tell the embedding story end to end. Each one is a self-contained
+//! `main()` you can copy into your own crate — no GUI, no `egui`/`eframe`
+//! anywhere in the call chain — and CI *runs* all of them (a build alone
+//! does not count as delivered):
+//!
+//! | Example | What it shows |
+//! | --- | --- |
+//! | [`simple_record`](https://github.com/thoser666/Rivulet/blob/develop/rivulet-core/examples/simple_record.rs) | Record to a file — no window, no egui |
+//! | [`simple_stream`](https://github.com/thoser666/Rivulet/blob/develop/rivulet-core/examples/simple_stream.rs) | Stream over RTMP, including muxer/codec choice |
+//! | [`dual_output`](https://github.com/thoser666/Rivulet/blob/develop/rivulet-core/examples/dual_output.rs) | Write to disk **and** stream at the same time |
+//! | [`encoder_config`](https://github.com/thoser666/Rivulet/blob/develop/rivulet-core/examples/encoder_config.rs) | Pick an encoder and bitrate explicitly |
+//! | [`engine_lifecycle`](https://github.com/thoser666/Rivulet/blob/develop/rivulet-core/examples/engine_lifecycle.rs) | Start, monitor, stop — and read failures from the error slot |
+//! | [`audio_routing`](https://github.com/thoser666/Rivulet/blob/develop/rivulet-core/examples/audio_routing.rs) | Default audio routing in a recording session |
+//!
+//! Run one with:
+//!
+//! ```text
+//! cargo run -p rivulet-core --example simple_record
+//! ```
+//!
 //! #![warn(missing_docs)]
 // In rivulet-core/src/lib.rs
 

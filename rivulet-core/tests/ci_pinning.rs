@@ -6237,6 +6237,109 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
     );
 }
 
+/// #293's acceptance criteria say an example that only compiles but never
+/// runs counts as *not delivered*. That claim is only as good as the check
+/// behind it, so three surfaces are pinned together:
+///
+/// 1. `ci.yml` executes every example (the step name, and a `cargo run
+///    --example <name>` per file — a `cargo build` would not be caught
+///    running anything),
+/// 2. the crate documentation carries the "Examples" overview with a link
+///    per example, so a consumer reading `cargo doc` finds the embedding
+///    path without knowing the repository layout,
+/// 3. the README M8 section links that overview, so the roadmap entry and
+///    the runnable code cannot drift apart.
+///
+/// The example list is read from `rivulet-core/examples/` rather than
+/// duplicated as a literal: adding or deleting an example fails here until
+/// the CI step and both docs mention it.
+#[test]
+fn m8_examples_are_run_by_ci_and_linked_from_crate_docs_and_readme() {
+    let mut names: Vec<String> = fs::read_dir(repo_file("rivulet-core/examples"))
+        .expect("rivulet-core/examples must exist")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .map(|ext| ext == "rs")
+                .unwrap_or(false)
+        })
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .map(|name| name.trim_end_matches(".rs").to_owned())
+        .collect();
+    names.sort();
+    assert!(
+        !names.is_empty(),
+        "the examples crate must not be empty; #293's run matrix has nothing to check"
+    );
+
+    // Names are matched as *whole tokens*, not substrings: a step that runs
+    // `audio_routing_mutant` does not run `audio_routing`, and a substring
+    // check would happily accept exactly that drift.
+    fn mentions(text: &str, name: &str) -> bool {
+        text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .any(|token| token == name)
+    }
+
+    let ci = read(".github/workflows/ci.yml");
+    let run_step = ci
+        .split("Run rivulet-core examples (M8 #293)")
+        .nth(1)
+        .unwrap_or_else(|| {
+            panic!(
+                "ci.yml must run the examples step (#293 acceptance: an \
+                 example that only compiles is not delivered)"
+            )
+        })
+        .split("- name:")
+        .next()
+        .expect("the examples step must have a body");
+    assert!(
+        run_step.contains("cargo run"),
+        "the examples step must *run* each example, not just build it"
+    );
+    for name in &names {
+        assert!(
+            mentions(run_step, name),
+            "ci.yml's examples step must run `{name}` — every example in \
+             rivulet-core/examples needs a run, got step:\n{run_step}"
+        );
+    }
+
+    let lib = read("rivulet-core/src/lib.rs");
+    let docs_section = lib
+        .split("//! ## Examples")
+        .nth(1)
+        .unwrap_or_else(|| panic!("the crate docs must have an Examples section"))
+        .split("//! #![warn(missing_docs)]")
+        .next()
+        .expect("the Examples section must end before the crate attribute");
+    for name in &names {
+        assert!(
+            docs_section.contains(&format!("examples/{name}.rs")),
+            "the crate docs' Examples section must link `{name}.rs`, got:\n{docs_section}"
+        );
+    }
+
+    let readme = read("README.md");
+    let readme_m8_section = readme
+        .split("### 📦 M8 – Embeddable Engine & API")
+        .nth(1)
+        .and_then(|rest| rest.split("### ⚡ M9").next())
+        .unwrap_or_default();
+    assert!(
+        readme_m8_section.contains("rivulet-core/examples/"),
+        "the README M8 section must link the example overview"
+    );
+    for name in &names {
+        assert!(
+            mentions(readme_m8_section, name),
+            "the README M8 example overview must mention `{name}`"
+        );
+    }
+}
+
 #[test]
 fn local_pre_push_hook_mirrors_the_ci_lints_job() {
     // Commit 06792c6 shipped four GUI tests that were clean under a plain

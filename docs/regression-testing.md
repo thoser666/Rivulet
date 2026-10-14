@@ -46,6 +46,15 @@ stability work the suite also covers the safeguarded Python sanity-check wrapper
 (`check_sanity.py`) and the starter auditable command wrapper (`scripts/run.cmd`):
 see `rivulet-core/tests/check_sanity.rs` and `rivulet-core/tests/run_cmd.rs`.
 
+The same file also guards the M8 delivery claims: `ci_pinning` pins the six
+`rivulet-core/examples/` files against three surfaces at once — the `ci.yml`
+step that **runs** them (M8 #293: an example that only compiles is not
+delivered), the `Examples` table in the crate docs, and the README M8
+overview. The example list is read from `rivulet-core/examples/`, so a
+seventh example fails the guard until CI and both docs mention it; the names
+are matched as whole tokens so renaming an example in the workflow cannot
+pass on a substring.
+
 ## Why this exists (OpenSSF Silver)
 
 The OpenSSF Best Practices **silver** badge criterion `regression_tests_added50`

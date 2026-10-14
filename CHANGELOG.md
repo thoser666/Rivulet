@@ -1,5 +1,48 @@
 ## [Unreleased]
 
+- test(m8): **#293 ist jetzt auch belegt, nicht nur behauptet — die sechs
+  Beispiele werden ausgefuehrt, nicht nur gebaut.** Der Akzeptanzsatz von
+  #293 sagt: ein Beispiel, das nur kompiliert aber nicht laeuft, gilt als
+  nicht erfuellt. Genau das fehlte. Drei Flaechen sind jetzt gegen die
+  Dateiliste in `rivulet-core/examples/` gepinnt:
+  - **CI fuehrt alle sechs aus.** Der Schritt `Run rivulet-core examples
+    (M8 #293)` in `build_and_test` (ubuntu, windows, macOS) startet
+    `simple_record`, `simple_stream`, `dual_output`, `encoder_config`,
+    `engine_lifecycle` und `audio_routing` und scheitert bei jedem ungleich
+    null — `shell: bash` haelt die Schleife auf allen drei Runnern
+    identisch. Lokal alle sechs mit Exit 0 verifiziert (Gesamtlaufzeit
+    ~30 s, nur Schlafzeiten, weder Hardware noch Netz noetig).
+  - **Crate-Doku verlinkt die Uebersicht.** `rivulet-core/src/lib.rs`
+    bekommt eine `## Examples`-Tabelle (was zeigt welches Beispiel, plus
+    `cargo run -p rivulet-core --example …`), jeder Eintrag als Link auf die
+    Quelldatei. README/M8 verlinkt dieselbe Uebersicht.
+  - **Guard, der auch beißt.**
+    `ci_pinning::m8_examples_are_run_by_ci_and_linked_from_crate_docs_and_readme`
+    liest die Beispielsliste aus dem Verzeichnis (kein kopiertes Literal)
+    und prueft CI-Schritt, Crate-Doku und README. Namen werden als ganze
+    Tokens verglichen, nicht als Substring — ein `audio_routing_MUTANT` im
+    Workflow besteht den Check nicht. Verifiziert per Mutationstest:
+    umbenannter CI-Eintrag, geloeschter Doku-Eintrag und geloeschter
+    README-Eintrag fallen je einzeln durch, der restorete Baum ist wieder
+    gruen.
+  Siehe [docs/m8-api-contract.md](docs/m8-api-contract.md) und
+  [docs/regression-testing.md](docs/regression-testing.md).
+
+- fix(chat): **YouTube-Worker-Smoke: der Fixture-Read liest die Anfrage
+  wieder vollstaendig.** Die Arbeitskopie hatte den `capture_request`-Aufruf
+  durch einen einzelnen `read` in einen 8-KB-Puffer ersetzt. Ein einzelner
+  Read garantiert aber nicht, dass die Anfrage vollstaendig angekommen ist —
+  und genau das ist der Fall, vor dem der Schutz von 7c904ce existiert: auf
+  Windows macht eine Antwort bei ungelesenen Request-Bytes den Close zum
+  `WSAECONNRESET` statt zu einem sauberen FIN, waerend der Worker retryt (die
+  Stoerung trat ~1 von 8 Laeufen auf). Jetzt eine Read-Schleife, die bis zum
+  Header-Terminator `\r\n\r\n` liest und die Bytes behaelt (die Verzweigung
+  braucht die Request-Line); beide Anfragen des Workers sind koerperlose
+  GETs, also endet dort die Anfrage. Der veraltende Kommentar, der auf
+  `capture_request` verwies, das dieser Test nicht mehr benutzt, beschreibt
+  jetzt die Schleife. Verifiziert: `youtube_chat` 29/29, chat-Familie 87/87,
+  `cargo fmt --check` gruen.
+
 - fix(chat): **Der YouTube-Worker-Smoke liefert wieder aus, statt im eigenen
   Fail-fast zu panicken.** Auf CI war
   `worker_connects_and_delivers_messages_to_local_http_listener` rot (1190

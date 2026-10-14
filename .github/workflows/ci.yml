@@ -684,6 +684,30 @@ jobs:
       - name: Build
         run: cargo build --workspace --verbose
 
+      # M8 #293: an example that only compiles is not delivered. These six
+      # examples are the documented embedding path (recording, streaming,
+      # dual output, encoder configuration, lifecycle, audio routing), so CI
+      # *runs* each one and fails on a non-zero exit — `cargo build` alone
+      # would keep a broken `main()` green. They only sleep a few seconds
+      # each and need no hardware or network beyond GStreamer, which this job
+      # installs above. `shell: bash` keeps the loop identical on the Windows
+      # and macOS runners (Git Bash ships with the image).
+      - name: Run rivulet-core examples (M8 #293)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for example in \
+            simple_record \
+            simple_stream \
+            dual_output \
+            encoder_config \
+            engine_lifecycle \
+            audio_routing; do
+            echo "::group::example ${example}"
+            cargo run --quiet -p rivulet-core --example "${example}"
+            echo "::endgroup::"
+          done
+
       - name: Test pre-Rust launcher with missing GUI binary
         run: cargo test -p rivulet-launcher --test pre_rust_smoke --verbose
 
