@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+- feat(core): **#294 (Teil 1): typisierte Früh-Validierung für die
+  In-Process-Capture-API — ungültige Konfiguration scheitert vor dem ersten
+  Frame, mit benanntem Feld und behebbarem Meldungstext.** Das Gate-Kriterium
+  "Invalid configuration fails early with typed, actionable errors" ist damit
+  als Fundament geliefert, deterministic und ohne Hardware/Netz/GStreamer
+  testbar:
+  - Neues `rivulet_core::recording_config`: `RecordingConfig` (Breite, Höhe,
+    fps, Bitrate, Codec, Encoder, Container, Pfad) mit `validate()`, das vor
+    jedem Pipeline-Bau scheitert. Bewusst hardware- und netzunabhängig — die
+    Frage "ist dieser Encoder auf dieser Maschine verfügbar" bleibt #295.
+  - `RecordingConfigError` ist typisiert: jede Variante kennt über `field()`
+    das schuldige Feld (maschinenlesbar, zum Binden an UI-Controls) und die
+    `Display`-Meldung nennt die Behebung (z. B. bei VP9-in-MP4 den
+    funktionierenden Container MKV, bei zu hoher Bitrate den
+    Bits-vs-Kilobits-Fehler, bei ungerader Breite die Macroblock-Regel).
+  - Geprüfte Parameter: Breite/Höhe (0, ungerade, >8192), fps (0, >240),
+    Bitrate (0, <100 kbps, >500.000 kbps), Codec/Container-Kompatibilität
+    (VP9 nur MKV, H.265 nicht MPEG-TS, H.264 überall) und Pfadendung gegen
+    den Container.
+  - `tests/recording_config.rs` deckt jeden Parameter einzeln ab und pinnt
+    die Feldnamen als Vertrag. Bewusst **nicht** geliefert (bleibt auf #294
+    offen): Start/Stop/Pause-Lebenszyklus mit Drop-Semantik, Status-Stream,
+    Audio+Video+Datei+Stream-Sitzung und der E2E-Test gegen Fixtures.
+
 - fix(docs,m8): **Die M8-Gate-Checkliste behauptete drei Dinge, die der Baum
   nicht hergibt — bei der Prüfung nach #293 korrigiert und gegen Rückschritt
   gepinnt.** Befund und Reparatur:
