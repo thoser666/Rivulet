@@ -1,5 +1,36 @@
 ## [Unreleased]
 
+- fix(docs,m8): **Die M8-Gate-Checkliste behauptete drei Dinge, die der Baum
+  nicht hergibt — bei der Prüfung nach #293 korrigiert und gegen Rückschritt
+  gepinnt.** Befund und Reparatur:
+  - **`missing_docs` wurde nie aktiviert.** Die Zeile in `rivulet-core/src/lib.rs`
+    ist ein Doc-Comment (`//! #![warn(missing_docs)]`), kein Crate-Attribut —
+    sie dokumentiert die Idee, schaltet aber nichts ein. Beweis per Probe:
+    ein undokumentiertes `pub fn` kompiliert still (0 Warnungen); das echte
+    Aktivieren meldet 696 fehlende Docs (gemessen 2026-10-13). README und
+    Gate sagten "arrived with #292" bzw. listeten `missing_docs` als
+    geliefert — jetzt steht dort, dass der Lint inaktiv bzw. nie aktiviert
+    war; #292s Checkbox nennt den Zustand explizit.
+  - **Frame streaming war nicht geliefert, wurde aber behauptet.** Kein
+    Beispiel in `rivulet-core/examples/` erwähnt Frames; die README-Checkbox
+    für #293 nannte "frame streaming" trotzdem. Sie nennt jetzt die sechs
+    tatsächlichen Themen und benennt Frame-Delivery als offene Klausal des
+    Gate-Kriteriums (braucht die In-Process-API aus #294 als Gegenstück).
+  - **Der Gate-Absatz war veraltet.** "Das fehlende Attribut, die fehlende
+    examples/-Krate und die Log-only-Feature-Erkennung gelten noch und #292
+    muss sie schließen" — #292 und #293 sind geliefert, die examples/-Krate
+    existiert und CI führt alle sechs aus. Der Absatz trennt jetzt sauber:
+    geliefert (examples/-Krate) vs. nicht geliefert (Lint, Feature-Why,
+    Frame-Delivery).
+  - **Guard `m8_delivery_claims_match_the_artifacts`** leitet beide Claims
+    aus dem Artefakt ab statt aus der Prosa: Lint zählt als aktiv nur bei
+    echtem `#!`-Crate-Attribut (nie `//!`), Frame-streaming zählt als
+    geliefert nur, wenn ein Beispiel Frames erwähnt. Solange das Artefakt
+    den Claim nicht trägt, ist die ehrliche Formulierung selbst gepinnt.
+    Verifiziert per Mutationstest: neutrierte Gate-Formulierung, zurück-
+    gekehrter README-Frame-Claim und entfernter Lint-Claim fallen je einzeln
+    durch, der restorete Baum ist wieder grün.
+
 - test(m8): **#293 ist jetzt auch belegt, nicht nur behauptet — die sechs
   Beispiele werden ausgefuehrt, nicht nur gebaut.** Der Akzeptanzsatz von
   #293 sagt: ein Beispiel, das nur kompiliert aber nicht laeuft, gilt als
