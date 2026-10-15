@@ -379,11 +379,16 @@ small downstream-consumer smoke test.
 Workstream issues:
 
 - [x] [#292](https://github.com/thoser666/Rivulet/issues/292) — stabilized public
-  API (`missing_docs`, crate-style types, semver policy, deprecation path).
+  API (crate-style types, semver policy, deprecation path; the promised
+  `missing_docs` lint stayed a doc-comment example in `lib.rs` and was never
+  activated — see the closing note).
   Covers the first, fourth and part of the second criterion.
 - [x] [#293](https://github.com/thoser666/Rivulet/issues/293) — API docs plus a
   `rivulet-core/examples/` crate whose examples are **run**, not just built.
-  Covers the example and the GUI-independence criterion.
+  Covers the GUI-independence criterion and, for the example criterion,
+  everything except frame delivery: no example streams frames out of the
+  capture pipeline, so that clause stays open until the in-process API from
+  #294 exists to demonstrate it against.
   - **Evidence:** the `Run rivulet-core examples (M8 #293)` step in the
     Build & Test job executes all six examples (`simple_record`,
     `simple_stream`, `dual_output`, `encoder_config`, `engine_lifecycle`,
@@ -411,9 +416,16 @@ state is recorded rather than glossed. As recorded when the milestone opened,
 `rivulet-core` was `0.65.0-alpha.55` (under semver `0.x` every minor bump is
 breaking) with 66 public modules and no `#![warn(missing_docs)]`, no
 `examples/` crate, and feature detection reachable only through log output.
-The module count is a snapshot and has grown since; the missing attribute,
-the absent example crate and the log-only feature detection are the parts
-that still hold and that #292 has to close.
+The module count is a snapshot and has grown since, and the opening state
+has moved on in part: the `examples/` crate exists and CI runs all six (#293).
+Two of the three gaps were *not* closed by the workstreams that were checked
+off against them. `#![warn(missing_docs)]` was never activated — the line in
+`lib.rs` is a doc-comment example, not a crate attribute, and turning it on
+for real reports 696 undocumented public items (measured 2026-10-13) — so
+"stabilized public API" and "documented API" are not the same claim yet.
+Feature detection hands out a bare list without a machine-readable why,
+which is what #295 exists for; frame delivery has no example, which needs
+#294 first. The gate stays open on those clauses, not on the delivery count.
 
 ### M9: Modern Architecture
 
