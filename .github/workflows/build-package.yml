@@ -188,7 +188,7 @@ jobs:
       - name: Upload Windows EXEs for SignPath signing
         if: runner.os == 'Windows' && steps.signing.outputs.signpath_enabled == 'true'
         id: signpath-upload-exe
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rivulet-windows-unsigned-exe-${{ github.run_id }}
           path: |
@@ -267,7 +267,7 @@ jobs:
       - name: Upload MSI for SignPath signing
         if: runner.os == 'Windows' && steps.signing.outputs.signpath_enabled == 'true'
         id: signpath-upload-msi
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rivulet-windows-unsigned-msi-${{ github.run_id }}
           path: staging/rivulet-windows-x86_64.msi
@@ -314,7 +314,7 @@ jobs:
           bash packaging/macos/sign-notarize.sh "$RELEASE_VERSION" "$(pwd)/staging" "$(pwd)/staging/rivulet-macos-aarch64.dmg"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact_name }}
           path: |
