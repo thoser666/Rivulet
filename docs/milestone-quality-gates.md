@@ -400,6 +400,16 @@ Workstream issues:
 - [#294](https://github.com/thoser666/Rivulet/issues/294) — in-process capture
   API so a foreign crate can record without starting the app. Covers the
   early-typed-errors criterion and the embedding promise itself.
+  - **Partial (2026-10-13):** the *early-typed-errors* half now has a
+    foundation — `rivulet_core::recording_config` gives an embedder a
+    `RecordingConfig` plus a typed `RecordingConfigError` that names the
+    offending field and states the fix, checked **before** any pipeline is
+    built and without hardware, network or GStreamer (so it is deterministic
+    in CI). It is covered per-parameter by `tests/recording_config.rs`.
+    The workstream stays open: start/stop/pause lifecycle with drop
+    semantics, the status stream, the audio+video+file+stream session and the
+    end-to-end fixture test are not delivered yet, and validation here is
+    static — runtime encoder availability remains #295's job.
 - [#295](https://github.com/thoser666/Rivulet/issues/295) — feature detection
   and fallback as a queryable API with a machine-readable reason.
   Covers the detection criterion.
