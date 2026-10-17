@@ -159,7 +159,10 @@ pub use stream_runtime::{AdaptiveBitrateController, BitrateChange, DelaySupervis
 
 pub mod encoder;
 pub mod recording_config;
-pub use recording_config::{RecordingConfig, RecordingConfigError};
+pub use recording_config::{
+    detect_container_availability, detect_encoder_availability, RecordingConfig,
+    RecordingConfigDetect, RecordingConfigError,
+};
 pub mod video_effects;
 pub use encoder::{
     best_encoder, best_encoder_for_codec, detect_available_encoders,

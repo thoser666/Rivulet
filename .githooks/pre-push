@@ -41,33 +41,33 @@ if [[ "${RIVULET_PRE_PUSH_FAST_TESTS:-}" != "0" ]]; then
   echo "pre-push: cargo test -p rivulet-core --test ci_pinning"
   cargo test -p rivulet-core --test ci_pinning
 
-  if command -v python3 >/dev/null 2>&1; then
-    echo "pre-push: python3 scripts/generate-action-pins.py --check"
-    python3 scripts/generate-action-pins.py --check
+  if command -v python >/dev/null 2>&1; then
+    echo "pre-push: python scripts/generate-action-pins.py --check"
+    python scripts/generate-action-pins.py --check
 
     if git rev-parse --verify --quiet origin/develop >/dev/null; then
-      echo "pre-push: python3 scripts/check-dco.py --base origin/develop"
-      python3 scripts/check-dco.py --base origin/develop
+      echo "pre-push: python scripts/check-dco.py --base origin/develop"
+      python scripts/check-dco.py --base origin/develop
     else
       echo "pre-push: no origin/develop ref — skipping DCO check (CI enforces it on PRs)"
     fi
 
-    echo "pre-push: python3 scripts/check-parity-checklist.py --self-test"
-    python3 scripts/check-parity-checklist.py --self-test
+    echo "pre-push: python scripts/check-parity-checklist.py --self-test"
+    python scripts/check-parity-checklist.py --self-test
 
-    echo "pre-push: python3 scripts/check-release-notes.py --self-test"
-    python3 scripts/check-release-notes.py --self-test
+    echo "pre-push: python scripts/check-release-notes.py --self-test"
+    python scripts/check-release-notes.py --self-test
 
-    echo "pre-push: python3 scripts/check-theme-contrast.py"
-    python3 scripts/check-theme-contrast.py
+    echo "pre-push: python scripts/check-theme-contrast.py"
+    python scripts/check-theme-contrast.py
 
-    echo "pre-push: python3 scripts/check-apt-parity.py --self-test"
-    python3 scripts/check-apt-parity.py --self-test
+    echo "pre-push: python scripts/check-apt-parity.py --self-test"
+    python scripts/check-apt-parity.py --self-test
 
-    echo "pre-push: python3 scripts/check-code-scanning-alerts.py --self-test"
-    python3 scripts/check-code-scanning-alerts.py --self-test
+    echo "pre-push: python scripts/check-code-scanning-alerts.py --self-test"
+    python scripts/check-code-scanning-alerts.py --self-test
   else
-    echo "pre-push: python3 not found — skipping script self-tests"
+    echo "pre-push: python not found — skipping script self-tests"
   fi
 
   if command -v bash >/dev/null 2>&1; then

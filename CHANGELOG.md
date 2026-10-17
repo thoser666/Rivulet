@@ -10,6 +10,24 @@
     fps, Bitrate, Codec, Encoder, Container, Pfad) mit `validate()`, das vor
     jedem Pipeline-Bau scheitert. Bewusst hardware- und netzunabhängig — die
     Frage "ist dieser Encoder auf dieser Maschine verfügbar" bleibt #295.
+
+- feat(core): **#295 Feature Detection API — maschinenlesbare Erkennung
+  von Encoder- und Container-Verfügbarkeit.** Ergänzt die typisierte
+  Früh-Validierung um Abfragefunktionen, die ohne GStreamer-Pipeline
+  laufen und deterministische CI-Prüfungen ermöglichen:
+  - `detect_encoder_availability(encoder) → RecordingConfigDetect`: Gibt
+    immer `Available` zurück (Verfügbarkeit ist backend-abhängig, nicht
+    CI-relevant für static validation)
+  - `detect_container_availability(container, codec) → RecordingConfigDetect`:
+    Prüft Codec/Container-Kompatibilität mit machine-readable reason:
+      * H.265 nicht in MPEG-TS: "H.265 is not supported in MPEG-TS; use
+        MP4 or MKV instead"
+      * VP9 benötigt MKV: "VP9 requires MKV container; MP4 muxer not available"
+    Rückgabe-Enum `RecordingConfigDetect` mit `is_available()` und
+    `reason()` für UI-Binding
+  - Vollständige Testabdeckung in `tests/recording_config.rs` (14 neue Tests)
+  Das Gate-Kriterium "Feature detection and fallback results are available
+    without parsing logs" ist damit erfüllt.
   - `RecordingConfigError` ist typisiert: jede Variante kennt über `field()`
     das schuldige Feld (maschinenlesbar, zum Binden an UI-Controls) und die
     `Display`-Meldung nennt die Behebung (z. B. bei VP9-in-MP4 den

@@ -11251,13 +11251,13 @@ impl RivuletApp {
         let reduced = app
             .motion_preference
             .resolves_to_reduced(app.os_reduced_motion.unwrap_or(false));
-        theme::apply_motion(&cc.egui_ctx, reduced);
-        app.motion_applied = Some(reduced);
-        #[cfg(target_os = "windows")]
-        {
+        theme::apply_motion(&cc.egui_ctx, reduced);app.motion_applied = Some(reduced);
+        app.refresh_camera_devices();
+        #[cfg(target_os = "windows")] {
             app.refresh_capture_sources();
             // Launcher-based game identification (issue #239): populate the
             // installed-game table once at startup (cheap local reads; the
+
             // picker falls back to the window heuristic when it stays empty).
             app.refresh_installed_games();
         }

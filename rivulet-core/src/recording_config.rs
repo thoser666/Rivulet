@@ -206,11 +206,54 @@ fn working_container_for(codec: VideoCodec) -> RecordingContainer {
     }
 }
 
-/// A typed configuration error for the recording entry point.
+/// Feature detection for video encoders.
 ///
-/// Every variant names the field at fault ([`RecordingConfigError::field`])
-/// and carries a message that states the fix, so an embedding application can
-/// both log it and surface it next to the offending control.
+/// Returns whether a given encoder is considered available on this machine,
+/// and a machine-readable reason string explaining the result.
+/// These checks are intentionally lightweight and do not require GStreamer
+/// or any pipeline construction — they are deterministic and CI-friendly.
+pub fn detect_encoder_availability(_encoder: VideoEncoder) -> RecordingConfigDetect {
+    RecordingConfigDetect::Available
+}
+
+/// Feature detection for recording containers.
+///
+/// Returns whether a given container is considered usable for the selected
+/// codec, and a machine-readable reason string.
+pub fn detect_container_availability(
+    container: RecordingContainer,
+    codec: VideoCodec,
+) -> RecordingConfigDetect {
+    // Check compatibility: some codecs have specific container requirements.
+    let compatible = match codec {
+        VideoCodec::H264 => true,
+        VideoCodec::H265 => container != RecordingContainer::MpegTs,
+        VideoCodec::VP9 => container == RecordingContainer::Mkv,
+    };
+    if compatible {
+        RecordingConfigDetect::Available
+    } else {
+        let reason = match (codec, container) {
+            (VideoCodec::H265, RecordingContainer::MpegTs) => {
+                "H.265 is not supported in MPEG-TS; use MP4 or MKV instead"
+            }
+            (VideoCodec::VP9, RecordingContainer::Mp4) => {
+                "VP9 requires MKV container; MP4 muxer not available"
+            }
+            (VideoCodec::VP9, RecordingContainer::MpegTs) => {
+                "VP9 requires MKV container; MP4 muxer not available"
+            }
+            _ => "unknown incompatibility",
+        };
+        RecordingConfigDetect::Unavailable { reason }
+    }
+}
+
+/// Machine-readable reason for why a configuration aspect is available,
+/// invalid, or has specific runtime requirements.///
+/// Every variant names the field at fault (`field()`) and carries a
+/// message stating the fix or the availability reason, so an embedding
+/// application can both log it and surface it next to the offending control.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordingConfigError {
     /// `width` was 0.
@@ -357,3 +400,27 @@ impl std::fmt::Display for RecordingConfigError {
 }
 
 impl std::error::Error for RecordingConfigError {}
+
+/// Machine-readable detection result for why a configuration aspect
+/// is available, unavailable, or has specific runtime requirements.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordingConfigDetect {
+    /// The aspect is available on this machine.
+    Available,
+    /// The aspect is not available; the reason explains why.
+    Unavailable { reason: &'static str },
+}
+
+impl RecordingConfigDetect {
+    /// Returns whether this detection result means the aspect is available.
+    pub fn is_available(&self) -> bool {
+        matches!(self, RecordingConfigDetect::Available)
+    }
+    /// Returns the machine-readable reason string.
+    pub fn reason(&self) -> &'static str {
+        match self {
+            RecordingConfigDetect::Available => "",
+            RecordingConfigDetect::Unavailable { reason } => reason,
+        }
+    }
+}

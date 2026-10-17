@@ -10,7 +10,10 @@
 
 use rivulet_core::container::RecordingContainer;
 use rivulet_core::encoder::{VideoCodec, VideoEncoder};
-use rivulet_core::{RecordingConfig, RecordingConfigError};
+use rivulet_core::{
+    detect_container_availability, detect_encoder_availability, RecordingConfig,
+    RecordingConfigError,
+};
 
 /// A valid baseline; each failing test mutates exactly one field so the
 /// reported error is unambiguous.
@@ -290,6 +293,88 @@ fn field_names_are_stable_for_binding_to_ui_controls() {
     for (err, field) in cases {
         assert_eq!(err.field(), field, "field name for {err:?}");
     }
+}
+
+#[test]
+fn detect_encoder_availability_is_available_for_software() {
+    let result = detect_encoder_availability(VideoEncoder::Software);
+    assert!(result.is_available());
+}
+
+#[test]
+fn detect_encoder_availability_is_available_for_all_backends() {
+    for encoder in [
+        VideoEncoder::Software,
+        VideoEncoder::Nvenc,
+        VideoEncoder::QuickSync,
+        VideoEncoder::Amf,
+    ] {
+        let result = detect_encoder_availability(encoder);
+        assert!(
+            result.is_available(),
+            "encoder {encoder:?} should be available"
+        );
+    }
+}
+
+#[test]
+fn detect_container_availability_is_compatible_h264_mp4() {
+    let result = detect_container_availability(RecordingContainer::Mp4, VideoCodec::H264);
+    assert!(result.is_available());
+}
+
+#[test]
+fn detect_container_availability_is_compatible_h264_mkv() {
+    let result = detect_container_availability(RecordingContainer::Mkv, VideoCodec::H264);
+    assert!(result.is_available());
+}
+
+#[test]
+fn detect_container_availability_is_compatible_h264_mpegts() {
+    let result = detect_container_availability(RecordingContainer::MpegTs, VideoCodec::H264);
+    assert!(result.is_available());
+}
+
+#[test]
+fn detect_container_availability_is_compatible_h265_mp4() {
+    let result = detect_container_availability(RecordingContainer::Mp4, VideoCodec::H265);
+    assert!(result.is_available());
+}
+
+#[test]
+fn detect_container_availability_is_not_compatible_h265_mpegts() {
+    let result = detect_container_availability(RecordingContainer::MpegTs, VideoCodec::H265);
+    assert!(!result.is_available());
+    assert_eq!(
+        result.reason(),
+        "H.265 is not supported in MPEG-TS; use MP4 or MKV instead"
+    );
+}
+
+#[test]
+fn detect_container_availability_is_compatible_vp9_mkv() {
+    let result = detect_container_availability(RecordingContainer::Mkv, VideoCodec::VP9);
+    assert!(result.is_available());
+}
+
+#[test]
+fn detect_container_availability_is_not_compatible_vp9_mp4() {
+    let result = detect_container_availability(RecordingContainer::Mp4, VideoCodec::VP9);
+    assert!(!result.is_available());
+    assert_eq!(
+        result.reason(),
+        "VP9 requires MKV container; MP4 muxer not available"
+    );
+}
+
+#[test]
+fn detect_container_availability_is_not_compatible_vp9_mpegts() {
+    let result = detect_container_availability(RecordingContainer::MpegTs, VideoCodec::VP9);
+    assert!(!result.is_available());
+    assert_eq!(
+        result.reason(),
+        "VP9 requires MKV container; MP4 muxer not available"
+    );
 }
 
 #[test]
