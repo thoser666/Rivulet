@@ -100,8 +100,5 @@
   - Gegeben ein Theme mit Palette.
   - Dann müssen Farbdarstellungen auf Palette-Änderung reagieren.
 
-- **`scene_color_meaning_is_not_only_decorative`**
-  - Wird separat zu 2 genannt, aber als prinzipielle Testrichtung wiederholt.
-
 EOF
 echo "written"
