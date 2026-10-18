@@ -400,20 +400,33 @@ Workstream issues:
 - [#294](https://github.com/thoser666/Rivulet/issues/294) — in-process capture
   API so a foreign crate can record without starting the app. Covers the
   early-typed-errors criterion and the embedding promise itself.
-  - **CLOSED** — `RecordingConfig::validate()` provides typed early
+  - **CLOSED — partial** — `RecordingConfig::validate()` provides typed early
     validation with `RecordingConfigError` that names the offending field
     and states the fix, checked per-parameter by `tests/recording_config.rs`.
-    Both the early-typed-errors and feature-detection (#295) workstreams are
-    now complete, delivering a fully typed, deterministic configuration
-    validation before any pipeline construction.
+    The early-typed-errors workstream is complete: invalid configuration now
+    fails before any pipeline construction with a typed, field-named, actionable
+    error.
+    What this does **not** yet deliver is the embedding promise in the issue title:
+    a recording feature a foreign crate can embed without starting the Rivulet
+    app, with audio/video capture, encoding, file and stream output. The typed
+    config gate is a necessary precondition for that entry point, not the entry
+    point itself.
 - [#295](https://github.com/thoser666/Rivulet/issues/295) — feature detection
   and fallback as a queryable API with a machine-readable reason.
-  **CLOSED** — `RecordingConfigDetect` enum with `is_available()` and
+  **CLOSED — partial** — `RecordingConfigDetect` enum with `is_available()` and
   `reason()` methods, plus `detect_encoder_availability()` and
   `detect_container_availability()` functions implemented in
   `rivulet-core/src/recording_config.rs` with full test coverage in
-  `rivulet-core/tests/recording_config.rs`. The detection criterion is now
-  met with machine-readable why strings for all compatibility cases.
+  `rivulet-core/tests/recording_config.rs`.
+  The codec/container compatibility criterion is met: `detect_container_availability()`
+  reports machine-readable why strings for every compatibility case (VP9→MKV,
+  H.265 ∉ MPEG-TS, H.264 everywhere).
+  What is **not** yet delivered is the encoder-side part of the issue: a
+  machine-readable, queryable answer to "is this encoder available on this
+  machine" that `detect_encoder_availability()` would need to return for a real
+  runtime query. Today it returns `Available` for every encoder by construction —
+  the availability question the issue names is backend-dependent and is deferred,
+  not faked.
 - [#296](https://github.com/thoser666/Rivulet/issues/296) — capture backends
   behind one stable trait, with explicit lifecycle and thread-safety promises.
   Feeds the first criterion.

@@ -444,9 +444,9 @@ must not be implied by beta parity.
 
 - [x] Stabilized public API for `rivulet-core` (semver 1.0, crate-style types; `#![warn(missing_docs)]` was named in #292 but stayed a doc-comment example in `lib.rs`, not an active lint) — [#292](https://github.com/thoser666/Rivulet/issues/292)
 - [x] Comprehensive API docs + examples (recording, streaming, dual output, encoder selection, engine lifecycle, audio routing — frame delivery is not yet covered and waits on the in-process capture API) — [#293](https://github.com/thoser666/Rivulet/issues/293)
-- [ ] In-process capture API: embed a recording feature in any Rust app (audio/video capture, encoding, file/stream) — [#294](https://github.com/thoser666/Rivulet/issues/294)
-- [ ] Feature detection and runtime diagnostics as an API (`detect_available_encoders()`, encoder fallback) — [#295](https://github.com/thoser666/Rivulet/issues/295)
-- [ ] Abstraction of capture backends (xcap, PipeWire, Metal/WGC) behind stable traits — [#296](https://github.com/thoser666/Rivulet/issues/296)
+- [ ] In-process capture API: embed a recording feature in any Rust app (audio/video capture, encoding, file/stream) — [#294](https://github.com/thoser666/Rivulet/issues/294) — typed config gate delivered; embeddable capture entry point still open
+- [ ] Feature detection and runtime diagnostics as an API (`detect_available_encoders()`, encoder fallback) — [#295](https://github.com/thoser666/Rivulet/issues/295) — container/codec query delivered; runtime encoder availability query still open
+- [x] Abstraction of capture backends (xcap, PipeWire, Metal/WGC) behind stable traits — [#296](https://github.com/thoser666/Rivulet/issues/296)
 - [ ] Exit evidence: docs build, example run matrix, public API review, downstream-consumer smoke test — [#297](https://github.com/thoser666/Rivulet/issues/297)
 
 **Example overview:** the six runnable examples live in [`rivulet-core/examples/`](rivulet-core/examples/) and are listed with what each one shows in the [crate documentation](rivulet-core/src/lib.rs) — `simple_record`, `simple_stream`, `dual_output`, `encoder_config`, `engine_lifecycle`, `audio_routing`. CI **runs** all six (`Run rivulet-core examples` in the Build & Test job); building without running them does not count as delivered.

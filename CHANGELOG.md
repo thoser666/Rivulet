@@ -10,6 +10,12 @@
     fps, Bitrate, Codec, Encoder, Container, Pfad) mit `validate()`, das vor
     jedem Pipeline-Bau scheitert. Bewusst hardware- und netzunabhängig — die
     Frage "ist dieser Encoder auf dieser Maschine verfügbar" bleibt #295.
+  - Dies ist die erste Teil-Lieferung (#294 Teil 1), nicht die volle In-Process-
+    Capture-API. Es fehlt noch der Capture-Einstiegspunkt selbst: eine Session-
+    Lebenszyklus-API (Start/Stop/Pause, Drop-Semantik), Audio+Video, Datei und
+    Stream aus einer fremden Crate heraus und der zugehörige E2E-Test gegen
+    Fixtures. Das Gate-Kriterium "Invalid configuration fails early" ist erfüllt,
+    das Issue-Title-Ziel "embed a recording feature in any Rust app" noch nicht.
 
 - feat(core): **#295 Feature Detection API — maschinenlesbare Erkennung
   von Encoder- und Container-Verfügbarkeit.** Ergänzt die typisierte
@@ -17,7 +23,8 @@
   laufen und deterministische CI-Prüfungen ermöglichen:
   - `detect_encoder_availability(encoder) → RecordingConfigDetect`: Gibt
     immer `Available` zurück (Verfügbarkeit ist backend-abhängig, nicht
-    CI-relevant für static validation)
+    CI-relevant für static validation). Das ist bewusst kein echter Laufzeit-
+    Query — das ist die offene Hälfte des Issues, kein geliefertes Ergebnis.
   - `detect_container_availability(container, codec) → RecordingConfigDetect`:
     Prüft Codec/Container-Kompatibilität mit machine-readable reason:
       * H.265 nicht in MPEG-TS: "H.265 is not supported in MPEG-TS; use
@@ -27,7 +34,9 @@
     `reason()` für UI-Binding
   - Vollständige Testabdeckung in `tests/recording_config.rs` (14 neue Tests)
   Das Gate-Kriterium "Feature detection and fallback results are available
-    without parsing logs" ist damit erfüllt.
+    without parsing logs" ist teilweise erfüllt: das Container- und Codec-
+  Kompatibilitäts-Kriterium ist geliefert, der Encoder-Verfügbarkeits-Teil
+  (maschinenlesbare Antwort auf "welcher Encoder läuft hier") noch nicht.
   - `RecordingConfigError` ist typisiert: jede Variante kennt über `field()`
     das schuldige Feld (maschinenlesbar, zum Binden an UI-Controls) und die
     `Display`-Meldung nennt die Behebung (z. B. bei VP9-in-MP4 den

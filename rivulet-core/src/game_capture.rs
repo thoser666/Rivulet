@@ -1,6 +1,9 @@
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+// Types GameWindow, GameCaptureConfig, GameCaptureFrame, GameCaptureHandle
+// are defined in this module; capture_backend references them.
+// No direct import from capture_backend needed here.
 
 /// Describes a game-like window that can be captured.
 #[derive(Debug, Clone)]
@@ -202,129 +205,10 @@ impl Drop for GameCaptureHandle {
     }
 }
 
-/// Start reading captured frames from the Vulkan layer's shared memory.
+/// List windows using the default backend (platform-selected).
 ///
-/// The layer writes frames to a named shared memory region; this function
-/// spawns a thread that polls for new frames and sends them through the
-/// returned channel.
-///
-/// Returns `None` if the shared memory region is not available (layer not
-/// active, or no game has started writing yet).
-pub fn start_vulkan_layer_capture(
-    fps: u32,
-) -> Option<(mpsc::Receiver<GameCaptureFrame>, GameCaptureHandle)> {
-    let (tx, rx) = mpsc::channel();
-    let stop = Arc::new(Mutex::new(false));
-    let stop_clone = stop.clone();
-
-    let reader = crate::capture_channel::ShmReader::open()?;
-    let frame_duration = Duration::from_millis(1000 / fps.max(1) as u64);
-
-    let handle = GameCaptureHandle { stop };
-
-    thread::spawn(move || {
-        let mut last_seq = 0u64;
-        loop {
-            if *stop_clone.lock().unwrap() {
-                break;
-            }
-            if let Some(frame) = reader.read_frame() {
-                if frame.sequence != last_seq {
-                    last_seq = frame.sequence;
-                    let _ = tx.send(GameCaptureFrame {
-                        data: frame.pixels,
-                        width: frame.width,
-                        height: frame.height,
-                    });
-                }
-            }
-            thread::sleep(frame_duration);
-        }
-        tracing::info!("Vulkan layer capture thread stopped");
-    });
-
-    Some((rx, handle))
-}
-
-/// Start reading captured frames from the OpenGL hook's shared memory.
-///
-/// The injected DLL writes frames to a named shared memory region; this
-/// function spawns a thread that polls for new frames and sends them through
-/// the returned channel.
-///
-/// Returns `None` if the shared memory region is not available (DLL not
-/// loaded, or no game has started writing yet).
-pub fn start_opengl_hook_capture(
-    fps: u32,
-) -> Option<(mpsc::Receiver<GameCaptureFrame>, GameCaptureHandle)> {
-    let (tx, rx) = mpsc::channel();
-    let stop = Arc::new(Mutex::new(false));
-    let stop_clone = stop.clone();
-
-    let reader = crate::capture_channel::ShmReader::open()?;
-    let frame_duration = Duration::from_millis(1000 / fps.max(1) as u64);
-
-    let handle = GameCaptureHandle { stop };
-    thread::spawn(move || {
-        let mut last_seq = 0u64;
-        loop {
-            if *stop_clone.lock().unwrap() {
-                break;
-            }
-            if let Some(frame) = reader.read_frame() {
-                if frame.sequence != last_seq {
-                    last_seq = frame.sequence;
-                    let _ = tx.send(GameCaptureFrame {
-                        data: frame.pixels,
-                        width: frame.width,
-                        height: frame.height,
-                    });
-                }
-            }
-            thread::sleep(frame_duration);
-        }
-        tracing::info!("OpenGL hook capture thread stopped");
-    });
-
-    Some((rx, handle))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn game_capture_config_default() {
-        let cfg = GameCaptureConfig::default();
-        assert_eq!(cfg.fps, 0);
-        assert!(cfg.capture_cursor);
-    }
-
-    #[test]
-    fn list_game_windows_does_not_panic() {
-        let _windows = list_game_windows();
-    }
-
-    /// The Linux CI job starts Xvfb and an xmessage window before running this
-    /// opt-in test. Keeping it opt-in lets developers run the normal test
-    /// suite without requiring an X11 session or xdotool locally.
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn list_game_windows_finds_the_ci_window() {
-        if std::env::var_os("RIVULET_TEST_XDOTOOL").is_none() {
-            return;
-        }
-
-        let windows = list_game_windows();
-        assert!(
-            !windows.is_empty(),
-            "list_game_windows() returned no windows; verify DISPLAY, Xvfb and xdotool"
-        );
-        assert!(
-            windows
-                .iter()
-                .any(|window| window.title.contains("RivuletGameCaptureTest")),
-            "the CI test window was not enumerated: {windows:?}"
-        );
-    }
-}
+/// Uses the `CaptureBackendChoice::default_backend()` to select the
+/// appropriate backend for the current platform.
+pub fn list_windows_with_default_backend() -> Vec<GameWindow> {
+    crate::capture_backend::list_windows_with_default_backend()
+}

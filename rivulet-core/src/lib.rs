@@ -129,6 +129,7 @@ pub use audio::{AudioFrame, AudioTrack, SkippedFilter};
 pub mod camera;
 pub use camera::{CameraConfig, CameraDevice, CameraFrame};
 
+pub mod capture_backend;
 pub mod game_capture;
 pub mod game_detection;
 pub use game_capture::{GameCaptureConfig, GameCaptureFrame, GameWindow};
