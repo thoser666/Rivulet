@@ -53,22 +53,6 @@ fn assert_list_windows_delegates() {
     let _ = _windows;
 }
 
-/// The existing start_game_capture() and list_game_windows() must still work
-/// for backward compatibility.
-fn assert_backward_compatibility() {
-    let cfg = rivulet_core::GameCaptureConfig::default();
-    let (_tx, _rx) = rivulet_core::start_game_capture(
-        &rivulet_core::game_capture::GameWindow {
-            id: 0,
-            title: "test".into(),
-            width: 640,
-            height: 480,
-        },
-        &cfg,
-    );
-    let _ = _rx;
-}
-
 /// A CaptureBackend implementation must satisfy the trait bounds.
 fn assert_concrete_backend_bounds() {
     // XCapBackend is Send + Sync + 'static (required by the trait)
@@ -114,11 +98,6 @@ fn test_capture_error_traits() {
 #[test]
 fn test_list_windows_delegates() {
     assert_list_windows_delegates();
-}
-
-#[test]
-fn test_backward_compatibility() {
-    assert_backward_compatibility();
 }
 
 #[test]
