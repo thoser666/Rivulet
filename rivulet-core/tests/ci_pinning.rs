@@ -63,8 +63,8 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v7.0.1",
     ),
     (
-        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-        "v7.0.1",
+        "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+        "v7.0.2",
     ),
     (
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
@@ -83,20 +83,20 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v3.0.3",
     ),
     (
-        "github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-        "v4.38.2",
+        "github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d",
+        "v4.38.3",
     ),
     (
-        "github/codeql-action/autobuild@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-        "v4.38.2",
+        "github/codeql-action/autobuild@24c54180a607b1449ed407dd24f251e4e9147c8d",
+        "v4.38.3",
     ),
     (
-        "github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-        "v4.38.2",
+        "github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d",
+        "v4.38.3",
     ),
     (
-        "github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-        "v4.38.2",
+        "github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d",
+        "v4.38.3",
     ),
     (
         "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
