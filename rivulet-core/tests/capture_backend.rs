@@ -84,6 +84,7 @@ fn test_capture_backend_default_backend_works() {
     // On Linux it returns XCapBackend, on Windows MetalWgcBackend, elsewhere an error.
     let _result = CaptureBackendChoice::default_backend();
     // If we get here without a compile error, the test passes.
+#[allow(clippy::assertions_on_constants)]
     assert!(true);
 }
 
