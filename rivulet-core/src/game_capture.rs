@@ -1,9 +1,9 @@
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-// Types GameWindow, GameCaptureConfig, GameCaptureFrame, GameCaptureHandle
-// are defined in this module; capture_backend references them.
-// No direct import from capture_backend needed here.
+ // Types GameWindow, GameCaptureConfig, GameCaptureFrame, GameCaptureHandle
+ // are defined in this module; capture_backend references them.
+ // No direct import from capture_backend needed here.
 
 /// Describes a game-like window that can be captured.
 #[derive(Debug, Clone)]
@@ -211,4 +211,4 @@ impl Drop for GameCaptureHandle {
 /// appropriate backend for the current platform.
 pub fn list_windows_with_default_backend() -> Vec<GameWindow> {
     crate::capture_backend::list_windows_with_default_backend()
-}
+}

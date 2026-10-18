@@ -10,10 +10,10 @@
 
 use rivulet_core::{
     capture_backend::{
-        CaptureBackend, CaptureBackendChoice, CaptureError, GameCaptureConfig, GameWindow,
-        start_game_capture,
+        start_game_capture, CaptureBackend, CaptureBackendChoice, CaptureError, GameCaptureConfig,
+        GameWindow,
     },
-    game_capture::{GameWindow, start_game_capture},
+    game_capture::{start_game_capture, GameWindow},
 };
 
 /// The trait must be object-safe (Send + Sync + 'static) so it can be used as
@@ -63,7 +63,15 @@ fn assert_list_windows_delegates() {
 /// for backward compatibility.
 fn assert_backward_compatibility() {
     let cfg = GameCaptureConfig::default();
-    let (_tx, _rx) = start_game_capture(&GameWindow { id: 0, title: "test".into(), width: 640, height: 480 }, &cfg);
+    let (_tx, _rx) = start_game_capture(
+        &GameWindow {
+            id: 0,
+            title: "test".into(),
+            width: 640,
+            height: 480,
+        },
+        &cfg,
+    );
     let _ = _rx;
 }
 

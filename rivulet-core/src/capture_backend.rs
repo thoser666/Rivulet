@@ -1,7 +1,7 @@
-use crate::game_capture::GameWindow;
 use crate::game_capture::GameCaptureConfig;
 use crate::game_capture::GameCaptureFrame;
 use crate::game_capture::GameCaptureHandle;
+use crate::game_capture::GameWindow;
 
 /// Error type for capture backend operations.
 #[derive(Debug, Clone)]
