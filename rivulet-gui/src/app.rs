@@ -3156,6 +3156,18 @@ impl RivuletApp {
             _ => "audio_source_kind_mixed",
         }
     }
+
+    /// Refresh the list of available camera devices.
+    ///
+    /// Platform-independent: `camera::list_cameras()` and the backing fields
+    /// carry no `cfg`, and the startup path calls this unconditionally — the
+    /// method must therefore live in the unconditional impl, not in the
+    /// `cfg(target_os = "windows")` one (that placement broke the Linux build
+    /// with E0599 while compiling clean on Windows).
+    fn refresh_camera_devices(&mut self) {
+        self.camera_devices = rivulet_core::camera::list_cameras();
+        self.selected_camera_idx = None;
+    }
 }
 
 // --- Game-window live preview (shared by Linux + Windows) ---
@@ -3278,12 +3290,6 @@ impl RivuletApp {
     fn refresh_installed_games(&mut self) {
         self.installed_games = rivulet_core::game_detection::list_installed_games();
         self.running_games = rivulet_core::game_detection::detect_running_game();
-    }
-
-    /// Refresh the list of available camera devices.
-    fn refresh_camera_devices(&mut self) {
-        self.camera_devices = rivulet_core::camera::list_cameras();
-        self.selected_camera_idx = None;
     }
 
     /// Open the region editor for the currently selected monitor, capturing
