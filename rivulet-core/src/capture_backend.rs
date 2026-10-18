@@ -258,3 +258,40 @@ pub fn list_windows_with_default_backend() -> Vec<GameWindow> {
             Vec::new()
         })
 }
+
+/// Start in-process capture using the default backend.
+///
+/// This allows embedding Rivulet capture in any Rust application without
+/// starting the Rivulet GUI. The capture uses the platform-selected backend
+/// (Linux: xcap, Windows: metal-wgc, etc.).
+///
+/// Returns a frame receiver and a handle that must be dropped to stop capture.
+pub fn start_in_process_capture(
+    window: &GameWindow,
+    config: &GameCaptureConfig,
+) -> Result<(
+    std::sync::mpsc::Receiver<GameCaptureFrame>,
+    GameCaptureHandle,
+    ),
+    CaptureError,
+> {
+    CaptureBackendChoice::default_backend()
+        .map(|backend| backend.start_capture(window, config))
+        .unwrap_or_else(|e| Err(e))
+}
+
+/// Convenience: start capture and immediately return the first frame,
+/// blocking until a frame is available or an error occurs.
+pub fn start_in_process_capture_first_frame(
+    window: &GameWindow,
+    config: &GameCaptureConfig,
+) -> Result<GameCaptureFrame, CaptureError> {
+    let (receiver, handle) = start_in_process_capture(window, config)?;
+    match receiver.recv() {
+        Ok(frame) => {
+            drop(handle);
+            Ok(frame)
+        }
+        Err(_) => Err(CaptureError::CaptureFailed("recv failed")),
+    }
+}
