@@ -1,20 +1,14 @@
-//! Regression tests for the capture backend trait abstraction ([#296]).
-//!\\
-//! Guarantees:
-//! - The `CaptureBackend` trait is object-safe and can be sent across threads.
-//! - `CaptureBackendChoice::default_backend()` returns the correct platform backend.
-//! - `list_windows_with_default_backend()` delegates to the default backend.
-//! - All backend names are consistent strings.
-//! - `CaptureError` is `std::error::Error` + `Display`.
-//! - Backend stubs return the expected `BackendUnavailable` error.
+/// Regression tests for the capture backend trait abstraction ([#296]).
+///
+/// Guarantees:
+/// - The `CaptureBackend` trait is object-safe and can be sent across threads.
+/// - `CaptureBackendChoice::default_backend()` returns the correct platform backend.
+/// - `list_windows_with_default_backend()` delegates to the default backend.
+/// - All backend names are consistent strings.
+/// - `CaptureError` is `std::error::Error` + `Display`.
+/// - Backend stubs return the expected `BackendUnavailable` error.
 
-use rivulet_core::{
-    capture_backend::{
-        start_game_capture, CaptureBackend, CaptureBackendChoice, CaptureError, GameCaptureConfig,
-        GameWindow,
-    },
-    game_capture::{start_game_capture, GameWindow},
-};
+use rivulet_core::capture_backend::{CaptureBackend, CaptureBackendChoice, CaptureError};
 
 /// The trait must be object-safe (Send + Sync + 'static) so it can be used as
 /// `dyn CaptureBackend`.
@@ -29,13 +23,13 @@ fn assert_default_backend_works() {
 
 /// Backend names must be consistent strings.
 fn assert_backend_names() {
-    let xcap = rivulet_core::capture_backend::CaptureBackendChoice::XCap;
+    let xcap = CaptureBackendChoice::XCap;
     assert_eq!(xcap.name(), "xcap");
 
-    let pipewire = rivulet_core::capture_backend::CaptureBackendChoice::PipeWire;
+    let pipewire = CaptureBackendChoice::PipeWire;
     assert_eq!(pipewire.name(), "pipewire");
 
-    let metal_wgc = rivulet_core::CaptureBackendChoice::MetalWgc;
+    let metal_wgc = CaptureBackendChoice::MetalWgc;
     assert_eq!(metal_wgc.name(), "metal-wgc");
 }
 
@@ -62,9 +56,9 @@ fn assert_list_windows_delegates() {
 /// The existing start_game_capture() and list_game_windows() must still work
 /// for backward compatibility.
 fn assert_backward_compatibility() {
-    let cfg = GameCaptureConfig::default();
-    let (_tx, _rx) = start_game_capture(
-        &GameWindow {
+    let cfg = rivulet_core::GameCaptureConfig::default();
+    let (_tx, _rx) = rivulet_core::start_game_capture(
+        &rivulet_core::game_capture::GameWindow {
             id: 0,
             title: "test".into(),
             width: 640,

@@ -59,6 +59,7 @@ pub trait CaptureBackend: Send + Sync + 'static {
 pub struct XCapBackend {
     /// Whether this backend is currently available (depends on xcap and
     /// display server being running).
+    #[allow(dead_code)]
     available: bool,
 }
 
