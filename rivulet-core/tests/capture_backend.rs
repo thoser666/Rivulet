@@ -7,7 +7,6 @@
 /// - All backend names are consistent strings.
 /// - `CaptureError` is `std::error::Error` + `Display`.
 /// - Backend stubs return the expected `BackendUnavailable` error.
-
 use rivulet_core::capture_backend::{CaptureBackend, CaptureBackendChoice, CaptureError};
 
 /// The trait must be object-safe (Send + Sync + 'static) so it can be used as
@@ -15,6 +14,7 @@ use rivulet_core::capture_backend::{CaptureBackend, CaptureBackendChoice, Captur
 fn assert_trait_is_object_safe(_b: &dyn CaptureBackend) {}
 
 /// The default backend must return a valid backend for the platform.
+#[allow(dead_code)]
 fn assert_default_backend_works() {
     let _backend = CaptureBackendChoice::default_backend();
     // On the CI runner, we just verify it type-checks and doesn't panic.
@@ -54,6 +54,7 @@ fn assert_list_windows_delegates() {
 }
 
 /// A CaptureBackend implementation must satisfy the trait bounds.
+#[allow(dead_code)]
 fn assert_concrete_backend_bounds() {
     // XCapBackend is Send + Sync + 'static (required by the trait)
     fn requires_send_sync(_b: &rivulet_core::capture_backend::XCapBackend) {}
@@ -69,7 +70,7 @@ fn assert_trait_methods_compile() {
     // but we can verify the trait is well-formed by checking the method signatures
     // compile in a function that takes &dyn CaptureBackend.
     fn check_trait<_B: ?Sized + CaptureBackend>(_: &_B) {}
-    let _ = check_trait(&rivulet_core::capture_backend::XCapBackend::new().unwrap());
+    check_trait(&rivulet_core::capture_backend::XCapBackend::new().unwrap());
 }
 
 #[test]
