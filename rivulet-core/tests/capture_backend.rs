@@ -11,6 +11,7 @@ use rivulet_core::capture_backend::{CaptureBackend, CaptureBackendChoice, Captur
 
 /// The trait must be object-safe (Send + Sync + 'static) so it can be used as
 /// `dyn CaptureBackend`.
+#[allow(dead_code)]
 fn assert_trait_is_object_safe(_b: &dyn CaptureBackend) {}
 
 /// The default backend must return a valid backend for the platform.
@@ -69,6 +70,7 @@ fn assert_trait_methods_compile() {
     // We can't easily instantiate a dyn CaptureBackend without a concrete type,
     // but we can verify the trait is well-formed by checking the method signatures
     // compile in a function that takes &dyn CaptureBackend.
+    #[allow(dead_code)]
     fn check_trait<_B: ?Sized + CaptureBackend>(_: &_B) {}
     // On non-Linux XCapBackend::new() returns an error, but the type check above
     // proves the trait is well-formed.

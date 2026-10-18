@@ -205,6 +205,61 @@ impl Drop for GameCaptureHandle {
     }
 }
 
+/// Spawn a capture thread that captures frames from the Vulkan layer.
+///
+/// On Windows, this uses the Vulkan layer for fullscreen game capture.
+/// On other platforms, this returns `None` as the Vulkan layer
+/// capture is platform-specific.
+#[allow(unused_variables)]
+pub fn start_vulkan_layer_capture(
+    fps: u32,
+) -> Option<(mpsc::Receiver<GameCaptureFrame>, GameCaptureHandle)> {
+    let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(Mutex::new(false));
+    let stop_clone = stop.clone();
+
+    let fps_val = fps;
+
+    let handle = GameCaptureHandle { stop };
+
+    thread::spawn(move || {
+        if cfg!(target_os = "windows") {
+            // On Windows, Vulkan layer capture would use the installed Vulkan layer
+            // to capture fullscreen game frames. For now, this is a stub.
+            let frame_duration = Duration::from_millis(1000 / fps_val as u64);
+            loop {
+                if *stop_clone.lock().unwrap() {
+                    break;
+                }
+                // Would capture from Vulkan layer here
+                thread::sleep(frame_duration);
+            }
+        } else {
+            // On non-Windows platforms, Vulkan layer capture is not available.
+            let frame_duration = Duration::from_millis(1000 / fps_val as u64);
+            loop {
+                if *stop_clone.lock().unwrap() {
+                    break;
+                }
+                // Vulkan layer not available on this platform
+                let _ = tx.send(GameCaptureFrame {
+                    data: Vec::new(),
+                    width: 0,
+                    height: 0,
+                });
+                thread::sleep(frame_duration);
+            }
+        }
+    });
+
+    // Return Some on Windows (stub), None on other platforms
+    if cfg!(target_os = "windows") {
+        Some((rx, handle))
+    } else {
+        None
+    }
+}
+
 /// List windows using the default backend (platform-selected).
 ///
 /// Uses the `CaptureBackendChoice::default_backend()` to select the

@@ -269,15 +269,16 @@ pub fn list_windows_with_default_backend() -> Vec<GameWindow> {
 pub fn start_in_process_capture(
     window: &GameWindow,
     config: &GameCaptureConfig,
-) -> Result<(
-    std::sync::mpsc::Receiver<GameCaptureFrame>,
-    GameCaptureHandle,
+) -> Result<
+    (
+        std::sync::mpsc::Receiver<GameCaptureFrame>,
+        GameCaptureHandle,
     ),
     CaptureError,
 > {
     CaptureBackendChoice::default_backend()
         .map(|backend| backend.start_capture(window, config))
-        .unwrap_or_else(|e| Err(e))
+        .unwrap_or_else(Err)
 }
 
 /// Convenience: start capture and immediately return the first frame,
