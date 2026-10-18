@@ -160,18 +160,23 @@ pub struct MetalWgcBackend;
 impl MetalWgcBackend {
     /// Create a new Metal/WGC backend.
     pub fn new() -> Result<Self, CaptureError> {
+        // Both platform halves are cfg-gated tail expressions: on Windows the
+        // probe block yields Ok, elsewhere the guard yields Err. Written as
+        // statements + trailing `Ok(Self {})` this function made the trailing
+        // Ok unreachable on non-Windows targets, which `clippy -D warnings`
+        // (Linux Lints job) rejects.
         #[cfg(target_os = "windows")]
         {
             // Probe for Metal or WGC availability - in a full implementation,
             // this would check for the relevant Windows APIs.
+            Ok(Self {})
         }
         #[cfg(not(target_os = "windows"))]
         {
-            return Err(CaptureError::BackendUnavailable(
+            Err(CaptureError::BackendUnavailable(
                 "Metal/WGC backend is Windows-only",
-            ));
+            ))
         }
-        Ok(Self {})
     }
 }
 
