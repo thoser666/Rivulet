@@ -56,10 +56,11 @@ fn assert_list_windows_delegates() {
 /// A CaptureBackend implementation must satisfy the trait bounds.
 fn assert_concrete_backend_bounds() {
     // XCapBackend is Send + Sync + 'static (required by the trait)
-    fn requires_send_sync(b: &rivulet_core::capture_backend::XCapBackend) {}
-    let _backend = rivulet_core::capture_backend::XCapBackend::new();
+    fn requires_send_sync(_b: &rivulet_core::capture_backend::XCapBackend) {}
     // The new() may fail on non-Linux, but the type must be well-kinded.
-    let _ = requires_send_sync(&_backend);
+    // On Linux it returns Ok(XCapBackend), elsewhere an error.
+    let _result = rivulet_core::capture_backend::XCapBackend::new();
+    let _ = _result;
 }
 
 /// Test that the CaptureBackend trait methods compile and are callable.
@@ -67,7 +68,7 @@ fn assert_trait_methods_compile() {
     // We can't easily instantiate a dyn CaptureBackend without a concrete type,
     // but we can verify the trait is well-formed by checking the method signatures
     // compile in a function that takes &dyn CaptureBackend.
-    fn check_trait<b: ?Sized + CaptureBackend>(_: &b) {}
+    fn check_trait<_B: ?Sized + CaptureBackend>(_: &_B) {}
     let _ = check_trait(&rivulet_core::capture_backend::XCapBackend::new().unwrap());
 }
 
