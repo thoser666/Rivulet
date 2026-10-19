@@ -1,5 +1,27 @@
 ## [Unreleased]
 
+- test(capture): **#296-Backends antworten jetzt mit Verhalten, nicht nur
+  mit Typ-Checks — 5 neue Verhaltens-Tests in `tests/capture_backend.rs`.**
+  Die neun bisherigen Tests bewiesen nur, dass die Trait-Fläche kompiliert;
+  kein einziger prüfte, was ein Backend konkret sagt. Jetzt gepinnt:
+  - `PipeWireBackend`: `new()` überall Ok, `list_windows()` leer,
+    `start_capture()` antwortet mit exakt
+    `BackendUnavailable("PipeWire capture not yet implemented")`, bevor ein
+    Fenster je berührt wird.
+  - `MetalWgcBackend::new()` / `XCapBackend::new()`: Plattform-Vertrag —
+    Ok nur dort, wo der Backend existiert (Windows bzw. Linux), sonst exakt
+    "Metal/WGC backend is Windows-only" bzw. "XCap backend is Linux-only";
+    auf Windows zusätzlich der Stub-Vertrag (name, leere Fensterliste,
+    BackendUnavailable-Meldung).
+  - `CaptureBackendChoice::default_backend()`: Linux → "xcap",
+    Windows → "metal-wgc", sonst Error "No capture backend available for
+    this platform" — inklusive leerer Fallback-Liste von
+    `list_windows_with_default_backend()`.
+  - `CaptureError`-Display exakt: "window not found",
+    "backend unavailable: {msg}", "capture failed: {msg}".
+  Läuft headless auf allen drei CI-Plattformen (nur Stub-Pfade, kein
+  Display, keine echte Aufnahme).
+
 - docs(m8): **M8-Doku auf den tatsächlichen Stand gezogen — zwei offene
   Issues waren in den Gates als "CLOSED" geführt, und die #296-Lieferung
   fehlte auf beiden Oberflächen.** Befund und Reparatur:

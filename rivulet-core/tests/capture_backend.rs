@@ -7,6 +7,11 @@
 /// - All backend names are consistent strings.
 /// - `CaptureError` is `std::error::Error` + `Display`.
 /// - Backend stubs return the expected `BackendUnavailable` error.
+/// - The concrete backends keep their behavioural contract per platform:
+///   `new()` succeeds only where the backend exists, stubs answer with
+///   their exact `BackendUnavailable` message before touching any window,
+///   and the default backend maps Linux → xcap, Windows → metal-wgc,
+///   everything else → an error plus an empty window list.
 use rivulet_core::capture_backend::{CaptureBackend, CaptureBackendChoice, CaptureError};
 
 /// The trait must be object-safe (Send + Sync + 'static) so it can be used as
@@ -132,4 +137,133 @@ fn test_in_process_capture_type_checks() {
 fn test_in_process_capture_first_frame_type_checks() {
     // Verify the function exists and has the right signature.
     let _ = std::mem::size_of::<rivulet_core::game_capture::GameCaptureConfig>();
+}
+
+// ── Behavioural contracts of the concrete backends (#296) ──────────────
+//
+// Everything above proves the trait is well-formed; nothing above pins what
+// a backend actually answers. These tests do: exact error messages, the
+// platform contract of every `new()`, and the default-backend mapping.
+// They exercise only stub paths — no window is ever touched — so they run
+// headless on all three CI platforms.
+
+/// A window the stubs answer before ever looking at it.
+fn dummy_window() -> rivulet_core::game_capture::GameWindow {
+    rivulet_core::game_capture::GameWindow {
+        id: 0,
+        title: String::from("capture-backend-test"),
+        width: 1,
+        height: 1,
+    }
+}
+
+/// Capture config for stub calls.
+fn dummy_config() -> rivulet_core::game_capture::GameCaptureConfig {
+    rivulet_core::game_capture::GameCaptureConfig::default()
+}
+
+#[test]
+fn pipewire_stub_contract() {
+    let backend = rivulet_core::capture_backend::PipeWireBackend::new()
+        .expect("PipeWireBackend::new() probes nothing yet and must succeed everywhere");
+    assert_eq!(backend.name(), "pipewire");
+    assert!(
+        backend.list_windows().is_empty(),
+        "the PipeWire stub must enumerate no windows"
+    );
+    match backend.start_capture(&dummy_window(), &dummy_config()) {
+        Err(CaptureError::BackendUnavailable(msg)) => {
+            assert_eq!(msg, "PipeWire capture not yet implemented");
+        }
+        Err(other) => panic!("unexpected error: {other}"),
+        Ok(_) => panic!("the PipeWire stub must not start a capture"),
+    }
+}
+
+#[test]
+fn metal_wgc_new_is_platform_specific() {
+    #[cfg(target_os = "windows")]
+    {
+        let backend = rivulet_core::capture_backend::MetalWgcBackend::new()
+            .expect("MetalWgcBackend::new() must succeed on Windows");
+        assert_eq!(backend.name(), "metal-wgc");
+        assert!(
+            backend.list_windows().is_empty(),
+            "Metal/WGC does not enumerate windows the xcap way"
+        );
+        match backend.start_capture(&dummy_window(), &dummy_config()) {
+            Err(CaptureError::BackendUnavailable(msg)) => {
+                assert_eq!(msg, "Metal/WGC capture not yet implemented");
+            }
+            Err(other) => panic!("unexpected error: {other}"),
+            Ok(_) => panic!("the Metal/WGC stub must not start a capture"),
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        match rivulet_core::capture_backend::MetalWgcBackend::new() {
+            Err(CaptureError::BackendUnavailable(msg)) => {
+                assert_eq!(msg, "Metal/WGC backend is Windows-only");
+            }
+            Err(other) => panic!("unexpected error: {other}"),
+            Ok(_) => panic!("MetalWgcBackend::new() must refuse on non-Windows targets"),
+        }
+    }
+}
+
+#[test]
+fn xcap_new_is_platform_specific() {
+    #[cfg(target_os = "linux")]
+    {
+        let backend = rivulet_core::capture_backend::XCapBackend::new()
+            .expect("XCapBackend::new() must succeed on Linux");
+        assert_eq!(backend.name(), "xcap");
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        match rivulet_core::capture_backend::XCapBackend::new() {
+            Err(CaptureError::BackendUnavailable(msg)) => {
+                assert_eq!(msg, "XCap backend is Linux-only");
+            }
+            Err(other) => panic!("unexpected error: {other}"),
+            Ok(_) => panic!("XCapBackend::new() must refuse on non-Linux targets"),
+        }
+    }
+}
+
+#[test]
+fn default_backend_is_platform_specific() {
+    let result = CaptureBackendChoice::default_backend();
+    if cfg!(target_os = "linux") {
+        let backend = result.expect("Linux must select the xcap backend");
+        assert_eq!(backend.name(), "xcap");
+    } else if cfg!(target_os = "windows") {
+        let backend = result.expect("Windows must select the Metal/WGC backend");
+        assert_eq!(backend.name(), "metal-wgc");
+    } else {
+        match result {
+            Err(CaptureError::BackendUnavailable(msg)) => {
+                assert_eq!(msg, "No capture backend available for this platform");
+            }
+            Err(other) => panic!("unexpected error: {other}"),
+            Ok(_) => panic!("a platform without a backend must get an error, not a silent default"),
+        }
+        assert!(
+            rivulet_core::capture_backend::list_windows_with_default_backend().is_empty(),
+            "with no backend, window listing must fall back to an empty list"
+        );
+    }
+}
+
+#[test]
+fn capture_error_display_is_stable() {
+    assert_eq!(CaptureError::WindowNotFound.to_string(), "window not found");
+    assert_eq!(
+        CaptureError::BackendUnavailable("probe failed").to_string(),
+        "backend unavailable: probe failed"
+    );
+    assert_eq!(
+        CaptureError::CaptureFailed("recv failed").to_string(),
+        "capture failed: recv failed"
+    );
 }
