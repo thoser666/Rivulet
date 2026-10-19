@@ -1,5 +1,127 @@
 ## [Unreleased]
 
+- test(capture): **#296-Backends antworten jetzt mit Verhalten, nicht nur
+  mit Typ-Checks — 5 neue Verhaltens-Tests in `tests/capture_backend.rs`.**
+  Die neun bisherigen Tests bewiesen nur, dass die Trait-Fläche kompiliert;
+  kein einziger prüfte, was ein Backend konkret sagt. Jetzt gepinnt:
+  - `PipeWireBackend`: `new()` überall Ok, `list_windows()` leer,
+    `start_capture()` antwortet mit exakt
+    `BackendUnavailable("PipeWire capture not yet implemented")`, bevor ein
+    Fenster je berührt wird.
+  - `MetalWgcBackend::new()` / `XCapBackend::new()`: Plattform-Vertrag —
+    Ok nur dort, wo der Backend existiert (Windows bzw. Linux), sonst exakt
+    "Metal/WGC backend is Windows-only" bzw. "XCap backend is Linux-only";
+    auf Windows zusätzlich der Stub-Vertrag (name, leere Fensterliste,
+    BackendUnavailable-Meldung).
+  - `CaptureBackendChoice::default_backend()`: Linux → "xcap",
+    Windows → "metal-wgc", sonst Error "No capture backend available for
+    this platform" — inklusive leerer Fallback-Liste von
+    `list_windows_with_default_backend()`.
+  - `CaptureError`-Display exakt: "window not found",
+    "backend unavailable: {msg}", "capture failed: {msg}".
+  Läuft headless auf allen drei CI-Plattformen (nur Stub-Pfade, kein
+  Display, keine echte Aufnahme).
+
+- docs(m8): **M8-Doku auf den tatsächlichen Stand gezogen — zwei offene
+  Issues waren in den Gates als "CLOSED" geführt, und die #296-Lieferung
+  fehlte auf beiden Oberflächen.** Befund und Reparatur:
+  - `docs/milestone-quality-gates.md` markierte #294 und #295 mit
+    "**CLOSED — partial**", beide sind laut GitHub aber OPEN (Stand
+    2026-10-19) — im Widerspruch zum eigenen Status-Absatz "four still
+    open". Beide Labels heißen jetzt "**OPEN — partial**".
+  - Weder README noch Gates notierten, dass #296 bereits die stabile
+    `CaptureBackend`-Fläche (`list_windows` / `start_capture` / `name`),
+    die PipeWire- und Metal/WGC-Stubs und den `game_capture`-Refactor mit
+    9 Regressionstests liefert; beide nennen jetzt Lieferung und Rest
+    (die Stubs antworten noch mit `BackendUnavailable`).
+  - **Guard `m8_opening_is_pinned_to_the_six_workstream_issues`** verbietet
+    jetzt `**CLOSED`, solange der eigene Status-Absatz "four still open"
+    sagt: Labels und Status-Zeile können nicht mehr auseinanderlaufen.
+    Verifiziert per Mutationstest: zurückgesetztes "**CLOSED — partial**"
+    fällt durch, restoreter Baum ist wieder grün.
+
+- feat(core): **#294 (Teil 1): typisierte Früh-Validierung für die
+  In-Process-Capture-API — ungültige Konfiguration scheitert vor dem ersten
+  Frame, mit benanntem Feld und behebbarem Meldungstext.** Das Gate-Kriterium
+  "Invalid configuration fails early with typed, actionable errors" ist damit
+  als Fundament geliefert, deterministic und ohne Hardware/Netz/GStreamer
+  testbar:
+  - Neues `rivulet_core::recording_config`: `RecordingConfig` (Breite, Höhe,
+    fps, Bitrate, Codec, Encoder, Container, Pfad) mit `validate()`, das vor
+    jedem Pipeline-Bau scheitert. Bewusst hardware- und netzunabhängig — die
+    Frage "ist dieser Encoder auf dieser Maschine verfügbar" bleibt #295.
+  - Dies ist die erste Teil-Lieferung (#294 Teil 1), nicht die volle In-Process-
+    Capture-API. Es fehlt noch der Capture-Einstiegspunkt selbst: eine Session-
+    Lebenszyklus-API (Start/Stop/Pause, Drop-Semantik), Audio+Video, Datei und
+    Stream aus einer fremden Crate heraus und der zugehörige E2E-Test gegen
+    Fixtures. Das Gate-Kriterium "Invalid configuration fails early" ist erfüllt,
+    das Issue-Title-Ziel "embed a recording feature in any Rust app" noch nicht.
+
+- feat(core): **#295 Feature Detection API — maschinenlesbare Erkennung
+  von Encoder- und Container-Verfügbarkeit.** Ergänzt die typisierte
+  Früh-Validierung um Abfragefunktionen, die ohne GStreamer-Pipeline
+  laufen und deterministische CI-Prüfungen ermöglichen:
+  - `detect_encoder_availability(encoder) → RecordingConfigDetect`: Gibt
+    immer `Available` zurück (Verfügbarkeit ist backend-abhängig, nicht
+    CI-relevant für static validation). Das ist bewusst kein echter Laufzeit-
+    Query — das ist die offene Hälfte des Issues, kein geliefertes Ergebnis.
+  - `detect_container_availability(container, codec) → RecordingConfigDetect`:
+    Prüft Codec/Container-Kompatibilität mit machine-readable reason:
+      * H.265 nicht in MPEG-TS: "H.265 is not supported in MPEG-TS; use
+        MP4 or MKV instead"
+      * VP9 benötigt MKV: "VP9 requires MKV container; MP4 muxer not available"
+    Rückgabe-Enum `RecordingConfigDetect` mit `is_available()` und
+    `reason()` für UI-Binding
+  - Vollständige Testabdeckung in `tests/recording_config.rs` (14 neue Tests)
+  Das Gate-Kriterium "Feature detection and fallback results are available
+    without parsing logs" ist teilweise erfüllt: das Container- und Codec-
+  Kompatibilitäts-Kriterium ist geliefert, der Encoder-Verfügbarkeits-Teil
+  (maschinenlesbare Antwort auf "welcher Encoder läuft hier") noch nicht.
+  - `RecordingConfigError` ist typisiert: jede Variante kennt über `field()`
+    das schuldige Feld (maschinenlesbar, zum Binden an UI-Controls) und die
+    `Display`-Meldung nennt die Behebung (z. B. bei VP9-in-MP4 den
+    funktionierenden Container MKV, bei zu hoher Bitrate den
+    Bits-vs-Kilobits-Fehler, bei ungerader Breite die Macroblock-Regel).
+  - Geprüfte Parameter: Breite/Höhe (0, ungerade, >8192), fps (0, >240),
+    Bitrate (0, <100 kbps, >500.000 kbps), Codec/Container-Kompatibilität
+    (VP9 nur MKV, H.265 nicht MPEG-TS, H.264 überall) und Pfadendung gegen
+    den Container.
+  - `tests/recording_config.rs` deckt jeden Parameter einzeln ab und pinnt
+    die Feldnamen als Vertrag. Bewusst **nicht** geliefert (bleibt auf #294
+    offen): Start/Stop/Pause-Lebenszyklus mit Drop-Semantik, Status-Stream,
+    Audio+Video+Datei+Stream-Sitzung und der E2E-Test gegen Fixtures.
+
+- fix(docs,m8): **Die M8-Gate-Checkliste behauptete drei Dinge, die der Baum
+  nicht hergibt — bei der Prüfung nach #293 korrigiert und gegen Rückschritt
+  gepinnt.** Befund und Reparatur:
+  - **`missing_docs` wurde nie aktiviert.** Die Zeile in `rivulet-core/src/lib.rs`
+    ist ein Doc-Comment (`//! #![warn(missing_docs)]`), kein Crate-Attribut —
+    sie dokumentiert die Idee, schaltet aber nichts ein. Beweis per Probe:
+    ein undokumentiertes `pub fn` kompiliert still (0 Warnungen); das echte
+    Aktivieren meldet 696 fehlende Docs (gemessen 2026-10-13). README und
+    Gate sagten "arrived with #292" bzw. listeten `missing_docs` als
+    geliefert — jetzt steht dort, dass der Lint inaktiv bzw. nie aktiviert
+    war; #292s Checkbox nennt den Zustand explizit.
+  - **Frame streaming war nicht geliefert, wurde aber behauptet.** Kein
+    Beispiel in `rivulet-core/examples/` erwähnt Frames; die README-Checkbox
+    für #293 nannte "frame streaming" trotzdem. Sie nennt jetzt die sechs
+    tatsächlichen Themen und benennt Frame-Delivery als offene Klausal des
+    Gate-Kriteriums (braucht die In-Process-API aus #294 als Gegenstück).
+  - **Der Gate-Absatz war veraltet.** "Das fehlende Attribut, die fehlende
+    examples/-Krate und die Log-only-Feature-Erkennung gelten noch und #292
+    muss sie schließen" — #292 und #293 sind geliefert, die examples/-Krate
+    existiert und CI führt alle sechs aus. Der Absatz trennt jetzt sauber:
+    geliefert (examples/-Krate) vs. nicht geliefert (Lint, Feature-Why,
+    Frame-Delivery).
+  - **Guard `m8_delivery_claims_match_the_artifacts`** leitet beide Claims
+    aus dem Artefakt ab statt aus der Prosa: Lint zählt als aktiv nur bei
+    echtem `#!`-Crate-Attribut (nie `//!`), Frame-streaming zählt als
+    geliefert nur, wenn ein Beispiel Frames erwähnt. Solange das Artefakt
+    den Claim nicht trägt, ist die ehrliche Formulierung selbst gepinnt.
+    Verifiziert per Mutationstest: neutrierte Gate-Formulierung, zurück-
+    gekehrter README-Frame-Claim und entfernter Lint-Claim fallen je einzeln
+    durch, der restorete Baum ist wieder grün.
+
 - fix(security): **Wasmtime 48.0.5 → 49.0.3, wasmtime-wasi → 49.0.3 und rustls
   0.23.45 → 0.23.46 — die 16 offenen RUSTSEC-Advisories sind behoben, der
   Security-Gate (Cargo Audit + Cargo Deny) ist wieder grün.** Die Advisories

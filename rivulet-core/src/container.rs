@@ -93,6 +93,22 @@ impl RecordingContainer {
     }
 }
 
+/// Which containers can carry which codecs, matching what the muxers in this crate actually support. VP9 has no MP4/MPEG-TS muxer path here, and H.265 is kept out of MPEG-TS because only H.264 Annex-B is wired.
+///
+/// This is the authority for codec/container compatibility; the public reason
+/// strings in `encoder.rs` must be kept in sync with it (see the
+/// `container_incompatibility_reasons_match_container_supports_codec` test).
+pub fn container_supports_codec(
+    codec: crate::encoder::VideoCodec,
+    container: RecordingContainer,
+) -> bool {
+    match codec {
+        crate::encoder::VideoCodec::H264 => true,
+        crate::encoder::VideoCodec::H265 => !matches!(container, RecordingContainer::MpegTs),
+        crate::encoder::VideoCodec::VP9 => matches!(container, RecordingContainer::Mkv),
+    }
+}
+
 /// A validated plan for remuxing one container into another losslessly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemuxPlan {
