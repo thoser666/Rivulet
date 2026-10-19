@@ -400,7 +400,7 @@ Workstream issues:
 - [#294](https://github.com/thoser666/Rivulet/issues/294) — in-process capture
   API so a foreign crate can record without starting the app. Covers the
   early-typed-errors criterion and the embedding promise itself.
-  - **CLOSED — partial** — `RecordingConfig::validate()` provides typed early
+  - **OPEN — partial** — `RecordingConfig::validate()` provides typed early
     validation with `RecordingConfigError` that names the offending field
     and states the fix, checked per-parameter by `tests/recording_config.rs`.
     The early-typed-errors workstream is complete: invalid configuration now
@@ -413,7 +413,7 @@ Workstream issues:
     point itself.
 - [#295](https://github.com/thoser666/Rivulet/issues/295) — feature detection
   and fallback as a queryable API with a machine-readable reason.
-  **CLOSED — partial** — `RecordingConfigDetect` enum with `is_available()` and
+  **OPEN — partial** — `RecordingConfigDetect` enum with `is_available()` and
   `reason()` methods, plus `detect_encoder_availability()` and
   `detect_container_availability()` functions implemented in
   `rivulet-core/src/recording_config.rs` with full test coverage in
@@ -430,6 +430,12 @@ Workstream issues:
 - [#296](https://github.com/thoser666/Rivulet/issues/296) — capture backends
   behind one stable trait, with explicit lifecycle and thread-safety promises.
   Feeds the first criterion.
+  **OPEN — partial** — the stable `CaptureBackend` trait
+  (`list_windows` / `start_capture` / `name`), the PipeWire and Metal/WGC
+  backend stubs and the `game_capture` refactor onto it are delivered with
+  9 regression tests in `tests/capture_backend.rs`; both stubs still answer
+  `BackendUnavailable`, so the real capture paths and the xcap integration
+  remain open.
 - [#297](https://github.com/thoser666/Rivulet/issues/297) — exit evidence:
   downstream-consumer smoke test, docs build, example run matrix, public API
   review and the M8 completion report. **Starts only once #292 is delivered**;

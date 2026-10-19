@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+- docs(m8): **M8-Doku auf den tatsächlichen Stand gezogen — zwei offene
+  Issues waren in den Gates als "CLOSED" geführt, und die #296-Lieferung
+  fehlte auf beiden Oberflächen.** Befund und Reparatur:
+  - `docs/milestone-quality-gates.md` markierte #294 und #295 mit
+    "**CLOSED — partial**", beide sind laut GitHub aber OPEN (Stand
+    2026-10-19) — im Widerspruch zum eigenen Status-Absatz "four still
+    open". Beide Labels heißen jetzt "**OPEN — partial**".
+  - Weder README noch Gates notierten, dass #296 bereits die stabile
+    `CaptureBackend`-Fläche (`list_windows` / `start_capture` / `name`),
+    die PipeWire- und Metal/WGC-Stubs und den `game_capture`-Refactor mit
+    9 Regressionstests liefert; beide nennen jetzt Lieferung und Rest
+    (die Stubs antworten noch mit `BackendUnavailable`).
+  - **Guard `m8_opening_is_pinned_to_the_six_workstream_issues`** verbietet
+    jetzt `**CLOSED`, solange der eigene Status-Absatz "four still open"
+    sagt: Labels und Status-Zeile können nicht mehr auseinanderlaufen.
+    Verifiziert per Mutationstest: zurückgesetztes "**CLOSED — partial**"
+    fällt durch, restoreter Baum ist wieder grün.
+
 - feat(core): **#294 (Teil 1): typisierte Früh-Validierung für die
   In-Process-Capture-API — ungültige Konfiguration scheitert vor dem ersten
   Frame, mit benanntem Feld und behebbarem Meldungstext.** Das Gate-Kriterium

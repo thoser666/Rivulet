@@ -6235,6 +6235,21 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
         gates_m8_section.contains("Starts only once #292 is delivered"),
         "the exit-evidence issue must be marked as depending on #292"
     );
+
+    // Per-issue labels must agree with the section's own status line: while
+    // it records four workstreams as still open, no workstream entry may
+    // claim CLOSED. The gates once marked #294 and #295 "CLOSED — partial"
+    // while both issues were open on GitHub — the label and the count
+    // contradicted each other and the reader could not tell which to trust.
+    // The condition derives from the doc itself, so the moment the status
+    // line honestly records fewer open workstreams the ban retires with it.
+    if gates_m8_section.contains("four still open") {
+        assert!(
+            !gates_m8_section.contains("**CLOSED"),
+            "the M8 quality gate labels a workstream CLOSED while its own \
+             status line says four are still open"
+        );
+    }
 }
 
 /// #293's acceptance criteria say an example that only compiles but never
