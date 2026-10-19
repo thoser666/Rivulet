@@ -63,8 +63,8 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v7.0.1",
     ),
     (
-        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-        "v7.0.1",
+        "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+        "v7.0.2",
     ),
     (
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
@@ -83,20 +83,20 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v3.0.3",
     ),
     (
-        "github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-        "v4.38.2",
+        "github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d",
+        "v4.38.3",
     ),
     (
-        "github/codeql-action/autobuild@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-        "v4.38.2",
+        "github/codeql-action/autobuild@24c54180a607b1449ed407dd24f251e4e9147c8d",
+        "v4.38.3",
     ),
     (
-        "github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-        "v4.38.2",
+        "github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d",
+        "v4.38.3",
     ),
     (
-        "github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-        "v4.38.2",
+        "github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d",
+        "v4.38.3",
     ),
     (
         "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
@@ -6235,6 +6235,21 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
         gates_m8_section.contains("Starts only once #292 is delivered"),
         "the exit-evidence issue must be marked as depending on #292"
     );
+
+    // Per-issue labels must agree with the section's own status line: while
+    // it records four workstreams as still open, no workstream entry may
+    // claim CLOSED. The gates once marked #294 and #295 "CLOSED — partial"
+    // while both issues were open on GitHub — the label and the count
+    // contradicted each other and the reader could not tell which to trust.
+    // The condition derives from the doc itself, so the moment the status
+    // line honestly records fewer open workstreams the ban retires with it.
+    if gates_m8_section.contains("four still open") {
+        assert!(
+            !gates_m8_section.contains("**CLOSED"),
+            "the M8 quality gate labels a workstream CLOSED while its own \
+             status line says four are still open"
+        );
+    }
 }
 
 /// #293's acceptance criteria say an example that only compiles but never
@@ -6336,6 +6351,120 @@ fn m8_examples_are_run_by_ci_and_linked_from_crate_docs_and_readme() {
         assert!(
             mentions(readme_m8_section, name),
             "the README M8 example overview must mention `{name}`"
+        );
+    }
+}
+
+/// Milestone prose claims delivery; only the artifact can prove it. Twice the
+/// M8 surfaces claimed things the tree did not do: "`#![warn(missing_docs)]`
+/// arrived with #292" (the line in `lib.rs` is a `//!` doc-comment example,
+/// so no lint is active) and the #293 checkbox listed "frame streaming" as
+/// delivered although no example touches frames. Both claims are therefore
+/// derived from the artifact, not from the prose:
+///
+/// 1. the `missing_docs` lint counts as active only if `lib.rs` carries a
+///    *real* crate attribute (a line starting with `#!`), never a `//!`
+///    copy — a doc-comment line documents the idea, it enables nothing,
+/// 2. "frame streaming" counts as delivered only if at least one example
+///    file mentions frames.
+///
+/// While the artifact does not back a claim, the honest wording itself is
+/// pinned: deleting the correction re-introduces the drift and fails here.
+#[test]
+fn m8_delivery_claims_match_the_artifacts() {
+    let lib = read("rivulet-core/src/lib.rs");
+    let lint_is_active = lib.lines().any(|line| {
+        let t = line.trim_start();
+        t.starts_with("#![warn(missing_docs)]") || t.starts_with("#![deny(missing_docs)]")
+    });
+
+    let readme = read("README.md");
+    let readme_m8_section = readme
+        .split("### 📦 M8 – Embeddable Engine & API")
+        .nth(1)
+        .and_then(|rest| rest.split("### ⚡ M9").next())
+        .unwrap_or_default();
+    assert!(
+        !readme_m8_section.is_empty(),
+        "the README must still have an M8 section"
+    );
+    let gates = read("docs/milestone-quality-gates.md");
+    let gates_m8_section = gates
+        .split("### M8: Embeddable Engine and API")
+        .nth(1)
+        .and_then(|rest| rest.split("### M9:").next())
+        .unwrap_or_default();
+    assert!(
+        !gates_m8_section.is_empty(),
+        "the quality gate must still have an M8 section"
+    );
+
+    if lint_is_active {
+        assert!(
+            !gates_m8_section.contains("was never activated"),
+            "lib.rs now carries a real missing_docs attribute; the gate must \n\
+             stop recording it as never activated"
+        );
+    } else {
+        for (label, section) in [
+            ("README M8 section", readme_m8_section),
+            ("M8 quality gate", gates_m8_section),
+        ] {
+            assert!(
+                !section.contains("arrived with #292"),
+                "the {label} must not claim the missing_docs lint arrived with \n\
+                 #292 while lib.rs carries only a doc-comment example"
+            );
+        }
+        assert!(
+            readme_m8_section.contains("is not active"),
+            "the README M8 section must record that the missing_docs lint is \n\
+             not active; lib.rs has no real crate attribute"
+        );
+        assert!(
+            gates_m8_section.contains("was never activated"),
+            "the M8 quality gate must record that the missing_docs lint was \n\
+             never activated; lib.rs has no real crate attribute"
+        );
+    }
+
+    // "Frame streaming" is delivered only if an example actually touches
+    // frames; until then the checkbox must name the gap, not the feature.
+    let examples_mention_frames = fs::read_dir(repo_file("rivulet-core/examples"))
+        .expect("rivulet-core/examples must exist")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .map(|ext| ext == "rs")
+                .unwrap_or(false)
+        })
+        .any(|entry| {
+            fs::read_to_string(entry.path())
+                .map(|source| source.to_ascii_lowercase().contains("frame"))
+                .unwrap_or(false)
+        });
+    if examples_mention_frames {
+        assert!(
+            !readme_m8_section.contains("is not yet covered"),
+            "an example now mentions frames; the README M8 checkbox must stop \n\
+             calling frame delivery uncovered"
+        );
+    } else {
+        assert!(
+            !readme_m8_section.contains("frame streaming"),
+            "the README M8 checkbox must not list frame streaming as delivered \n\
+             while no example in rivulet-core/examples mentions frames"
+        );
+        assert!(
+            readme_m8_section.contains("frame delivery is not yet covered"),
+            "the README M8 checkbox must name frame delivery as the gap it is"
+        );
+        assert!(
+            gates_m8_section.contains("frame delivery"),
+            "the M8 quality gate criterion must keep naming frame delivery so \n\
+             the open clause stays visible"
         );
     }
 }

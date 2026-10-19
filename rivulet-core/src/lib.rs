@@ -129,6 +129,7 @@ pub use audio::{AudioFrame, AudioTrack, SkippedFilter};
 pub mod camera;
 pub use camera::{CameraConfig, CameraDevice, CameraFrame};
 
+pub mod capture_backend;
 pub mod game_capture;
 pub mod game_detection;
 pub use game_capture::{GameCaptureConfig, GameCaptureFrame, GameWindow};
@@ -158,10 +159,17 @@ pub use stream_info::{
 pub use stream_runtime::{AdaptiveBitrateController, BitrateChange, DelaySupervisor};
 
 pub mod encoder;
+pub mod recording_config;
+pub use recording_config::{
+    detect_container_availability, detect_encoder_availability, RecordingConfig,
+    RecordingConfigDetect, RecordingConfigError,
+};
 pub mod video_effects;
 pub use encoder::{
     best_encoder, best_encoder_for_codec, detect_available_encoders,
-    detect_available_encoders_for_codec, RateControl, RateControlMode, VideoCodec, VideoEncoder,
+    detect_available_encoders_for_codec, detect_available_encoders_info,
+    detect_available_encoders_with_info, encoder_fallback, encoder_fallback_for_codec,
+    EncoderFallback, EncoderInfo, RateControl, RateControlMode, VideoCodec, VideoEncoder,
 };
 pub use video_effects::VideoEffects;
 
@@ -4974,7 +4982,7 @@ mod tests {
     /// NVIDIA GPU or the NVCODEC plugin.
     #[test]
     fn records_synthetic_video_with_nvenc_when_available() {
-        if !VideoEncoder::Nvenc.is_available() {
+        if !VideoEncoder::Nvenc.is_available_for_codec(VideoCodec::H264) {
             return;
         }
         let _ = gst::init();

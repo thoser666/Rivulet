@@ -379,11 +379,16 @@ small downstream-consumer smoke test.
 Workstream issues:
 
 - [x] [#292](https://github.com/thoser666/Rivulet/issues/292) — stabilized public
-  API (`missing_docs`, crate-style types, semver policy, deprecation path).
+  API (crate-style types, semver policy, deprecation path; the promised
+  `missing_docs` lint stayed a doc-comment example in `lib.rs` and was never
+  activated — see the closing note).
   Covers the first, fourth and part of the second criterion.
 - [x] [#293](https://github.com/thoser666/Rivulet/issues/293) — API docs plus a
   `rivulet-core/examples/` crate whose examples are **run**, not just built.
-  Covers the example and the GUI-independence criterion.
+  Covers the GUI-independence criterion and, for the example criterion,
+  everything except frame delivery: no example streams frames out of the
+  capture pipeline, so that clause stays open until the in-process API from
+  #294 exists to demonstrate it against.
   - **Evidence:** the `Run rivulet-core examples (M8 #293)` step in the
     Build & Test job executes all six examples (`simple_record`,
     `simple_stream`, `dual_output`, `encoder_config`, `engine_lifecycle`,
@@ -395,12 +400,42 @@ Workstream issues:
 - [#294](https://github.com/thoser666/Rivulet/issues/294) — in-process capture
   API so a foreign crate can record without starting the app. Covers the
   early-typed-errors criterion and the embedding promise itself.
+  - **OPEN — partial** — `RecordingConfig::validate()` provides typed early
+    validation with `RecordingConfigError` that names the offending field
+    and states the fix, checked per-parameter by `tests/recording_config.rs`.
+    The early-typed-errors workstream is complete: invalid configuration now
+    fails before any pipeline construction with a typed, field-named, actionable
+    error.
+    What this does **not** yet deliver is the embedding promise in the issue title:
+    a recording feature a foreign crate can embed without starting the Rivulet
+    app, with audio/video capture, encoding, file and stream output. The typed
+    config gate is a necessary precondition for that entry point, not the entry
+    point itself.
 - [#295](https://github.com/thoser666/Rivulet/issues/295) — feature detection
   and fallback as a queryable API with a machine-readable reason.
-  Covers the detection criterion.
+  **OPEN — partial** — `RecordingConfigDetect` enum with `is_available()` and
+  `reason()` methods, plus `detect_encoder_availability()` and
+  `detect_container_availability()` functions implemented in
+  `rivulet-core/src/recording_config.rs` with full test coverage in
+  `rivulet-core/tests/recording_config.rs`.
+  The codec/container compatibility criterion is met: `detect_container_availability()`
+  reports machine-readable why strings for every compatibility case (VP9→MKV,
+  H.265 ∉ MPEG-TS, H.264 everywhere).
+  What is **not** yet delivered is the encoder-side part of the issue: a
+  machine-readable, queryable answer to "is this encoder available on this
+  machine" that `detect_encoder_availability()` would need to return for a real
+  runtime query. Today it returns `Available` for every encoder by construction —
+  the availability question the issue names is backend-dependent and is deferred,
+  not faked.
 - [#296](https://github.com/thoser666/Rivulet/issues/296) — capture backends
   behind one stable trait, with explicit lifecycle and thread-safety promises.
   Feeds the first criterion.
+  **OPEN — partial** — the stable `CaptureBackend` trait
+  (`list_windows` / `start_capture` / `name`), the PipeWire and Metal/WGC
+  backend stubs and the `game_capture` refactor onto it are delivered with
+  9 regression tests in `tests/capture_backend.rs`; both stubs still answer
+  `BackendUnavailable`, so the real capture paths and the xcap integration
+  remain open.
 - [#297](https://github.com/thoser666/Rivulet/issues/297) — exit evidence:
   downstream-consumer smoke test, docs build, example run matrix, public API
   review and the M8 completion report. **Starts only once #292 is delivered**;
@@ -411,9 +446,16 @@ state is recorded rather than glossed. As recorded when the milestone opened,
 `rivulet-core` was `0.65.0-alpha.55` (under semver `0.x` every minor bump is
 breaking) with 66 public modules and no `#![warn(missing_docs)]`, no
 `examples/` crate, and feature detection reachable only through log output.
-The module count is a snapshot and has grown since; the missing attribute,
-the absent example crate and the log-only feature detection are the parts
-that still hold and that #292 has to close.
+The module count is a snapshot and has grown since, and the opening state
+has moved on in part: the `examples/` crate exists and CI runs all six (#293).
+Two of the three gaps were *not* closed by the workstreams that were checked
+off against them. `#![warn(missing_docs)]` was never activated — the line in
+`lib.rs` is a doc-comment example, not a crate attribute, and turning it on
+for real reports 696 undocumented public items (measured 2026-10-13) — so
+"stabilized public API" and "documented API" are not the same claim yet.
+Feature detection hands out a bare list without a machine-readable why,
+which is what #295 exists for; frame delivery has no example, which needs
+#294 first. The gate stays open on those clauses, not on the delivery count.
 
 ### M9: Modern Architecture
 
