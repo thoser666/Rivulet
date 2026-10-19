@@ -100,6 +100,27 @@
     gekehrter README-Frame-Claim und entfernter Lint-Claim fallen je einzeln
     durch, der restorete Baum ist wieder grün.
 
+- fix(security): **Wasmtime 48.0.5 → 49.0.3, wasmtime-wasi → 49.0.3 und rustls
+  0.23.45 → 0.23.46 — die 16 offenen RUSTSEC-Advisories sind behoben, der
+  Security-Gate (Cargo Audit + Cargo Deny) ist wieder grün.** Die Advisories
+  trafen den unveränderten Abhängigkeitsbaum — repo-weit rot seit 2026-10-15,
+  betroffen waren damit auch alle Dependabot-PRs und jeder Merge:
+  - **wasmtime/wasmtime-wasi** (12×: RUSTSEC-2026-0352 bis -0364 — u. a.
+    Komponenten-Model-Panics, nicht erzwungene Async-Entry-Points,
+    WASI-Sandbox-Flucht beim Umbenennen von Symlinks mit Schrägstrich):
+    gepatcht ab 48.0.6 bzw. 49.0.3. Das Workspace-Manifest geht bewusst auf
+    die neueste stabile Hauptversion `49.0` (50 liegt als RC vor).
+    `rivulet-core/src/plugin_runtime.rs` brauchte keine Codeänderung — die
+    genutzte API (Engine/Config/Module/Store/Linker, Epoch-Interruption) ist
+    48→49 kompatibel; alle 87 Plugin- und Registry-Tests laufen grün.
+  - **rustls** (4×: RUSTSEC-2026-0346 bis -0349 — u. a. TLS-Secrets in
+    `Debug`-Impls, gepufferte Daten nach ECH-Ablehnung): gepatcht ab 0.23.46,
+    reiner Lockfile-Bump.
+  - Verifiziert: `cargo audit` → 0 Vulnerabilities (nur die 8 lang bekannten,
+    in der Konfiguration erlaubten Warnungen bleiben), `cargo check` und die
+    Plugin-Suite lokal grün; der Security-Workflow auf dem PR-Branch ist der
+    endgültige Beweis.
+
 - test(m8): **#293 ist jetzt auch belegt, nicht nur behauptet — die sechs
   Beispiele werden ausgefuehrt, nicht nur gebaut.** Der Akzeptanzsatz von
   #293 sagt: ein Beispiel, das nur kompiliert aber nicht laeuft, gilt als
