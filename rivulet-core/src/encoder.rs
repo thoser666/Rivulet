@@ -9,6 +9,41 @@
 use gstreamer as gst;
 use serde::{Deserialize, Serialize};
 
+/// A machine-readable detection result for an encoder backend and codec.
+///
+/// Unlike the existing `is_available()`/`is_available_for_codec()`, which only
+/// returns a bare `bool`, this type carries a structured `why` so an embedding
+/// application can decide what to show the user or which fallback to pick
+/// without parsing log output.
+///
+/// The type is deliberately cacheable: it has no interior mutability, no GStreamer
+/// side effects beyond the availability probe, and the result is stable for a
+/// given machine/GStreamer installation until that installation changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EncoderInfo {
+    /// Backend and codec this entry describes.
+    pub backend: VideoEncoder,
+    /// Codec this entry applies to.
+    pub codec: VideoCodec,
+    /// Whether the backend is available for this codec on this machine.
+    pub available: bool,
+    /// Machine-readable reason when `available` is `false`.
+    /// Empty when the backend is available.
+    pub why_not: &'static str,
+}
+
+impl EncoderInfo {
+    /// Whether this encoder backend is usable for this codec on this machine.
+    pub fn is_available(&self) -> bool {
+        self.available
+    }
+
+    /// The machine-readable reason why this encoder is not available, if any.
+    pub fn reason(&self) -> &'static str {
+        self.why_not
+    }
+}
+
 /// Encoder rate-control strategy. Advanced rate control lets users switch
 /// between constant bitrate (default, required for live streaming), variable
 /// bitrate (better quality for local recordings) and quality-based mode where
@@ -152,6 +187,43 @@ impl VideoCodec {
     pub fn is_rtmp_compatible(self) -> bool {
         matches!(self, Self::H264)
     }
+
+    /// A stable, machine-readable reason string explaining a known codec/container
+    /// incompatibility, or empty when the pair is compatible.
+    ///
+    /// The strings are intentionally non-localised and stable so downstream
+    /// consumers can match on them without parsing log output.
+    pub fn incompatibility_reason_for_container(
+        self,
+        container: crate::container::RecordingContainer,
+    ) -> &'static str {
+        if crate::container::container_supports_codec(self, container) {
+            ""
+        } else {
+            codec_container_incompatibility_reason(self, container)
+        }
+    }
+}
+
+/// Internal helper reused by the public `incompatibility_reason_for_container` and by the
+/// compatibility-consistency test: a canonical, stable, machine-readable reason for a known
+/// codec/container incompatibility.
+fn codec_container_incompatibility_reason(
+    codec: VideoCodec,
+    container: crate::container::RecordingContainer,
+) -> &'static str {
+    match (codec, container) {
+        (VideoCodec::H265, crate::container::RecordingContainer::MpegTs) => {
+            "H.265 is not supported in MPEG-TS; use MP4 or MKV instead"
+        }
+        (VideoCodec::VP9, crate::container::RecordingContainer::Mp4) => {
+            "VP9 requires MKV container; no VP9 MP4 muxer wired"
+        }
+        (VideoCodec::VP9, crate::container::RecordingContainer::MpegTs) => {
+            "VP9 requires MKV container; no VP9 MPEG-TS muxer wired"
+        }
+        _ => "codec/container incompatibility (unknown)",
+    }
 }
 
 /// Supported video encoder backends.
@@ -220,9 +292,21 @@ impl VideoEncoder {
         gst::ElementFactory::find(self.element_name_for_codec(codec)).is_some()
     }
 
-    /// Whether the element factory is present (backward-compatible, H.264).
-    pub fn is_available(self) -> bool {
-        self.is_available_for_codec(VideoCodec::H264)
+    /// Why this encoder backend is not available for the given codec, if the
+    /// element factory is missing from the current GStreamer installation.
+    /// Empty (`""`) when the factory is present.
+    pub fn why_not_for_codec(self, codec: VideoCodec) -> &'static str {
+        if self.is_available_for_codec(codec) {
+            ""
+        } else {
+            self.element_not_found_reason(codec)
+        }
+    }
+
+    /// Why this encoder backend is not available at all on this machine (H.264),
+    /// when the element factory is missing. Empty when the factory is present.
+    pub fn why_not(self) -> &'static str {
+        self.why_not_for_codec(VideoCodec::H264)
     }
 
     /// `parse_launch` caps fragment for the given codec.
@@ -241,6 +325,40 @@ impl VideoEncoder {
     /// `parse_launch` caps fragment (backward-compatible, H.264).
     pub fn input_caps_fragment(self) -> &'static str {
         self.input_caps_fragment_for_codec(VideoCodec::H264)
+    }
+
+    /// Whether this encoder backend is covered by the encoder-detection tests.
+    ///
+    /// Used by the encoder-detection tests so a newly added encoder that forgets the
+    /// reason strings breaks the test instead of silently widening the API.
+    pub fn is_in_encoder_detection_test(self) -> bool {
+        matches!(
+            self,
+            VideoEncoder::Nvenc
+                | VideoEncoder::QuickSync
+                | VideoEncoder::Amf
+                | VideoEncoder::Software
+        )
+    }
+
+    /// A stable, machine-readable reason why the element factory for this backend
+    /// is not found for the given codec.
+    ///
+    /// The strings are intentionally non-localised (the issue requests codes/enums,
+    /// not translated user-facing sentences) and stable across GStreamer versions
+    /// so downstream consumers can match against them without parsing log output.
+    fn element_not_found_reason(self, codec: VideoCodec) -> &'static str {
+        let _element = self.element_name_for_codec(codec);
+        match self {
+            Self::Nvenc => {
+                "nvenc element not found: nvh264enc/nvh265enc not in gst-plugins-bad (NVCODEC)"
+            }
+            Self::QuickSync => {
+                "qsv element not found: qsvh264enc/qsvh265enc not in gst-plugins-bad (oneVPL)"
+            }
+            Self::Amf => "amf element not found: amfh264enc/amfh265enc not in gst-plugins-bad",
+            Self::Software => "",
+        }
     }
 
     /// Build the `parse_launch` fragment for this encoder with the given codec
@@ -362,6 +480,54 @@ pub fn detect_available_encoders() -> Vec<VideoEncoder> {
     detect_available_encoders_for_codec(VideoCodec::H264)
 }
 
+/// Detect available encoders for a codec, with a structured `why` for each one.
+///
+/// Returns one [`EncoderInfo`] per backend (hardware + software fallback), so a
+/// downstream consumer can decide which encoder to pick and why the others are
+/// skipped — without parsing log output or GUI labels.
+///
+/// Hardware encoders are listed in preference order (Nvenc > QuickSync > Amf),
+/// followed by the software fallback, which is always available. The result is
+/// never empty.
+///
+/// The availability probe only checks the GStreamer element factory; actually
+/// creating the element can still fail on machines without the matching GPU/driver.
+/// That runtime failure is a separate concern — this function reports the
+/// *detectable* availability, not the create-time failure.
+pub fn detect_available_encoders_with_info(codec: VideoCodec) -> Vec<EncoderInfo> {
+    let mut out = Vec::new();
+    for enc in [
+        VideoEncoder::Nvenc,
+        VideoEncoder::QuickSync,
+        VideoEncoder::Amf,
+    ] {
+        let available = enc.is_available_for_codec(codec);
+        out.push(EncoderInfo {
+            backend: enc,
+            codec,
+            available,
+            why_not: if available {
+                ""
+            } else {
+                enc.why_not_for_codec(codec)
+            },
+        });
+    }
+    // Software encoder is always available as a guaranteed fallback.
+    out.push(EncoderInfo {
+        backend: VideoEncoder::Software,
+        codec,
+        available: true,
+        why_not: "",
+    });
+    out
+}
+
+/// Detect available H.264 encoders with structured info (backward-compatible).
+pub fn detect_available_encoders_info() -> Vec<EncoderInfo> {
+    detect_available_encoders_with_info(VideoCodec::H264)
+}
+
 /// Return the best available encoder for the given codec.
 pub fn best_encoder_for_codec(codec: VideoCodec) -> VideoEncoder {
     detect_available_encoders_for_codec(codec)[0]
@@ -372,9 +538,86 @@ pub fn best_encoder() -> VideoEncoder {
     best_encoder_for_codec(VideoCodec::H264)
 }
 
+/// A queryable fallback decision: which encoder Rivulet would pick next for a
+/// given codec, and why that one was chosen over the earlier candidates.
+///
+/// This is the structured, non-GUI, non-localised answer to "welchen Encoder
+/// würde Rivulet nehmen, und warum gerade den?" — the fallback result is
+/// available without parsing log output, and each entry carries a machine-readable
+/// `why_not` for the skipped candidates.
+///
+/// The result always contains at least the software fallback, so callers never
+/// have to special-case an empty decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EncoderFallback {
+    /// The encoder that would be used for the given codec.
+    pub chosen: VideoEncoder,
+    /// The codec this decision applies to.
+    pub codec: VideoCodec,
+    /// Every candidate considered, in preference order, with availability and
+    /// reason when not chosen. The software entry is always last and always
+    /// available.
+    pub candidates: Vec<EncoderInfo>,
+    /// Why the chosen encoder was picked: the first available candidate in the
+    /// preference order. Empty when that answer is obvious from `candidates`.
+    pub why_chosen: &'static str,
+}
+
+impl EncoderFallback {
+    /// Which encoder the fallback would select for this codec.
+    pub fn chosen(&self) -> VideoEncoder {
+        self.chosen
+    }
+
+    /// Why the chosen encoder was picked (machine-readable, non-localised).
+    pub fn why(&self) -> &'static str {
+        self.why_chosen
+    }
+
+    /// All candidates in preference order, with their availability and reason.
+    pub fn candidates(&self) -> &[EncoderInfo] {
+        &self.candidates
+    }
+}
+
+/// Query the fallback decision for a given codec.
+///
+/// Returns the encoder Rivulet would pick, the full candidate list with reasons,
+/// and a structured explanation of the choice — all without parsing log output or
+/// GUI labels.
+pub fn encoder_fallback_for_codec(codec: VideoCodec) -> EncoderFallback {
+    let candidates = detect_available_encoders_with_info(codec);
+    let chosen = candidates
+        .iter()
+        .find(|c| c.is_available())
+        .map(|c| c.backend)
+        .unwrap_or(VideoEncoder::Software);
+    let why_chosen = if let Some(first_avail) = candidates.iter().find(|c| c.is_available()) {
+        if first_avail.backend.is_hardware() {
+            "first available hardware encoder in preference order (Nvenc > QuickSync > Amf); GPU/driver assumed present because element factory found"
+        } else {
+            "no hardware encoder element found, falling back to software (guaranteed available)"
+        }
+    } else {
+        "no encoder available at all (should not happen; software is always listed)"
+    };
+    EncoderFallback {
+        chosen,
+        codec,
+        candidates,
+        why_chosen,
+    }
+}
+
+/// Query the fallback decision for H.264 (backward-compatible).
+pub fn encoder_fallback() -> EncoderFallback {
+    encoder_fallback_for_codec(VideoCodec::H264)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::container::RecordingContainer;
 
     #[test]
     fn element_names_are_stable() {
@@ -410,7 +653,10 @@ mod tests {
     #[test]
     fn software_encoder_is_always_available() {
         let _ = gst::init();
-        assert!(VideoEncoder::Software.is_available());
+        assert!(
+            VideoEncoder::Software.is_available_for_codec(VideoCodec::H264),
+            "software encoder must always be available for H.264"
+        );
     }
 
     #[test]
@@ -434,6 +680,24 @@ mod tests {
             assert_eq!(encoders[i], *enc, "hardware encoder position mismatch");
         }
         assert_eq!(best_encoder(), encoders[0]);
+    }
+
+    #[test]
+    fn encoder_fallback_picks_first_available_backend() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            let fb = encoder_fallback_for_codec(codec);
+            let first_available = fb
+                .candidates
+                .iter()
+                .find(|c| c.is_available())
+                .map(|c| c.backend)
+                .unwrap_or(VideoEncoder::Software);
+            assert_eq!(
+                fb.chosen, first_available,
+                "EncoderFallback::chosen must be the first available candidate for {codec:?}"
+            );
+        }
     }
 
     #[test]
@@ -513,6 +777,74 @@ mod tests {
     }
 
     #[test]
+    fn container_incompatibility_reasons_are_stable() {
+        // H.264 is compatible with everything.
+        assert_eq!(
+            VideoCodec::H264.incompatibility_reason_for_container(RecordingContainer::Mp4),
+            ""
+        );
+        assert_eq!(
+            VideoCodec::H264.incompatibility_reason_for_container(RecordingContainer::Mkv),
+            ""
+        );
+        assert_eq!(
+            VideoCodec::H264.incompatibility_reason_for_container(RecordingContainer::MpegTs),
+            ""
+        );
+        // H.265 incompatible with MPEG-TS only.
+        assert_eq!(
+            VideoCodec::H265.incompatibility_reason_for_container(RecordingContainer::MpegTs),
+            "H.265 is not supported in MPEG-TS; use MP4 or MKV instead"
+        );
+        assert_eq!(
+            VideoCodec::H265.incompatibility_reason_for_container(RecordingContainer::Mp4),
+            ""
+        );
+        assert_eq!(
+            VideoCodec::H265.incompatibility_reason_for_container(RecordingContainer::Mkv),
+            ""
+        );
+        // VP9 requires MKV.
+        assert_eq!(
+            VideoCodec::VP9.incompatibility_reason_for_container(RecordingContainer::Mp4),
+            "VP9 requires MKV container; no VP9 MP4 muxer wired"
+        );
+        assert_eq!(
+            VideoCodec::VP9.incompatibility_reason_for_container(RecordingContainer::MpegTs),
+            "VP9 requires MKV container; no VP9 MPEG-TS muxer wired"
+        );
+        assert_eq!(
+            VideoCodec::VP9.incompatibility_reason_for_container(RecordingContainer::Mkv),
+            ""
+        );
+    }
+
+    #[test]
+    fn container_incompatibility_reasons_match_container_supports_codec() {
+        // Every pair that the private compatibility helper says is compatible must
+        // also produce an empty reason, and every incompatible pair must produce a
+        // non-empty reason. That keeps the two functions in sync instead of silently
+        // drifting: if a codec/container combination changes its compatibility, both
+        // the public reason and the private helper must move together.
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            for container in [
+                RecordingContainer::Mp4,
+                RecordingContainer::Mkv,
+                RecordingContainer::Mov,
+                RecordingContainer::MpegTs,
+            ] {
+                let reason = codec.incompatibility_reason_for_container(container);
+                let compatible = crate::container::container_supports_codec(codec, container);
+                assert_eq!(
+                    reason.is_empty(),
+                    compatible,
+                    "reason and supports should agree for {codec:?} + {container:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn codec_muxers_are_correct() {
         assert_eq!(VideoCodec::H264.muxer_element(), "mp4mux");
         assert_eq!(VideoCodec::H265.muxer_element(), "mp4mux");
@@ -536,6 +868,204 @@ mod tests {
     #[test]
     fn codec_default_is_h264() {
         assert_eq!(VideoCodec::default(), VideoCodec::H264);
+    }
+
+    // --- EncoderInfo + detection-with-reason tests ---
+
+    #[test]
+    fn encoder_info_is_available_matches_backend_availability() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            for info in detect_available_encoders_with_info(codec) {
+                assert_eq!(
+                    info.is_available(),
+                    info.backend.is_available_for_codec(codec),
+                    "EncoderInfo::is_available should match the backend's is_available_for_codec for {codec:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn encoder_info_why_not_is_empty_when_available() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            for info in detect_available_encoders_with_info(codec) {
+                if info.is_available() {
+                    assert_eq!(
+                        info.why_not,
+                        "",
+                        "EncoderInfo::why_not must be empty when the backend is available for {codec:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn encoder_info_why_not_is_non_empty_when_unavailable() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            for info in detect_available_encoders_with_info(codec) {
+                if !info.is_available() {
+                    assert!(!info.why_not.is_empty(),
+                        "EncoderInfo::why_not must be non-empty when the backend is unavailable for {codec:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn encoder_info_software_is_always_available() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            let sw = detect_available_encoders_with_info(codec)
+                .into_iter()
+                .find(|info| info.backend == VideoEncoder::Software)
+                .expect("software encoder must be listed");
+            assert!(
+                sw.is_available(),
+                "software encoder must always be available for {codec:?}"
+            );
+            assert_eq!(
+                sw.why_not, "",
+                "software encoder must have an empty why_not"
+            );
+        }
+    }
+
+    #[test]
+    fn detect_available_encoders_info_is_never_empty() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            let infos = detect_available_encoders_with_info(codec);
+            assert!(
+                !infos.is_empty(),
+                "detect_available_encoders_with_info must return at least the software fallback for {codec:?}"
+            );
+            assert_eq!(
+                infos.last().map(|info| info.backend),
+                Some(VideoEncoder::Software),
+                "detect_available_encoders_with_info must end with the software fallback for {codec:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn detect_available_encoders_info_order_matches_preference() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            let infos = detect_available_encoders_with_info(codec);
+            let backend_order: Vec<VideoEncoder> = infos.iter().map(|info| info.backend).collect();
+            assert_eq!(
+                backend_order,
+                vec![
+                    VideoEncoder::Nvenc,
+                    VideoEncoder::QuickSync,
+                    VideoEncoder::Amf,
+                    VideoEncoder::Software
+                ],
+                "encoder preference order must be Nvenc > QuickSync > Amf > Software for {codec:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn detect_available_encoders_info_hardware_before_software() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            let infos = detect_available_encoders_with_info(codec);
+            let hw_indices: Vec<_> = infos
+                .iter()
+                .enumerate()
+                .filter(|(_, info)| info.backend.is_hardware())
+                .map(|(i, _)| i)
+                .collect();
+            for (pos, idx) in hw_indices.iter().enumerate() {
+                assert_eq!(
+                    *idx, pos,
+                    "hardware encoder position mismatch for {codec:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn encoder_fallback_chosen_is_first_available() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            let fb = encoder_fallback_for_codec(codec);
+            let first_available = fb
+                .candidates
+                .iter()
+                .find(|c| c.is_available())
+                .map(|c| c.backend)
+                .unwrap_or(VideoEncoder::Software);
+            assert_eq!(
+                fb.chosen, first_available,
+                "EncoderFallback::chosen must be the first available candidate for {codec:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn encoder_fallback_candidates_include_why_not_for_unavailable() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            let fb = encoder_fallback_for_codec(codec);
+            for info in &fb.candidates {
+                if !info.is_available() {
+                    assert!(!info.why_not.is_empty(),
+                        "EncoderFallback candidates must carry a non-empty why_not for unavailable backends (codec {codec:?}, backend {:?})",
+                        info.backend
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn encoder_fallback_why_is_non_empty() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            let fb = encoder_fallback_for_codec(codec);
+            assert!(
+                !fb.why_chosen.is_empty(),
+                "EncoderFallback::why_chosen must be non-empty for {codec:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn encoder_fallback_picks_hardware_when_one_is_available() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            let fb = encoder_fallback_for_codec(codec);
+            let any_hw_available = fb
+                .candidates
+                .iter()
+                .any(|c| c.backend.is_hardware() && c.is_available());
+            assert_eq!(
+                fb.chosen.is_hardware(),
+                any_hw_available,
+                "EncoderFallback must pick a hardware encoder when one is available for {codec:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn encoder_fallback_always_has_software_as_last_resort() {
+        let _ = gst::init();
+        for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+            let fb = encoder_fallback_for_codec(codec);
+            assert!(
+                fb.candidates
+                    .iter()
+                    .any(|c| c.backend == VideoEncoder::Software && c.is_available()),
+                "EncoderFallback must always list the software encoder as available for {codec:?}"
+            );
+        }
     }
 
     #[test]
