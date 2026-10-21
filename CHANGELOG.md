@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+- chore(ci): **Sechs veraltete Action-Pins innerhalb ihrer Major-Version
+  angehoben, bevor die Nightly-Chek (02:17 UTC, `--fail-on-major` + outdated
+  immer fatal) dadurch rot wäre.**
+  - `actions/download-artifact` v8.0.1 → v8.0.2 (ci.yml, release.yml).
+  - `github/codeql-action/{init,autobuild,analyze,upload-sarif}`
+    v4.38.3 → v4.39.0 (security.yml, scorecard.yml).
+  - `ossf/scorecard-action` v2.4.4 → v2.5.0 (scorecard.yml).
+  Alle SHAs per `git ls-remote` gegen die Upstream-Tags verifiziert und
+  innerhalb derselben Major (drop-in). Doku-Tabelle neu generiert
+  (`generate-action-pins.py --check` grün) und die hartkodierte
+  Review-Tabelle `PINNED_ACTIONS` in `ci_pinning` entsprechend angepasst
+  (123/123 grün) — genau der beabsichtigte Ablauf: ein Pin-Update zwingt
+  eine Review-Änderung im Guard-Test. Kein Gap bei der Abdeckung: alle 16
+  Workflows sind SHA-gepinnt, `parse_workflows()` scannt sie alle ohne
+  Allowlist; die grüne PR-CI bei outdated Pins ist gewollt
+  (`continue-on-error` in ci.yml als Advisory, Gate ist die Nightly).
+  `dtolnay/rust-toolchain@stable` bleibt Rolling-Branch-Drift
+  (informational, Compilerversion kommt aus `rust-toolchain.toml`).
+
 - fix(m8): **Pipeline-Beschreibung mit Audio war unparsebar — die
   Audio-Beine klebten an die Muxer-Zeile (`mux_rec.mp4mux`),
   `gst::parse::launch` antwortete auf allen Plattformen mit
