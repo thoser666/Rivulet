@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+- fix(m8): **Pipeline-Beschreibung mit Audio war unparsebar — die
+  Audio-Beine klebten an die Muxer-Zeile (`mux_rec.mp4mux`),
+  `gst::parse::launch` antwortete auf allen Plattformen mit
+  "syntax error".** Betroffen waren alle drei Audio-Formen (Datei,
+  Dual-Output, Stream-only); Video-only funktionierte nur zufällig, weil
+  dort das leere Audio-Bein durch ein explizites Leerzeichen getrennt
+  wird. Aufgefallen erst in CI: lokal war avenc_aac unladbar, der A/V-Test
+  lief dort über den typisierten Refusal-Pfad statt über den echten Parse.
+  Fix: explizites Trennzeichen nach den Audio-Beinen in allen drei
+  Armen; Regressionstest `audio_legs_leave_a_separator_before_the_muxer_line`
+  pinnt die drei Beschreibungen als reine Strings (ohne GStreamer) und
+  fällt nachgewiesen auf unfixed-Code.
+
 - fix(security): **Vier frische RUSTSEC-Advisories geschlossen —
   RUSTSEC-2026-0378, -0379, -0381, -0382; der seit heute auf develop rote
   Security-Gate (Cargo Audit + Cargo Deny) wird wieder grün.**

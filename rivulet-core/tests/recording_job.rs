@@ -418,6 +418,49 @@ fn dual_output_tees_video_once_into_both_muxers() {
 }
 
 #[test]
+fn audio_legs_leave_a_separator_before_the_muxer_line() {
+    // Regression (CI, all three platforms): the audio legs end ON the
+    // muxer reference — `mux_rec.` / `mux_stream.audio` — and appending
+    // the muxer line directly glued them together (`mux_rec.mp4mux`,
+    // `mux_stream.audiomp4mux`, `mux_stream.flvmux`). Every GStreamer
+    // parse rejects that with a bare "syntax error", so all three
+    // audio-bearing shapes are pinned here as pure strings.
+    let file = file_config()
+        .with_default_audio()
+        .pipeline_description()
+        .expect("file+audio is valid");
+    assert!(
+        file.contains("mux_rec. mp4mux name=mux_rec"),
+        "file+audio needs a separator before the muxer: {file}"
+    );
+    assert!(!file.contains("mux_rec.mp4mux"), "glued: {file}");
+
+    let dual = file_config()
+        .with_default_audio()
+        .with_stream(stream_settings())
+        .pipeline_description()
+        .expect("file+audio+stream is valid");
+    assert!(
+        dual.contains("mux_stream.audio mp4mux name=mux_rec"),
+        "dual output needs a separator after the audio tee: {dual}"
+    );
+    assert!(!dual.contains("mux_stream.audiomp4mux"), "glued: {dual}");
+
+    let mut stream_only = file_config()
+        .with_default_audio()
+        .with_stream(stream_settings());
+    stream_only.recording.path = None;
+    let stream = stream_only
+        .pipeline_description()
+        .expect("audio+stream without a file is valid");
+    assert!(
+        stream.contains("mux_stream. flvmux name=mux_stream"),
+        "stream-only audio needs a separator before flvmux: {stream}"
+    );
+    assert!(!stream.contains("mux_stream.flvmux"), "glued: {stream}");
+}
+
+#[test]
 fn windows_backslashes_are_escaped_for_parse_launch() {
     let mut config = file_config();
     config.recording.path = Some(r"C:\tmp\rivulet_job_test.mp4".to_string());

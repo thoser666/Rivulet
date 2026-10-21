@@ -287,6 +287,10 @@ impl RecordingJobConfig {
                 s.push_str(&video);
                 s.push(' ');
                 s.push_str(&self.audio_legs(true)?);
+                // Separator: the audio legs end ON the muxer reference
+                // (`mux_stream.audio`); appending the muxer line directly
+                // would yield `mux_stream.audiomp4mux`, a parse error.
+                s.push(' ');
                 let muxer = rec.container.muxer_element();
                 s.push_str(&format!(
                     "{muxer} name=mux_rec ! filesink name=file_sink location=\"{}\"",
@@ -303,6 +307,10 @@ impl RecordingJobConfig {
                 s.push_str(&video);
                 s.push(' ');
                 s.push_str(&self.audio_legs(false)?);
+                // Separator (see the dual arm): without it the description
+                // reads `mux_rec.mp4mux` and every parse fails with a
+                // syntax error.
+                s.push(' ');
                 let muxer = rec.container.muxer_element();
                 s.push_str(&format!(
                     "{muxer} name=mux_rec ! filesink name=file_sink location=\"{}\"",
@@ -314,6 +322,9 @@ impl RecordingJobConfig {
                 s.push_str(&video);
                 s.push(' ');
                 s.push_str(&self.audio_legs(false)?.replace("mux_rec.", "mux_stream."));
+                // Separator (see the dual arm): the legs end on
+                // `mux_stream.`, the muxer line starts with `flvmux`.
+                s.push(' ');
                 s.push_str(&format!(
                     "flvmux name=mux_stream streamable=true ! rtmp2sink location=\"{}\"",
                     escape_location(&self.stream.as_ref().expect("checked").location())
