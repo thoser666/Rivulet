@@ -1,5 +1,86 @@
 ## [Unreleased]
 
+- fix(m8): **Pipeline-Beschreibung mit Audio war unparsebar — die
+  Audio-Beine klebten an die Muxer-Zeile (`mux_rec.mp4mux`),
+  `gst::parse::launch` antwortete auf allen Plattformen mit
+  "syntax error".** Betroffen waren alle drei Audio-Formen (Datei,
+  Dual-Output, Stream-only); Video-only funktionierte nur zufällig, weil
+  dort das leere Audio-Bein durch ein explizites Leerzeichen getrennt
+  wird. Aufgefallen erst in CI: lokal war avenc_aac unladbar, der A/V-Test
+  lief dort über den typisierten Refusal-Pfad statt über den echten Parse.
+  Fix: explizites Trennzeichen nach den Audio-Beinen in allen drei
+  Armen; Regressionstest `audio_legs_leave_a_separator_before_the_muxer_line`
+  pinnt die drei Beschreibungen als reine Strings (ohne GStreamer) und
+  fällt nachgewiesen auf unfixed-Code.
+
+- fix(security): **Vier frische RUSTSEC-Advisories geschlossen —
+  RUSTSEC-2026-0378, -0379, -0381, -0382; der seit heute auf develop rote
+  Security-Gate (Cargo Audit + Cargo Deny) wird wieder grün.**
+  - `rustls-webpki` 0.103.14 → 0.103.16 (RUSTSEC-2026-0382: distrusted
+    emSign-Zwischenzertifikate mit bekannten privaten Schlüsseln).
+  - `wasmtime`-Familie (`wasmtime`, `wasmtime-wasi`, `wasmtime-environ`,
+    `wiggle`, `wasmtime-internal-*`) 49.0.3 → 49.0.4 (RUSTSEC-2026-0378
+    Component-Model-Panic, RUSTSEC-2026-0379 Cranelift-`br_table` auf
+    aarch64); das Manifest bleibt `"49.0"`, der Whole-Family-Bump war
+    nötig, weil `wiggle` `wasmtime-environ = \"=49.0.3\"` pimmt.
+  - `webpki-roots` 1.0.9 → 1.0.10 (ureq-Zweig, gleiche emSign-Lücke).
+  - RUSTSEC-2026-0381 hat keinen Fix in der 0.26-Linie (jedes
+    tungstenite-Release bis 0.30 hängt an `^0.26`): der tungstenite-Zweig
+    vertraut jetzt dem OS-Zertifikatsdose — `rustls-tls-native-roots`
+    statt `rustls-tls-webpki-roots` — mit Guard-Update in `ci_pinning`
+    und Doku-Update in `alerts_eventsub`/`alerts-ingest.md`. **Kein
+    Ignore-Eintrag nötig — deny.toml bleibt `ignore = []`.**
+  - `packaging/flatpak/cargo/cargo-sources.json` aus dem neuen Lock neu
+    erzeugt (`generate-cargo-sources.sh --verify` grün), weil die
+    native-certs-Kette (`rustls-native-certs`, `schannel`,
+    `openssl-probe`) neu in den gepinnten Archiven liegt.
+  Lokal verifiziert: `cargo deny check` (advisories/bans/licenses/sources)
+  und `cargo audit` je Exit 0, `cargo fmt` sauber, `clippy -D warnings`
+  sauber, `ci_pinning` 123/123, rivulet-browser 4/4, OBS-Smokes 20/20.
+
+- feat(m8): **#294 abnahmefähig — `RecordingJob` ist der GUI-freie
+  Einbettungs-Einstiegspunkt, `session_embed` demonstriert ihn end-to-end.**
+  Eine fremde Crate validiert die Konfiguration, startet die Session,
+  schiebt Frames und Audio, abonmiert Events, pausiert/resumt und stoppt —
+  oder lässt den Handle fallen, der dann wie `stop()` finalisiert.
+  Vier Modul-Fixes, die die Verhaltens-Tests aufgedeckt haben:
+  - Der Progress-Ticker wartet jetzt gebunden auf dem Bus: der frühere
+    ungebundene Error-only-Pop feuerte auf einer gesunden Pipeline nie ein
+    Progress-Event, und `finalize()` konnte auf den Ticker-Join warten.
+  - Der tote Paused-Check in `finalize()` ist entfernt — die
+    Rück-zu-PLAYING-Migration prüfte eine bereits überschriebene Variable.
+  - `pause()`/`resume()` gate-n nur noch den `JobState`: die Pipeline in
+    PAUSED zu parken hinterließ nach dem Resume einen flushing
+    appsrc-Pad (`PushFailed("Pad is flushing")`). Die Pause landet weiter-
+    hin als Zeitstempel-Lücke in der Ausgabe (appsrc stempelt beim Push).
+  - Der Preflight prüft per `ElementFactory::make()` statt `find()`: eine
+    stale Registry mit unladbarer Plugin-DLL meldet jetzt typisiert
+    `MissingElements` statt eines Parse-Fehlers ("link has no sink").
+  Verdrahtung: `[[test]]`-Pin in `Cargo.toml`, siebstes Beispiel in der
+  `ci.yml`-Run-Matrix, in der Examples-Tabelle (`lib.rs`) und in der
+  README-M8-Liste; die README-Zusage zu frame delivery ist auf den neuen
+  Stand gebracht (Guard liest die Beispiele aus dem Dateisystem). Gates-
+  und API-Contract-Doku aktualisiert. 27/27 Tests, `cargo fmt` und
+  `clippy -D warnings` sauber, Beispiel läuft mit Exit 0.
+
+- test(capture): **Die #296-Verhaltens-Tests sind auf die beiden letzten
+  Milestone-Dateien ohne Tests portiert — `tests/camera.rs` (4 Tests) und
+  `tests/game_capture.rs` (6 Tests).**
+  - `camera.rs`: Zero-Config-Vertrag (0 = Quelle beibehalten),
+    `CameraDevice`/`CameraFrame`-Datenvertrag mit stabiler Gleichheit,
+    `list_cameras()` (v4l2 zuerst, PipeWire nur als Fallback — nie
+    gemischt; `element_factory` aus genau diesem Satz; keine doppelten
+    device-Pfade; Windows ohne beide Provider → leer), und dass ein
+    unbenutzbarer Device die Saite trennt statt den Thread wedge’t.
+  - `game_capture.rs`: `GameCaptureConfig::default()` (fps 0 = Match,
+    Cursor an), RGBA-Frame-Geometrie, Handle-Drop trennt die Saite
+    (Thread endet, kein Leak) auf jeder Plattform,
+    `start_vulkan_layer_capture()` plattformkonform (Windows `Some`,
+    sonst `None`), `list_game_windows()`-Heuristik (Titel nicht leer,
+    strikt >640×480; Windows leer, weil die GUI die Liste selbst
+    liefert) und die Delegation an `capture_backend`. Alles headless —
+    kein Fenster, keine Kamera, nur Stub-Pfade.
+
 - test(capture): **#296-Backends antworten jetzt mit Verhalten, nicht nur
   mit Typ-Checks — 5 neue Verhaltens-Tests in `tests/capture_backend.rs`.**
   Die neun bisherigen Tests bewiesen nur, dass die Trait-Fläche kompiliert;

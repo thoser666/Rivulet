@@ -21,7 +21,7 @@
 //!
 //! ## Examples
 //!
-//! Six runnable examples in [`examples/`](https://github.com/thoser666/Rivulet/tree/develop/rivulet-core/examples)
+//! Seven runnable examples in [`examples/`](https://github.com/thoser666/Rivulet/tree/develop/rivulet-core/examples)
 //! tell the embedding story end to end. Each one is a self-contained
 //! `main()` you can copy into your own crate — no GUI, no `egui`/`eframe`
 //! anywhere in the call chain — and CI *runs* all of them (a build alone
@@ -35,6 +35,7 @@
 //! | [`encoder_config`](https://github.com/thoser666/Rivulet/blob/develop/rivulet-core/examples/encoder_config.rs) | Pick an encoder and bitrate explicitly |
 //! | [`engine_lifecycle`](https://github.com/thoser666/Rivulet/blob/develop/rivulet-core/examples/engine_lifecycle.rs) | Start, monitor, stop — and read failures from the error slot |
 //! | [`audio_routing`](https://github.com/thoser666/Rivulet/blob/develop/rivulet-core/examples/audio_routing.rs) | Default audio routing in a recording session |
+//! | [`session_embed`](https://github.com/thoser666/Rivulet/blob/develop/rivulet-core/examples/session_embed.rs) | Embed a session in a foreign crate — push frames, read events, pause/resume, stop |
 //!
 //! Run one with:
 //!
@@ -163,6 +164,11 @@ pub mod recording_config;
 pub use recording_config::{
     detect_container_availability, detect_encoder_availability, RecordingConfig,
     RecordingConfigDetect, RecordingConfigError,
+};
+pub mod recording_job;
+pub use recording_job::{
+    AudioSettings, JobError, JobState, RecordingJob, RecordingJobConfig, SessionEvent,
+    SessionReport,
 };
 pub mod video_effects;
 pub use encoder::{
