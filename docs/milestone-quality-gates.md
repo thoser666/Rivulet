@@ -386,31 +386,38 @@ Workstream issues:
 - [x] [#293](https://github.com/thoser666/Rivulet/issues/293) — API docs plus a
   `rivulet-core/examples/` crate whose examples are **run**, not just built.
   Covers the GUI-independence criterion and, for the example criterion,
-  everything except frame delivery: no example streams frames out of the
-  capture pipeline, so that clause stays open until the in-process API from
-  #294 exists to demonstrate it against.
+  every clause: frame delivery is demonstrated against the in-process API
+  from #294 (`session_embed`, below), so no part of the example criterion
+  is left open.
   - **Evidence:** the `Run rivulet-core examples (M8 #293)` step in the
-    Build & Test job executes all six examples (`simple_record`,
+    Build & Test job executes all seven examples (`simple_record`,
     `simple_stream`, `dual_output`, `encoder_config`, `engine_lifecycle`,
-    `audio_routing`) on every push and fails on a non-zero exit, so an
-    example that stops running turns CI red instead of staying silently
-    broken. The same six are listed in the `rivulet-core` crate
+    `audio_routing`, `session_embed`) on every push and fails on a non-zero
+    exit, so an example that stops running turns CI red instead of staying
+    silently broken. The same seven are listed in the `rivulet-core` crate
     documentation ("Examples" section) and linked from the README M8
     overview; `ci_pinning` pins step, list and both links.
 - [#294](https://github.com/thoser666/Rivulet/issues/294) — in-process capture
   API so a foreign crate can record without starting the app. Covers the
   early-typed-errors criterion and the embedding promise itself.
-  - **OPEN — partial** — `RecordingConfig::validate()` provides typed early
-    validation with `RecordingConfigError` that names the offending field
-    and states the fix, checked per-parameter by `tests/recording_config.rs`.
-    The early-typed-errors workstream is complete: invalid configuration now
-    fails before any pipeline construction with a typed, field-named, actionable
-    error.
-    What this does **not** yet deliver is the embedding promise in the issue title:
-    a recording feature a foreign crate can embed without starting the Rivulet
-    app, with audio/video capture, encoding, file and stream output. The typed
-    config gate is a necessary precondition for that entry point, not the entry
-    point itself.
+  - **OPEN — delivered on the branch, awaiting issue verification and
+    closure** — both layers exist now. The typed early validation:
+    `RecordingConfig::validate()` answers with `RecordingConfigError` that
+    names the offending field and states the fix, checked per-parameter by
+    `tests/recording_config.rs`, so invalid configuration fails before any
+    pipeline construction with a typed, field-named, actionable error.
+    The embedding entry point itself: the GUI-free `RecordingJob`
+    (`rivulet-core/src/recording_job.rs`) validates, builds, runs and
+    finalizes a whole session from a foreign crate — frames and audio
+    pushed by the embedder, progress events, pause/resume/stop through a
+    typed `JobState`/`JobError` contract, `Drop` finalizing like `stop()`,
+    and an inspectable `pipeline_description()` (stream keys redacted
+    before logging). Pinned by 27 tests in `tests/recording_job.rs`
+    (explicit `[[test]]` target) and demonstrated end-to-end by
+    `examples/session_embed.rs`, which CI runs with the other examples:
+    encoding and file/stream output ride the same pipeline fragments the
+    engine uses. The issue stays open for verification and closure on
+    GitHub.
 - [#295](https://github.com/thoser666/Rivulet/issues/295) — feature detection
   and fallback as a queryable API with a machine-readable reason.
   **OPEN — partial** — `RecordingConfigDetect` enum with `is_available()` and
@@ -441,21 +448,26 @@ Workstream issues:
   review and the M8 completion report. **Starts only once #292 is delivered**;
   it closes the milestone, it does not work toward it.
 
-The gate stays **open**. No criterion is claimed as met yet, and the opening
-state is recorded rather than glossed. As recorded when the milestone opened,
+The gate stays **open**. The criteria are tracked individually rather than
+glossed, and the opening state is recorded: the example criterion is now
+closed end to end (#293 with frame delivery through #294's entry point),
+while the others wait on their workstream. As recorded when the milestone
+opened,
 `rivulet-core` was `0.65.0-alpha.55` (under semver `0.x` every minor bump is
 breaking) with 66 public modules and no `#![warn(missing_docs)]`, no
 `examples/` crate, and feature detection reachable only through log output.
 The module count is a snapshot and has grown since, and the opening state
-has moved on in part: the `examples/` crate exists and CI runs all six (#293).
+has moved on in part: the `examples/` crate exists and CI runs all seven (#293).
 Two of the three gaps were *not* closed by the workstreams that were checked
 off against them. `#![warn(missing_docs)]` was never activated — the line in
 `lib.rs` is a doc-comment example, not a crate attribute, and turning it on
 for real reports 696 undocumented public items (measured 2026-10-13) — so
 "stabilized public API" and "documented API" are not the same claim yet.
 Feature detection hands out a bare list without a machine-readable why,
-which is what #295 exists for; frame delivery has no example, which needs
-#294 first. The gate stays open on those clauses, not on the delivery count.
+which is what #295 exists for; frame delivery now has its example against
+the #294 entry point, which is delivered on this branch while the issue
+stays open for verification. The gate stays open on those clauses, not on
+the delivery count.
 
 ### M9: Modern Architecture
 

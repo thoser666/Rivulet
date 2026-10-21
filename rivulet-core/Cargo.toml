@@ -121,3 +121,11 @@ path = "tests/run_cmd.rs"
 [[test]]
 name = "api_stability"
 path = "tests/api_stability.rs"
+
+# M8 #294 behavior contract: the GUI-free session entry point must refuse
+# bad configuration with typed, actionable errors (every parameter), and its
+# lifecycle including Drop must finalize the output — pinned here so the
+# suite cannot be skipped by target auto-discovery changes.
+[[test]]
+name = "recording_job"
+path = "tests/recording_job.rs"

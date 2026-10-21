@@ -702,7 +702,8 @@ jobs:
             dual_output \
             encoder_config \
             engine_lifecycle \
-            audio_routing; do
+            audio_routing \
+            session_embed; do
             echo "::group::example ${example}"
             cargo run --quiet -p rivulet-core --example "${example}"
             echo "::endgroup::"
