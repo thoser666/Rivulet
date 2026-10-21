@@ -1,5 +1,48 @@
 ## [Unreleased]
 
+- feat(m8): **#294 abnahmefähig — `RecordingJob` ist der GUI-freie
+  Einbettungs-Einstiegspunkt, `session_embed` demonstriert ihn end-to-end.**
+  Eine fremde Crate validiert die Konfiguration, startet die Session,
+  schiebt Frames und Audio, abonmiert Events, pausiert/resumt und stoppt —
+  oder lässt den Handle fallen, der dann wie `stop()` finalisiert.
+  Vier Modul-Fixes, die die Verhaltens-Tests aufgedeckt haben:
+  - Der Progress-Ticker wartet jetzt gebunden auf dem Bus: der frühere
+    ungebundene Error-only-Pop feuerte auf einer gesunden Pipeline nie ein
+    Progress-Event, und `finalize()` konnte auf den Ticker-Join warten.
+  - Der tote Paused-Check in `finalize()` ist entfernt — die
+    Rück-zu-PLAYING-Migration prüfte eine bereits überschriebene Variable.
+  - `pause()`/`resume()` gate-n nur noch den `JobState`: die Pipeline in
+    PAUSED zu parken hinterließ nach dem Resume einen flushing
+    appsrc-Pad (`PushFailed("Pad is flushing")`). Die Pause landet weiter-
+    hin als Zeitstempel-Lücke in der Ausgabe (appsrc stempelt beim Push).
+  - Der Preflight prüft per `ElementFactory::make()` statt `find()`: eine
+    stale Registry mit unladbarer Plugin-DLL meldet jetzt typisiert
+    `MissingElements` statt eines Parse-Fehlers ("link has no sink").
+  Verdrahtung: `[[test]]`-Pin in `Cargo.toml`, siebstes Beispiel in der
+  `ci.yml`-Run-Matrix, in der Examples-Tabelle (`lib.rs`) und in der
+  README-M8-Liste; die README-Zusage zu frame delivery ist auf den neuen
+  Stand gebracht (Guard liest die Beispiele aus dem Dateisystem). Gates-
+  und API-Contract-Doku aktualisiert. 27/27 Tests, `cargo fmt` und
+  `clippy -D warnings` sauber, Beispiel läuft mit Exit 0.
+
+- test(capture): **Die #296-Verhaltens-Tests sind auf die beiden letzten
+  Milestone-Dateien ohne Tests portiert — `tests/camera.rs` (4 Tests) und
+  `tests/game_capture.rs` (6 Tests).**
+  - `camera.rs`: Zero-Config-Vertrag (0 = Quelle beibehalten),
+    `CameraDevice`/`CameraFrame`-Datenvertrag mit stabiler Gleichheit,
+    `list_cameras()` (v4l2 zuerst, PipeWire nur als Fallback — nie
+    gemischt; `element_factory` aus genau diesem Satz; keine doppelten
+    device-Pfade; Windows ohne beide Provider → leer), und dass ein
+    unbenutzbarer Device die Saite trennt statt den Thread wedge’t.
+  - `game_capture.rs`: `GameCaptureConfig::default()` (fps 0 = Match,
+    Cursor an), RGBA-Frame-Geometrie, Handle-Drop trennt die Saite
+    (Thread endet, kein Leak) auf jeder Plattform,
+    `start_vulkan_layer_capture()` plattformkonform (Windows `Some`,
+    sonst `None`), `list_game_windows()`-Heuristik (Titel nicht leer,
+    strikt >640×480; Windows leer, weil die GUI die Liste selbst
+    liefert) und die Delegation an `capture_backend`. Alles headless —
+    kein Fenster, keine Kamera, nur Stub-Pfade.
+
 - test(capture): **#296-Backends antworten jetzt mit Verhalten, nicht nur
   mit Typ-Checks — 5 neue Verhaltens-Tests in `tests/capture_backend.rs`.**
   Die neun bisherigen Tests bewiesen nur, dass die Trait-Fläche kompiliert;
