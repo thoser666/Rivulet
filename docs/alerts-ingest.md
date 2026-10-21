@@ -51,8 +51,9 @@ entries, with redaction of tokens and privacy tests.
 - **`rivulet-core::alerts_eventsub`** — the native **outbound EventSub
   WebSocket** transport (the live-webhook forwarder from the honest-scope note
   is not needed for Twitch): dials `wss://eventsub.wss.twitch.tv/ws` via
-  `tungstenite` + rustls (webpki-roots, the same lockstep TLS stack `ureq`
-  already uses), walks the session lifecycle (`session_welcome`/`keepalive`/
+  `tungstenite` + rustls trusting the OS certificate store (native roots via
+  `rustls-native-certs`; the bundled webpki-roots line stays out because of
+  RUSTSEC-2026-0381 — `ureq` keeps its patched webpki-roots 1.0.10), walks the session lifecycle (`session_welcome`/`keepalive`/
   `reconnect`/`revocation`) and pushes `notification` frames through
   `parse_twitch_eventsub_notification` into the same `AlertIngest`. It creates
   the four alert subscriptions (`channel.follow` v2,

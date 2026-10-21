@@ -691,7 +691,7 @@ fn m5_alerts_ingest_is_native_localized_and_pinned() {
         "DEFAULT_EVENTSUB_WS_ENDPOINT",
         "session_welcome",
         "session_reconnect",
-        "rustls-tls-webpki-roots",
+        "rustls-tls-native-roots",
     ] {
         assert!(
             eventsub.contains(required),

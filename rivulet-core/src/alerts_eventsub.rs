@@ -4,7 +4,9 @@
 //! Where [`crate::alerts_webhook`] is an *inbound* loopback endpoint (real
 //! Twitch/Streamlabs deliveries always need a forwarder or HTTPS terminator in
 //! front), this module dials **out to Twitch** (`wss://eventsub.wss.twitch.tv/ws`,
-//! via `tungstenite` with the `rustls-tls-webpki-roots` feature) and keeps a
+//! via `tungstenite` with the `rustls-tls-native-roots` feature — the OS
+//! certificate store, not the bundled webpki-roots line that RUSTSEC-2026-0381
+//! flags without a 0.26 fix) and keeps a
 //! `channel.follow` / `channel.subscribe` /
 //! `channel.subscription.gift` / `channel.raid` WebSocket session alive with
 //! automatic reconnect. A live setup needs **no forwarder and no shared

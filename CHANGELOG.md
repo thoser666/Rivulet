@@ -1,5 +1,30 @@
 ## [Unreleased]
 
+- fix(security): **Vier frische RUSTSEC-Advisories geschlossen —
+  RUSTSEC-2026-0378, -0379, -0381, -0382; der seit heute auf develop rote
+  Security-Gate (Cargo Audit + Cargo Deny) wird wieder grün.**
+  - `rustls-webpki` 0.103.14 → 0.103.16 (RUSTSEC-2026-0382: distrusted
+    emSign-Zwischenzertifikate mit bekannten privaten Schlüsseln).
+  - `wasmtime`-Familie (`wasmtime`, `wasmtime-wasi`, `wasmtime-environ`,
+    `wiggle`, `wasmtime-internal-*`) 49.0.3 → 49.0.4 (RUSTSEC-2026-0378
+    Component-Model-Panic, RUSTSEC-2026-0379 Cranelift-`br_table` auf
+    aarch64); das Manifest bleibt `"49.0"`, der Whole-Family-Bump war
+    nötig, weil `wiggle` `wasmtime-environ = \"=49.0.3\"` pimmt.
+  - `webpki-roots` 1.0.9 → 1.0.10 (ureq-Zweig, gleiche emSign-Lücke).
+  - RUSTSEC-2026-0381 hat keinen Fix in der 0.26-Linie (jedes
+    tungstenite-Release bis 0.30 hängt an `^0.26`): der tungstenite-Zweig
+    vertraut jetzt dem OS-Zertifikatsdose — `rustls-tls-native-roots`
+    statt `rustls-tls-webpki-roots` — mit Guard-Update in `ci_pinning`
+    und Doku-Update in `alerts_eventsub`/`alerts-ingest.md`. **Kein
+    Ignore-Eintrag nötig — deny.toml bleibt `ignore = []`.**
+  - `packaging/flatpak/cargo/cargo-sources.json` aus dem neuen Lock neu
+    erzeugt (`generate-cargo-sources.sh --verify` grün), weil die
+    native-certs-Kette (`rustls-native-certs`, `schannel`,
+    `openssl-probe`) neu in den gepinnten Archiven liegt.
+  Lokal verifiziert: `cargo deny check` (advisories/bans/licenses/sources)
+  und `cargo audit` je Exit 0, `cargo fmt` sauber, `clippy -D warnings`
+  sauber, `ci_pinning` 123/123, rivulet-browser 4/4, OBS-Smokes 20/20.
+
 - feat(m8): **#294 abnahmefähig — `RecordingJob` ist der GUI-freie
   Einbettungs-Einstiegspunkt, `session_embed` demonstriert ihn end-to-end.**
   Eine fremde Crate validiert die Konfiguration, startet die Session,

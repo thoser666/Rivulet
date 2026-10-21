@@ -30,11 +30,13 @@ base64 = { workspace = true }
 keyring = { version = "3.6", default-features = false }
 # WebSocket client used by the Kick chat dock (Pusher, plain `ws://`) and
 # the Twitch EventSub WebSocket transport (`wss://`, native alert delivery).
-# The `rustls-tls-webpki-roots` feature enables outgoing `wss://` so EventSub
-# needs no forwarder; it pulls the same `rustls` stack `ureq` already uses
-# (webpki-roots/rustls-pki-types are additive, license-clean, and already
-# allowed by deny.toml).
-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+# The `rustls-tls-native-roots` feature enables outgoing `wss://` so EventSub
+# needs no forwarder; it trusts the OS certificate store (rustls-native-certs).
+# The bundled webpki-roots alternative was dropped because the 0.26 line —
+# which every tungstenite release requires — has no fix for RUSTSEC-2026-0381
+# (distrusted emSign intermediates); `ureq` keeps its patched webpki-roots
+# 1.0.10 for its own connections (license-clean, allowed by deny.toml).
+tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
 
 
 gstreamer = "0.25"
