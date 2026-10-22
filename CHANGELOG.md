@@ -27,6 +27,39 @@
   korrekt. Gleiche Prozedur: SHA per `git ls-remote` verifiziert, Doku-
   Tabelle neu generiert (`--check` grün), `PINNED_ACTIONS` angepasst.
 
+- ci(stale-pins): **Pin-Staleness-Check vom Advisory-Step zum blockierenden
+  PR-Check gemacht (#327) — verlatene Pins können nicht mehr still auf
+  `develop` landen.**
+  - ci.yml: der Step `Report stale action pins (advisory)`
+    (`continue-on-error`, ohne `--fail-on-major`) ist raus; stattdessen
+    läuft der eigene Job `stale_pins` (`Stale Action Pins (gate)`) mit
+    `check-action-pins.py --fail-on-major --comment` und `set -o pipefail`
+    auf jedem Push/PR — ohne `--on-error`-Kulanz. Ein veralteter Pin rotet
+    damit den *offenen* PR, statt erst die Nightly (02:17 UTC) zu färben.
+    Genau die Lücke, die bei codeql-action v4.39.1 (#326) sichtbar wurde.
+  - Branch-Drift bleibt bewusst nicht fatal (kein `--fail-on-branch-drift`):
+    `dtolnay/rust-toolchain@stable` kann keinen PR blockieren.
+  - Guard gedreht: `stale_pin_checker_blocks_prs_via_a_dedicated_gate_job`
+    pinnt den neuen Vertrag (Job existiert, `--fail-on-major`, kein
+    `continue-on-error`, kein `--fail-on-branch-drift`, Advisory-Step weg),
+    123/123 grün; die Enforcement-Tabelle in `docs/ci-action-pins.md` ist
+    aktualisiert („one gates, one reports" → beide Gates).
+  - Ruleset `develop` (ID 8577978) erweitert: `Stale Action Pins (gate)`
+    als siebter Required Status Check eingetragen (integration_id 15368;
+    `strict`, Conditions und alle übrigen Regeln unverändert). Damit
+    *blockiert* GitHub den Merge, nicht nur der Check-Rotstand.
+  - End-to-end-Beweis (Test-PR #328, danach geschlossen — kein
+    Test-Commit auf `develop`): `actions/download-artifact` v8.0.2 →
+    v8.0.1 zurückgedreht, `PINNED_ACTIONS` und Doku-Tabelle folgten, damit
+    der Gate der *einzige* rote Required-Check war (47 pass, 2 fail = der
+    Gate-Push- und -PR-Lauf). `gh pr merge --squash` scheiterte mit
+    „the base branch policy prohibits the merge", `mergeStateStatus:
+    BLOCKED` — dagegen war derselbe Ruleset-Status am grünen PR #327
+    `CLEAN` und der Merge ging durch.
+  - Der in #325 notierte Satz („grüne PR-CI bei outdated Pins ist gewollt …
+    Gate ist die Nightly") gilt damit für PRs nicht mehr; die Nightly
+    bleibt als zweiter, tagesweiter Beleg aktiv.
+
 - fix(m8): **Pipeline-Beschreibung mit Audio war unparsebar — die
   Audio-Beine klebten an die Muxer-Zeile (`mux_rec.mp4mux`),
   `gst::parse::launch` antwortete auf allen Plattformen mit
