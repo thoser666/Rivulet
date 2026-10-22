@@ -67,8 +67,8 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v7.0.2",
     ),
     (
-        "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
-        "v8.0.2",
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "v8.0.1",
     ),
     (
         "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",

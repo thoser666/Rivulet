@@ -23,7 +23,7 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, obs-upstream.yml |
 | `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | build-package.yml, ci.yml, distribution-readiness.yml, flatpak-build.yml, fuzz-deep.yml, nightly.yml, obs-upstream.yml, release.yml, ruleset-guard.yml, scorecard.yml, security.yml, signing-e2e.yml, weekly-promotion.yml, wiki-translations.yml |
 | `actions/dependency-review-action` | `v5.0.0` | `a1d282b36b6f3519aa1f3fc636f609c47dddb294` | security.yml |
-| `actions/download-artifact` | `v8.0.2` | `9000827ccba6bdab643e8b6fd33ac0654aef8333` | ci.yml, release.yml |
+| `actions/download-artifact` | `v8.0.1` | `3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c` | ci.yml, release.yml |
 | `actions/upload-artifact` | `v7.0.2` | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` | build-package.yml, ci.yml, fuzz-deep.yml, obs-upstream.yml, scorecard.yml, weekly-promotion.yml |
 | `dtolnay/rust-toolchain` | `stable` | `89b12181fb390509a0842a86cc55eeb8eb928c1d` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, security.yml |
 | `github/codeql-action/analyze` | `v4.39.1` | `9b3254085494b55a0f7c4c2b3d2d52cc712ce370` | security.yml |
