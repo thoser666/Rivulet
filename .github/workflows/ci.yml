@@ -16,6 +16,35 @@ env:
 
 jobs:
   ################################################################
+  # STALE ACTION PIN GATE (blocking PR check)
+  #
+  # Runs the same pin-staleness checker as the nightly, with the same fatal
+  # flags (--fail-on-major), on every push and pull request. A PR whose pinned
+  # action already has a newer release inside its major (or a newer major
+  # available) fails this check while the PR is still open, instead of only
+  # at the next 02:17 UTC nightly. This closes the gap Dependabot's schedule
+  # leaves: a release cut between Dependabot's last run and this merge
+  # (e.g. github/codeql-action v4.39.1) used to go unnoticed for up to a day.
+  #
+  # Branch drift (a rolling branch such as dtolnay/rust-toolchain@stable)
+  # stays non-fatal: the pinned SHA still fixes the action code and the
+  # compiler is pinned by rust-toolchain.toml. Make it a required status check
+  # on develop to enforce this gate (see docs/ci-action-pins.md).
+  ################################################################
+  stale_pins:
+    name: Stale Action Pins (gate)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compare pinned SHAs against upstream tags/branches
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 scripts/check-action-pins.py --fail-on-major --comment | tee -a "$GITHUB_STEP_SUMMARY"
+
+  ################################################################
   # LINTS & FORMATTING (runs only on Linux, but is platform-independent)
   ################################################################
   lints:
@@ -103,27 +132,6 @@ jobs:
 
       - name: Check action pin table is up to date
         run: python3 scripts/generate-action-pins.py --check
-
-      - name: Report stale action pins (advisory)
-        # The nightly workflow owns the *gate* for stale action pins. This step
-        # runs the same checker on every push and pull request purely as an
-        # early-warning report, so a moved rolling-branch pin (e.g.
-        # dtolnay/rust-toolchain@stable) becomes visible within minutes instead
-        # of at the next 02:17 UTC nightly, and lands in this run's step
-        # summary as the same Markdown table the nightly publishes.
-        # It stays advisory on purpose:
-        #   * continue-on-error: an upstream action commit must never redden a
-        #     push or a contributor's pull request,
-        #   * no --fail-on-major: newer-major gaps stay owned by the nightly,
-        #   * no --fail-on-branch-drift: a rolled branch pin is not staleness,
-        #     the pinned SHA still fixes the action code and the compiler is
-        #     pinned by rust-toolchain.toml.
-        # See docs/ci-action-pins.md ("Enforcement").
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          python3 scripts/check-action-pins.py --comment | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Check generated assets are up to date
         run: |
