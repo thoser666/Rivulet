@@ -122,10 +122,11 @@ repository is not configured yet.
   a full 40-char SHA, if the reviewed pins are not the ones in use, or if this
   table drifts from those pins.
 - `scripts/check-action-pins.py` — compares every pinned SHA against upstream
-  (run daily by the nightly workflow): fails on same-major updates we have not
-  taken. The nightly workflow invokes it with `--fail-on-major`, so **newer
-  major versions also fail the job** instead of only being reported — a major
-  gap therefore surfaces as a red Nightly run rather than a warning. For a
+  (run by the blocking `stale_pins` job in `ci.yml` on every push/PR, and daily
+  by the nightly workflow): fails on same-major updates we have not taken.
+  Both invoke it with `--fail-on-major`, so **newer major versions also fail
+  the check** instead of only being reported — a major gap surfaces on the open
+  PR (and as a red Nightly run) rather than as a quiet warning. For a
   branch pin such as `dtolnay/rust-toolchain@stable` the comparison is against
   the branch tip, which moves on every upstream push; that is reported as its
   own `branch-drift` status and stays informational, because the pinned SHA
@@ -138,32 +139,36 @@ repository is not configured yet.
   `--json` emits a machine-readable result; `--comment` emits a compact Markdown
   notification that the nightly workflow publishes to the run's step summary.
 
-### Two places run the checker: one gates, one reports
+### The checker runs as a blocking gate in both workflows
 
-The same checker runs in two workflows with deliberately different strictness:
-
-| Workflow | Step | Flags | Failure |
+| Workflow | Job / step | Flags | Failure |
 | --- | --- | --- | --- |
-| `nightly.yml` | `Check for stale action pins` | `--fail-on-major --comment` | **fails the job** (outdated within major, newer major, unresolvable ref) |
-| `ci.yml` | `Report stale action pins (advisory)` | `--comment` | never — `continue-on-error: true` |
+| `ci.yml` | `stale_pins` — `Compare pinned SHAs against upstream tags/branches` | `--fail-on-major --comment` | **fails the PR** (outdated within major, newer major, unresolvable ref) |
+| `nightly.yml` | `Check for stale action pins` | `--fail-on-major --comment` | **fails the job** on schedule/dispatch |
 
-`ci.yml` runs on every push and pull request, the nightly only once a day. A
-drifting rolling-branch pin is therefore reported within minutes instead of
-up to 24h later, and lands in that run's step summary next to the commit that
-touched a pin. It stays a report on purpose: the drift must not be able to
-redden a contributor's pull request, which is why the step carries
-`continue-on-error: true` and passes neither `--fail-on-major` nor
-`--fail-on-branch-drift`. The nightly remains the single fatal gate — a second
-one would only duplicate the cause of red builds.
+`ci.yml` runs on every push and pull request, so an outdated pin reddens the
+PR *while it is still open* instead of surfacing only at the next 02:17 UTC
+nightly — this closed the gap where a release cut between Dependabot's last
+run and the merge (e.g. `github/codeql-action` v4.39.1) landed on `develop`
+before the nightly noticed. To make the gate enforce merges, mark the
+`Stale Action Pins (gate)` check as a **required status check** on `develop`'s
+branch protection.
+
+Branch drift stays informational in both places: a rolling branch pin such as
+`dtolnay/rust-toolchain@stable` moving upstream is reported but passes, because
+the pinned SHA still fixes the action code and the compiler is pinned by
+`rust-toolchain.toml`. Neither invocation passes `--fail-on-branch-drift`.
 
 Both invocations use `set -o pipefail` with a `| tee -a "$GITHUB_STEP_SUMMARY"`
 pipeline, so the checker's exit status survives the pipe and the step summary
 is written even when the checker itself fails.
 
-`rivulet-core/tests/ci_pinning.rs` asserts this split
-(`stale_pin_checker_runs_on_every_push_as_an_advisory_report`): the advisory
-step must exist, must run the checker in `--comment` mode, must keep
-`continue-on-error`, and must not pick up either fatal flag.
+`rivulet-core/tests/ci_pinning.rs` asserts the gate
+(`stale_pin_checker_blocks_prs_via_a_dedicated_gate_job`): the `stale_pins`
+job must exist, run `check-action-pins.py --fail-on-major`, keep
+`set -o pipefail` + the step summary, take no `continue-on-error` (so it can
+redden a PR), never opt into `--fail-on-branch-drift`, and the retired
+advisory step must be gone.
   Compound actions (`owner/repo/path/to/action`) are resolved against the
   `owner/repo` repository that owns the tags, so the sub-path is stripped before
   comparing SHAs.

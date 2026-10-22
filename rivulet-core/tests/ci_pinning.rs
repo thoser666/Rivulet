@@ -2633,77 +2633,91 @@ fn stale_pin_checker_is_wired_up() {
     );
 }
 
-/// The advisory stale-pin report in `.github/workflows/ci.yml`.
+/// The blocking stale-pin gate in `.github/workflows/ci.yml`.
 ///
-/// The nightly already *gates* stale pins, but it only runs once a day, so a
-/// rolling-branch pin that moved upstream stayed invisible for up to 24h (and
-/// in practice for days, because nobody read the red nightly). Reporting it on
-/// every push/PR makes the drift visible while the commit that touched a pin is
-/// still on screen.
+/// It used to be an advisory step (`continue-on-error: true`, no
+/// `--fail-on-major`): visible on every push/PR but never able to redden one.
+/// That left a real hole — a release cut between Dependabot's last run and the
+/// merge (e.g. `github/codeql-action` v4.39.1) only reddened the *nightly*, up
+/// to 24h later, after the stale pin was already on `develop`.
 ///
-/// This must stay a *report*, not a second gate: the same drift that reddened
-/// the nightly cannot redden a contributor's pull request. Hence
-/// `continue-on-error`, and deliberately no `--fail-on-major` /
-/// `--fail-on-branch-drift` — those belong to the nightly gate only.
+/// It is now a dedicated job that runs the checker with the same fatal flags
+/// as the nightly, so an outdated pin fails the PR *while it is still open*.
+/// The nightly keeps running the same gate for schedule/dispatch runs; this
+/// test pins the CI-side contract.
+///
+/// Branch drift stays non-fatal here: a rolling branch (e.g.
+/// `dtolnay/rust-toolchain@stable`) moving upstream is reported but must not
+/// block a PR, because the pinned SHA still fixes the action code and the
+/// compiler is pinned by `rust-toolchain.toml`.
 #[test]
-fn stale_pin_checker_runs_on_every_push_as_an_advisory_report() {
+fn stale_pin_checker_blocks_prs_via_a_dedicated_gate_job() {
     let ci = read(".github/workflows/ci.yml");
-    const STEP_NAME: &str = "Report stale action pins (advisory)";
+    const JOB_ID: &str = "stale_pins:";
     let start = ci
-        .find(STEP_NAME)
-        .unwrap_or_else(|| panic!("ci.yml must contain a step named {STEP_NAME:?}"));
-    let rest = &ci[start..];
-    let end = rest[1..]
-        .find("\n      - name: ")
-        .map(|offset| offset + 1)
-        .expect("the advisory step must be followed by another step");
-    let step = &rest[..end];
+        .find(JOB_ID)
+        .unwrap_or_else(|| panic!("ci.yml must contain a job id {JOB_ID:?}"));
+    // Slice the job body: from the job id to the next top-level job key.
+    let rest = &ci[start + JOB_ID.len()..];
+    // Find the next line indented at *exactly* two spaces (the next top-level
+    // job key or section), skipping deeper-indented body lines like
+    // `\n    name:` (four spaces), which would otherwise truncate immediately.
+    let mut end = None;
+    let mut search = 0;
+    while let Some(found) = rest[search..].find("\n  ") {
+        let at = search + found;
+        let after_two_spaces = at + 3; // skip "\n" + "  "
+        let next_byte = rest.as_bytes().get(after_two_spaces).copied();
+        if matches!(next_byte, Some(b) if b != b' ' && b != b'#') {
+            end = Some(at + 1);
+            break;
+        }
+        search = at + 1;
+    }
+    let end = end.expect("stale_pins must be followed by another job");
+    let job = &rest[..end];
 
+    // The job must actually run the checker with the nightly's fatal flags.
     assert!(
-        step.contains("python3 scripts/check-action-pins.py --comment"),
-        "the advisory step must run the same checker the nightly runs, in --comment mode"
-    );
-    // The step carries a comment explaining *why* it passes no fatal flag, so
-    // the flags themselves are checked on the executed command line only.
-    let command: String = step
-        .lines()
-        .filter(|line| !line.trim_start().starts_with('#'))
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(
-        step.contains("continue-on-error: true"),
-        "the advisory step must not be able to redden a push or a contributor's pull request"
+        job.contains("python3 scripts/check-action-pins.py --fail-on-major"),
+        "the stale_pins gate must run check-action-pins.py with --fail-on-major"
     );
     assert!(
-        step.contains("GITHUB_STEP_SUMMARY"),
-        "the advisory step must publish its report to the run's step summary"
+        !job.contains("continue-on-error"),
+        "the stale_pins gate must be able to redden a PR (no continue-on-error)"
     );
     assert!(
-        step.contains("set -o pipefail"),
-        "the advisory step must keep the checker's exit status instead of tee's"
-    );
-    // The nightly stays the single fatal gate; a second one would just be a
-    // duplicate source of red builds.
-    assert!(
-        !command.contains("--fail-on-major"),
-        "newer-major gaps must stay owned by the nightly gate, not the advisory CI step"
+        job.contains("GITHUB_STEP_SUMMARY"),
+        "the stale_pins gate must still publish its report to the step summary"
     );
     assert!(
-        !command.contains("--fail-on-branch-drift"),
-        "branch drift must stay informational in regular CI too"
+        job.contains("set -o pipefail"),
+        "the stale_pins gate must keep the checker's exit status instead of tee's"
+    );
+    // Branch drift must not become a second, accidental blocker in the gate.
+    assert!(
+        !job.contains("--fail-on-branch-drift"),
+        "the stale_pins gate must not treat branch drift as fatal"
+    );
+    // The old advisory step must be gone — nothing may re-assert
+    // continue-on-error around the checker any more.
+    assert!(
+        !ci.contains("Report stale action pins (advisory)"),
+        "the advisory step must be gone; the gate job replaces it"
     );
 
-    // The gate itself must not be weakened by the addition.
+    // The nightly keeps its own fatal gate for scheduled runs.
     let nightly = read(".github/workflows/nightly.yml");
     assert!(
         nightly.contains("--fail-on-major") && !nightly.contains("--fail-on-branch-drift"),
         "the nightly must remain the fatal gate (--fail-on-major, no --fail-on-branch-drift)"
     );
 
+    // The docs must describe the gate, not the retired advisory report.
     let doc = read("docs/ci-action-pins.md");
     assert!(
-        doc.contains("advisory") && doc.contains("ci.yml"),
-        "docs/ci-action-pins.md must document the advisory report in ci.yml next to the nightly gate"
+        doc.contains("stale_pins") && doc.contains("ci.yml"),
+        "docs/ci-action-pins.md must document the blocking stale_pins gate in ci.yml"
     );
 }
 
