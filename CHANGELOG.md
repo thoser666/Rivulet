@@ -19,6 +19,14 @@
   `dtolnay/rust-toolchain@stable` bleibt Rolling-Branch-Drift
   (informational, Compilerversion kommt aus `rust-toolchain.toml`).
 
+- chore(ci): **`github/codeql-action` v4.39.0 → v4.39.1 nachgezogen —
+  Upstream veröffentlichte v4.39.1 zwischen dem #325-Merge und dem
+  manuellen Nightly-Dispatch, der pin-Staleness-Job fiel dadurch erwartbar
+  (`Check for stale action pins`, run 39722281528).** Genau das Signal, das
+  der Guard täglich fangen soll; der v4.39.0-Bump war zum Merge-Zeitpunkt
+  korrekt. Gleiche Prozedur: SHA per `git ls-remote` verifiziert, Doku-
+  Tabelle neu generiert (`--check` grün), `PINNED_ACTIONS` angepasst.
+
 - fix(m8): **Pipeline-Beschreibung mit Audio war unparsebar — die
   Audio-Beine klebten an die Muxer-Zeile (`mux_rec.mp4mux`),
   `gst::parse::launch` antwortete auf allen Plattformen mit
