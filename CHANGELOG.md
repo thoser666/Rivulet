@@ -1,5 +1,20 @@
 ## [Unreleased]
 
+- fix(deps): **Yank-Lücke bei `clipboard-win` geschlossen — Upstream hat
+  5.4.1 heute (2026-10-23) von crates.io yanked und 5.4.2/5.4.3
+  nachgelegt, wodurch jeder frische `Cargo Deny`-Lauf mit
+  `error[yanked]` rot wurde (develop war um 08:16 UTC noch grün, der
+  erste Lauf danach um 13:51 UTC fiel bereits).**
+  - `cargo update -p clipboard-win`: 5.4.1 → 5.4.3 (gleiche 5.x-Linie,
+    transitive Abhängigkeit von `arboard` → `egui-winit` → `eframe`).
+    Diff bewusst auf das eine Paket beschränkt (237 andere Deps
+    unangetastet), Lockfile-Diff = 2 Zeilen.
+  - `packaging/flatpak/cargo/cargo-sources.json` neu generiert
+    (`generate-cargo-sources.sh --verify` grün) — das Flatpak-Build ist
+    offline und pinnt die Crate-Archive, das File muss aus dem Lock
+    folgen.
+  - Lokal verifiziert: `cargo deny check advisories` → `advisories ok`.
+
 - chore(ci): **Sechs veraltete Action-Pins innerhalb ihrer Major-Version
   angehoben, bevor die Nightly-Chek (02:17 UTC, `--fail-on-major` + outdated
   immer fatal) dadurch rot wäre.**
