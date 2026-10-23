@@ -1,5 +1,28 @@
 ## [Unreleased]
 
+- ci(dependabot): **Dependabot für GitHub-Actions auf `daily` + einen
+  gruppierten Sammel-PR umgestellt — der jetzt aktive `stale_pins`-Gate
+  kann dadurch nicht mehr wochenlang rotieren und nicht mehr im
+  Multi-Pin-Deadlock hängenbleiben.**
+  - `interval: weekly` → `daily`: seit #327 rotiert der Gate
+    (`Stale Action Pins (gate)`, Required Check auf `develop`) jeden
+    offenen PR, dessen Pin hinter dem Upstream liegt. Im Wochentakt war
+    die Exposition damit bis zu sieben Tage — bei der Upstream-Frequenz
+    (codeql-action zweimal in Tagen, siehe #325/#326) kein Ausnahme-,
+    sondern der Normalzustand. Täglich begrenzt das auf ≤24 h + CI-Zeit.
+  - `groups: github-actions` (Pattern `*`): ein Sammel-PR bumppt alle
+    veralteten Pins gleichzeitig. Ohne Gruppen öffnet Dependabot pro
+    Action einen eigenen PR, und jeder trägt im Merge-Ref weiterhin die
+    *anderen* veralteten Pins — gegen den blockierenden Gate wird keiner
+    davon je grün (Deadlock, nur per Admin-Merge zu durchbrechen). Im
+    gruppierten PR ist der gesamte Pin-Satz current, der Gate geht grün
+    und der Auto-Merge legt alles in einem Zug auf `develop`.
+  - Guard angepasst: `dependabot_updates_pinned_github_actions` in
+    `ci_pinning.rs` fordert jetzt `daily` und das Gruppen-Block statt der
+    bisherigen Weekly-Vorgabe (auf dem Branch grün, 123 Tests).
+  - `docs/ci-action-pins.md` erklärt die Begründung (Daily + Grouping
+    gegen den Gate).
+
 - chore(ci): **Sechs veraltete Action-Pins innerhalb ihrer Major-Version
   angehoben, bevor die Nightly-Chek (02:17 UTC, `--fail-on-major` + outdated
   immer fatal) dadurch rot wäre.**

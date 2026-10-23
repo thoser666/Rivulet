@@ -6,7 +6,12 @@ Human-readable reference for the third-party GitHub Actions used in
 cannot swap in a malicious commit.
 
 Dependabot keeps the pins current: when an action releases a new version it
-opens a PR that updates both the SHA and the inline version comment. The table
+opens a PR that updates both the SHA and the inline version comment. It runs
+**daily** and opens **one grouped PR** for all stale action pins (see the
+`github-actions` entry in `.github/dependabot.yml`): the blocking `stale_pins`
+gate reddens every open PR whose pins are behind upstream, so a per-action PR
+would still carry the other stale pins and could never go green, and a weekly
+schedule would leave the fleet stale-gated for up to seven days. The table
 below is generated from the workflows by `scripts/generate-action-pins.py`
 (do not edit it by hand) and is the review aid for those PRs:
 
