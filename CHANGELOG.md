@@ -23,11 +23,31 @@
   - `docs/ci-action-pins.md` erklärt die Begründung (Daily + Grouping
     gegen den Gate).
 
+- fix(security): **RUSTSEC-2026-0386 in `tokio` geschlossen — das Advisory
+  kam heute (2026-10-24) herein, `tokio 1.53.1` liegt unter der
+  Fix-Schwelle ≥ 1.53.3, der Security-Gate (Cargo Deny) rotete erneut.**
+  - `cargo update -p tokio@1.53.1 --precise 1.53.3`: exakt die
+    Advisory-Schwelle, Lockfile-Diff = 1 Zeile (222 Arbeitsknoten hängen
+    an `^1.0`). `AsyncFd` ist seit tokio 1.53.0 deprecated, wird im
+    Workspace aber nirgends genutzt — kein Code nötig, kein
+    Ignore-Eintrag nötig.
+  - `packaging/flatpak/cargo/cargo-sources.json` neu generiert
+    (`generate-cargo-sources.sh --verify` grün) — nur die tokio-Zeilen
+    ändern sich; das Flatpak-Build pinnt die Crate-Archive offline.
+  - Lokal verifiziert: `cargo deny check` (advisories/bans/licenses/
+    sources) → alles ok.
+  - **Korrektur des #331-Eintrags unten:** er behauptete zunächst,
+    develop sei um 08:16 UTC (2026-10-23) noch grün gewesen und der erste
+    Yank-Fehler erst um 13:51 — falsch: der Security-Lauf von develop um
+    08:16 UTC (run 39923512758) scheiterte bereits auf `error[yanked]`;
+    grün war um diese Zeit nur der CI-Lauf (ci.yml), der keinen
+    Cargo-Deny-Job enthält.
+
 - fix(deps): **Yank-Lücke bei `clipboard-win` geschlossen — Upstream hat
   5.4.1 heute (2026-10-23) von crates.io yanked und 5.4.2/5.4.3
   nachgelegt, wodurch jeder frische `Cargo Deny`-Lauf mit
-  `error[yanked]` rot wurde (develop war um 08:16 UTC noch grün, der
-  erste Lauf danach um 13:51 UTC fiel bereits).**
+  `error[yanked]` rot wurde (develop war um 08:16 UTC bereits rot —
+  grün um diese Zeit war nur der CI-Lauf ohne Cargo-Deny-Job).**
   - `cargo update -p clipboard-win`: 5.4.1 → 5.4.3 (gleiche 5.x-Linie,
     transitive Abhängigkeit von `arboard` → `egui-winit` → `eframe`).
     Diff bewusst auf das eine Paket beschränkt (237 andere Deps
