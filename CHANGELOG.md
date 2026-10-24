@@ -1,5 +1,91 @@
 ## [Unreleased]
 
+- fix(camera): **#318 — `list_cameras()` fragte nur Linux-Device-Provider
+  ab; auf Windows und macOS war die Webcam-Liste damit immer leer, obwohl
+  GStreamer die Geräte dort sieht. Plattformgerechte Provider-Ketten,
+  getestete Element/Property-Zuordnung und eine eigene Leer-Liste-Meldung.**
+  - **Ursache 1 (Nur-Linux-Provider):** abgefragt waren nur
+    `video4linux2deviceprovider` und `pipewiredeviceprovider` — beide
+    existieren auf Windows/macOS nicht, `by_name()` liefert dort also
+    konstant `None`. Jetzt eine Kette je Plattform, in Reihenfolge
+    probe-first: der erste Provider, der Geräte liefert, gewinnt die
+    ganze Liste (**nie ein Merge** — v4l2 und PipeWire beschreiben
+    dieselben physischen Kameras in verschiedenen Pfadformaten):
+    * Linux: v4l2 → PipeWire (unverändert),
+    * Windows: `mfdeviceprovider` → `ksdeviceprovider` →
+      `dshowdeviceprovider` — live gegen die installierte Runtime
+      verifiziert (2026-10-24): Media Foundation liefert beide Kameras
+      dieser Maschine inklusive Virtueller (`device.api = mediafoundation`),
+      `ksvideosrc`/`dshowvideosrc` als Rückfall.
+    * macOS: `avfdeviceprovider` (gst-plugins-bad `applemedia`, seit
+      GStreamer 1.20).
+  - **Consuming-Element und Device-Property kommen jetzt aus einer
+    getesteten Tabelle:** MF- und KS-Geräte wollen `device-path`,
+    PipeWire `path`, AVFoundation `unique-id` (`device-index` ist seit
+    1.30 deprecatet und funktionslos), DirectShow `device` —
+    `start_camera_capture()` baute bisher überall `device="…"` (falscher
+    Name = `parse_launch`-Fehler beim Öffnen). Der Provider-Eintrag
+    liefert das Element über `GstDevice::create_element` (Fallback:
+    dokumentierter Provider-Standard), nicht mehr einen Linux-Namen.
+  - **Ursache 2 (nur 🔄-Button):** der vom Issue beschriebene
+    Startup-Aufruf ist auf `develop` bereits vorhanden
+    (`app.rs:11262`); er ist jetzt über den `ci_pinning`-Guard gepinnt,
+    damit er nicht still wieder verschwindet. Neu ist die
+    Kamera-spezifische Leer-Meldung: der Webcam-Picker zeigt `camera_none`
+    (EN „No camera found.“ / DE „Keine Kamera gefunden.“) statt der
+    generischen „No devices detected.“ — „leer“ ist damit von
+    „nicht unterstützt“ unterscheidbar (i18n-Paritäts-Test inklusive).
+  - **Docs:** neue Seite [`docs/camera-capture.md`](docs/camera-capture.md)
+    mit der Support-Tabelle je Plattform (Provider, Element, Property),
+    den Garantien der Fallback-Kette und dem Troubleshooting der
+    Plugin-Pfad-Kollision (msys2- vs. offizielles GStreamer); der
+    README-Kamera-Bullet nennt den Stand.
+  - **Tests:** `tests/camera.rs` 4 → 8. Neu: gepinnte Provider-Ketten
+    aller drei Plattformen (die Listen werden auf jeder OS-Kompilierung
+    gepinnt, also auch vom Linux-CI), der **Stub-Provider-Test** über die
+    neue Injektionsnaht `list_cameras_with()` (Akzeptanzkriterium: ohne
+    Fix unmöglich — `list_cameras()` war auf Windows konstruktiv leer),
+    Fallback-/Dedup-Vertrag über die ganze Liste (die alte `dedup_by`
+    übersah durchmischierte Duplikate), die Property-Tabelle und ein
+    realer `list_cameras()`-Lauf innerhalb der Plattform-Element-Menge.
+    Guard `camera_provider_chains_cover_every_platform_and_are_documented`
+    koppelt Kette, Startup-Fill, i18n-Strings und Doku — eine erweiterte
+    Kette ohne Doku-Zeile fällt durch.
+  Verifiziert: `tests/camera` 8/8, `ci_pinning` samt neuem Guard grün,
+  `cargo fmt --check` sauber.
+
+- feat(m8): **#294 abgeschlossen — die beiden noch offenen
+  Akzeptanzkriterien sind jetzt echt belegt: Audio+Video laufen in einer
+  Session gleichzeitig in Datei *und* in einen lokalen RTMP-Server,
+  end-to-end gegen eine lokale Fixture.**
+  - **Neues `audio_and_video_reach_the_file_and_a_local_rtmp_server_in_one_session`
+    in `tests/recording_job.rs` (27 → 29 Tests):** ein in den Test
+    eingebauter minimaler RTMP-Server auf `127.0.0.1` (C0/C1-Handshake,
+    S0/S1/S2, Chunk-Parser mit fmt 0–3 und Set-Chunk-Size, AMF0-Antworten
+    auf `connect`/`createStream`/`publish` inkl. generischer `_result`-
+    Antwort für `releaseStream`/`FCPublish`) zählt die ankommenden
+    Audio- und Video-Nachrichten. Der Test pusht 30 Frames + Audio in eine
+    Dual-Output-`RecordingJob`-Session und prüft danach beide Beine:
+    Dateileiste (`frames_written`/`audio_samples`) und Stream-Beine
+    (Handshake → publish → gezählte Audio- und Video-Nachrichten) — ohne
+    Hardware, ohne Netz. Damit ist Akzeptanzkriterium 5 (Datei+Stream aus
+    einer Session) und 6 (E2E gegen lokale Fixtures) gedeckt; zuvor wurde
+    der Stream-Arm nur als Pipeline-*Besreibungs*-String gepinnt.
+  - Fehlt ein Plugin (`flvmux`/`rtmp2sink`/`avenc_aac`), liefert `start`
+    wie in der Suite dokumentiert typisiert `MissingElements` — der
+    Verweigerungszweig ist ein Vertragsbeweis, kein Skip.
+  - **Buchhaltung mitgezogen:** README-Checkbox `- [x]`, Statuszeilen
+    „#292, #293 and #294 delivered, three still open“, der #294-Gates-Eintrag
+    steht auf „CLOSED — delivered and verified“ (29 Tests + E2E-Nachweis),
+    `docs/m8-api-contract.md` auf 29/29. Der Guard
+    `m8_opening_is_pinned_to_the_six_workstream_issues` zieht die
+    Zustimmungsnadeln (3× `[x]`, 3× `[ ]`) nach und leitet das
+    `**CLOSED`-Verbot jetzt aus den README-Checkboxen ab statt aus der
+    eingetippten „four still open“-Phrase — ein nicht abgehaktes Workstream-
+    Issue kann so nie als CLOSED dastehen, und die Regel tritt nicht
+    still zurück, sobald die Zahl sinkt. `cargo fmt`, `tests/camera`,
+    `tests/recording_job` (29/29, E2E inklusive) und `ci_pinning` grün.
+
 - ci(dependabot): **Dependabot für GitHub-Actions auf `daily` + einen
   gruppierten Sammel-PR umgestellt — der jetzt aktive `stale_pins`-Gate
   kann dadurch nicht mehr wochenlang rotieren und nicht mehr im

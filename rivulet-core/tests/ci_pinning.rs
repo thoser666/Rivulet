@@ -6117,9 +6117,10 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
     );
 
     // Both surfaces say "in progress", never "planned" — and never "complete"
-    // or "delivered" either, because four workstreams (#294-#297) are still
-    // open. #292 and #293 ARE delivered, so both surfaces must name them as
-    // such: an unmentioned delivery is the same drift in the other direction.
+    // or "delivered" either, because three workstreams (#295-#297) are still
+    // open. #292, #293 and #294 ARE delivered, so both surfaces must name them
+    // as such: an unmentioned delivery is the same drift in the other
+    // direction.
     for (label, section) in [
         ("README M8 section", readme_m8_section),
         ("M8 quality gate", gates_m8_section),
@@ -6129,8 +6130,8 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
             "the {label} must state that M8 is in progress"
         );
         assert!(
-            section.contains("#292 and #293 delivered"),
-            "the {label} must name the two delivered workstreams"
+            section.contains("#292, #293 and #294 delivered"),
+            "the {label} must name the three delivered workstreams"
         );
         assert!(
             !section.contains("**Status: Planned"),
@@ -6138,11 +6139,11 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
         );
         assert!(
             !section.contains("Complete") && !section.contains("**Status: Complete"),
-            "the {label} must not claim Complete while four workstreams are open"
+            "the {label} must not claim Complete while three workstreams are open"
         );
         assert!(
             !section.contains("**Status: Delivered"),
-            "the {label} must not claim the milestone Delivered while #294-#297 are open"
+            "the {label} must not claim the milestone Delivered while #295-#297 are open"
         );
     }
 
@@ -6174,27 +6175,28 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
     }
     // The roadmap checkboxes and the issues are the same six items, so both
     // lists have to stay complete — a missing checkbox or a missing issue is
-    // the same silent drift the M7 guard caught. Exactly the two delivered
-    // workstreams may be checked: a premature "- [x]" on #294-#297, or a
-    // stale unchecked #292/#293, fails here.
+    // the same silent drift the M7 guard caught. Exactly the three delivered
+    // workstreams may be checked: a premature "- [x]" on #295-#297, or a
+    // stale unchecked #292/#293/#294, fails here.
     assert_eq!(
         readme_m8_section.matches("- [x]").count(),
-        2,
-        "the README M8 section must check exactly the two delivered workstreams"
+        3,
+        "the README M8 section must check exactly the three delivered workstreams"
     );
     assert_eq!(
         readme_m8_section.matches("- [ ]").count(),
-        4,
-        "the README M8 section must leave the four open workstreams unchecked"
+        3,
+        "the README M8 section must leave the three open workstreams unchecked"
     );
-    for (issue, expected) in [
+    let readme_m8_checkboxes = [
         ("#292", "- [x]"),
         ("#293", "- [x]"),
-        ("#294", "- [ ]"),
+        ("#294", "- [x]"),
         ("#295", "- [ ]"),
         ("#296", "- [ ]"),
         ("#297", "- [ ]"),
-    ] {
+    ];
+    for (issue, expected) in readme_m8_checkboxes {
         let line = readme_m8_section
             .lines()
             .find(|line| line.starts_with("- [") && line.contains(issue))
@@ -6263,19 +6265,30 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
         "the exit-evidence issue must be marked as depending on #292"
     );
 
-    // Per-issue labels must agree with the section's own status line: while
-    // it records four workstreams as still open, no workstream entry may
-    // claim CLOSED. The gates once marked #294 and #295 "CLOSED — partial"
-    // while both issues were open on GitHub — the label and the count
-    // contradicted each other and the reader could not tell which to trust.
-    // The condition derives from the doc itself, so the moment the status
-    // line honestly records fewer open workstreams the ban retires with it.
-    if gates_m8_section.contains("four still open") {
-        assert!(
-            !gates_m8_section.contains("**CLOSED"),
-            "the M8 quality gate labels a workstream CLOSED while its own \
-             status line says four are still open"
-        );
+    // Per-issue labels must agree with the README's own checkboxes: while
+    // the README leaves a workstream unchecked, the gates must not claim that
+    // issue CLOSED; once the box is ticked the entry may record the closure
+    // (as #294's does after its verification). Deriving the ban from the
+    // checkboxes instead of a hand-typed "four still open" phrase is what
+    // lets a delivery pass through without the rule silently retiring. The
+    // gates once marked #294 and #295 "CLOSED — partial" while both issues
+    // were open on GitHub — the label and the count contradicted each other
+    // and the reader could not tell which to trust.
+    for (issue, expected) in readme_m8_checkboxes {
+        // Each workstream is linked exactly once in the gates section (pinned
+        // above), so its entry is the chunk between two "- [" starts. The
+        // split consumes the bracket of the link, so match on "#NNN]".
+        let entry = gates_m8_section
+            .split("\n- [")
+            .find(|chunk| chunk.contains(&format!("{issue}]")))
+            .unwrap_or_else(|| panic!("the M8 quality gate must link {issue}"));
+        if expected == "- [ ]" {
+            assert!(
+                !entry.contains("**CLOSED"),
+                "the M8 quality gate claims {issue} CLOSED while its README \
+                 checkbox is still unchecked: {entry}"
+            );
+        }
     }
 }
 
@@ -9491,5 +9504,75 @@ fn the_previous_crash_upload_is_a_seam_that_ships_empty() {
     assert!(
         !read("README.md").contains("Rivulet sends crash reports automatically"),
         "the README must not claim automatic reporting"
+    );
+}
+
+#[test]
+fn camera_provider_chains_cover_every_platform_and_are_documented() {
+    // Issue #318: before the fix only the two Linux device providers were
+    // queried, so on Windows and macOS `list_cameras()` returned an empty
+    // list by construction. The chains, the startup fill, the localized
+    // empty-state message and docs/camera-capture.md must move together —
+    // extending a chain without documenting it fails here.
+    let camera = read("rivulet-core/src/camera.rs");
+    let providers = [
+        "video4linux2deviceprovider",
+        "pipewiredeviceprovider",
+        "mfdeviceprovider",
+        "ksdeviceprovider",
+        "dshowdeviceprovider",
+        "avfdeviceprovider",
+    ];
+    for provider in providers {
+        assert!(
+            camera.contains(provider),
+            "camera.rs must keep `{provider}` in its platform chain"
+        );
+    }
+
+    // The docs page carries the platform-support claim; every provider and
+    // every consuming element of the code must appear on it.
+    let docs = read("docs/camera-capture.md");
+    for provider in providers {
+        assert!(
+            docs.contains(&format!("`{provider}`")),
+            "docs/camera-capture.md must document the provider `{provider}`"
+        );
+    }
+    for element in [
+        "v4l2src",
+        "pipewiresrc",
+        "mfvideosrc",
+        "ksvideosrc",
+        "dshowvideosrc",
+        "avfvideosrc",
+    ] {
+        assert!(
+            docs.contains(&format!("`{element}`")),
+            "docs/camera-capture.md must name the consuming element `{element}`"
+        );
+    }
+
+    // The app fills the picker at startup; the 🔄 button is a second chance,
+    // not the only one (#318 defect 2).
+    let gui = read("rivulet-gui/src/app.rs");
+    assert!(
+        gui.contains("app.refresh_camera_devices();"),
+        "the camera list must be filled at app startup, not only on refresh"
+    );
+    assert!(
+        gui.contains("camera_none"),
+        "the webcam picker must render the camera-specific empty message"
+    );
+
+    // Both locales carry the message the picker shows for an empty list.
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert!(
+        i18n.contains("(\"camera_none\", \"No camera found.\")"),
+        "the English locale must say 'No camera found.'"
+    );
+    assert!(
+        i18n.contains("(\"camera_none\", \"Keine Kamera gefunden.\")"),
+        "the German locale must say 'Keine Kamera gefunden.'"
     );
 }

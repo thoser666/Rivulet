@@ -360,7 +360,7 @@ are not yet *measured*, only audited —
 ### M8: Embeddable Engine and API
 
 **Status: In progress** — opened 2026-10-05, six workstream issues:
-#292 and #293 delivered, four still open.
+#292, #293 and #294 delivered, three still open.
 
 Review the API as a product consumed by another developer:
 
@@ -400,8 +400,8 @@ Workstream issues:
 - [#294](https://github.com/thoser666/Rivulet/issues/294) — in-process capture
   API so a foreign crate can record without starting the app. Covers the
   early-typed-errors criterion and the embedding promise itself.
-  - **OPEN — delivered on the branch, awaiting issue verification and
-    closure** — both layers exist now. The typed early validation:
+  - **CLOSED — delivered and verified** — both layers exist and are now
+    proven end-to-end. The typed early validation:
     `RecordingConfig::validate()` answers with `RecordingConfigError` that
     names the offending field and states the fix, checked per-parameter by
     `tests/recording_config.rs`, so invalid configuration fails before any
@@ -412,12 +412,16 @@ Workstream issues:
     pushed by the embedder, progress events, pause/resume/stop through a
     typed `JobState`/`JobError` contract, `Drop` finalizing like `stop()`,
     and an inspectable `pipeline_description()` (stream keys redacted
-    before logging). Pinned by 27 tests in `tests/recording_job.rs`
-    (explicit `[[test]]` target) and demonstrated end-to-end by
-    `examples/session_embed.rs`, which CI runs with the other examples:
-    encoding and file/stream output ride the same pipeline fragments the
-    engine uses. The issue stays open for verification and closure on
-    GitHub.
+    before logging). Pinned by 29 tests in `tests/recording_job.rs`
+    (explicit `[[test]]` target), including the acceptance-closing
+    `audio_and_video_reach_the_file_and_a_local_rtmp_server_in_one_session`,
+    which runs audio+video into file *and* stream in one session against a
+    loopback RTMP fixture (handshake → connect → publish → counted media
+    messages; no hardware, no network). The session entry point is also
+    demonstrated end-to-end by `examples/session_embed.rs`, which CI runs
+    with the other examples: encoding and file/stream output ride the same
+    pipeline fragments the engine uses. Closed on GitHub after review of
+    that evidence.
 - [#295](https://github.com/thoser666/Rivulet/issues/295) — feature detection
   and fallback as a queryable API with a machine-readable reason.
   **OPEN — partial** — `RecordingConfigDetect` enum with `is_available()` and
@@ -465,9 +469,9 @@ for real reports 696 undocumented public items (measured 2026-10-13) — so
 "stabilized public API" and "documented API" are not the same claim yet.
 Feature detection hands out a bare list without a machine-readable why,
 which is what #295 exists for; frame delivery now has its example against
-the #294 entry point, which is delivered on this branch while the issue
-stays open for verification. The gate stays open on those clauses, not on
-the delivery count.
+the #294 entry point, which is delivered — proven end-to-end by the
+loopback-RTMP session test — and closed on GitHub. The gate stays open on
+those clauses, not on the delivery count.
 
 ### M9: Modern Architecture
 

@@ -5436,7 +5436,15 @@ impl RivuletApp {
     ) {
         let entries = self.scene_device_entries(kind);
         if entries.is_empty() {
-            ui.colored_label(colors.hint, self.tr("composition_device_none"));
+            // Issue #318: a camera picker without cameras says so explicitly
+            // ("No camera found." / "Keine Kamera gefunden.") instead of
+            // leaving a silent empty combo; other kinds keep the generic
+            // "No devices detected." message.
+            let key = match kind {
+                rivulet_core::SourceKind::Webcam => "camera_none",
+                _ => "composition_device_none",
+            };
+            ui.colored_label(colors.hint, self.tr(key));
             return;
         }
         self.selected_scene_device_idx = self
