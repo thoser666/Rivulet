@@ -840,6 +840,7 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("composition_device_picker", "Device"),
                 ("composition_device_default", "Default (automatic)"),
                 ("composition_device_none", "No devices detected."),
+                ("camera_none", "No camera found."),
                 ("game_detection_running_marker", "running now"),
                 ("game_detection_group_steam", "Steam"),
                 ("game_detection_group_epic", "Epic Games Store"),
@@ -1676,6 +1677,7 @@ Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."
                 ("composition_device_picker", "Gerät"),
                 ("composition_device_default", "Standard (automatisch)"),
                 ("composition_device_none", "Keine Geräte gefunden."),
+                ("camera_none", "Keine Kamera gefunden."),
                 ("game_detection_running_marker", "läuft gerade"),
                 ("game_detection_group_steam", "Steam"),
                 ("game_detection_group_epic", "Epic Games Store"),
@@ -1843,6 +1845,14 @@ mod tests {
         assert_eq!(de, "Aufnahme läuft (7s)");
         let missing = Locale::En.tr_fmt("does_not_exist", &["x".to_string()]);
         assert_eq!(missing, "does_not_exist");
+    }
+
+    #[test]
+    fn camera_none_is_translated_in_both_locales() {
+        // Issue #318: the camera picker must distinguish "empty" from
+        // "not supported" in both languages, not show a silent empty combo.
+        assert_eq!(Locale::En.tr("camera_none"), "No camera found.");
+        assert_eq!(Locale::De.tr("camera_none"), "Keine Kamera gefunden.");
     }
 
     #[test]
