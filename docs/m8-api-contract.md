@@ -56,13 +56,19 @@ and every refusal must be typed before GStreamer is involved.
 - Inspectability: `RecordingJobConfig::pipeline_description()` exposes the
   exact `parse_launch` string; it embeds the stream key, so redact with
   `redact_pipeline_for_log` before logging.
-- Contract proof: `rivulet-core/tests/recording_job.rs` (27 tests, wired as
+- Contract proof: `rivulet-core/tests/recording_job.rs` (29 tests, wired as
   an explicit `[[test]]` target in `rivulet-core/Cargo.toml`) pins typed
   validation per parameter, the pipeline fragments, the event stream
   (Started/Progress/Paused/Resumed/Stopped), pause/resume push gating, the
-  stop counters and the Drop-finalize (moov atom present) — plus
+  stop counters and the Drop-finalize (moov atom present) — plus the
+  end-to-end acceptance test
+  `audio_and_video_reach_the_file_and_a_local_rtmp_server_in_one_session`,
+  which runs one session's audio+video into file *and* a loopback RTMP
+  fixture (a minimal in-test server: handshake, connect/createStream/publish
+  replies, counted audio/video messages — no hardware, no network) — plus
   `rivulet-core/examples/session_embed.rs`, which CI runs with the other
   examples.
 
-Status: verified — the suite passes locally (27/27) and the example runs
-with exit 0; enforced by the CI test and example-run jobs.
+Status: verified — the suite passes locally (29/29, the E2E leg included)
+and the example runs with exit 0; enforced by the CI test and example-run
+jobs.

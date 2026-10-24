@@ -773,3 +773,512 @@ fn pushing_audio_without_an_audio_branch_is_a_typed_wrong_state() {
     drop(job);
     let _ = std::fs::remove_file(temp_mp4("noaudio"));
 }
+// ---------------------------------------------------------------------------
+// E2E fixture: a minimal loopback RTMP server (#294 acceptance criteria 5+6)
+// ---------------------------------------------------------------------------
+
+/// What the fixture observed. Delivered once the client disconnects (or the
+/// read budget elapses).
+#[derive(Debug, Default, Clone)]
+struct RtmpStats {
+    handshake_done: bool,
+    connect_replied: bool,
+    published: bool,
+    audio_msgs: u64,
+    video_msgs: u64,
+}
+
+/// Per-connection chunk-reassembly state, keyed by chunk-stream id.
+#[derive(Default)]
+struct ChunkState {
+    timestamp: u64,
+    ts_delta: u32,
+    msg_len: u32,
+    msg_type: u8,
+    msg_stream_id: u32,
+    has_ext_ts: bool,
+    buf: Vec<u8>,
+    received: u32,
+}
+
+fn read_exact_or(stream: &mut std::net::TcpStream, buf: &mut [u8]) -> bool {
+    use std::io::Read;
+    let mut i = 0;
+    while i < buf.len() {
+        match stream.read(&mut buf[i..]) {
+            Ok(0) => return false,
+            Ok(n) => i += n,
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return false,
+        }
+    }
+    true
+}
+
+// -- AMF0 encoding (server replies only need strings, numbers, null, objects)
+
+fn amf0_str(s: &str) -> Vec<u8> {
+    let mut v = vec![0x02u8];
+    v.extend_from_slice(&(s.len() as u16).to_be_bytes());
+    v.extend_from_slice(s.as_bytes());
+    v
+}
+
+fn amf0_num(n: f64) -> Vec<u8> {
+    let mut v = vec![0x00u8];
+    v.extend_from_slice(&n.to_be_bytes());
+    v
+}
+
+fn amf0_null() -> Vec<u8> {
+    vec![0x05u8]
+}
+
+fn amf0_obj(props: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    let mut v = vec![0x03u8];
+    for (key, value) in props {
+        v.extend_from_slice(&(key.len() as u16).to_be_bytes());
+        v.extend_from_slice(key.as_bytes());
+        v.extend_from_slice(value);
+    }
+    v.extend_from_slice(&[0x00, 0x00, 0x05]); // object end
+    v
+}
+
+/// Read an AMF0 string at `i`; `None` when the marker is not a string.
+fn amf0_read_str(bytes: &[u8], i: &mut usize) -> Option<String> {
+    if *i >= bytes.len() || bytes[*i] != 0x02 {
+        return None;
+    }
+    *i += 1;
+    if *i + 2 > bytes.len() {
+        return None;
+    }
+    let len = u16::from_be_bytes([bytes[*i], bytes[*i + 1]]) as usize;
+    *i += 2;
+    if *i + len > bytes.len() {
+        return None;
+    }
+    let out = String::from_utf8_lossy(&bytes[*i..*i + len]).into_owned();
+    *i += len;
+    Some(out)
+}
+
+/// Read an AMF0 number at `i`; `None` when the marker is not a number.
+fn amf0_read_num(bytes: &[u8], i: &mut usize) -> Option<f64> {
+    if *i + 9 > bytes.len() || bytes[*i] != 0x00 {
+        return None;
+    }
+    let mut raw = [0u8; 8];
+    raw.copy_from_slice(&bytes[*i + 1..*i + 9]);
+    *i += 9;
+    Some(f64::from_be_bytes(raw))
+}
+
+/// Encode a 24-bit big-endian length field.
+fn len24(len: usize) -> [u8; 3] {
+    [(len >> 16) as u8, (len >> 8) as u8, len as u8]
+}
+
+/// One RTMP message from the server: fmt-0 header on chunk-stream id 3.
+/// The payload of every reply we send is far below the announced 4096-byte
+/// chunk size, so a single chunk always carries it.
+fn server_msg(msg_type: u8, msg_stream_id: u32, payload: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(12 + payload.len());
+    out.push(0x03); // fmt 0, csid 3
+    out.extend_from_slice(&[0x00, 0x00, 0x00]); // timestamp
+    out.extend_from_slice(&len24(payload.len()));
+    out.push(msg_type);
+    out.extend_from_slice(&msg_stream_id.to_le_bytes());
+    out.extend_from_slice(payload);
+    out
+}
+
+/// Read a fixed-size chunk header: fmt 0 (11 bytes), 1 (7) or 2 (3).
+fn read_msg_header(stream: &mut std::net::TcpStream, fmt: u8, st: &mut ChunkState) -> bool {
+    match fmt {
+        0 => {
+            let mut h = [0u8; 11];
+            if !read_exact_or(stream, &mut h) {
+                return false;
+            }
+            let ts = ((h[0] as u64) << 16) | ((h[1] as u64) << 8) | h[2] as u64;
+            st.msg_len = ((h[3] as u32) << 16) | ((h[4] as u32) << 8) | h[5] as u32;
+            st.msg_type = h[6];
+            st.msg_stream_id = u32::from_le_bytes([h[7], h[8], h[9], h[10]]);
+            st.has_ext_ts = ts == 0xFFFF_FFFF;
+            st.timestamp = if st.has_ext_ts {
+                let mut ext = [0u8; 4];
+                if !read_exact_or(stream, &mut ext) {
+                    return false;
+                }
+                u32::from_be_bytes(ext) as u64
+            } else {
+                ts
+            };
+            st.buf.clear();
+            st.received = 0;
+            true
+        }
+        1 => {
+            let mut h = [0u8; 7];
+            if !read_exact_or(stream, &mut h) {
+                return false;
+            }
+            let delta = ((h[0] as u32) << 16) | ((h[1] as u32) << 8) | h[2] as u32;
+            st.ts_delta = delta;
+            st.msg_len = ((h[3] as u32) << 16) | ((h[4] as u32) << 8) | h[5] as u32;
+            st.msg_type = h[6];
+            st.has_ext_ts = delta == 0xFFFF_FFFF;
+            if st.has_ext_ts {
+                let mut ext = [0u8; 4];
+                if !read_exact_or(stream, &mut ext) {
+                    return false;
+                }
+                st.ts_delta = u32::from_be_bytes(ext);
+            }
+            st.timestamp = st.timestamp.wrapping_add(st.ts_delta as u64);
+            st.buf.clear();
+            st.received = 0;
+            true
+        }
+        2 => {
+            let mut h = [0u8; 3];
+            if !read_exact_or(stream, &mut h) {
+                return false;
+            }
+            let delta = ((h[0] as u32) << 16) | ((h[1] as u32) << 8) | h[2] as u32;
+            st.ts_delta = delta;
+            st.has_ext_ts = delta == 0xFFFF_FFFF;
+            if st.has_ext_ts {
+                let mut ext = [0u8; 4];
+                if !read_exact_or(stream, &mut ext) {
+                    return false;
+                }
+                st.ts_delta = u32::from_be_bytes(ext);
+            }
+            st.timestamp = st.timestamp.wrapping_add(st.ts_delta as u64);
+            st.buf.clear();
+            st.received = 0;
+            true
+        }
+        3 => {
+            // Continuation of the running message, or a brand-new message
+            // that reuses the previous headers.
+            if st.received >= st.msg_len {
+                st.buf.clear();
+                st.received = 0;
+                st.timestamp = st.timestamp.wrapping_add(st.ts_delta as u64);
+            }
+            if st.has_ext_ts {
+                let mut ext = [0u8; 4];
+                if !read_exact_or(stream, &mut ext) {
+                    return false;
+                }
+            }
+            true
+        }
+        _ => true,
+    }
+}
+
+/// Handle one fully reassembled message from the client.
+fn handle_message(
+    stream: &mut std::net::TcpStream,
+    msg_type: u8,
+    payload: Vec<u8>,
+    stats: &mut RtmpStats,
+    chunk_size: &mut usize,
+) {
+    use std::io::Write;
+    match msg_type {
+        1 => {
+            // Set Chunk Size from the client.
+            if payload.len() >= 4 {
+                *chunk_size = u32::from_be_bytes(payload[0..4].try_into().unwrap()) as usize;
+            }
+        }
+        8 => stats.audio_msgs += 1,
+        9 => stats.video_msgs += 1,
+        20 => {
+            let mut i = 0;
+            let name = amf0_read_str(&payload, &mut i);
+            let txn = amf0_read_num(&payload, &mut i).unwrap_or(0.0);
+            match name.as_deref() {
+                Some("connect") => {
+                    let mut reply = Vec::new();
+                    reply.extend_from_slice(&amf0_str("_result"));
+                    reply.extend_from_slice(&amf0_num(txn));
+                    reply.extend_from_slice(&amf0_obj(&[
+                        ("fmsVer", amf0_str("FMS/3,5,6,7009")),
+                        ("capabilities", amf0_num(31.0)),
+                    ]));
+                    reply.extend_from_slice(&amf0_obj(&[
+                        ("level", amf0_str("status")),
+                        ("code", amf0_str("NetConnection.Connect.Success")),
+                        ("description", amf0_str("Connection succeeded.")),
+                        ("objectEncoding", amf0_num(0.0)),
+                    ]));
+                    let _ = stream.write_all(&server_msg(20, 0, &reply));
+                    stats.connect_replied = true;
+                }
+                Some("createStream") => {
+                    let mut reply = Vec::new();
+                    reply.extend_from_slice(&amf0_str("_result"));
+                    reply.extend_from_slice(&amf0_num(txn));
+                    reply.extend_from_slice(&amf0_null());
+                    reply.extend_from_slice(&amf0_num(1.0));
+                    let _ = stream.write_all(&server_msg(20, 0, &reply));
+                }
+                Some("publish") => {
+                    stats.published = true;
+                    let mut reply = Vec::new();
+                    reply.extend_from_slice(&amf0_str("onStatus"));
+                    reply.extend_from_slice(&amf0_num(0.0));
+                    reply.extend_from_slice(&amf0_null());
+                    reply.extend_from_slice(&amf0_obj(&[
+                        ("level", amf0_str("status")),
+                        ("code", amf0_str("NetStream.Publish.Start")),
+                        ("description", amf0_str("Publishing stream.")),
+                    ]));
+                    let _ = stream.write_all(&server_msg(20, 1, &reply));
+                }
+                Some(_) if txn != 0.0 => {
+                    // releaseStream/FCPublish/... - answer `_result` so a
+                    // client waiting for it cannot stall the test.
+                    let mut reply = Vec::new();
+                    reply.extend_from_slice(&amf0_str("_result"));
+                    reply.extend_from_slice(&amf0_num(txn));
+                    reply.extend_from_slice(&amf0_null());
+                    reply.extend_from_slice(&amf0_null());
+                    let _ = stream.write_all(&server_msg(20, 0, &reply));
+                }
+                _ => {}
+            }
+        }
+        _ => {} // ack, peer bandwidth, data (onMetaData), user control
+    }
+}
+
+/// Run one RTMP client session: handshake, command replies, then count the
+/// audio/video messages until the client disconnects.
+fn serve_rtmp(mut stream: std::net::TcpStream) -> RtmpStats {
+    use std::io::Write;
+    let mut stats = RtmpStats::default();
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(20)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+
+    // Handshake: C0 + C1, then S0 + S1 + S2 (S2 echoes C1), then C2.
+    let mut c0 = [0u8; 1];
+    if !read_exact_or(&mut stream, &mut c0) || c0[0] != 0x03 {
+        return stats;
+    }
+    let mut c1 = [0u8; 1536];
+    if !read_exact_or(&mut stream, &mut c1) {
+        return stats;
+    }
+    let mut hello = Vec::with_capacity(1 + 1536 + 1536);
+    hello.push(0x03);
+    hello.extend_from_slice(&[0u8; 1536]); // S1: time 0 + zeros
+    hello.extend_from_slice(&c1); // S2: echo the client's C1
+    if stream.write_all(&hello).is_err() {
+        return stats;
+    }
+    let mut c2 = [0u8; 1536];
+    if !read_exact_or(&mut stream, &mut c2) {
+        return stats;
+    }
+    stats.handshake_done = true;
+
+    // Server preamble: our chunk size plus the flow-control messages every
+    // RTMP server sends before `_result`.
+    if stream
+        .write_all(&server_msg(1, 0, &4096u32.to_be_bytes()))
+        .is_err()
+    {
+        return stats;
+    }
+    let _ = stream.write_all(&server_msg(5, 0, &2_147_483_647u32.to_be_bytes()));
+    let _ = stream.write_all(&server_msg(6, 0, &[0xFF, 0xFF, 0xFF, 0xFF, 0x02]));
+
+    let mut chunk_size: usize = 128;
+    let mut states: std::collections::HashMap<u32, ChunkState> = std::collections::HashMap::new();
+
+    loop {
+        let mut head = [0u8; 1];
+        if !read_exact_or(&mut stream, &mut head) {
+            break; // client closed - the session is over
+        }
+        let fmt = head[0] >> 6;
+        let csid_raw = (head[0] & 0x3F) as u32;
+        let csid = if csid_raw == 0 {
+            let mut ext = [0u8; 1];
+            if !read_exact_or(&mut stream, &mut ext) {
+                break;
+            }
+            64 + ext[0] as u32
+        } else if csid_raw == 1 {
+            let mut ext = [0u8; 2];
+            if !read_exact_or(&mut stream, &mut ext) {
+                break;
+            }
+            64 + ext[0] as u32 + (ext[1] as u32) * 256
+        } else {
+            csid_raw
+        };
+
+        let st = states.entry(csid).or_default();
+        if !read_msg_header(&mut stream, fmt, st) {
+            break;
+        }
+        // Payload chunk(s) for this header.
+        let want = std::cmp::min(chunk_size as u32, st.msg_len - st.received) as usize;
+        let mut chunk = vec![0u8; want];
+        if !read_exact_or(&mut stream, &mut chunk) {
+            break;
+        }
+        st.buf.extend_from_slice(&chunk);
+        st.received += chunk.len() as u32;
+        if st.received < st.msg_len {
+            continue;
+        }
+        let msg_type = st.msg_type;
+        let payload = std::mem::take(&mut st.buf);
+        st.received = 0;
+        handle_message(&mut stream, msg_type, payload, &mut stats, &mut chunk_size);
+    }
+    stats
+}
+
+/// A loopback RTMP server on an ephemeral port; [`RtmpFixture::finish`]
+/// collects what it saw once the client is gone.
+struct RtmpFixture {
+    port: u16,
+    done: std::sync::mpsc::Receiver<RtmpStats>,
+}
+
+impl RtmpFixture {
+    fn start() -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback RTMP");
+        let port = listener.local_addr().expect("local addr").port();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let stats = match listener.accept() {
+                Ok((stream, _)) => serve_rtmp(stream),
+                Err(err) => {
+                    eprintln!("rtmp fixture accept failed: {err}");
+                    RtmpStats::default()
+                }
+            };
+            let _ = tx.send(stats);
+        });
+        RtmpFixture { port, done: rx }
+    }
+
+    /// Wait for the server thread to finish (the client disconnects after
+    /// `stop()`), up to `budget`.
+    fn finish(self, budget: Duration) -> RtmpStats {
+        let deadline = Instant::now() + budget;
+        loop {
+            match self.done.recv_timeout(Duration::from_millis(100)) {
+                Ok(stats) => return stats,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("the RTMP fixture thread died without reporting")
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "the RTMP fixture never saw a complete client session \
+                         (handshake + publish + disconnect) within {budget:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// True when this GStreamer installation can build the *stream* leg
+/// (`flvmux` + `rtmp2sink`) - same `make` rule as the other element gates.
+fn stream_elements_present() -> bool {
+    let _ = gst::init();
+    ["flvmux", "rtmp2sink"]
+        .into_iter()
+        .all(|name| gst::ElementFactory::make(name).build().is_ok())
+}
+
+// ---------------------------------------------------------------------------
+// #294 acceptance 5+6: audio+video into file *and* stream in one session,
+// end-to-end against a local fixture (no hardware, no network)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn audio_and_video_reach_the_file_and_a_local_rtmp_server_in_one_session() {
+    // Acceptance 5 ("file and stream simultaneously from one session") and 6
+    // ("E2E against local fixtures"): this is the only test that runs the
+    // stream leg for real - everything else pins the pipeline *description*.
+    // The fixture is a loopback RTMP server speaking handshake, connect,
+    // createStream and publish, so nothing leaves the machine.
+    let fixture = RtmpFixture::start();
+
+    let mut config = file_config().with_default_audio();
+    config.recording.path = Some(temp_mp4("dual_e2e").display().to_string());
+    config = config.with_stream(StreamSettings::custom(
+        format!("rtmp://127.0.0.1:{}/live", fixture.port),
+        "fixture_key",
+    ));
+
+    if !session_elements_present() || !audio_elements_present() || !stream_elements_present() {
+        // Missing plugins must refuse typed (`MissingElements`), the suite's
+        // documented policy - that branch is a contract proof, not a skip.
+        refuse_or_continue(config);
+        let _ = std::fs::remove_file(temp_mp4("dual_e2e"));
+        return;
+    }
+
+    let (mut job, _events) = RecordingJob::start(config).expect("start must succeed");
+
+    // A little over one second of frames: enough for the encoder, the FLV
+    // muxer and the RTMP handshake to all do their job.
+    const FRAMES: u64 = 30;
+    for _ in 0..FRAMES {
+        job.push_frame(&rgba_frame()).expect("video frame");
+        job.push_audio(&vec![0.0f32; (48_000 / FPS * 2) as usize])
+            .expect("audio frame");
+    }
+    let report = job.stop().expect("stop");
+    assert_eq!(
+        report.frames_written, FRAMES,
+        "the file leg must get every frame"
+    );
+    assert_eq!(
+        report.audio_samples,
+        (48_000 / FPS * 2) as u64 * FRAMES,
+        "the file leg must count the pushed audio"
+    );
+
+    let stats = fixture.finish(Duration::from_secs(30));
+    assert!(
+        stats.handshake_done,
+        "the client must complete the RTMP handshake"
+    );
+    assert!(
+        stats.connect_replied,
+        "the connect command must have been answered"
+    );
+    assert!(
+        stats.published,
+        "the session must publish on the local server"
+    );
+    assert!(
+        stats.video_msgs > 0,
+        "encoded video must actually arrive over the stream leg, got {} messages",
+        stats.video_msgs
+    );
+    assert!(
+        stats.audio_msgs > 0,
+        "encoded audio must actually arrive over the stream leg, got {} messages",
+        stats.audio_msgs
+    );
+
+    let _ = std::fs::remove_file(temp_mp4("dual_e2e"));
+}
