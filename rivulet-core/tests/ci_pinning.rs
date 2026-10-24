@@ -2462,9 +2462,22 @@ fn dependabot_updates_pinned_github_actions() {
         entry.contains("directory: \"/\""),
         "the github-actions entry must scan the repo root"
     );
+    // Daily, not weekly: the blocking `stale_pins` gate (see
+    // `stale_pin_checker_blocks_prs_via_a_dedicated_gate_job`) reddens every
+    // open PR whose pin is behind upstream. A weekly window would leave the
+    // whole fleet stale-gated for up to seven days after an upstream release.
     assert!(
-        entry.contains("interval: \"weekly\""),
-        "the github-actions entry must have a weekly schedule"
+        entry.contains("interval: \"daily\""),
+        "the github-actions entry must have a daily schedule so the blocking\n\
+         stale_pins gate cannot stay red for a week after an upstream release"
+    );
+    // One grouped PR for all action bumps. Without grouping, each per-action
+    // PR still carries the *other* stale pins in its merge ref, so with the
+    // blocking gate none of them could ever go green (multi-pin deadlock).
+    assert!(
+        entry.contains("groups:") && entry.contains("patterns:"),
+        "the github-actions entry must group all bumps into one PR, otherwise\n\
+         per-action PRs deadlock against the blocking stale_pins gate"
     );
     assert!(
         !config.contains("package-ecosystem: \"cargo\""),

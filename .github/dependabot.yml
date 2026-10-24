@@ -7,4 +7,18 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      # Daily, not weekly: since #327 the `stale_pins` job (Stale Action
+      # Pins (gate)) reddens every open PR whose pin is behind upstream, so
+      # a weekly window would leave the whole fleet stale-gated for up to
+      # seven days. Daily caps that exposure at ~24h plus CI time.
+      interval: "daily"
+    groups:
+      # One grouped PR for all action bumps. Without grouping, Dependabot
+      # opens one PR per action, and each PR still carries the *other*
+      # stale pins in its merge ref — with the blocking gate no single PR
+      # can go green, so they would deadlock until a manual group bump.
+      # A grouped PR updates every stale pin at once, so its own tree is
+      # current and the gate passes.
+      github-actions:
+        patterns:
+          - "*"
