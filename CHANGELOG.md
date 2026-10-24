@@ -1,5 +1,28 @@
 ## [Unreleased]
 
+- fix(deps): **GitHub-Dependabot-Alert #5 geschlossen — die veraltete
+  `fuzz/Cargo.lock` zog wasmtime 48.0.5 (GHSA-9pvw-hwfg-92h5, medium:
+  Panic beim „lowering“ eines host-erzeugten component-model-Streams,
+  vulnerable >= 46.0.0, < 48.0.7 bzw. 49.0.x < 49.0.4).**
+  - `cargo update -p wasmtime --precise 48.0.7` im `fuzz/`-Verzeichnis
+    landet auf **49.0.4** — der Semver-Sprung war nötig, weil die
+    `rivulet-core`-Abhängigkeit inzwischen die 49er-Linie auflöst; das
+    Ergebnis ist exakt dieselbe wasmtime-Version wie im Haupt-`Cargo.lock`
+    (gepatcht) und liegt über der Advisory-Grenze.
+  - Beim Nachziehen fielen drei weitere Advisory-Fälle im selben
+    veralteten Lock auf, die `cargo deny` im `fuzz/`-Verzeichnis rot
+    machten (im Haupt-Lock alles schon gepatcht): `rustls` 0.23.45 →
+    0.23.46 (RUSTSEC-2026-0346/0347/0348/0349), `rustls-webpki`
+    0.103.15 → 0.103.16 (RUSTSEC-2026-0382) und `webpki-roots`
+    1.0.9 → 1.0.11 (RUSTSEC-2026-0381, ureq-Zweig).
+  - Verifiziert: `cargo deny check advisories` im `fuzz/` jetzt `ok`
+    (vorher 5 Fehler), Root-Lauf weiter `ok`, Auflösung via
+    `cargo tree` sauber. Nur `fuzz/Cargo.lock` geändert; das Haupt-`Cargo.lock`
+    ist unberührt.
+  Hinweis: der fehlgeschlagene Dependabot-Security-Update-Lauf schließt
+  sich nach dem Merge von selbst, sobald Dependabot die neue Lockfile
+  auf `develop` sieht.
+
 - fix(camera): **#318 — `list_cameras()` fragte nur Linux-Device-Provider
   ab; auf Windows und macOS war die Webcam-Liste damit immer leer, obwohl
   GStreamer die Geräte dort sieht. Plattformgerechte Provider-Ketten,
