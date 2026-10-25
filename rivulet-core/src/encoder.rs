@@ -951,7 +951,7 @@ mod feature_detection_tests {
     #[test]
     fn detect_hardware_decoding_never_empty() {
         for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
-            let results = detect_hardware_decoding_availability(_codec);
+            let results = detect_hardware_decoding_availability(codec);
             assert!(
                 !results.is_empty(),
                 "hardware-decoding detection must not be empty for {codec:?}"
