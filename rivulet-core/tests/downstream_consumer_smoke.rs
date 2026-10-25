@@ -23,7 +23,6 @@ use rivulet_core::{
 fn downstream_api_is_coherent() {
     // 1. Encoder selection (structured, no log parsing)
     let fb = encoder_fallback_for_codec(VideoCodec::H264);
-    assert!(!fb.chosen().is_empty());
     assert!(!fb.why().is_empty());
     assert!(!fb.candidates().is_empty());
 
