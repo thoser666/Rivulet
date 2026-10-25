@@ -833,7 +833,7 @@ impl CaptureBackendFallback {
 /// Returns structured info for NVDEC / VideoToolbox / D3D11 / VAAPI
 /// per codec — without parsing GStreamer pipeline logs.
 pub fn detect_hardware_decoding_availability(_codec: VideoCodec) -> Vec<FeatureInfo> {
-    const FEATURES: &[(&str, &'static str)] = &[
+    const FEATURES: &[(&str, &str)] = &[
         ("nvdec", "NVDEC (NVIDIA hardware decoding)"),
         ("vt-decode", "VideoToolbox (macOS hardware decoding)"),
         ("d3d11-decode", "D3D11 (Windows DirectX hardware decoding)"),
