@@ -42,6 +42,13 @@ pub struct FeatureDetectionCache {
     inner: Mutex<HashMap<DetectionCacheKey, DetectionCacheEntry>>,
 }
 
+
+/// Automatically implement Default since the cache is always initialized via once_cell.
+impl Default for FeatureDetectionCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl FeatureDetectionCache {
     pub fn new() -> Self {
         Self {
