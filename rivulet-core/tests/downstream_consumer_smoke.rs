@@ -10,6 +10,7 @@
 //! usable from an external crate with the public surface documented in
 //! `lib.rs`.
 
+use gstreamer as gst;
 use rivulet_core::{
     best_encoder, best_encoder_for_codec, detect_available_encoders,
     detect_available_encoders_for_codec, detect_available_encoders_info,
@@ -20,6 +21,10 @@ use rivulet_core::{
 /// Prove that the public API is coherent and does not require internal paths.
 #[test]
 fn downstream_api_is_coherent() {
+    // A downstream embedder initialises GStreamer before probing element
+    // factories; `ElementFactory::find` panics otherwise.
+    let _ = gst::init();
+
     // 1. Encoder selection (structured, no log parsing)
     let fb = encoder_fallback_for_codec(VideoCodec::H264);
     assert!(!fb.why().is_empty());
@@ -52,6 +57,8 @@ fn downstream_api_is_coherent() {
 /// than the documented `pub use` exports from `rivulet-core/src/lib.rs`.
 #[test]
 fn downstream_uses_only_documented_public_surface() {
+    let _ = gst::init();
+
     // The very act of compiling this module proves that the exported names
     // listed in `rivulet-core/src/lib.rs` (line ~117: encoder exports) are
     // sufficient for a downstream consumer to perform encoder selection.
