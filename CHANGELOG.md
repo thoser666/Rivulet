@@ -1,6 +1,8 @@
 ## [Unreleased]
 
 - feat(inspection): Feature-Erkennung als API (#295) — `detect_available_encoders_with_info()` liefert strukturierte Encoder-Info mit `why_not`; `encoder_fallback_for_codec()` liefert Fallback-Entscheidung; Capture-Backend-Detector (`detect_capture_backends()`) und Hardware-Decoding/Audio-Quellen folgen demselben Muster. Cache (`FEATURE_DETECTION_CACHE`) vermeidet wiederholte GStreamer-Probes; deterministische Tests prüfen das Muster ohne echte Hardware. Dokumentation unter `docs/feature-detection.md`.
+- feat(capture): Capture-Backends hinter stabile Traits (#296) — `CaptureBackend` (Send+Sync, Lifecycle, CaptureError-Typisierung), Stabilitätsmatrix, Enumaration-Tests, `docs/capture-backends.md`.
+- feat(exit-evidence): M8-Exit-Evidence Abschlussbericht (#297) — `docs/m8-automation-completion-report.md`, `rivulet-core/tests/downstream_consumer_smoke.rs`; F-M8-001/F-M8-002 Follow-ups kategorisiert.
 
 - fix(deps): **GitHub-Dependabot-Alert #5 geschlossen — die veraltete
   `fuzz/Cargo.lock` zog wasmtime 48.0.5 (GHSA-9pvw-hwfg-92h5, medium:
