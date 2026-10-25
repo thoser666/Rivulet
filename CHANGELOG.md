@@ -1,5 +1,7 @@
 ## [Unreleased]
 
+- feat(inspection): Feature-Erkennung als API (#295) — `detect_available_encoders_with_info()` liefert strukturierte Encoder-Info mit `why_not`; `encoder_fallback_for_codec()` liefert Fallback-Entscheidung; Capture-Backend-Detector (`detect_capture_backends()`) und Hardware-Decoding/Audio-Quellen folgen demselben Muster. Cache (`FEATURE_DETECTION_CACHE`) vermeidet wiederholte GStreamer-Probes; deterministische Tests prüfen das Muster ohne echte Hardware. Dokumentation unter `docs/feature-detection.md`.
+
 - fix(deps): **GitHub-Dependabot-Alert #5 geschlossen — die veraltete
   `fuzz/Cargo.lock` zog wasmtime 48.0.5 (GHSA-9pvw-hwfg-92h5, medium:
   Panic beim „lowering“ eines host-erzeugten component-model-Streams,
