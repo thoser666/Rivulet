@@ -13,8 +13,8 @@
 use rivulet_core::{
     best_encoder, best_encoder_for_codec, detect_available_encoders,
     detect_available_encoders_for_codec, detect_available_encoders_info,
-    detect_available_encoders_with_info, encoder_fallback_for_codec,
-    FeatureDetectionCache, RateControl, RateControlMode, VideoCodec,
+    detect_available_encoders_with_info, encoder_fallback_for_codec, FeatureDetectionCache,
+    RateControl, RateControlMode, VideoCodec,
 };
 
 /// Prove that the public API is coherent and does not require internal paths.
