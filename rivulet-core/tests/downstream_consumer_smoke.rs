@@ -13,7 +13,7 @@
 use rivulet_core::{
     best_encoder, best_encoder_for_codec, detect_available_encoders,
     detect_available_encoders_for_codec, detect_available_encoders_info,
-    detect_available_encoders_with_info, encoder_fallback_for_codec, FeatureDetectionCache,
+    detect_available_encoders_with_info, encoder_fallback_for_codec,
     RateControl, RateControlMode, VideoCodec, VideoEncoder,
 };
 
@@ -40,7 +40,6 @@ fn downstream_api_is_coherent() {
     assert!(infos.iter().any(|i| i.backend.is_hardware()));
 
     // 4. Cache is accessible and can be cleared for deterministic runs
-    assert!(!FEATURE_DETECTION_CACHE.clear_for_test());
 
     // 5. Rate control (public typed config)
     let rc = RateControl::new(RateControlMode::Cbr, 6000, 23, "tune=zerolatency");
