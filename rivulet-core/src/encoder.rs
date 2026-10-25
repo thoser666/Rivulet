@@ -863,7 +863,7 @@ pub fn detect_hardware_decoding_availability(_codec: VideoCodec) -> Vec<FeatureI
 ///
 /// Uses the same non-localised, non-GUI, cached pattern (#295).
 pub fn detect_audio_source_availability() -> Vec<FeatureInfo> {
-    const AUDIO: &[(&str, &'static str)] = &[
+    const AUDIO: &[(&str, &str)] = &[
         ("microphone-v4l2", "Microphone / V4L2 audio source"),
         ("pipewire-audio", "PipeWire desktop audio capture"),
         ("pulseaudio", "PulseAudio source"),
