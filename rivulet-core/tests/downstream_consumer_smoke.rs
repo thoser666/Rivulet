@@ -14,8 +14,8 @@ use rivulet_core::{
     best_encoder, best_encoder_for_codec, detect_available_encoders,
     detect_available_encoders_for_codec, detect_available_encoders_info,
     detect_available_encoders_with_info, encoder_fallback, encoder_fallback_for_codec,
-    EncoderFallback, EncoderInfo, RateControl, RateControlMode, VideoCodec, VideoEncoder,
-    FeatureDetectionCache,
+    EncoderFallback, EncoderInfo, FeatureDetectionCache, RateControl, RateControlMode, VideoCodec,
+    VideoEncoder,
 };
 
 /// Prove that the public API is coherent and does not require internal paths.
@@ -45,12 +45,7 @@ fn downstream_api_is_coherent() {
     assert!(!FEATURE_DETECTION_CACHE.clear_for_test());
 
     // 5. Rate control (public typed config)
-    let rc = RateControl::new(
-        RateControlMode::Cbr,
-        6000,
-        23,
-        "tune=zerolatency",
-    );
+    let rc = RateControl::new(RateControlMode::Cbr, 6000, 23, "tune=zerolatency");
     assert_eq!(rc.mode(), RateControlMode::Cbr);
     assert_eq!(rc.max_bitrate_kbps(), 6000);
     assert!(rc.custom_options().contains("tune"));
