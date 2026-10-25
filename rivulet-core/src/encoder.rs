@@ -59,11 +59,23 @@ impl FeatureDetectionCache {
         key: DetectionCacheKey,
         compute: impl FnOnce() -> DetectionCacheEntry,
     ) -> DetectionCacheEntry {
+        // Fast path: the feature was already detected on an earlier call.
+        if let Some(entry) = self.inner.lock().unwrap().get(&key) {
+            return entry.clone();
+        }
+        // Compute *without* holding the lock. Filling one cache entry can
+        // re-enter this cache for another key: `encoder_fallback_for_codec`
+        // probes the encoders while building the fallback entry, and `Mutex`
+        // is not re-entrant, so holding it across `compute()` deadlocks the
+        // calling thread (observed as the encoder_fallback_* tests hanging
+        // for hours in CI). Two threads may both compute on a cold cache;
+        // the first insert wins and later callers keep that answer, so the
+        // cached result stays stable per key.
+        let entry = compute();
         let mut guard = self.inner.lock().unwrap();
         match guard.get(&key) {
-            Some(entry) => entry.clone(),
+            Some(existing) => existing.clone(),
             None => {
-                let entry = compute();
                 guard.insert(key.clone(), entry.clone());
                 entry
             }
