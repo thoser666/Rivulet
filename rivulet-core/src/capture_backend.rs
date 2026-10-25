@@ -354,7 +354,7 @@ mod trait_enumeration_tests {
         // not a platform panic.
         if let Ok(x) = XCapBackend::new() {
             let windows = x.list_windows();
-            assert!(windows.len() >= 0);
+            assert!(!windows.is_empty());
         }
     }
 }
