@@ -592,7 +592,7 @@ pub fn detect_available_encoders() -> Vec<VideoEncoder> {
 /// *detectable* availability, not the create-time failure.
 pub fn detect_available_encoders_with_info(codec: VideoCodec) -> Vec<EncoderInfo> {
     let key = DetectionCacheKey::Encoders(codec);
-    let entry = FEATURE_DETECTION_CACHE.get_or_insert(key, || {
+    let entry = FEATURE_DETECTION_CACHE.get_or_insert(key.clone(), || {
         let mut out = Vec::new();
         for enc in [
             VideoEncoder::Nvenc,
@@ -694,7 +694,7 @@ impl EncoderFallback {
 /// GUI labels.
 pub fn encoder_fallback_for_codec(codec: VideoCodec) -> EncoderFallback {
     let key = DetectionCacheKey::Fallback(codec);
-    let entry = FEATURE_DETECTION_CACHE.get_or_insert(key, || {
+    let entry = FEATURE_DETECTION_CACHE.get_or_insert(key.clone(), || {
         let candidates = detect_available_encoders_with_info(codec);
         let chosen = candidates
             .iter()
@@ -761,7 +761,7 @@ pub fn detect_capture_backends() -> Vec<CaptureBackendInfo> {
     ];
     BACKENDS
         .iter()
-        .map(|(name, label, platform, available)| {
+        .map(|(name, _label, platform, available)| {
             // Availability is environment-dependent; the structured info carries
             // the machine-readable reason when unavailable, without requiring a
             // GPU/driver for the detector itself.
@@ -826,7 +826,7 @@ impl CaptureBackendFallback {
 ///
 /// Returns structured info for NVDEC / VideoToolbox / D3D11 / VAAPI
 /// per codec — without parsing GStreamer pipeline logs.
-pub fn detect_hardware_decoding_availability(codec: VideoCodec) -> Vec<FeatureInfo> {
+pub fn detect_hardware_decoding_availability(_codec: VideoCodec) -> Vec<FeatureInfo> {
     const FEATURES: &[(&str, &'static str)] = &[
         ("nvdec", "NVDEC (NVIDIA hardware decoding)"),
         ("vt-decode", "VideoToolbox (macOS hardware decoding)"),
@@ -835,7 +835,7 @@ pub fn detect_hardware_decoding_availability(codec: VideoCodec) -> Vec<FeatureIn
     ];
     FEATURES
         .iter()
-        .map(|(name, label)| {
+        .map(|(name, _label)| {
             // Deterministic for CI: hardware-decoding availability depends on
             // GPU/driver; the detector reports the factory presence (element
             // registered) rather than a live decode test.
@@ -866,7 +866,7 @@ pub fn detect_audio_source_availability() -> Vec<FeatureInfo> {
     ];
     AUDIO
         .iter()
-        .map(|(name, label)| FeatureInfo {
+        .map(|(name, _label)| FeatureInfo {
             feature: name,
             available: true, // stub for CI; real check uses platform backend probes
             why_not: "",
@@ -945,7 +945,7 @@ mod feature_detection_tests {
     #[test]
     fn detect_hardware_decoding_never_empty() {
         for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
-            let results = detect_hardware_decoding_availability(codec);
+            let results = detect_hardware_decoding_availability(_codec);
             assert!(
                 !results.is_empty(),
                 "hardware-decoding detection must not be empty for {codec:?}"
