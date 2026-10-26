@@ -6117,10 +6117,9 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
     );
 
     // Both surfaces say "in progress", never "planned" — and never "complete"
-    // or "delivered" either, because three workstreams (#295-#297) are still
-    // open. #292, #293 and #294 ARE delivered, so both surfaces must name them
-    // as such: an unmentioned delivery is the same drift in the other
-    // direction.
+    // or "delivered" either, because one workstream (#297) is still open.
+    // #292-#296 ARE delivered, so both surfaces must name them as such: an
+    // unmentioned delivery is the same drift in the other direction.
     for (label, section) in [
         ("README M8 section", readme_m8_section),
         ("M8 quality gate", gates_m8_section),
@@ -6130,8 +6129,8 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
             "the {label} must state that M8 is in progress"
         );
         assert!(
-            section.contains("#292, #293 and #294 delivered"),
-            "the {label} must name the three delivered workstreams"
+            section.contains("#292, #293, #294, #295 and #296 delivered"),
+            "the {label} must name the five delivered workstreams"
         );
         assert!(
             !section.contains("**Status: Planned"),
@@ -6139,11 +6138,11 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
         );
         assert!(
             !section.contains("Complete") && !section.contains("**Status: Complete"),
-            "the {label} must not claim Complete while three workstreams are open"
+            "the {label} must not claim Complete while one workstream is open"
         );
         assert!(
             !section.contains("**Status: Delivered"),
-            "the {label} must not claim the milestone Delivered while #295-#297 are open"
+            "the {label} must not claim the milestone Delivered while #297 is open"
         );
     }
 
@@ -6175,25 +6174,25 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
     }
     // The roadmap checkboxes and the issues are the same six items, so both
     // lists have to stay complete — a missing checkbox or a missing issue is
-    // the same silent drift the M7 guard caught. Exactly the three delivered
-    // workstreams may be checked: a premature "- [x]" on #295-#297, or a
-    // stale unchecked #292/#293/#294, fails here.
+    // the same silent drift the M7 guard caught. Exactly the five delivered
+    // workstreams may be checked: a premature "- [x]" on #297, or a
+    // stale unchecked #292-#296, fails here.
     assert_eq!(
         readme_m8_section.matches("- [x]").count(),
-        3,
-        "the README M8 section must check exactly the three delivered workstreams"
+        5,
+        "the README M8 section must check exactly the five delivered workstreams"
     );
     assert_eq!(
         readme_m8_section.matches("- [ ]").count(),
-        3,
-        "the README M8 section must leave the three open workstreams unchecked"
+        1,
+        "the README M8 section must leave the one open workstream unchecked"
     );
     let readme_m8_checkboxes = [
         ("#292", "- [x]"),
         ("#293", "- [x]"),
         ("#294", "- [x]"),
-        ("#295", "- [ ]"),
-        ("#296", "- [ ]"),
+        ("#295", "- [x]"),
+        ("#296", "- [x]"),
         ("#297", "- [ ]"),
     ];
     for (issue, expected) in readme_m8_checkboxes {
