@@ -25,59 +25,58 @@
   Note: the failed Dependabot security-update run closes itself after the
   merge, once Dependabot sees the new lockfile on `develop`.
 
-- fix(camera): **#318 — `list_cameras()` fragte nur Linux-Device-Provider
-  ab; auf Windows und macOS war die Webcam-Liste damit immer leer, obwohl
-  GStreamer die Geräte dort sieht. Plattformgerechte Provider-Ketten,
-  getestete Element/Property-Zuordnung und eine eigene Leer-Liste-Meldung.**
-  - **Ursache 1 (Nur-Linux-Provider):** abgefragt waren nur
-    `video4linux2deviceprovider` und `pipewiredeviceprovider` — beide
-    existieren auf Windows/macOS nicht, `by_name()` liefert dort also
-    konstant `None`. Jetzt eine Kette je Plattform, in Reihenfolge
-    probe-first: der erste Provider, der Geräte liefert, gewinnt die
-    ganze Liste (**nie ein Merge** — v4l2 und PipeWire beschreiben
-    dieselben physischen Kameras in verschiedenen Pfadformaten):
-    * Linux: v4l2 → PipeWire (unverändert),
+
+- fix(camera): **#318 — `list_cameras()` only queried Linux device
+  providers; on Windows and macOS the webcam list was therefore always
+  empty, even though GStreamer sees the devices there. Platform-specific
+  provider chains, a test table of element/property mappings and a
+  dedicated empty-list message.**
+  - **Cause 1 (Linux-only providers):** only `video4linux2deviceprovider`
+    and `pipewiredeviceprovider` were queried — neither exists on
+    Windows/macOS, so `by_name()` returns `None` there. Now a per-platform
+    chain in probe-first order: the first provider that yields devices wins
+    the whole list (**never a merge** — v4l2 and PipeWire describe the same
+    physical cameras in different path formats):
+    * Linux: v4l2 → PipeWire (unchanged),
     * Windows: `mfdeviceprovider` → `ksdeviceprovider` →
-      `dshowdeviceprovider` — live gegen die installierte Runtime
-      verifiziert (2026-10-24): Media Foundation liefert beide Kameras
-      dieser Maschine inklusive Virtueller (`device.api = mediafoundation`),
-      `ksvideosrc`/`dshowvideosrc` als Rückfall.
-    * macOS: `avfdeviceprovider` (gst-plugins-bad `applemedia`, seit
-      GStreamer 1.20).
-  - **Consuming-Element und Device-Property kommen jetzt aus einer
-    getesteten Tabelle:** MF- und KS-Geräte wollen `device-path`,
-    PipeWire `path`, AVFoundation `unique-id` (`device-index` ist seit
-    1.30 deprecatet und funktionslos), DirectShow `device` —
-    `start_camera_capture()` baute bisher überall `device="…"` (falscher
-    Name = `parse_launch`-Fehler beim Öffnen). Der Provider-Eintrag
-    liefert das Element über `GstDevice::create_element` (Fallback:
-    dokumentierter Provider-Standard), nicht mehr einen Linux-Namen.
-  - **Ursache 2 (nur 🔄-Button):** der vom Issue beschriebene
-    Startup-Aufruf ist auf `develop` bereits vorhanden
-    (`app.rs:11262`); er ist jetzt über den `ci_pinning`-Guard gepinnt,
-    damit er nicht still wieder verschwindet. Neu ist die
-    Kamera-spezifische Leer-Meldung: der Webcam-Picker zeigt `camera_none`
-    (EN „No camera found.“ / DE „Keine Kamera gefunden.“) statt der
-    generischen „No devices detected.“ — „leer“ ist damit von
-    „nicht unterstützt“ unterscheidbar (i18n-Paritäts-Test inklusive).
-  - **Docs:** neue Seite [`docs/camera-capture.md`](docs/camera-capture.md)
-    mit der Support-Tabelle je Plattform (Provider, Element, Property),
-    den Garantien der Fallback-Kette und dem Troubleshooting der
-    Plugin-Pfad-Kollision (msys2- vs. offizielles GStreamer); der
-    README-Kamera-Bullet nennt den Stand.
-  - **Tests:** `tests/camera.rs` 4 → 8. Neu: gepinnte Provider-Ketten
-    aller drei Plattformen (die Listen werden auf jeder OS-Kompilierung
-    gepinnt, also auch vom Linux-CI), der **Stub-Provider-Test** über die
-    neue Injektionsnaht `list_cameras_with()` (Akzeptanzkriterium: ohne
-    Fix unmöglich — `list_cameras()` war auf Windows konstruktiv leer),
-    Fallback-/Dedup-Vertrag über die ganze Liste (die alte `dedup_by`
-    übersah durchmischierte Duplikate), die Property-Tabelle und ein
-    realer `list_cameras()`-Lauf innerhalb der Plattform-Element-Menge.
+      `dshowdeviceprovider` — live-verified (2026-10-24) against the installed
+      runtime: Media Foundation reports both cameras on this machine
+      including virtual ones (`device.api = mediafoundation`), with
+      `ksvideosrc`/`dshowvideosrc` as fallback.
+    * macOS: `avfdeviceprovider` (gst-plugins-bad `applemedia`, available
+      since GStreamer 1.20).
+  - **Consuming element and device property now come from a test table:**
+    MF and KS devices expect `device-path`, PipeWire expects `path`,
+    AVFoundation expects `unique-id` (`device-index` is deprecated and
+    non-functional since 1.30), DirectShow expects `device` —
+    `start_camera_capture()` previously set `device="…"` everywhere (wrong
+    name = `parse_launch` failure on open). The provider entry now yields
+    the element via `GstDevice::create_element` (fallback: documented
+    provider default) rather than a Linux-only name.
+  - **Cause 2 (🔄 button only):** the startup call described in the issue
+    was already present on `develop` (`app.rs:11262`); it is now pinned behind
+    the `ci_pinning` guard so it won't quietly disappear again. New is the
+    camera-specific empty-list message: the webcam picker shows `camera_none`
+    ("No camera found.") instead of the generic "No devices detected." —
+    this distinguishes "empty" from "unsupported" (i18n parity test included).
+  - **Docs:** new page [`docs/camera-capture.md`](docs/camera-capture.md)
+    with the per-platform support table (provider, element, property),
+    guarantees of the fallback chain and troubleshooting the plugin-path
+    collision (msys2 vs. official GStreamer); the README camera bullet
+    states the current status.
+  - **Tests:** `tests/camera.rs` 4 → 8. New: pinned provider chains for all
+    three platforms (the lists are pinned on every OS build, so also from
+    the Linux CI), a **stub-provider test** through the new injection point
+    `list_cameras_with()` (acceptance criterion: impossible without the fix
+    — `list_cameras()` was constructively empty on Windows), the
+    fallback/dedup contract over the whole list (the old `dedup_by` missed
+    interleaved duplicates), the property table and a real `list_cameras()`
+    run within the platform element set.
     Guard `camera_provider_chains_cover_every_platform_and_are_documented`
-    koppelt Kette, Startup-Fill, i18n-Strings und Doku — eine erweiterte
-    Kette ohne Doku-Zeile fällt durch.
-  Verifiziert: `tests/camera` 8/8, `ci_pinning` samt neuem Guard grün,
-  `cargo fmt --check` sauber.
+    chains the provider chain, startup fill, i18n strings and docs — a
+    platform chain without a matching doc line fails.
+  Verified: `tests/camera` 8/8, `ci_pinning` plus the new guard green,
+  `cargo fmt --check` clean.
 
 - feat(m8): **#294 abgeschlossen — die beiden noch offenen
   Akzeptanzkriterien sind jetzt echt belegt: Audio+Video laufen in einer
@@ -266,6 +265,59 @@
   Lokal verifiziert: `cargo deny check` (advisories/bans/licenses/sources)
   und `cargo audit` je Exit 0, `cargo fmt` sauber, `clippy -D warnings`
   sauber, `ci_pinning` 123/123, rivulet-browser 4/4, OBS-Smokes 20/20.
+
+
+- fix(camera): **#318 — `list_cameras()` only queried Linux device
+  providers; on Windows and macOS the webcam list was therefore always
+  empty, even though GStreamer sees the devices there. Platform-specific
+  provider chains, a test table of element/property mappings and a
+  dedicated empty-list message.**
+  - **Cause 1 (Linux-only providers):** only `video4linux2deviceprovider`
+    and `pipewiredeviceprovider` were queried — neither exists on
+    Windows/macOS, so `by_name()` returns `None` there. Now a per-platform
+    chain in probe-first order: the first provider that yields devices wins
+    the whole list (**never a merge** — v4l2 and PipeWire describe the same
+    physical cameras in different path formats):
+    * Linux: v4l2 → PipeWire (unchanged),
+    * Windows: `mfdeviceprovider` → `ksdeviceprovider` →
+      `dshowdeviceprovider` — live-verified (2026-10-24) against the installed
+      runtime: Media Foundation reports both cameras on this machine
+      including virtual ones (`device.api = mediafoundation`), with
+      `ksvideosrc`/`dshowvideosrc` as fallback.
+    * macOS: `avfdeviceprovider` (gst-plugins-bad `applemedia`, available
+      since GStreamer 1.20).
+  - **Consuming element and device property now come from a test table:**
+    MF and KS devices expect `device-path`, PipeWire expects `path`,
+    AVFoundation expects `unique-id` (`device-index` is deprecated and
+    non-functional since 1.30), DirectShow expects `device` —
+    `start_camera_capture()` previously set `device="…"` everywhere (wrong
+    name = `parse_launch` failure on open). The provider entry now yields
+    the element via `GstDevice::create_element` (fallback: documented
+    provider default) rather than a Linux-only name.
+  - **Cause 2 (🔄 button only):** the startup call described in the issue
+    was already present on `develop` (`app.rs:11262`); it is now pinned behind
+    the `ci_pinning` guard so it won't quietly disappear again. New is the
+    camera-specific empty-list message: the webcam picker shows `camera_none`
+    ("No camera found.") instead of the generic "No devices detected." —
+    this distinguishes "empty" from "unsupported" (i18n parity test included).
+  - **Docs:** new page [`docs/camera-capture.md`](docs/camera-capture.md)
+    with the per-platform support table (provider, element, property),
+    guarantees of the fallback chain and troubleshooting the plugin-path
+    collision (msys2 vs. official GStreamer); the README camera bullet
+    states the current status.
+  - **Tests:** `tests/camera.rs` 4 → 8. New: pinned provider chains for all
+    three platforms (the lists are pinned on every OS build, so also from
+    the Linux CI), a **stub-provider test** through the new injection point
+    `list_cameras_with()` (acceptance criterion: impossible without the fix
+    — `list_cameras()` was constructively empty on Windows), the
+    fallback/dedup contract over the whole list (the old `dedup_by` missed
+    interleaved duplicates), the property table and a real `list_cameras()`
+    run within the platform element set.
+    Guard `camera_provider_chains_cover_every_platform_and_are_documented`
+    chains the provider chain, startup fill, i18n strings and docs — a
+    platform chain without a matching doc line fails.
+  Verified: `tests/camera` 8/8, `ci_pinning` plus the new guard green,
+  `cargo fmt --check` clean.
 
 - feat(m8): **#294 abnahmefähig — `RecordingJob` ist der GUI-freie
   Einbettungs-Einstiegspunkt, `session_embed` demonstriert ihn end-to-end.**
