@@ -1,31 +1,29 @@
 ## [Unreleased]
 
-- feat(inspection): Feature-Erkennung als API (#295) — `detect_available_encoders_with_info()` liefert strukturierte Encoder-Info mit `why_not`; `encoder_fallback_for_codec()` liefert Fallback-Entscheidung; Capture-Backend-Detector (`detect_capture_backends()`) und Hardware-Decoding/Audio-Quellen folgen demselben Muster. Cache (`FEATURE_DETECTION_CACHE`) vermeidet wiederholte GStreamer-Probes; deterministische Tests prüfen das Muster ohne echte Hardware. Dokumentation unter `docs/feature-detection.md`.
-- feat(capture): Capture-Backends hinter stabile Traits (#296) — `CaptureBackend` (Send+Sync, Lifecycle, CaptureError-Typisierung), Stabilitätsmatrix, Enumaration-Tests, `docs/capture-backends.md`.
-- feat(exit-evidence): M8-Exit-Evidence Abschlussbericht (#297) — `docs/m8-automation-completion-report.md`, `rivulet-core/tests/downstream_consumer_smoke.rs`; F-M8-001/F-M8-002 Follow-ups kategorisiert.
+- feat(inspection): Feature detection as API (#295) — `detect_available_encoders_with_info()` provides structured encoder info with `why_not`; `encoder_fallback_for_codec()` provides fallback decision; capture backend detector (`detect_capture_backends()`) and hardware decoding/audio sources follow the same pattern. Cache (`FEATURE_DETECTION_CACHE`) avoids repeated GStreamer probes; deterministic tests verify the pattern without real hardware. Documentation under `docs/feature-detection.md`.
+- feat(capture): Capture backends behind stable traits (#296) — `CaptureBackend` (Send+Sync, Lifecycle, CaptureError-Typisierung), stability matrix, enumeration tests, `docs/capture-backends.md`.
+- feat(exit-evidence): M8 Exit Evidence completion report (#297) — `docs/m8-automation-completion-report.md`, `rivulet-core/tests/downstream_consumer_smoke.rs`; F-M8-001/F-M8-002 follow-ups categorized.
 
-- fix(deps): **GitHub-Dependabot-Alert #5 geschlossen — die veraltete
-  `fuzz/Cargo.lock` zog wasmtime 48.0.5 (GHSA-9pvw-hwfg-92h5, medium:
-  Panic beim „lowering“ eines host-erzeugten component-model-Streams,
-  vulnerable >= 46.0.0, < 48.0.7 bzw. 49.0.x < 49.0.4).**
-  - `cargo update -p wasmtime --precise 48.0.7` im `fuzz/`-Verzeichnis
-    landet auf **49.0.4** — der Semver-Sprung war nötig, weil die
-    `rivulet-core`-Abhängigkeit inzwischen die 49er-Linie auflöst; das
-    Ergebnis ist exakt dieselbe wasmtime-Version wie im Haupt-`Cargo.lock`
-    (gepatcht) und liegt über der Advisory-Grenze.
-  - Beim Nachziehen fielen drei weitere Advisory-Fälle im selben
-    veralteten Lock auf, die `cargo deny` im `fuzz/`-Verzeichnis rot
-    machten (im Haupt-Lock alles schon gepatcht): `rustls` 0.23.45 →
-    0.23.46 (RUSTSEC-2026-0346/0347/0348/0349), `rustls-webpki`
-    0.103.15 → 0.103.16 (RUSTSEC-2026-0382) und `webpki-roots`
-    1.0.9 → 1.0.11 (RUSTSEC-2026-0381, ureq-Zweig).
-  - Verifiziert: `cargo deny check advisories` im `fuzz/` jetzt `ok`
-    (vorher 5 Fehler), Root-Lauf weiter `ok`, Auflösung via
-    `cargo tree` sauber. Nur `fuzz/Cargo.lock` geändert; das Haupt-`Cargo.lock`
-    ist unberührt.
-  Hinweis: der fehlgeschlagene Dependabot-Security-Update-Lauf schließt
-  sich nach dem Merge von selbst, sobald Dependabot die neue Lockfile
-  auf `develop` sieht.
+- fix(deps): **GitHub Dependabot Alert #5 closed — the outdated
+  `fuzz/Cargo.lock` pulled in wasmtime 48.0.5 (GHSA-9pvw-hwfg-92h5, medium:
+  panic when "lowering" a host-generated component-model stream,
+  vulnerable >= 46.0.0, < 48.0.7 or 49.0.x < 49.0.4).**
+  - `cargo update -p wasmtime --precise 48.0.7` in the `fuzz/`
+    directory resolves to **49.0.4** — the semver bump was necessary because
+    the `rivulet-core` dependency now resolves the 49.x line; the result is
+    exactly the same wasmtime version as in the main `Cargo.lock` (patched)
+    and is above the advisory threshold.
+  - Bringing things up to date surfaced three additional advisory cases in
+    the same outdated lockfile, which made `cargo deny` in `fuzz/` fail
+    (main lockfile already patched): `rustls` 0.23.45 → 0.23.46
+    (RUSTSEC-2026-0346/0347/0348/0349), `rustls-webpki` 0.103.15 → 0.103.16
+    (RUSTSEC-2026-0382) and `webpki-roots` 1.0.9 → 1.0.11
+    (RUSTSEC-2026-0381, ureq branch).
+  - Verified: `cargo deny check advisories` in `fuzz/` now `ok` (previously
+    5 errors), root build still `ok`, resolution via `cargo tree` clean.
+    Only `fuzz/Cargo.lock` changed; the main `Cargo.lock` is untouched.
+  Note: the failed Dependabot security-update run closes itself after the
+  merge, once Dependabot sees the new lockfile on `develop`.
 
 - fix(camera): **#318 — `list_cameras()` fragte nur Linux-Device-Provider
   ab; auf Windows und macOS war die Webcam-Liste damit immer leer, obwohl
