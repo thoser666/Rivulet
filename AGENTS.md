@@ -11,9 +11,7 @@ public record (see `CONTRIBUTING.md` for the Conventional Commits format).
 
 Two deliberate exceptions:
 
-- **`CHANGELOG.md` is written in German** — the entire file (all neighbouring
-  entries) is German, so new entries follow that convention. An English entry
-  would be the lone outlier.
+- **`CHANGELOG.md` is written in English** — all entries follow the English convention so the changelog stays consistent.
 - **Issue discussions** may be written in whichever language the thread is
   already in; do not switch an existing German thread to English.
 
@@ -34,7 +32,7 @@ Merged commit subjects are history — never rewrite them to translate.
   `# vX.Y.Z` comment; `rivulet-core/tests/ci_pinning.rs` fails otherwise.
   After bumping a pin, run `scripts/generate-action-pins.py` and update the
   `PINNED_ACTIONS` table in the same PR.
-- `CHANGELOG.md` gets an entry for every user-visible change (German, under
+- `CHANGELOG.md` gets an entry for every user-visible change (English, under
   `## [Unreleased]`); tests assert core surfaces stay documented.
 - Renovate owns Cargo updates; Dependabot owns GitHub Actions pins only.
   Do not add a `cargo` ecosystem to `.github/dependabot.yml`.
