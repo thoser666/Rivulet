@@ -360,7 +360,7 @@ are not yet *measured*, only audited —
 ### M8: Embeddable Engine and API
 
 **Status: In progress** — opened 2026-10-05, six workstream issues:
-#292, #293 and #294 delivered, three still open.
+#292, #293, #294, #295 and #296 delivered, one still open.
 
 Review the API as a product consumed by another developer:
 
