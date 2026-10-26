@@ -1,7 +1,26 @@
 ## [Unreleased]
 
+- fix(encoder): `FeatureDetectionCache::get_or_insert` held its `Mutex` across
+  `compute()`, and `encoder_fallback_for_codec` re-enters the cache for a
+  second key while building its entry. `std::sync::Mutex` is not reentrant, so
+  the first cold-cache call deadlocked and hung every `encoder_fallback_*`
+  test until the 6-hour CI timeout. The cache now computes with the lock
+  released (first insert wins, the answer stays stable per key), and the
+  downstream consumer smoke test initialises GStreamer before probing element
+  factories.
+- fix(capture): the #296 enumeration tests stopped being platform-correct.
+  `all_registered_backends_implement_trait` unwrapped `XCapBackend::new()`,
+  which refuses with `BackendUnavailable` on Windows and macOS, and
+  `list_windows_never_panics_for_registered_backends` demanded a non-empty
+  window list on headless CI runners — contradicting its own contract. Both
+  now assert what holds on every platform: a typed refusal, no panic, no
+  fabricated windows, and complete records for any window that is reported.
+  New gates cover `Send + Sync` for every registered backend and the
+  empty-list fallback of `list_windows_with_default_backend()`. Documented in
+  `docs/capture-backends.md`.
+
 - feat(inspection): Feature detection as API (#295) — `detect_available_encoders_with_info()` provides structured encoder info with `why_not`; `encoder_fallback_for_codec()` provides fallback decision; capture backend detector (`detect_capture_backends()`) and hardware decoding/audio sources follow the same pattern. Cache (`FEATURE_DETECTION_CACHE`) avoids repeated GStreamer probes; deterministic tests verify the pattern without real hardware. Documentation under `docs/feature-detection.md`.
-- feat(capture): Capture backends behind stable traits (#296) — `CaptureBackend` (Send+Sync, Lifecycle, CaptureError-Typisierung), stability matrix, enumeration tests, `docs/capture-backends.md`.
+- feat(capture): Capture backends behind stable traits (#296) — `CaptureBackend` (Send+Sync, lifecycle, typed CaptureError), stability matrix, enumeration tests, `docs/capture-backends.md`.
 - feat(exit-evidence): M8 Exit Evidence completion report (#297) — `docs/m8-automation-completion-report.md`, `rivulet-core/tests/downstream_consumer_smoke.rs`; F-M8-001/F-M8-002 follow-ups categorized.
 
 - fix(deps): **GitHub Dependabot Alert #5 closed — the outdated

@@ -30,7 +30,7 @@ impl std::error::Error for CaptureError {}
 ///
 /// Life-cycle guarantees (non-negotiable):
 /// - `Send + Sync`: safe to move across threads and hold in shared state.
-/// - `list_windows()` yields stable window IDs (UUID-based) for session-level recovery.
+/// - `list_windows()` yields stable window IDs (`u64`: X11 window id / HWND) for session-level recovery, and answers with an empty `Vec` — never a panic — when the host has no window to offer.
 /// - `start_capture()` returns an ordered `Receiver<GameCaptureFrame>` (timestamped frames, never out of order) plus a `GameCaptureHandle` for explicit stop; both survive until dropped.
 /// - `CaptureError` is fully typed (`WindowNotFound`, `BackendUnavailable(&'static str)`, `CaptureFailed(&'static str)`) — callers must not parse platform strings.
 /// - Backends are enumerable; adding a new backend without implementing this trait breaks the full-enumeration test.
@@ -320,19 +320,56 @@ mod trait_enumeration_tests {
     /// This test breaks intentionally when a new backend is added without
     /// the `CaptureBackend` trait implementation — it is the M8 gate that
     /// keeps the public API coherent.
+    ///
+    /// Every constructor is platform-gated, so the gate itself must never
+    /// `unwrap()` one: on Windows and macOS XCap refuses by design, on Linux
+    /// the Metal/WGC stub does. A refusal that arrives as the typed
+    /// `BackendUnavailable` variant is a passing result — that is exactly
+    /// what the "no platform strings at the caller" guarantee looks like
+    /// from outside the library.
     #[test]
     fn all_registered_backends_implement_trait() {
-        // XCap (Linux) — stable
-        let xcap = XCapBackend::new();
-        assert!(xcap.is_ok() || true); // trait check is structural, not runtime
-                                       // PipeWire (Linux/Wayland) — experimental stub
-        let pw = PipeWireBackend::new();
-        assert!(pw.is_ok() || pw.is_err());
-        // Metal/WGC (Windows) — experimental stub
-        let metal = MetalWgcBackend::new();
-        assert!(metal.is_ok() || metal.is_err());
-        // All backends expose `name()` (trait contract fulfilled)
-        assert!(!XCapBackend::new().unwrap().name().is_empty());
+        /// One platform-gated constructor, paired with the diagnostic name
+        /// its `CaptureBackend::name()` must answer with.
+        type Constructed = Result<Box<dyn CaptureBackend>, CaptureError>;
+
+        let registered: [(&str, Constructed); 3] = [
+            (
+                "xcap",
+                XCapBackend::new().map(|b| Box::new(b) as Box<dyn CaptureBackend>),
+            ),
+            (
+                "pipewire",
+                PipeWireBackend::new().map(|b| Box::new(b) as Box<dyn CaptureBackend>),
+            ),
+            (
+                "metal-wgc",
+                MetalWgcBackend::new().map(|b| Box::new(b) as Box<dyn CaptureBackend>),
+            ),
+        ];
+
+        let mut constructed = 0usize;
+        for (expected_name, backend) in registered {
+            match backend {
+                Ok(backend) => {
+                    constructed += 1;
+                    // Reachable only through the trait object: `name()` is
+                    // the expected non-empty string and `list_windows()`
+                    // answers without panicking on this host.
+                    assert_eq!(backend.name(), expected_name);
+                    let _windows = backend.list_windows();
+                }
+                Err(err) => assert!(
+                    matches!(err, CaptureError::BackendUnavailable(_)),
+                    "{expected_name} must refuse with the typed BackendUnavailable \
+                     variant instead of panicking, got: {err}"
+                ),
+            }
+        }
+        assert!(
+            constructed >= 1,
+            "every supported host must construct at least one backend"
+        );
     }
 
     /// Verify `CaptureError` remains fully typed and never leaks a raw
@@ -345,16 +382,84 @@ mod trait_enumeration_tests {
         assert!(matches!(err_window, CaptureError::WindowNotFound));
     }
 
-    /// Verify `list_windows` returns empty for the test backend rather
-    /// than panicking — stability check for embedding products that call
-    /// this before `start_capture`.
+    /// Verify `list_windows` answers with a `Vec` instead of panicking —
+    /// stability check for embedding products that call this before
+    /// `start_capture`.
+    ///
+    /// An empty list is a legitimate answer and must not fail the test: CI
+    /// runners are headless and own no game-sized windows, and the stub
+    /// backends enumerate nothing by design. What is pinned here is what
+    /// holds on every host — the call returns, nothing is fabricated, and
+    /// every window that *is* reported is complete.
     #[test]
     fn list_windows_never_panics_for_registered_backends() {
-        // Even when no windows exist, the trait must return an empty Vec,
-        // not a platform panic.
-        if let Ok(x) = XCapBackend::new() {
-            let windows = x.list_windows();
-            assert!(!windows.is_empty());
+        let mut backends: Vec<Box<dyn CaptureBackend>> = Vec::new();
+        if let Ok(backend) = XCapBackend::new() {
+            backends.push(Box::new(backend));
+        }
+        if let Ok(backend) = PipeWireBackend::new() {
+            backends.push(Box::new(backend));
+        }
+        if let Ok(backend) = MetalWgcBackend::new() {
+            backends.push(Box::new(backend));
+        }
+        assert!(
+            !backends.is_empty(),
+            "at least one backend must construct on this host"
+        );
+
+        for backend in backends {
+            let name = backend.name();
+            // Reaching the next line without a panic is the core guarantee.
+            let windows = backend.list_windows();
+            for window in &windows {
+                assert!(
+                    !window.title.is_empty(),
+                    "{name} must not report a window without a title: {window:?}"
+                );
+                assert!(
+                    window.width > 0 && window.height > 0,
+                    "{name} must not report a window without geometry: {window:?}"
+                );
+            }
+            match name {
+                // The two stub backends document an empty window list.
+                "pipewire" | "metal-wgc" => assert!(
+                    windows.is_empty(),
+                    "the {name} stub must enumerate no windows, got {}: {windows:?}",
+                    windows.len()
+                ),
+                _ => {}
+            }
+        }
+    }
+
+    /// The first non-negotiable guarantee of the trait: every registered
+    /// backend is `Send + Sync + 'static`, so an embedding product can move
+    /// it into a worker thread and hold it behind a shared `Arc`. This is the
+    /// static half of the enumeration gate — it stops compiling the moment a
+    /// new backend type loses one of the bounds.
+    #[test]
+    fn every_registered_backend_is_send_and_sync() {
+        fn assert_send_sync_static<T: Send + Sync + 'static>() {}
+
+        assert_send_sync_static::<XCapBackend>();
+        assert_send_sync_static::<PipeWireBackend>();
+        assert_send_sync_static::<MetalWgcBackend>();
+        assert_send_sync_static::<Box<dyn CaptureBackend>>();
+    }
+
+    /// The free listing helper must answer on every platform, including hosts
+    /// where `default_backend()` refuses: without a default backend it falls
+    /// back to an empty list instead of erroring or panicking.
+    #[test]
+    fn window_listing_falls_back_to_empty_without_a_default_backend() {
+        let windows = crate::capture_backend::list_windows_with_default_backend();
+        if CaptureBackendChoice::default_backend().is_err() {
+            assert!(
+                windows.is_empty(),
+                "without a default backend the listing must fall back to an empty list"
+            );
         }
     }
 }
