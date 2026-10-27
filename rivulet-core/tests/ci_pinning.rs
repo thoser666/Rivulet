@@ -1655,6 +1655,102 @@ fn dependabot_unreachable_glib_advisory_is_documented_and_pinned() {
 }
 
 #[test]
+fn wasmtime_cache_feature_stays_disabled_so_the_zstd_advisories_stay_gone() {
+    // RUSTSEC-2026-0391 (zstd), -0398/-0403 (zstd-safe) and -0410 (zstd-sys)
+    // need zstd >= 0.14.3, zstd-safe >= 8.2.0 and zstd-sys >= 2.1.2. The
+    // lockfile carried zstd 0.13.3 because `wasmtime-internal-cache` pins
+    // `zstd = "^0.13.0"` in every published release (49.0.0 through 50.0.0),
+    // so cargo cannot select a fixed zstd and `Cargo Audit`, `Cargo Deny` and
+    // therefore the required `Security` check failed on every new commit.
+    // wasmtime's on-disk module cache is the only thing its `cache` feature
+    // adds and the plugin sandbox never uses it, so the feature is switched
+    // off instead of ignoring the advisories. This guard fails if the feature
+    // comes back (wasmtime's default set re-adds it), if either lockfile grows
+    // one of the removed crates again, or if the rationale is dropped.
+    let root = read("Cargo.toml");
+    let start = root
+        .find("wasmtime = { version =")
+        .expect("the root manifest must declare the wasmtime dependency");
+    let rest = &root[start..];
+    let end = rest
+        .find('}')
+        .expect("the wasmtime dependency declaration must be closed");
+    let wasmtime_dep = &rest[..end];
+    assert!(
+        wasmtime_dep.contains("default-features = false"),
+        "wasmtime must stay at `default-features = false`: its default set turns the \
+         module cache back on, which pulls `wasmtime-internal-cache` -> `zstd 0.13.x` \
+         and with it RUSTSEC-2026-0391/-0398/-0403/-0410"
+    );
+    assert!(
+        !wasmtime_dep.contains("\"cache\""),
+        "wasmtime's `cache` feature must stay out of the feature list: no published \
+         wasmtime release accepts a fixed zstd, so enabling it makes the advisories \
+         unfixable again"
+    );
+    for required in ["runtime", "std", "wat", "cranelift"] {
+        assert!(
+            wasmtime_dep.contains(&format!("\"{required}\"")),
+            "the wasmtime feature list must keep {required} so the plugin sandbox \
+             behaves exactly as it did before the cache feature was dropped"
+        );
+    }
+
+    // Both lockfiles must stay free of the cache chain: the workspace one and
+    // the fuzz one, which is a separate workspace and previously reported the
+    // same advisories. `zstd` is asserted on its own name entry so the check
+    // cannot be satisfied by a substring of another crate.
+    for lockfile in ["Cargo.lock", "fuzz/Cargo.lock"] {
+        let lock = read(lockfile);
+        for gone in [
+            "wasmtime-internal-cache",
+            "zstd",
+            "zstd-safe",
+            "zstd-sys",
+            "directories-next",
+            "dirs-sys-next",
+        ] {
+            assert!(
+                !lock.contains(&format!("name = \"{gone}\"")),
+                "{lockfile} must not carry {gone} again: it is only reachable through \
+                 wasmtime's module cache, whose zstd family is covered by \
+                 RUSTSEC-2026-0391/-0398/-0403/-0410"
+            );
+        }
+    }
+
+    // The Flatpak build vendors its crates from `cargo-sources.json`, which is
+    // generated from `Cargo.lock`. It drifts silently — the lockfile removal
+    // alone left the zstd archives in the vendored build — so it is checked
+    // here too, not just by the `generate-cargo-sources.sh --verify` CI step.
+    let flatpak_pin = read("packaging/flatpak/cargo/cargo-sources.json");
+    for gone in ["wasmtime-internal-cache", "zstd", "zstd-safe", "zstd-sys"] {
+        assert!(
+            !flatpak_pin.contains(gone),
+            "packaging/flatpak/cargo/cargo-sources.json must be regenerated \
+             whenever the lockfile changes: it still vendors {gone}"
+        );
+    }
+
+    let security_docs = read("docs/security.md");
+    for needle in [
+        "RUSTSEC-2026-0391",
+        "RUSTSEC-2026-0398",
+        "RUSTSEC-2026-0403",
+        "RUSTSEC-2026-0410",
+        "wasmtime-internal-cache",
+        "default-features = false",
+        "wasmtime_cache_feature_stays_disabled_so_the_zstd_advisories_stay_gone",
+    ] {
+        assert!(
+            security_docs.contains(needle),
+            "docs/security.md must keep documenting why wasmtime's cache feature is \
+             disabled (missing: {needle})"
+        );
+    }
+}
+
+#[test]
 fn security_policy_is_linked_from_readme_and_docs() {
     let readme = read("README.md");
     let policy = read("SECURITY.md");
@@ -6081,22 +6177,25 @@ fn crash_report_stays_local_and_redacted() {
 }
 
 #[test]
-fn m8_opening_is_pinned_to_the_six_workstream_issues() {
-    // Documentation lies cluster at milestone boundaries: at opening, "In
-    // progress" where nothing is delivered is worse than "Planned", because a
-    // reader concludes someone is working on it; at delivery, "Delivered"
-    // where four workstreams are still open is worse than either. M7 had the
-    // mirror failure — three documents claiming the opposite of reality. So
-    // the milestone state is pinned as it moves: the status must name what is
-    // actually delivered, and the milestone must never claim progress it
-    // cannot show.
+fn m8_closeout_statements_match_across_readme_gate_and_report() {
+    // Milestone boundaries are where documentation lies cluster, and the
+    // close-out is the boundary where the lie is easiest: a milestone that
+    // calls itself delivered while its own report still lists open findings,
+    // or a gate that keeps hedging while the roadmap shows six ticks. M7 had
+    // the mirror failure — three documents claiming the opposite of reality.
+    // So the three surfaces that describe M8 are pinned against each other:
+    // the README section, the quality-gate section and the completion report
+    // must agree on the status, on the six workstream issues and on what is
+    // still open.
     let readme = read("README.md");
     let gates = read("docs/milestone-quality-gates.md");
+    let report = read("docs/m8-automation-completion-report.md");
 
-    // Scope both sections by ASCII anchors so the assertions cannot be
-    // satisfied or broken by an unrelated part of the file. The README anchor
-    // has to be the full section header, not the plain title: the milestone
-    // table row above carries the same wording and would win otherwise.
+    // Scope both milestone documents by ASCII anchors so the assertions cannot
+    // be satisfied or broken by an unrelated part of the file. The README
+    // anchor has to be the full section header, not the plain title: the
+    // milestone table row above carries the same wording and would win
+    // otherwise. The report is only about M8, so it is used whole.
     let readme_m8_section = readme
         .split("### 📦 M8 – Embeddable Engine & API")
         .nth(1)
@@ -6116,33 +6215,25 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
         "the quality gate must still have an M8 section"
     );
 
-    // Both surfaces say "in progress", never "planned" — and never "complete"
-    // or "delivered" either, because one workstream (#297) is still open.
-    // #292-#296 ARE delivered, so both surfaces must name them as such: an
-    // unmentioned delivery is the same drift in the other direction.
+    // Every surface says delivered, and none of them still claims work in
+    // progress: a stale "In progress" next to six ticked boxes is the same
+    // drift in the other direction, and it is what a reader would believe.
     for (label, section) in [
         ("README M8 section", readme_m8_section),
         ("M8 quality gate", gates_m8_section),
+        ("M8 completion report", report.as_str()),
     ] {
         assert!(
-            section.contains("In progress"),
-            "the {label} must state that M8 is in progress"
+            section.contains("Delivered"),
+            "the {label} must state that M8 is delivered"
         );
         assert!(
-            section.contains("#292, #293, #294, #295 and #296 delivered"),
-            "the {label} must name the five delivered workstreams"
+            !section.contains("In progress"),
+            "the {label} must not still claim M8 is in progress now that all six workstreams are delivered"
         );
         assert!(
             !section.contains("**Status: Planned"),
-            "the {label} must not still claim Planned while #292-#297 are open"
-        );
-        assert!(
-            !section.contains("Complete") && !section.contains("**Status: Complete"),
-            "the {label} must not claim Complete while one workstream is open"
-        );
-        assert!(
-            !section.contains("**Status: Delivered"),
-            "the {label} must not claim the milestone Delivered while #297 is open"
+            "the {label} must not still claim Planned"
         );
     }
 
@@ -6152,40 +6243,44 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
         .find(|line| line.starts_with("| M8 – Embeddable Engine & API |"))
         .expect("the README milestone table must still have an M8 row");
     assert!(
-        m8_row.contains("In progress"),
-        "the README M8 milestone row must show the work as started"
+        m8_row.contains("Delivered"),
+        "the README M8 milestone row must show the milestone as delivered"
     );
     assert!(
-        !m8_row.contains("Planned"),
-        "the README M8 milestone row must not stay Planned while #292-#297 are open"
+        !m8_row.contains("In progress") && !m8_row.contains("Planned"),
+        "the README M8 milestone row must not contradict the section below it"
     );
 
-    // All six workstream issues are named in both surfaces. The gate maps them
-    // to criteria; the README maps them to the roadmap checkboxes.
+    // All six workstream issues are named in all three surfaces. The gate maps
+    // them to criteria, the README to the roadmap checkboxes, the report to the
+    // delivery table — an issue that disappears from one of them is how a
+    // workstream silently leaves the milestone's story.
     for issue in ["#292", "#293", "#294", "#295", "#296", "#297"] {
-        assert!(
-            readme_m8_section.contains(issue),
-            "the README M8 section must reference {issue}"
-        );
-        assert!(
-            gates_m8_section.contains(issue),
-            "the M8 quality gate must reference {issue}"
-        );
+        for (label, section) in [
+            ("README M8 section", readme_m8_section),
+            ("M8 quality gate", gates_m8_section),
+            ("M8 completion report", report.as_str()),
+        ] {
+            assert!(
+                section.contains(issue),
+                "the {label} must reference {issue}"
+            );
+        }
     }
     // The roadmap checkboxes and the issues are the same six items, so both
     // lists have to stay complete — a missing checkbox or a missing issue is
-    // the same silent drift the M7 guard caught. Exactly the five delivered
-    // workstreams may be checked: a premature "- [x]" on #297, or a
-    // stale unchecked #292-#296, fails here.
+    // the same silent drift the M7 guard caught. All six are delivered now: a
+    // premature tick fails here, and so does an unchecked one the report calls
+    // delivered.
     assert_eq!(
         readme_m8_section.matches("- [x]").count(),
-        5,
-        "the README M8 section must check exactly the five delivered workstreams"
+        6,
+        "the README M8 section must check all six delivered workstreams"
     );
     assert_eq!(
         readme_m8_section.matches("- [ ]").count(),
-        1,
-        "the README M8 section must leave the one open workstream unchecked"
+        0,
+        "the README M8 section must not leave a workstream unchecked"
     );
     let readme_m8_checkboxes = [
         ("#292", "- [x]"),
@@ -6193,7 +6288,7 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
         ("#294", "- [x]"),
         ("#295", "- [x]"),
         ("#296", "- [x]"),
-        ("#297", "- [ ]"),
+        ("#297", "- [x]"),
     ];
     for (issue, expected) in readme_m8_checkboxes {
         let line = readme_m8_section
@@ -6215,79 +6310,319 @@ fn m8_opening_is_pinned_to_the_six_workstream_issues() {
         "the M8 quality gate must link each workstream issue exactly once"
     );
 
-    // A started milestone has to name where to start, and the named issue must
-    // be the one that unblocks the rest.
-    assert!(
-        readme_m8_section.contains("Recommended first implementation step"),
-        "the README M8 section must name a recommended first implementation step"
-    );
-    let first_step = readme_m8_section
-        .split("Recommended first implementation step")
-        .nth(1)
-        .and_then(|rest| rest.split("**Goal:**").next())
-        .unwrap_or_default();
-    assert!(
-        first_step.contains("#292"),
-        "the recommended first implementation step must be #292, the API \
-         contract the other workstreams build against"
-    );
-
-    // The opening state is recorded with numbers, not adjectives: a reader
-    // must be able to check the claims. These are the facts that make M8
-    // "Planned -> In progress" more than a label.
-    assert!(
-        readme_m8_section.contains("0.65.0-alpha.55")
-            && readme_m8_section.contains("66 public modules")
-            && readme_m8_section.contains("missing_docs"),
-        "the README M8 section must record the concrete opening state (version, \
-         module count, missing_docs)"
-    );
-    assert!(
-        gates_m8_section.contains("0.65.0-alpha.55")
-            && gates_m8_section.contains("66 public modules"),
-        "the M8 quality gate must record the same opening state as the README"
-    );
-
-    // Honest bookkeeping: the gate must stay open while the workstreams run.
-    assert!(
-        gates_m8_section.contains("The gate stays **open**"),
-        "the M8 quality gate must state that it is still open"
-    );
+    // A delivered milestone must not read as an unconditional pass while its
+    // own report lists open findings: the gate has to name the follow-ups it
+    // closed on, and the report has to list each of them with a verdict.
+    for finding in ["F-M8-003", "F-M8-004", "F-M8-005", "F-M8-006"] {
+        assert!(
+            gates_m8_section.contains(finding),
+            "the M8 quality gate must name {finding} among the follow-ups it closed with"
+        );
+        assert!(
+            report.contains(finding),
+            "the M8 completion report must list {finding}"
+        );
+    }
     assert!(
         !gates_m8_section.contains("gate passed"),
-        "no unconditional gate pass may sit next to six open workstream issues"
-    );
-    // The exit-evidence issue closes the milestone, it does not work toward
-    // it; saying otherwise would let someone "finish" M8 with a smoke test.
-    assert!(
-        gates_m8_section.contains("Starts only once #292 is delivered"),
-        "the exit-evidence issue must be marked as depending on #292"
+        "no unconditional gate pass may sit next to four named follow-ups"
     );
 
-    // Per-issue labels must agree with the README's own checkboxes: while
-    // the README leaves a workstream unchecked, the gates must not claim that
-    // issue CLOSED; once the box is ticked the entry may record the closure
-    // (as #294's does after its verification). Deriving the ban from the
-    // checkboxes instead of a hand-typed "four still open" phrase is what
-    // lets a delivery pass through without the rule silently retiring. The
-    // gates once marked #294 and #295 "CLOSED — partial" while both issues
-    // were open on GitHub — the label and the count contradicted each other
-    // and the reader could not tell which to trust.
-    for (issue, expected) in readme_m8_checkboxes {
-        // Each workstream is linked exactly once in the gates section (pinned
-        // above), so its entry is the chunk between two "- [" starts. The
-        // split consumes the bracket of the link, so match on "#NNN]".
-        let entry = gates_m8_section
-            .split("\n- [")
-            .find(|chunk| chunk.contains(&format!("{issue}]")))
-            .unwrap_or_else(|| panic!("the M8 quality gate must link {issue}"));
-        if expected == "- [ ]" {
-            assert!(
-                !entry.contains("**CLOSED"),
-                "the M8 quality gate claims {issue} CLOSED while its README \
-                 checkbox is still unchecked: {entry}"
-            );
+    // The two evidence findings of the first conditional pass were closed by
+    // this workstream; the report must keep naming them and their closures, so
+    // a later reader can tell which gap was fixed and which is still open.
+    for finding in ["F-M8-001", "F-M8-002"] {
+        let row = report
+            .lines()
+            .find(|line| line.starts_with(&format!("| {finding} |")))
+            .unwrap_or_else(|| panic!("the M8 completion report must keep the {finding} row"));
+        assert!(
+            row.contains("closed"),
+            "the {finding} row must record that it is closed, got: {row}"
+        );
+    }
+    for (finding, issue) in [
+        ("F-M8-003", "342"),
+        ("F-M8-004", "343"),
+        ("F-M8-005", "344"),
+        ("F-M8-006", "345"),
+    ] {
+        let row = report
+            .lines()
+            .find(|line| line.starts_with(&format!("| {finding} |")))
+            .unwrap_or_else(|| panic!("the M8 completion report must keep the {finding} row"));
+        assert!(
+            row.contains(&format!("/issues/{issue}")),
+            "the open {finding} row must link its tracking issue #{issue}, got: {row}"
+        );
+        assert!(
+            row.contains("open"),
+            "the {finding} row must be recorded as open, got: {row}"
+        );
+    }
+
+    // The acceptance criterion is that *every* gate criterion is recorded
+    // individually as satisfied/partial/open — no collapsed "gate passed"
+    // beside named follow-ups. Read the criteria table out of the report and
+    // require a verdict per row, then check the prose counts against the table:
+    // changing a verdict without updating the numbers fails here.
+    let criteria_section = report
+        .split("## Quality-gate criteria (M8)")
+        .nth(1)
+        .and_then(|rest| rest.split("\n## ").next())
+        .unwrap_or_default();
+    assert!(
+        !criteria_section.is_empty(),
+        "the report must keep its own '## Quality-gate criteria (M8)' section"
+    );
+    let criteria_rows: Vec<&str> = criteria_section
+        .lines()
+        .filter(|line| line.starts_with("| "))
+        .filter(|line| !line.contains("---") && !line.contains("| Status |"))
+        .collect();
+    assert!(
+        criteria_rows.len() >= 8,
+        "the M8 gate has at least nine criteria; the report lists {} row(s)",
+        criteria_rows.len()
+    );
+    let satisfied = criteria_rows
+        .iter()
+        .filter(|line| line.contains("satisfied"))
+        .count();
+    let partial = criteria_rows
+        .iter()
+        .filter(|line| line.contains("partial"))
+        .count();
+    for line in &criteria_rows {
+        assert!(
+            line.contains("satisfied") || line.contains("partial") || line.contains("open"),
+            "every gate criterion needs its own verdict (satisfied/partial/open): {line}"
+        );
+    }
+    assert_eq!(
+        satisfied + partial,
+        criteria_rows.len(),
+        "every criterion row is either satisfied or partial here; a third verdict would need the prose below to say so"
+    );
+    let number_word = |value: usize| -> &'static str {
+        match value {
+            0 => "zero",
+            1 => "one",
+            2 => "two",
+            3 => "three",
+            4 => "four",
+            5 => "five",
+            6 => "six",
+            7 => "seven",
+            8 => "eight",
+            9 => "nine",
+            _ => "many",
         }
+    };
+    // The summary line states the verdict counts; the table is the source of
+    // truth, so the sentence has to follow it.
+    assert!(
+        report.contains(&format!(
+            "{} satisfied, {} partial",
+            number_word(satisfied),
+            number_word(partial)
+        )),
+        "the report's summary must state the counts the criteria table carries: {satisfied} satisfied, {partial} partial"
+    );
+    // Every surface names how many follow-ups remain, and the number is the
+    // number of open findings in the report's own table.
+    let open_findings = report
+        .lines()
+        .filter(|line| line.starts_with("| F-M8-"))
+        .filter(|line| line.contains("| open |"))
+        .count();
+    let expected_word = number_word(open_findings);
+    for (label, section) in [
+        ("README M8 section", readme_m8_section),
+        ("M8 quality gate", gates_m8_section),
+        ("M8 completion report", report.as_str()),
+    ] {
+        assert!(
+            section.contains(expected_word),
+            "the {label} must state that {expected_word} follow-ups remain open"
+        );
+    }
+}
+
+/// #297 is the milestone's exit evidence, so the evidence itself has to be
+/// wired up rather than described: an *external* consumer crate built against
+/// the packaging artifact, an API overview generated from the code, and a
+/// warning-free `cargo doc`. Each of the three is pinned to its artifact here,
+/// because every one of them can be silently weakened without any test failing:
+///
+/// * a committed `downstream-smoke/Cargo.toml` with `path = "../rivulet-core"`
+///   turns the external consumer back into a working-tree test,
+/// * a `ci.yml` step that only *builds* the consumer, or that drops
+///   `RIVULET_DOWNSTREAM_REQUIRE_AUDIO`, hides the positive audio evidence,
+/// * an `api-overview.md` nobody regenerates drifts from `lib.rs` within a
+///   release, and a `cargo doc` without `-D warnings` prints the same broken
+///   links it did before #297.
+#[test]
+fn m8_exit_evidence_is_wired_into_ci_and_docs() {
+    // --- The external consumer crate --------------------------------------
+    let template = read("downstream-smoke/Cargo.toml.in");
+    assert!(
+        template.contains("rivulet-core = { path = \"__RIVULET_CORE_PATH__\" }"),
+        "the consumer's only dependency must be the packaged artifact, substituted by the runner script"
+    );
+    assert!(
+        template.contains("[workspace]") && !template.contains("[dev-dependencies]"),
+        "the consumer must stay its own workspace root with no dev-dependencies"
+    );
+    assert!(
+        !repo_file("downstream-smoke/Cargo.toml").exists(),
+        "a committed downstream-smoke/Cargo.toml would point the consumer at the working tree; \
+         the manifest must be generated from Cargo.toml.in"
+    );
+    let consumer = read("downstream-smoke/src/main.rs");
+    assert!(
+        consumer.contains("use rivulet_core::{"),
+        "the consumer must import the public crate root, not internal paths"
+    );
+    for marker in [
+        "RecordingJob::start",
+        "push_frame",
+        "push_audio",
+        "SessionReport",
+        "detect_available_encoders_with_info",
+        "JobError::MissingElements",
+    ] {
+        assert!(
+            consumer.contains(marker),
+            "the smoke crate must exercise {marker} through the public API"
+        );
+    }
+    assert!(
+        !consumer.contains("rivulet_core::tests") && !consumer.contains("gstreamer::"),
+        "the consumer must not reach into test helpers or name gstreamer-rs types of its own"
+    );
+
+    // --- The runner script ------------------------------------------------
+    let script = read("scripts/run-downstream-smoke.sh");
+    for marker in [
+        "package -p rivulet-core",
+        "--no-verify",
+        "tar xzf",
+        "__RIVULET_CORE_PATH__",
+        "RIVULET_DOWNSTREAM_REQUIRE_AUDIO",
+        "RIVULET_DOWNSTREAM_SMOKE_DIR",
+    ] {
+        assert!(
+            script.contains(marker),
+            "scripts/run-downstream-smoke.sh must keep {marker}"
+        );
+    }
+
+    // --- CI wiring --------------------------------------------------------
+    let ci = read(".github/workflows/ci.yml");
+    let smoke_step = ci
+        .split("Downstream consumer smoke test (M8 #297)")
+        .nth(1)
+        .unwrap_or_else(|| {
+            panic!("ci.yml must run the downstream consumer smoke test that closes #297")
+        })
+        .split("- name:")
+        .next()
+        .expect("the smoke step must have a body");
+    for marker in [
+        "bash scripts/run-downstream-smoke.sh",
+        "RIVULET_DOWNSTREAM_REQUIRE_AUDIO: \"1\"",
+        "runner.os == 'Linux'",
+    ] {
+        assert!(
+            smoke_step.contains(marker),
+            "the downstream smoke step must keep {marker}, got:\n{smoke_step}"
+        );
+    }
+
+    let overview_step = ci
+        .split("Check the public-API overview is current (M8 #297)")
+        .nth(1)
+        .unwrap_or_else(|| panic!("ci.yml must check the generated public-API overview"))
+        .split("- name:")
+        .next()
+        .expect("the overview step must have a body");
+    assert!(
+        overview_step.contains("generate-api-overview.py --self-test")
+            && overview_step.contains("generate-api-overview.py --check"),
+        "the overview step must both self-test and check the document, got:\n{overview_step}"
+    );
+    assert!(
+        ci.contains("RUSTDOCFLAGS: -D warnings")
+            && ci.contains("cargo doc -p rivulet-core --no-deps"),
+        "the Lints job must build the crate docs with warnings denied (F-M8-002)"
+    );
+
+    // --- The generated overview itself ------------------------------------
+    let overview = read("docs/api-overview.md");
+    for marker in [
+        "<!-- api-overview:start -->",
+        "<!-- api-overview:end -->",
+        "scripts/generate-api-overview.py",
+    ] {
+        assert!(
+            overview.contains(marker),
+            "docs/api-overview.md must keep {marker}"
+        );
+    }
+    // Every public module of the crate is listed. The list is read from
+    // `lib.rs` rather than duplicated, so a new module fails here until the
+    // document is regenerated — which is the automation the criterion asks for.
+    let lib = read("rivulet-core/src/lib.rs");
+    let mut modules = 0;
+    for line in lib.lines() {
+        let Some(rest) = line.strip_prefix("pub mod ") else {
+            continue;
+        };
+        let Some(name) = rest.strip_suffix(';') else {
+            continue;
+        };
+        modules += 1;
+        assert!(
+            overview.contains(&format!("| `{name}` |")),
+            "docs/api-overview.md must list the public module `{name}`; \
+             regenerate it with scripts/generate-api-overview.py"
+        );
+    }
+    assert!(
+        modules >= 60,
+        "the pub mod scan found only {modules} modules; the overview guard is not reading lib.rs"
+    );
+    // The overview reports the lint state from the attribute, not from prose,
+    // and the M8 surfaces have to agree with whatever it reports.
+    let lint_active = lib.lines().any(|line| {
+        let t = line.trim_start();
+        t.starts_with("#![warn(missing_docs)]") || t.starts_with("#![deny(missing_docs)]")
+    });
+    assert_eq!(
+        overview.contains("`#![warn(missing_docs)]`: **active**"),
+        lint_active,
+        "the overview's lint state must match the crate attribute in lib.rs"
+    );
+    if !lint_active {
+        assert!(
+            overview.contains("not active"),
+            "with the lint inactive the overview must say so (F-M8-003)"
+        );
+    }
+
+    // --- The report points at the artifacts -------------------------------
+    let report = read("docs/m8-automation-completion-report.md");
+    for marker in [
+        "downstream-smoke/",
+        "run-downstream-smoke.sh",
+        "api-overview.md",
+        "generate-api-overview.py",
+    ] {
+        assert!(
+            report.contains(marker),
+            "the M8 completion report must name {marker} as the artifact behind its exit evidence"
+        );
     }
 }
 

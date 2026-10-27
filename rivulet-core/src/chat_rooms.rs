@@ -94,8 +94,8 @@ pub enum RoomNameStep {
 }
 
 /// Pure shared-chat room-name cache. No I/O, no threads: the GUI drives
-/// [`SharedRoomNameService::step`] per badge render and drains
-/// [`SharedRoomNameService::take_pending`] once per frame.
+/// [`SharedRoomNameService::step`] per badge render and acts on the
+/// [`RoomNameStep::Started`] batch it returns once per frame.
 #[derive(Debug, Default)]
 pub struct SharedRoomNameService {
     cache: HashMap<String, String>,

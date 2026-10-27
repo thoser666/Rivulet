@@ -3,7 +3,7 @@
 //!
 //! Why this exists next to [`crate::crash_report`]: the report builder reads
 //! the daily log, but a panic kills the process before anything gets there.
-//! The release profile is `panic = "abort"` ([`Cargo.toml`]), so the hook
+//! The release profile is `panic = "abort"` (`Cargo.toml`), so the hook
 //! still runs, but the process is gone the instant it returns — there is no
 //! unwinding, no background thread and no time for a network round trip.
 //! Everything a future upload needs must therefore be on disk *before* the

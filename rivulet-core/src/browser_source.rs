@@ -353,12 +353,12 @@ impl Default for SyntheticBrowserBackend {
 }
 
 impl SyntheticBrowserBackend {
-    /// Latest JavaScript snippet passed to [`evaluate_javascript`], if any.
+    /// Latest JavaScript snippet passed to [`BrowserSourceBackend::evaluate_javascript`], if any.
     pub fn last_evaluated_javascript(&self) -> Option<&str> {
         self.last_js.as_deref()
     }
 
-    /// Latest input event forwarded by [`send_input`], if any.
+    /// Latest input event forwarded by [`BrowserSourceBackend::send_input`], if any.
     pub fn last_input(&self) -> Option<&BrowserInput> {
         self.last_input.as_ref()
     }

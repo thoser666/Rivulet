@@ -682,14 +682,14 @@ fn parse_amount(raw: &str) -> Option<(f64, String)> {
 ///
 /// Handled actions (renderer → kind):
 ///
-/// - `liveChatPaidMessageRenderer` → [`AlertKind::Donation`] (Super Chat;
+/// - `liveChatPaidMessageRenderer` → [`crate::alerts_ingest::AlertKind::Donation`] (Super Chat;
 ///   amount/currency parsed from `purchaseAmountText.simpleText`, message
 ///   joined from `message.runs`)
 /// - `addLiveChatTickerItemAction.item.liveChatPaidStickerRenderer` →
-///   [`AlertKind::Donation`] (Super Sticker; same amount source, label from
+///   [`crate::alerts_ingest::AlertKind::Donation`] (Super Sticker; same amount source, label from
 ///   `moneyChipBackgroundColor` as the sticker tier hint)
 /// - `addLiveChatTickerItemAction.item.liveChatMembershipItemRenderer` →
-///   [`AlertKind::Follow`] (new member; header text like "Welcome to the
+///   [`crate::alerts_ingest::AlertKind::Follow`] (new member; header text like "Welcome to the
 ///   member's chat"). Ticker duplicates of member milestones are skipped
 ///   (their `headerSubtext`/header text names the milestone age, not the
 ///   welcome).

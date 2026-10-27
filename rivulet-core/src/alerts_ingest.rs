@@ -16,7 +16,7 @@
 //!
 //! **Honest scope:** like telemetry, this ships **no network receiver**. The
 //! HTTPS endpoint those payloads would arrive on (or the EventSub WebSocket)
-//! is a documented follow-up ([`docs/alerts-ingest.md`]); nothing in the
+//! is a documented follow-up (`docs/alerts-ingest.md`); nothing in the
 //! shipped build listens on any socket for alerts. Ingestion is testable
 //! deterministically because parsing, signature verification and the queue are
 //! all network-free.

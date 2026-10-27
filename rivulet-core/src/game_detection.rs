@@ -1249,7 +1249,7 @@ pub fn enrich_executables(games: &mut [GameIdentity]) {
 /// This is the explicit-rescan counterpart to [`enrich_executables`]: it drops
 /// the session cache *and* clears the lists first, so a game installed while
 /// Rivulet runs is picked up. Deliberately not wired into the picker refresh
-/// — see [`STEAM_EXECUTABLE_CACHE`] for why the refresh path stays cheap.
+/// — see `STEAM_EXECUTABLE_CACHE` for why the refresh path stays cheap.
 pub fn rescan_steam_executables(games: &mut [GameIdentity]) {
     clear_steam_executable_cache();
     for game in games.iter_mut() {

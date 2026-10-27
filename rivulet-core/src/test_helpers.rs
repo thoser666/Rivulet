@@ -808,7 +808,7 @@ pub struct SceneBindingState {
 
 impl SceneState {
     /// Snapshot a source collection. Accepts what
-    /// [`SourceManager::current_collection`] returns, so a test can write
+    /// [`crate::source::SourceManager::current_collection`] returns, so a test can write
     /// `SceneState::new(mgr.current_collection())`.
     pub fn new((sources, bindings): (Vec<Source>, Vec<SceneSource>)) -> Self {
         let mut sources: Vec<SceneItemState> = sources
