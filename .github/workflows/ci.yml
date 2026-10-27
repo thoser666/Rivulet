@@ -2,14 +2,36 @@ name: CI
 
 on:
   push:
-    branches: [ "**" ]
+    # CI on push only for refs that never get a `pull_request` run: the
+    # integration branches and the release branches. `branches: [ "**" ]`
+    # used to run the entire 19-job matrix a second time for every push to a
+    # branch that already had an open pull request, and the duplicate was not
+    # merely expensive: in #341 a hung apt install in one of the two runs held
+    # the required `CI` check pending for two hours although the very same job
+    # had already passed in the other run.
+    branches: [ develop, master, "release/**" ]
     # Tags v* trigger the beta/rc/stable release path (build_release +
     # github_release) as well as a verification build.
     tags: [ "v*" ]
+  # Pull-request branches are covered here, exactly once.
   pull_request:
 
 permissions:
   contents: read
+
+# A newer run for the same ref supersedes the older one instead of queueing a
+# second full matrix behind it - pushing twice in a row, or pushing a fix to a
+# PR branch while the previous commit is still building, cancels the superseded
+# run. Cancellation therefore only ever hits a run that another run has already
+# replaced; the head of a pull request and the head of develop are never
+# cancelled by it.
+#
+# Tag pushes are never cancelled: the beta/rc/stable release path in this
+# workflow must finish once it starts, the same rule `release.yml`,
+# `weekly-promotion.yml` and `pat-expiry-guard.yml` follow.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 env:
   CARGO_TERM_COLOR: always
