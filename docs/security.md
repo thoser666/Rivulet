@@ -223,7 +223,11 @@ change. Do not silence the advisory or pin back to the yanked release.
   `wasmtime` with `default-features = false` and wasmtime 49's default feature
   set minus `cache`. That drops `wasmtime-internal-cache`, `zstd`,
   `zstd-safe`, `zstd-sys`, `directories-next`, `dirs-sys-next` and
-  `redox_users` from both `Cargo.lock` and `fuzz/Cargo.lock`. Plugin behaviour
+  `redox_users` from both `Cargo.lock` and `fuzz/Cargo.lock`. The Flatpak
+  offline crate pin (`packaging/flatpak/cargo/cargo-sources.json`) is
+  regenerated from the same lockfile with
+  `packaging/flatpak/generate-cargo-sources.sh`, so the vendored build cannot
+  keep shipping the removed crates either. Plugin behaviour
   is unchanged — every other default feature (including `cranelift`, `wat` and
   `runtime`) stays enabled, and the 87 plugin-runtime library tests (WAT
   loading, fuel budget, epoch interruption, lifecycle) pass as before.

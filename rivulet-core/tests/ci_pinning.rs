@@ -1719,6 +1719,19 @@ fn wasmtime_cache_feature_stays_disabled_so_the_zstd_advisories_stay_gone() {
         }
     }
 
+    // The Flatpak build vendors its crates from `cargo-sources.json`, which is
+    // generated from `Cargo.lock`. It drifts silently — the lockfile removal
+    // alone left the zstd archives in the vendored build — so it is checked
+    // here too, not just by the `generate-cargo-sources.sh --verify` CI step.
+    let flatpak_pin = read("packaging/flatpak/cargo/cargo-sources.json");
+    for gone in ["wasmtime-internal-cache", "zstd", "zstd-safe", "zstd-sys"] {
+        assert!(
+            !flatpak_pin.contains(gone),
+            "packaging/flatpak/cargo/cargo-sources.json must be regenerated \
+             whenever the lockfile changes: it still vendors {gone}"
+        );
+    }
+
     let security_docs = read("docs/security.md");
     for needle in [
         "RUSTSEC-2026-0391",

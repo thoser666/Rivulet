@@ -13,7 +13,10 @@
   `cache`; every other default feature stays enabled, so plugin behaviour is
   unchanged. `Cargo.lock` and `fuzz/Cargo.lock` both drop
   `wasmtime-internal-cache`, `zstd`, `zstd-safe`, `zstd-sys`,
-  `directories-next`, `dirs-sys-next` and `redox_users`. Documented in
+  `directories-next`, `dirs-sys-next` and `redox_users`, and the Flatpak
+  offline crate pin (`packaging/flatpak/cargo/cargo-sources.json`) is
+  regenerated with the pinned generator so the vendored build cannot keep
+  shipping them. Documented in
   `docs/security.md`, guarded by
   `wasmtime_cache_feature_stays_disabled_so_the_zstd_advisories_stay_gone`.
 
