@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+- ci(concurrency): **a branch push no longer runs the CI matrix twice.** Every
+  push to a branch with an open pull request started this workflow twice — once
+  for `push` (branches: `**`) and once for `pull_request` — and both ran the
+  full 19-job matrix. The duplicate was not just wasted compute: in #341 a hung
+  `apt-get install` in one of the two runs held the required `CI` check pending
+  for two hours although the very same job had already passed in the other run.
+  `push` CI now runs only for refs that never get a `pull_request` run
+  (`develop`, `master`, `release/**`) plus `v*` tags, so a PR branch builds
+  exactly once — cancelling the duplicate instead was rejected because a
+  cancelled run reports its aggregate `CI` job as *failed*, which would block
+  the very merge it was meant to unblock. A ref-keyed `concurrency` group
+  additionally cancels runs that a newer run for the same ref has already
+  replaced (rapid pushes, or a fix pushed while the previous commit builds),
+  never the head of a pull request or of `develop`. Tag runs are never
+  cancelled, so the beta/rc/stable release path still finishes once it starts —
+  the same rule `release.yml`, `weekly-promotion.yml` and `pat-expiry-guard.yml`
+  follow; a superseded `develop` run only defers an alpha release to the newer
+  run, which covers both commits.
+
 - fix(deps): **the RustSec `zstd` family is removed instead of ignored —
   `Cargo Audit`, `Cargo Deny` and therefore the required `Security` check
   failed on every new commit.** `RUSTSEC-2026-0391` (`zstd >= 0.14.3`),
