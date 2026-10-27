@@ -209,6 +209,27 @@ change. Do not silence the advisory or pin back to the yanked release.
   circumvents fuel consumption defeats the per-call fuel budget the plugin
   sandbox relies on. These minimums are regression-tested against the
   committed lockfile; advisories are not silenced with an ignore entry.
+- The `zstd` family is removed rather than ignored, because no upgrade can
+  reach a fixed release. `RUSTSEC-2026-0391` (`zstd >= 0.14.3`),
+  `RUSTSEC-2026-0398` and `RUSTSEC-2026-0403` (`zstd-safe >= 8.2.0`) and
+  `RUSTSEC-2026-0410` (`zstd-sys >= 2.1.2`) all describe the `zstd 0.13.3` the
+  lockfile carried, but that version arrived only through
+  `wasmtime-internal-cache`, which pins `zstd = "^0.13.0"` in every published
+  release (49.0.0 through 50.0.0). Cargo therefore cannot select a fixed
+  `zstd`, and `cargo update` fails with
+  ``failed to select a version for the requirement `zstd = "^0.13.0"```.
+  The plugin sandbox never uses the on-disk module cache, and the cache is the
+  only thing wasmtime's `cache` feature adds, so the root manifest declares
+  `wasmtime` with `default-features = false` and wasmtime 49's default feature
+  set minus `cache`. That drops `wasmtime-internal-cache`, `zstd`,
+  `zstd-safe`, `zstd-sys`, `directories-next`, `dirs-sys-next` and
+  `redox_users` from both `Cargo.lock` and `fuzz/Cargo.lock`. Plugin behaviour
+  is unchanged — every other default feature (including `cranelift`, `wat` and
+  `runtime`) stays enabled, and the 87 plugin-runtime library tests (WAT
+  loading, fuel budget, epoch interruption, lifecycle) pass as before.
+  `wasmtime_cache_feature_stays_disabled_so_the_zstd_advisories_stay_gone`
+  fails if the feature comes back, if either lockfile grows one of the removed
+  crates again, or if this rationale disappears.
 - Unmaintained advisories are evaluated for workspace dependencies; duplicate
   versions are warnings until explicitly triaged.
 - Only the crates.io registry is allowed; Git dependencies are not allowed.

@@ -38,7 +38,45 @@ xcap = "=0.9.8"
 sha2 = "0.10"
 hmac = "0.12"
 base64 = "0.22"
-wasmtime = "49.0"
+# wasmtime's DEFAULT feature set turns on its on-disk compilation cache, which
+# pulls `wasmtime-internal-cache` -> `zstd 0.13.x` into the dependency tree.
+# Every zstd release that requirement accepts is affected by the RustSec
+# advisories RUSTSEC-2026-0391 (zstd), -0398/-0403 (zstd-safe) and -0410
+# (zstd-sys), which need zstd >= 0.14.3 / zstd-safe >= 8.2.0 / zstd-sys >=
+# 2.1.2. There is no upgrade path: wasmtime-internal-cache pins
+# `zstd = "^0.13.0"` in every published release (49.0.0 through 50.0.0), so
+# cargo cannot select a fixed zstd. The plugin sandbox never uses the module
+# cache API, so the feature is dropped instead of silencing the advisory with
+# an ignore entry (see docs/security.md). The list below is wasmtime 49's
+# default feature set WITHOUT `cache` - every other default stays enabled, so
+# plugin runtime behaviour is unchanged.
+wasmtime = { version = "49.0", default-features = false, features = [
+    "anyhow",
+    "async",
+    "backtrace",
+    "gc",
+    "gc-copying",
+    "gc-drc",
+    "gc-null",
+    "wat",
+    "profiling",
+    "parallel-compilation",
+    "cranelift",
+    "pooling-allocator",
+    "demangle",
+    "addr2line",
+    "coredump",
+    "debug-builtins",
+    "runtime",
+    "component-model",
+    "component-model-async",
+    "threads",
+    "stack-switching",
+    "std",
+    "debug",
+    "compile-time-builtins",
+    "wit-parser",
+] }
 wasmtime-wasi = "49.0"
 
 [profile.release]

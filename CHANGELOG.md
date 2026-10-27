@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+- fix(deps): **the RustSec `zstd` family is removed instead of ignored —
+  `Cargo Audit`, `Cargo Deny` and therefore the required `Security` check
+  failed on every new commit.** `RUSTSEC-2026-0391` (`zstd >= 0.14.3`),
+  `RUSTSEC-2026-0398` and `RUSTSEC-2026-0403` (`zstd-safe >= 8.2.0`) and
+  `RUSTSEC-2026-0410` (`zstd-sys >= 2.1.2`) covered the locked `zstd 0.13.3`,
+  which arrived only through `wasmtime-internal-cache`. That crate pins
+  `zstd = "^0.13.0"` in every published release (49.0.0 through 50.0.0), so no
+  `cargo update` can reach a fixed `zstd`. The plugin sandbox never uses
+  wasmtime's on-disk module cache, so the root manifest now declares `wasmtime`
+  with `default-features = false` and wasmtime 49's default feature set minus
+  `cache`; every other default feature stays enabled, so plugin behaviour is
+  unchanged. `Cargo.lock` and `fuzz/Cargo.lock` both drop
+  `wasmtime-internal-cache`, `zstd`, `zstd-safe`, `zstd-sys`,
+  `directories-next`, `dirs-sys-next` and `redox_users`. Documented in
+  `docs/security.md`, guarded by
+  `wasmtime_cache_feature_stays_disabled_so_the_zstd_advisories_stay_gone`.
+
 - feat(exit-evidence): M8 closes on external evidence (#297) — the
   downstream-consumer smoke test is now a crate of its own (`downstream-smoke/`),
   so `scripts/run-downstream-smoke.sh` builds and runs it against the unpacked

@@ -1655,6 +1655,89 @@ fn dependabot_unreachable_glib_advisory_is_documented_and_pinned() {
 }
 
 #[test]
+fn wasmtime_cache_feature_stays_disabled_so_the_zstd_advisories_stay_gone() {
+    // RUSTSEC-2026-0391 (zstd), -0398/-0403 (zstd-safe) and -0410 (zstd-sys)
+    // need zstd >= 0.14.3, zstd-safe >= 8.2.0 and zstd-sys >= 2.1.2. The
+    // lockfile carried zstd 0.13.3 because `wasmtime-internal-cache` pins
+    // `zstd = "^0.13.0"` in every published release (49.0.0 through 50.0.0),
+    // so cargo cannot select a fixed zstd and `Cargo Audit`, `Cargo Deny` and
+    // therefore the required `Security` check failed on every new commit.
+    // wasmtime's on-disk module cache is the only thing its `cache` feature
+    // adds and the plugin sandbox never uses it, so the feature is switched
+    // off instead of ignoring the advisories. This guard fails if the feature
+    // comes back (wasmtime's default set re-adds it), if either lockfile grows
+    // one of the removed crates again, or if the rationale is dropped.
+    let root = read("Cargo.toml");
+    let start = root
+        .find("wasmtime = { version =")
+        .expect("the root manifest must declare the wasmtime dependency");
+    let rest = &root[start..];
+    let end = rest
+        .find('}')
+        .expect("the wasmtime dependency declaration must be closed");
+    let wasmtime_dep = &rest[..end];
+    assert!(
+        wasmtime_dep.contains("default-features = false"),
+        "wasmtime must stay at `default-features = false`: its default set turns the \
+         module cache back on, which pulls `wasmtime-internal-cache` -> `zstd 0.13.x` \
+         and with it RUSTSEC-2026-0391/-0398/-0403/-0410"
+    );
+    assert!(
+        !wasmtime_dep.contains("\"cache\""),
+        "wasmtime's `cache` feature must stay out of the feature list: no published \
+         wasmtime release accepts a fixed zstd, so enabling it makes the advisories \
+         unfixable again"
+    );
+    for required in ["runtime", "std", "wat", "cranelift"] {
+        assert!(
+            wasmtime_dep.contains(&format!("\"{required}\"")),
+            "the wasmtime feature list must keep {required} so the plugin sandbox \
+             behaves exactly as it did before the cache feature was dropped"
+        );
+    }
+
+    // Both lockfiles must stay free of the cache chain: the workspace one and
+    // the fuzz one, which is a separate workspace and previously reported the
+    // same advisories. `zstd` is asserted on its own name entry so the check
+    // cannot be satisfied by a substring of another crate.
+    for lockfile in ["Cargo.lock", "fuzz/Cargo.lock"] {
+        let lock = read(lockfile);
+        for gone in [
+            "wasmtime-internal-cache",
+            "zstd",
+            "zstd-safe",
+            "zstd-sys",
+            "directories-next",
+            "dirs-sys-next",
+        ] {
+            assert!(
+                !lock.contains(&format!("name = \"{gone}\"")),
+                "{lockfile} must not carry {gone} again: it is only reachable through \
+                 wasmtime's module cache, whose zstd family is covered by \
+                 RUSTSEC-2026-0391/-0398/-0403/-0410"
+            );
+        }
+    }
+
+    let security_docs = read("docs/security.md");
+    for needle in [
+        "RUSTSEC-2026-0391",
+        "RUSTSEC-2026-0398",
+        "RUSTSEC-2026-0403",
+        "RUSTSEC-2026-0410",
+        "wasmtime-internal-cache",
+        "default-features = false",
+        "wasmtime_cache_feature_stays_disabled_so_the_zstd_advisories_stay_gone",
+    ] {
+        assert!(
+            security_docs.contains(needle),
+            "docs/security.md must keep documenting why wasmtime's cache feature is \
+             disabled (missing: {needle})"
+        );
+    }
+}
+
+#[test]
 fn security_policy_is_linked_from_readme_and_docs() {
     let readme = read("README.md");
     let policy = read("SECURITY.md");
