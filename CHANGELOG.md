@@ -3612,3 +3612,4 @@
 ## [0.0.0-alpha.1] - 2026-08-14
 
 - Initial release
+- feat(exit-evidence): close out #297 — smoke-test docs updated, README checked, M8 close-out recorded (feat/297-closeout)
