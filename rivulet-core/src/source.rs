@@ -4,7 +4,7 @@
 //! parity, spec § W6): a copied *scene item* is the source definition plus its
 //! per-scene binding (transform, crop, visibility, lock, z-order), so pasting
 //! reproduces the full item — not just the source. Paste duplicates the source
-//! (new identity, "<name> copy") and re-binds it with every property
+//! (new identity, `<name> copy`) and re-binds it with every property
 //! preserved, in the same scene or a different one. Ids are regenerated
 //! **deterministically** when the manager runs in deterministic-id mode, so
 //! pasting the same clipboard content twice yields identical scene state

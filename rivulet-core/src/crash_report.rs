@@ -12,18 +12,18 @@
 //! Three properties matter and are pinned by tests:
 //!
 //! 1. **Redaction is not optional.** A report is only built through
-//!    [`CrashReport::render`], which always redacts. There is no public
+//!    [`build_report`], which always redacts. There is no public
 //!    function that returns an unredacted bundle.
 //! 2. **The report says what was removed.** Silent redaction teaches users
 //!    that the tool already cleaned everything, so every redaction is
 //!    counted and disclosed in the header.
 //! 3. **No crash block means no crash report.** A report with no
 //!    `RIVULET CRASH` block would send the maintainer a log dump with no
-//!    defect in it; [`CrashReport::render`] says so instead of pretending.
+//!    defect in it; [`build_report`] says so instead of pretending.
 
 /// Maximum number of log lines kept before the crash block. The documented
 /// reporting procedure asks for "the complete crash block and the preceding
-/// ~50 lines" ([`docs/logging.md`]); this is that number, named.
+/// ~50 lines" (`docs/logging.md`); this is that number, named.
 pub const CONTEXT_LINES: usize = 50;
 
 /// How many crash blocks are kept when a log contains more than one.

@@ -33,7 +33,7 @@ pub struct RateLimitConfig {
 
 impl RateLimitConfig {
     /// Twitch: 20 messages / 30 s for non-broadcaster/mod/VIP accounts,
-    /// enforced globally per account (https://dev.twitch.tv/docs/chat/).
+    /// enforced globally per account (<https://dev.twitch.tv/docs/chat/>).
     pub const fn twitch_default() -> Self {
         Self {
             capacity: 20,

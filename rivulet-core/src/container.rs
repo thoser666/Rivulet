@@ -579,7 +579,7 @@ impl RemuxChainWiring {
     }
 }
 
-/// Outcome of [`RemuxChainWiring::attach_pad`].
+/// Outcome of `RemuxChainWiring::attach_pad`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AttachResult {
     /// Duplicate pad joined the existing chain's funnel.
@@ -595,7 +595,7 @@ enum AttachResult {
 ///
 /// Runs a `filesrc -> demuxer -> muxer -> filesink` pipeline. Demuxer pads
 /// are dynamic (one per contained track), so every demux src pad is wired on
-/// `pad-added` through [`RemuxChainWiring::attach_pad`]: one chain per
+/// `pad-added` through `RemuxChainWiring::attach_pad`: one chain per
 /// logical stream (`funnel -> [aacparse|h264parse|h265parse] -> queue -> mux
 /// request pad`). The chain head is a funnel so tsdemux's duplicate pad
 /// waves (a speculative pad before the PMT update, the real pad after)

@@ -189,6 +189,25 @@ jobs:
       - name: Resource-efficiency gate
         run: python3 scripts/resource-efficiency-check.py scripts/resource-efficiency-sample.json
 
+      # M8 #297 exit evidence: the public-API overview must be generated from
+      # `rivulet-core/src/lib.rs`, so a module list that drifts from the code
+      # fails here instead of being discovered by a consumer.
+      - name: Check the public-API overview is current (M8 #297)
+        run: |
+          python3 scripts/generate-api-overview.py --self-test
+          python3 scripts/generate-api-overview.py --check
+
+      # M8 #297 exit evidence: `cargo doc` without warnings. The flags are the
+      # point — a plain `cargo doc` only *prints* broken intra-doc links and
+      # bare URLs, and 22 of them had accumulated before this step existed. If
+      # rustdoc ever fails with "invalid template: ... src-files.js", delete
+      # `target/doc` and rerun: that is a stale rustdoc artifact, not a code
+      # defect.
+      - name: Build API docs without warnings (M8 #297)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc -p rivulet-core --no-deps
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -716,6 +735,24 @@ jobs:
             cargo run --quiet -p rivulet-core --example "${example}"
             echo "::endgroup::"
           done
+
+      # M8 #297 exit evidence: an *external* consumer crate — no workspace
+      # membership, no internal paths, no dev-dependencies — builds and runs
+      # against the `cargo package` artifact, i.e. the file set `cargo publish`
+      # would upload, never against the working tree. Linux only: the script
+      # builds the consumer in a second package directory and the Windows/
+      # macOS runners would pay that cost without adding signal (the property
+      # under test is the packaged file set, not the platform).
+      # RIVULET_DOWNSTREAM_REQUIRE_AUDIO makes the audio leg mandatory here: a
+      # host without the plugins gets the typed MissingElements refusal, which
+      # the smoke crate accepts, and that must not be able to replace the
+      # positive evidence unnoticed.
+      - name: Downstream consumer smoke test (M8 #297)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          RIVULET_DOWNSTREAM_REQUIRE_AUDIO: "1"
+        run: bash scripts/run-downstream-smoke.sh
 
       - name: Test pre-Rust launcher with missing GUI binary
         run: cargo test -p rivulet-launcher --test pre_rust_smoke --verbose

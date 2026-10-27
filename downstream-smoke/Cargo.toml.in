@@ -1,0 +1,26 @@
+# Manifest template for the downstream-consumer smoke crate (#297 / M8 exit
+# evidence).
+#
+# This file is NOT a usable manifest: `scripts/run-downstream-smoke.sh`
+# substitutes __RIVULET_CORE_PATH__ with the directory it unpacked the
+# `cargo package` artifact into, writes the result next to a copy of `src/`
+# inside the build directory, and builds there.
+#
+# Committing a real `Cargo.toml` with `path = "../rivulet-core"` would point
+# the consumer at the working tree — the one thing #297 must not do, because
+# the working tree is exactly what a foreign crate never gets.
+[package]
+name = "downstream-smoke"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# The only dependency, and it is the unpacked `cargo publish` artifact.
+rivulet-core = { path = "__RIVULET_CORE_PATH__" }
+
+# Standalone on purpose: this crate is no member of the Rivulet workspace and
+# must not inherit its dependency list. `[workspace]`, not
+# `package.workspace = false`, so cargo treats the build directory as its own
+# workspace root wherever the script puts it.
+[workspace]

@@ -359,8 +359,15 @@ are not yet *measured*, only audited —
 
 ### M8: Embeddable Engine and API
 
-**Status: In progress** — opened 2026-10-05, six workstream issues:
-#292, #293, #294, #295 and #296 delivered, one still open.
+**Status: Delivered** — opened 2026-10-05, closed 2026-10-27. Six workstream
+issues, #292, #293, #294, #295, #296 and #297 delivered. The milestone closed on
+the exit evidence of #297, not on its own prose: an external consumer crate
+built against the `cargo package` artifact, a warning-free `cargo doc`, the
+example run matrix, a generated public-API overview, and the
+[M8 completion report](m8-automation-completion-report.md), which records every
+criterion below as satisfied, partial or open. Four follow-ups stay named
+(F-M8-003 to F-M8-006) and are tracked in their own issues — the gate did not
+close by declaring them finished.
 
 Review the API as a product consumed by another developer:
 
@@ -379,10 +386,10 @@ small downstream-consumer smoke test.
 Workstream issues:
 
 - [x] [#292](https://github.com/thoser666/Rivulet/issues/292) — stabilized public
-  API (crate-style types, semver policy, deprecation path; the promised
-  `missing_docs` lint stayed a doc-comment example in `lib.rs` and was never
-  activated — see the closing note).
-  Covers the first, fourth and part of the second criterion.
+  API (crate-style types, semver policy, deprecation path). Covers the first,
+  fourth and part of the second criterion. The promised `missing_docs` lint
+  stayed a doc-comment example in `lib.rs` and was never activated — see the
+  closing note and F-M8-003.
 - [x] [#293](https://github.com/thoser666/Rivulet/issues/293) — API docs plus a
   `rivulet-core/examples/` crate whose examples are **run**, not just built.
   Covers the GUI-independence criterion and, for the example criterion,
@@ -397,7 +404,7 @@ Workstream issues:
     silently broken. The same seven are listed in the `rivulet-core` crate
     documentation ("Examples" section) and linked from the README M8
     overview; `ci_pinning` pins step, list and both links.
-- [#294](https://github.com/thoser666/Rivulet/issues/294) — in-process capture
+- [x] [#294](https://github.com/thoser666/Rivulet/issues/294) — in-process capture
   API so a foreign crate can record without starting the app. Covers the
   early-typed-errors criterion and the embedding promise itself.
   - **CLOSED — delivered and verified** — both layers exist and are now
@@ -416,62 +423,68 @@ Workstream issues:
     (explicit `[[test]]` target), including the acceptance-closing
     `audio_and_video_reach_the_file_and_a_local_rtmp_server_in_one_session`,
     which runs audio+video into file *and* stream in one session against a
-    loopback RTMP fixture (handshake → connect → publish → counted media
-    messages; no hardware, no network). The session entry point is also
-    demonstrated end-to-end by `examples/session_embed.rs`, which CI runs
-    with the other examples: encoding and file/stream output ride the same
-    pipeline fragments the engine uses. Closed on GitHub after review of
-    that evidence.
-- [#295](https://github.com/thoser666/Rivulet/issues/295) — feature detection
+    loopback RTMP fixture. The session entry point is also demonstrated
+    end-to-end by `examples/session_embed.rs`, which CI runs with the other
+    examples. Closed on GitHub after review of that evidence.
+- [x] [#295](https://github.com/thoser666/Rivulet/issues/295) — feature detection
   and fallback as a queryable API with a machine-readable reason.
-  **OPEN — partial** — `RecordingConfigDetect` enum with `is_available()` and
-  `reason()` methods, plus `detect_encoder_availability()` and
-  `detect_container_availability()` functions implemented in
-  `rivulet-core/src/recording_config.rs` with full test coverage in
-  `rivulet-core/tests/recording_config.rs`.
-  The codec/container compatibility criterion is met: `detect_container_availability()`
-  reports machine-readable why strings for every compatibility case (VP9→MKV,
-  H.265 ∉ MPEG-TS, H.264 everywhere).
-  What is **not** yet delivered is the encoder-side part of the issue: a
-  machine-readable, queryable answer to "is this encoder available on this
-  machine" that `detect_encoder_availability()` would need to return for a real
-  runtime query. Today it returns `Available` for every encoder by construction —
-  the availability question the issue names is backend-dependent and is deferred,
-  not faked.
-- [#296](https://github.com/thoser666/Rivulet/issues/296) — capture backends
+  **DELIVERED — one helper is partial** — `detect_available_encoders_with_info()`
+  probes the real GStreamer element factories per codec, `encoder_fallback_for_codec()`
+  reports the chosen backend plus a `why_chosen` reason, and `why_not` strings are
+  non-localised, so no log parsing is needed anywhere; `RecordingConfigDetect`
+  plus `detect_container_availability()` cover the codec/container axis and are
+  tested in `rivulet-core/tests/recording_config.rs`. What is **not** converged is
+  the older per-encoder helper: `detect_encoder_availability(encoder)` still
+  ignores its argument and answers `Available` by construction, so it disagrees
+  with the structured API it sits next to (F-M8-006). The criterion is satisfied
+  by the structured API; the stale helper is tracked, not silently kept.
+- [x] [#296](https://github.com/thoser666/Rivulet/issues/296) — capture backends
   behind one stable trait, with explicit lifecycle and thread-safety promises.
   Feeds the first criterion.
-  **OPEN — partial** — the stable `CaptureBackend` trait
-  (`list_windows` / `start_capture` / `name`), the PipeWire and Metal/WGC
-  backend stubs and the `game_capture` refactor onto it are delivered with
-  9 regression tests in `tests/capture_backend.rs`; both stubs still answer
-  `BackendUnavailable`, so the real capture paths and the xcap integration
-  remain open.
-- [#297](https://github.com/thoser666/Rivulet/issues/297) — exit evidence:
+  **DELIVERED — implementations are partial** — the stable `CaptureBackend` trait
+  (`list_windows` / `start_capture` / `name`), the PipeWire and Metal/WGC backend
+  stubs and the `game_capture` refactor onto it are delivered with 9 regression
+  tests in `tests/capture_backend.rs` and the stability matrix in
+  `docs/capture-backends.md`. `XCapBackend` is real; `PipeWireBackend` and
+  `MetalWgcBackend` still answer `BackendUnavailable`, which the trait documents
+  as a typed answer rather than a failure (F-M8-004).
+- [x] [#297](https://github.com/thoser666/Rivulet/issues/297) — exit evidence:
   downstream-consumer smoke test, docs build, example run matrix, public API
-  review and the M8 completion report. **Starts only once #292 is delivered**;
-  it closes the milestone, it does not work toward it.
+  review and the M8 completion report. Started only once #292 was delivered; it
+  closed the milestone, it did not work toward it.
+  - **CLOSED — delivered and verified.** `downstream-smoke/` is a crate of its
+    own — not a workspace member, no internal paths, `rivulet-core` as its only
+    dependency — and `scripts/run-downstream-smoke.sh` builds and runs it
+    against the unpacked `cargo package` artifact, i.e. the file set
+    `cargo publish` would upload, on Linux in the Build & Test job with
+    `RIVULET_DOWNSTREAM_REQUIRE_AUDIO=1`. `cargo doc -p rivulet-core --no-deps`
+    runs with `RUSTDOCFLAGS=-D warnings` in the Lints job and is at zero
+    warnings, from 22 broken intra-doc links. `docs/api-overview.md` is generated
+    from `lib.rs` by `scripts/generate-api-overview.py` and checked on every
+    push. This closes F-M8-001 and F-M8-002, the two evidence gaps the first
+    conditional pass recorded.
 
-The gate stays **open**. The criteria are tracked individually rather than
-glossed, and the opening state is recorded: the example criterion is now
-closed end to end (#293 with frame delivery through #294's entry point),
-while the others wait on their workstream. As recorded when the milestone
-opened,
-`rivulet-core` was `0.65.0-alpha.55` (under semver `0.x` every minor bump is
-breaking) with 66 public modules and no `#![warn(missing_docs)]`, no
-`examples/` crate, and feature detection reachable only through log output.
-The module count is a snapshot and has grown since, and the opening state
-has moved on in part: the `examples/` crate exists and CI runs all seven (#293).
-Two of the three gaps were *not* closed by the workstreams that were checked
-off against them. `#![warn(missing_docs)]` was never activated — the line in
-`lib.rs` is a doc-comment example, not a crate attribute, and turning it on
-for real reports 696 undocumented public items (measured 2026-10-13) — so
-"stabilized public API" and "documented API" are not the same claim yet.
-Feature detection hands out a bare list without a machine-readable why,
-which is what #295 exists for; frame delivery now has its example against
-the #294 entry point, which is delivered — proven end-to-end by the
-loopback-RTMP session test — and closed on GitHub. The gate stays open on
-those clauses, not on the delivery count.
+The gate closed on the criteria above with four follow-ups named in the report
+rather than absorbed into a "done" verdict: F-M8-003 (`missing_docs` never
+activated, 696 undocumented public items), F-M8-004 (PipeWire/Metal-WGC capture
+paths), F-M8-005 (written deprecation and migration policy) and F-M8-006 (the
+stale per-encoder availability helper). None of them blocks the criterion it
+sits under — the structured API, the trait contract, the pinned API surface and
+the documented contract all exist — which is why the milestone is delivered
+while the gaps stay visible in
+[m8-automation-completion-report.md](m8-automation-completion-report.md) and in
+their own tracking issues.
+
+As recorded when the milestone opened, `rivulet-core` was `0.65.0-alpha.55`
+(under semver `0.x` every minor bump is breaking) with 66 public modules and no
+`#![warn(missing_docs)]`, no `examples/` crate, and feature detection reachable
+only through log output. The module count is a snapshot and has grown since;
+`docs/api-overview.md` reports the current numbers from the code on every push.
+`#![warn(missing_docs)]` was never activated — the line in `lib.rs` is a
+doc-comment example, not a crate attribute, and turning it on for real reports
+696 undocumented public items (measured 2026-10-13) — so "stabilized public API"
+and "documented public API" are not the same claim, and F-M8-003 keeps them
+apart.
 
 ### M9: Modern Architecture
 

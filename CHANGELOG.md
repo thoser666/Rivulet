@@ -1,5 +1,31 @@
 ## [Unreleased]
 
+- feat(exit-evidence): M8 closes on external evidence (#297) — the
+  downstream-consumer smoke test is now a crate of its own (`downstream-smoke/`),
+  so `scripts/run-downstream-smoke.sh` builds and runs it against the unpacked
+  `cargo package` artifact — the file set `cargo publish` would upload — instead
+  of against the working tree; CI runs it on Linux in the Build & Test job with
+  `RIVULET_DOWNSTREAM_REQUIRE_AUDIO=1`. That closes F-M8-001.
+  `cargo doc -p rivulet-core --no-deps` now runs with `RUSTDOCFLAGS=-D warnings`
+  in the Lints job and is at zero warnings (22 broken intra-doc links fixed:
+  unresolved `AlertEvent`/`AlertKind` paths, links to `docs/*.md` files,
+  private-item links, redundant explicit targets, a bare URL and `<name>` read
+  as an HTML tag), closing F-M8-002. `docs/api-overview.md` is generated from
+  `rivulet-core/src/lib.rs` by `scripts/generate-api-overview.py` (self-tested
+  and `--check`ed in CI) and lists every `pub mod`, every crate-root re-export
+  and every module whose own documentation calls it experimental.
+  `ci_pinning` now holds README, quality gate and completion report together
+  (`m8_closeout_statements_match_across_readme_gate_and_report`) and pins the
+  exit evidence to its artifacts (`m8_exit_evidence_is_wired_into_ci_and_docs`).
+  The remaining gaps stay tracked instead of being absorbed into the close-out:
+  F-M8-003 (#342, `missing_docs` never activated), F-M8-004 (#343,
+  PipeWire/Metal-WGC stubs), F-M8-005 (#344, no written deprecation policy) and
+  F-M8-006 (#345, stale `detect_encoder_availability`).
+- docs(m8): the roadmap section, the quality gate and the completion report now
+  record M8 as delivered, with each gate criterion carrying its own verdict
+  (five satisfied, four partial) and the four follow-ups named instead of a
+  blanket "gate passed".
+
 - fix(encoder): `FeatureDetectionCache::get_or_insert` held its `Mutex` across
   `compute()`, and `encoder_fallback_for_codec` re-enters the cache for a
   second key while building its entry. `std::sync::Mutex` is not reentrant, so
@@ -21,7 +47,6 @@
 
 - feat(inspection): Feature detection as API (#295) — `detect_available_encoders_with_info()` provides structured encoder info with `why_not`; `encoder_fallback_for_codec()` provides fallback decision; capture backend detector (`detect_capture_backends()`) and hardware decoding/audio sources follow the same pattern. Cache (`FEATURE_DETECTION_CACHE`) avoids repeated GStreamer probes; deterministic tests verify the pattern without real hardware. Documentation under `docs/feature-detection.md`.
 - feat(capture): Capture backends behind stable traits (#296) — `CaptureBackend` (Send+Sync, lifecycle, typed CaptureError), stability matrix, enumeration tests, `docs/capture-backends.md`.
-- feat(exit-evidence): M8 Exit Evidence completion report (#297) — `docs/m8-automation-completion-report.md`, `rivulet-core/tests/downstream_consumer_smoke.rs`; F-M8-001/F-M8-002 follow-ups categorized.
 
 - fix(deps): **GitHub Dependabot Alert #5 closed — the outdated
   `fuzz/Cargo.lock` pulled in wasmtime 48.0.5 (GHSA-9pvw-hwfg-92h5, medium:

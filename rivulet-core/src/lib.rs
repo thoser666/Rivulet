@@ -961,8 +961,8 @@ impl RivuletEngine {
     /// Must be called before the session starts; swapping the clock while a
     /// session is running is rejected so timestamps never jump mid-stream
     /// (after a stop, a new clock applies to the next session). The default
-    /// is the wall-clock [`SystemClock`](clock::SystemClock), which keeps
-    /// today's `do-timestamp` behavior; a [`VirtualClock`](clock::VirtualClock)
+    /// is the wall-clock [`SystemClock`], which keeps
+    /// today's `do-timestamp` behavior; a [`VirtualClock`]
     /// replaces real-time pacing with explicit, exactly frame-spaced PTS so a
     /// run is time-scriptable and reproducible.
     pub fn set_clock(&mut self, clock: impl EngineClock + 'static) {
@@ -2078,7 +2078,7 @@ impl RivuletEngine {
     /// The pipeline string this engine would build for its current
     /// configuration, without running it.
     ///
-    /// Delegates to the same [`Self::build_pipeline_str`] the first-frame
+    /// Delegates to the same `Self::build_pipeline_str` the first-frame
     /// pipeline construction uses, so an inspector (M7 W5 `rivulet inspect`)
     /// can never drift from what the engine actually builds. Returns `None`
     /// when no output is configured, or when the local recording leg is

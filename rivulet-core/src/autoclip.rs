@@ -1,7 +1,7 @@
 //! Chat-driven auto-clip: save replay-buffer highlights when chat activity
 //! spikes or a `!clip` command is received.
 //!
-//! The [`SpikeDetector`] monitors incoming [`ChatMessage`]s through a sliding
+//! The [`SpikeDetector`] monitors incoming [`crate::twitch_chat::ChatMessage`]s through a sliding
 //! time window and fires a callback when the message rate exceeds the
 //! configured threshold. A separate [`handle_clip_command`] helper checks
 //! every message for the `!clip` trigger and returns `true` when the clip

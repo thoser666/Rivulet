@@ -137,14 +137,14 @@ pub fn parse_kick_event(payload: &str) -> Option<ChatMessage> {
     })
 }
 
-/// Parse one Pusher engagement-event payload into an [`AlertEvent`].
+/// Parse one Pusher engagement-event payload into an [`crate::alerts_ingest::AlertEvent`].
 ///
 /// Kick delivers engagement events on the same chatroom Pusher channel as
 /// chat messages. Handled shapes (event name suffix → kind):
 ///
-/// - `SubscriptionEvent` → [`AlertKind::Subscribe`] (tier from
+/// - `SubscriptionEvent` → [`crate::alerts_ingest::AlertKind::Subscribe`] (tier from
 ///   `data.subscription_plan_name`, falling back to `subscription_plan`)
-/// - `GiftedSubscriptionsEvent` → [`AlertKind::GiftSub`] (count from
+/// - `GiftedSubscriptionsEvent` → [`crate::alerts_ingest::AlertKind::GiftSub`] (count from
 ///   `data.gifted_usernames` length, or `data.quantity`, gifter from
 ///   `data.gifter_username`/`data.username`)
 ///
