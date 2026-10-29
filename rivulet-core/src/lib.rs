@@ -162,9 +162,15 @@ pub use stream_runtime::{AdaptiveBitrateController, BitrateChange, DelaySupervis
 pub mod encoder;
 pub mod recording_config;
 pub use recording_config::{
-    detect_container_availability, detect_encoder_availability, RecordingConfig,
+    detect_container_availability, detect_encoder_availability_for_codec, RecordingConfig,
     RecordingConfigDetect, RecordingConfigError,
 };
+// Kept re-exported so existing `rivulet_core::detect_encoder_availability` call
+// paths still compile; the item itself is deprecated in favour of
+// `detect_encoder_availability_for_codec` (#345). The allow silences the
+// warning for the re-export, not for consumers.
+#[allow(deprecated)]
+pub use recording_config::detect_encoder_availability;
 pub mod recording_job;
 pub use recording_job::{
     AudioSettings, JobError, JobState, RecordingJob, RecordingJobConfig, SessionEvent,

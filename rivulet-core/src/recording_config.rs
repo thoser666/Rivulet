@@ -9,11 +9,17 @@
 //! single frame is requested, and every rejection is a typed
 //! [`RecordingConfigError`] that names the offending field and states the fix.
 //!
-//! This is deliberately hardware-, network- and GStreamer-independent: it is
-//! pure data validation, so it runs (and is tested) on any CI runner. What it
-//! deliberately does *not* do is answer "is this encoder available on *this*
-//! machine" — that is a runtime question and belongs to the feature-detection
-//! workstream (#295), not to static config validation.
+//! [`RecordingConfig::validate`] is deliberately hardware-, network- and
+//! GStreamer-independent: it is pure data validation, so it runs (and is
+//! tested) on any CI runner.
+//!
+//! Availability is a runtime question and is answered by the feature-detection
+//! workstream (#295). The two detect helpers at the bottom of this module are
+//! thin typed views over that single probe — they never invent an answer of
+//! their own. `detect_encoder_availability_for_codec` forwards to
+//! [`crate::encoder::detect_available_encoders_with_info`], the deprecated
+//! `detect_encoder_availability` is H.264-only for compatibility and names its
+//! replacement (#345).
 
 use crate::container::RecordingContainer;
 use crate::encoder::{VideoCodec, VideoEncoder};
@@ -206,14 +212,67 @@ fn working_container_for(codec: VideoCodec) -> RecordingContainer {
     }
 }
 
-/// Feature detection for video encoders.
+/// Feature detection for video encoders, for a specific codec.
 ///
-/// Returns whether a given encoder is considered available on this machine,
-/// and a machine-readable reason string explaining the result.
-/// These checks are intentionally lightweight and do not require GStreamer
-/// or any pipeline construction — they are deterministic and CI-friendly.
-pub fn detect_encoder_availability(_encoder: VideoEncoder) -> RecordingConfigDetect {
-    RecordingConfigDetect::Available
+/// Availability is a property of an *(encoder, codec)* pair: NVENC can exist
+/// for H.264 while the H.265 factory is missing, and the software fallback is
+/// always there. This is why the helper takes both.
+///
+/// The answer is read from the same probe that backs
+/// [`crate::encoder::detect_available_encoders_with_info`] — the one source of
+/// truth for availability — and turned into the typed
+/// [`RecordingConfigDetect`]. The `reason` of an [`RecordingConfigDetect::Unavailable`]
+/// is the structured `why_not` string of [`crate::encoder::EncoderInfo`], so a
+/// consumer can log or display it without parsing GStreamer output.
+///
+/// The probe inspects GStreamer element factories, so this is a runtime check,
+/// not static config validation; [`RecordingConfig::validate`] stays the
+/// GStreamer-free gate. Like the underlying probe, this reports *detectable*
+/// availability: creating the element can still fail on a machine without the
+/// matching GPU or driver.
+pub fn detect_encoder_availability_for_codec(
+    encoder: VideoEncoder,
+    codec: VideoCodec,
+) -> RecordingConfigDetect {
+    match crate::encoder::detect_available_encoders_with_info(codec)
+        .into_iter()
+        .find(|info| info.backend == encoder)
+    {
+        Some(info) if info.available => RecordingConfigDetect::Available,
+        Some(info) => RecordingConfigDetect::Unavailable {
+            reason: info.why_not,
+        },
+        // Every `VideoEncoder` is part of every codec's candidate list, so this
+        // is unreachable; refuse instead of silently reporting "available" if
+        // the probe's contract ever changes.
+        None => RecordingConfigDetect::Unavailable {
+            reason: "encoder is not in the candidate list for this codec",
+        },
+    }
+}
+
+/// Feature detection for video encoders (H.264 only).
+///
+/// # Deprecated
+///
+/// This helper predates [`crate::encoder::detect_available_encoders_with_info`]
+/// and answered [`RecordingConfigDetect::Available`] for every input, which was
+/// simply false on a machine without the matching hardware encoder (#345). It
+/// cannot be repaired in place: availability depends on the codec, and this
+/// signature has no codec parameter.
+///
+/// It now delegates to [`detect_encoder_availability_for_codec`] with
+/// [`VideoCodec::H264`], so it at least tells the truth for the codec it
+/// implicitly assumed. New code should call
+/// `detect_encoder_availability_for_codec(encoder, codec)`, or
+/// [`crate::encoder::detect_available_encoders_with_info`] when it wants the
+/// `why_not` of every candidate at once.
+#[deprecated(
+    since = "0.65.0-alpha.55",
+    note = "availability depends on the codec; use detect_encoder_availability_for_codec(encoder, codec) or detect_available_encoders_with_info(codec)"
+)]
+pub fn detect_encoder_availability(encoder: VideoEncoder) -> RecordingConfigDetect {
+    detect_encoder_availability_for_codec(encoder, VideoCodec::H264)
 }
 
 /// Feature detection for recording containers.

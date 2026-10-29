@@ -46,7 +46,7 @@ re-export that disappeared.
 
 - Crate: `rivulet-core` 0.65.0-alpha.55
 - Public modules: **71**
-- Crate-root re-exports: **64** statements
+- Crate-root re-exports: **65** statements
 - `#![warn(missing_docs)]`: **not active (the `//!` line in `lib.rs` is a doc-comment example)**
 - Runnable examples: **7** (`audio_routing`, `dual_output`, `encoder_config`, `engine_lifecycle`, `session_embed`, `simple_record`, `simple_stream`)
 
@@ -99,7 +99,7 @@ re-export that disappeared.
 | `preset` | Recording presets that bundle resolution, FPS, and bitrate into a single | 3 | yes |
 | `rate_limit` | Shared per-platform outbound rate limiter (token bucket). | 2 | yes |
 | `reconnect` | Per-target reconnect orchestration for streaming outputs. | 7 | yes |
-| `recording_config` | Typed, early configuration validation for the in-process recording entry | 5 | yes |
+| `recording_config` | Typed, early configuration validation for the in-process recording entry | 6 | yes |
 | `recording_job` | The GUI-free in-process recording entry point ([#294](https://github.com/thoser666/Rivulet/issues/294)). | 7 | yes |
 | `region` | Rectangular capture regions (subsets of a monitor) for region capture. | 1 | yes |
 | `render` | Headless deterministic rendering from code (M7 W3, issue #189). | 10 | yes |
@@ -160,7 +160,8 @@ its own path.
 | `reconnect` | `ReconnectCommand`, `ReconnectWorker`, `RetryPolicy`, `SinkBusEvent`, `StreamingReconnectSupervisor`, `TargetReconnectState`, `target_index_from_sink_name` |
 | `stream_info` | `InfoCredentials`, `InfoEndpoints`, `InfoPlatform`, `InfoUpdateOutcome`, `StreamInfoUpdate`, `UreqHttp`, `chat_info_platform`, `chat_info_platform_of_chat`, `update_all_stream_info`, `update_platform_stream_info` |
 | `stream_runtime` | `AdaptiveBitrateController`, `BitrateChange`, `DelaySupervisor` |
-| `recording_config` | `RecordingConfig`, `RecordingConfigDetect`, `RecordingConfigError`, `detect_container_availability`, `detect_encoder_availability` |
+| `recording_config` | `RecordingConfig`, `RecordingConfigDetect`, `RecordingConfigError`, `detect_container_availability`, `detect_encoder_availability_for_codec` |
+| `recording_config` | `detect_encoder_availability` |
 | `recording_job` | `AudioSettings`, `JobError`, `JobState`, `RecordingJob`, `RecordingJobConfig`, `SessionEvent`, `SessionReport` |
 | `encoder` | `EncoderFallback`, `EncoderInfo`, `RateControl`, `RateControlMode`, `VideoCodec`, `VideoEncoder`, `best_encoder`, `best_encoder_for_codec`, `detect_available_encoders`, `detect_available_encoders_for_codec`, `detect_available_encoders_info`, `detect_available_encoders_with_info`, `encoder_fallback`, `encoder_fallback_for_codec` |
 | `video_effects` | `VideoEffects` |
