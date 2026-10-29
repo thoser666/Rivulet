@@ -22,6 +22,8 @@ Die Feature-Detection-API ermöglicht es einer einbettenden Anwendung (`rivulet-
 - `best_encoder() -> VideoEncoder` — H.264-Standard.
 - `encoder_fallback_for_codec(codec) -> EncoderFallback` — strukturierte Fallback-Entscheidung (gewählt + Kandidatenliste + `why_chosen`).
 - `encoder_fallback() -> EncoderFallback` — H.264-Standard.
+- `detect_encoder_availability_for_codec(encoder, codec) -> RecordingConfigDetect` — typisierte Sicht auf denselben Probe (siehe unten).
+- `detect_encoder_availability(encoder) -> RecordingConfigDetect` — **deprecated** (H.264-only, delegiert an die codec-bewusste Variante).
 
 Strukturtypen:
 - `EncoderInfo { backend, codec, available, why_not }`
@@ -45,6 +47,44 @@ Strukturtypen:
 - `detect_audio_source_availability() -> Vec<FeatureInfo>` — Mikrofon, PipeWire, PulseAudio, CoreAudio, WASAPI.
 - `audio_source_fallback() -> AudioSourceFallback` — strukturierter Fallback.
 
+## Eine Quelle der Wahrheit für Encoder-Verfügbarkeit (#345)
+
+`rivulet-core` hatte zwei öffentliche Antworten auf „kann diese Maschine
+encodieren?", und sie widersprachen sich:
+
+| API | Verhalten vor #345 | Verhalten nach #345 |
+| --- | --- | --- |
+| `detect_available_encoders_with_info(codec)` | probt die GStreamer-Element-Factories, `why_not` pro Kandidat | unverändert — **die** Quelle der Wahrheit |
+| `detect_encoder_availability_for_codec(encoder, codec)` | existierte nicht | liest genau diesen Probe und gibt `Available` / `Unavailable { reason: why_not }` zurück |
+| `detect_encoder_availability(encoder)` | gab **immer** `Available` zurück, unabhängig vom Argument | `#[deprecated]`, delegiert mit `VideoCodec::H264` an die codec-bewusste Variante |
+
+Warum die Deprecation statt einer Reparatur: Verfügbarkeit ist eine Eigenschaft
+des Paars *(Encoder, Codec)* — NVENC kann für H.264 vorhanden sein, während die
+H.265-Factory fehlt, und der Software-Fallback ist immer da. Die alte Signatur
+hat keinen Codec-Parameter und kann die Frage deshalb grundsätzlich nicht
+beantworten. Sie bleibt als Kompatibilitätspfad kompilierbar, sagt aber
+wenigstens für H.264 die Wahrheit.
+
+Migration:
+
+```rust
+// vorher (immer "Available", auch ohne NVENC)
+let ok = detect_encoder_availability(VideoEncoder::Nvenc).is_available();
+
+// nachher
+let ok = detect_encoder_availability_for_codec(VideoEncoder::Nvenc, VideoCodec::H265)
+    .is_available();
+
+// oder strukturiert, inklusive Grund für jeden Kandidaten
+for info in detect_available_encoders_with_info(VideoCodec::H265) {
+    println!("{:?}: available={} why_not={}", info.backend, info.available, info.why_not);
+}
+```
+
+Der Probe prüft Element-Factories, also ist das eine Laufzeit-Antwort; das
+Erzeugen des Elements kann ohne passende GPU/Treiber weiterhin scheitern.
+`RecordingConfig::validate()` bleibt der GStreamer-freie, statische Gate.
+
 ## Cache-Mechanismus
 
 Die globale `FEATURE_DETECTION_CACHE` (`Lazy<FeatureDetectionCache>`) speichert Ergebnisse für `(VideoCodec, DetectionType)` und ermöglicht `clear_for_test()` für deterministische Testläufe.
@@ -62,7 +102,14 @@ Die `feature_detection_tests` (unter `#[cfg(test)]`) prüfen:
 - `detect_available_encoders_info_hardware_before_software()` — Hardware vor Software in der Liste.
 - `encoder_fallback_picks_first_available_backend()` — `EncoderFallback::chosen` = erste verfügbare.
 
+Zusätzlich pinnt `rivulet-core/tests/recording_config.rs` die Übereinstimmung
+der beiden Antworten:
+
+- `codec_aware_encoder_detection_agrees_with_the_probe_for_every_pair()` — für jedes (Encoder, Codec)-Paar stimmen `available` **und** `why_not` mit `detect_available_encoders_with_info` überein.
+- `deprecated_encoder_detection_repeats_the_h264_probe()` — der deprecated Helper wiederholt den H.264-Probe statt einer Konstante.
+- `deprecated_encoder_helper_delegates_and_names_its_replacement()` — hardware-unabhängiger Source-Guard: der Helper delegiert, enthält kein `RecordingConfigDetect::Available` und nennt in der `#[deprecated]`-Note seinen Ersatz. Dieser Test schlägt auf dem Code vor #345 fehl, auch auf einem Runner, auf dem zufällig alle Factories installiert sind.
+
 ## Roadmap-Bezug
-- **M8** (`rivulet-core` als stabile, embeddable API) — Feature-Detection liefert die programmatische Schnittstelle, die M8 fordert (`detect_available_encoders_with_info`, `detect_encoder_availability`).
+- **M8** (`rivulet-core` als stabile, embeddable API) — Feature-Detection liefert die programmatische Schnittstelle, die M8 fordert (`detect_available_encoders_with_info`, `detect_encoder_availability_for_codec`; `detect_encoder_availability` ist seit #345 deprecated).
 - **M9** (`Modern Architecture`, #319) — Die `FeatureInfo` und `CaptureBackendInfo`-Strukturen bereiten das erweiterte Scene-Management (Folder/Group, Component-Subscene-Isolation) vor.
 - **M11** (`Extensible UI & Plugin Platform`) — Die non-localisierten `why_not`-Codes sind für Plugin-Autoren stabil, ohne dass sie GStreamer-Log-Ausgabe parsen müssen.

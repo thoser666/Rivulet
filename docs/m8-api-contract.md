@@ -72,3 +72,33 @@ and every refusal must be typed before GStreamer is involved.
 Status: verified — the suite passes locally (29/29, the E2E leg included)
 and the example runs with exit 0; enforced by the CI test and example-run
 jobs.
+
+## Deprecation: `detect_encoder_availability` (#345)
+
+The first written deprecation of the stable surface, and the shape future ones
+follow:
+
+- **What is deprecated.** `rivulet_core::detect_encoder_availability(encoder)`.
+  It answered `RecordingConfigDetect::Available` for every input, because
+  availability is a property of an *(encoder, codec)* pair and the signature had
+  no codec.
+- **What replaces it.** `detect_encoder_availability_for_codec(encoder, codec)`
+  for the typed `RecordingConfigDetect`, and
+  `detect_available_encoders_with_info(codec)` for the full candidate list with
+  a machine-readable `why_not` per backend.
+- **How a consumer migrates.** The `#[deprecated(note = ...)]` on the item names
+  the replacement, and `docs/feature-detection.md` carries the before/after
+  example. Nothing else about the type changes: both functions return
+  `RecordingConfigDetect`.
+- **What still works.** The item stays callable and re-exported from the crate
+  root for the whole `0.65` line (H.264 only, delegating to the codec-aware
+  helper), so an existing caller keeps compiling and now gets a true answer for
+  the codec it implicitly assumed.
+- **What is pinned.** `rivulet-core/tests/recording_config.rs` asserts the typed
+  helper agrees with the probe for every (encoder, codec) pair, and a
+  source-level guard fails if the deprecated helper ever returns a constant
+  again or loses the note naming its replacement.
+
+Status: verified - `cargo test -p rivulet-core --test recording_config` passes
+(34 tests) and `cargo clippy --workspace --all-targets -- -D warnings` reports
+no deprecated-use warning inside the crate.

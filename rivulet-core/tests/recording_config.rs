@@ -7,11 +7,18 @@
 //! names the offending field and carries a message stating the fix — all
 //! before any GStreamer pipeline is touched, so the checks are deterministic
 //! on a runner without hardware, network, or codecs.
+//!
+//! The availability tests at the bottom are the exception to "no GStreamer":
+//! they pin that the typed detect helpers repeat the real encoder probe
+//! instead of inventing an answer
+//! ([#345](https://github.com/thoser666/Rivulet/issues/345)). They assert
+//! agreement with the probe rather than a fixed verdict, so they hold on a
+//! machine with NVENC and on a headless CI runner alike.
 
 use rivulet_core::container::RecordingContainer;
-use rivulet_core::encoder::{VideoCodec, VideoEncoder};
+use rivulet_core::encoder::{detect_available_encoders_with_info, VideoCodec, VideoEncoder};
 use rivulet_core::{
-    detect_container_availability, detect_encoder_availability, RecordingConfig,
+    detect_container_availability, detect_encoder_availability_for_codec, RecordingConfig,
     RecordingConfigError,
 };
 
@@ -296,25 +303,123 @@ fn field_names_are_stable_for_binding_to_ui_controls() {
 }
 
 #[test]
-fn detect_encoder_availability_is_available_for_software() {
-    let result = detect_encoder_availability(VideoEncoder::Software);
-    assert!(result.is_available());
-}
-
-#[test]
-fn detect_encoder_availability_is_available_for_all_backends() {
-    for encoder in [
-        VideoEncoder::Software,
-        VideoEncoder::Nvenc,
-        VideoEncoder::QuickSync,
-        VideoEncoder::Amf,
-    ] {
-        let result = detect_encoder_availability(encoder);
+fn software_encoder_is_reported_available_for_every_codec() {
+    let _ = gstreamer::init();
+    for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+        let result = detect_encoder_availability_for_codec(VideoEncoder::Software, codec);
         assert!(
             result.is_available(),
-            "encoder {encoder:?} should be available"
+            "the software fallback must be available for {codec:?}, got {result:?}"
+        );
+        assert_eq!(result.reason(), "", "an available result has no reason");
+    }
+}
+
+/// #345: this helper used to answer `Available` for every input. Availability
+/// is a property of an *(encoder, codec)* pair, so the codec-aware helper must
+/// repeat the probe verbatim — availability *and* the `why_not` string.
+#[test]
+fn codec_aware_encoder_detection_agrees_with_the_probe_for_every_pair() {
+    let _ = gstreamer::init();
+    for codec in [VideoCodec::H264, VideoCodec::H265, VideoCodec::VP9] {
+        let probe = detect_available_encoders_with_info(codec);
+        for encoder in [
+            VideoEncoder::Nvenc,
+            VideoEncoder::QuickSync,
+            VideoEncoder::Amf,
+            VideoEncoder::Software,
+        ] {
+            let expected = probe
+                .iter()
+                .find(|info| info.backend == encoder)
+                .unwrap_or_else(|| panic!("the probe must list {encoder:?} for {codec:?}"));
+            let detect = detect_encoder_availability_for_codec(encoder, codec);
+            assert_eq!(
+                detect.is_available(),
+                expected.is_available(),
+                "availability disagrees with the probe for {encoder:?}/{codec:?}"
+            );
+            assert_eq!(
+                detect.reason(),
+                expected.reason(),
+                "reason disagrees with the probe for {encoder:?}/{codec:?}"
+            );
+            if detect.is_available() {
+                assert_eq!(detect.reason(), "");
+            } else {
+                assert!(
+                    !detect.reason().is_empty(),
+                    "an unavailable result must say why ({encoder:?}/{codec:?})"
+                );
+            }
+        }
+    }
+}
+
+/// The deprecated helper is H.264-only by signature; for that codec it must
+/// still tell the truth instead of the old unconditional `Available`.
+#[test]
+#[allow(deprecated)]
+fn deprecated_encoder_detection_repeats_the_h264_probe() {
+    #[allow(deprecated)]
+    use rivulet_core::detect_encoder_availability;
+
+    let _ = gstreamer::init();
+    for info in detect_available_encoders_with_info(VideoCodec::H264) {
+        let legacy = detect_encoder_availability(info.backend);
+        assert_eq!(
+            legacy.is_available(),
+            info.available,
+            "the deprecated helper disagrees with the H.264 probe for {:?}",
+            info.backend
+        );
+        assert_eq!(
+            legacy.reason(),
+            info.why_not,
+            "the deprecated helper drops the probe's reason for {:?}",
+            info.backend
         );
     }
+}
+
+/// The two tests above can only observe what this machine's GStreamer
+/// installation reports; on a runner where every factory exists they would
+/// pass against the old unconditional `Available` too. This guard is the
+/// hardware-independent half of the #345 regression: the deprecated helper
+/// must delegate to the codec-aware one and carry a note naming its
+/// replacement, so it cannot silently go back to a constant.
+#[test]
+fn deprecated_encoder_helper_delegates_and_names_its_replacement() {
+    const SOURCE: &str = include_str!("../src/recording_config.rs");
+    let lines: Vec<&str> = SOURCE.lines().collect();
+    let start = lines
+        .iter()
+        .position(|line| line.starts_with("pub fn detect_encoder_availability("))
+        .expect("the deprecated helper must still exist under its documented name");
+    let body_end = lines[start + 1..]
+        .iter()
+        .position(|line| line.trim() == "}")
+        .expect("the helper must have a closing brace")
+        + start
+        + 1;
+    let body = lines[start + 1..body_end].join("\n");
+    assert!(
+        body.contains("detect_encoder_availability_for_codec("),
+        "the deprecated helper must delegate to the codec-aware one, not answer on its own: {body}"
+    );
+    assert!(
+        !body.contains("RecordingConfigDetect::Available"),
+        "the deprecated helper must not return a constant: {body}"
+    );
+    let attribute = lines[start.saturating_sub(6)..start].join("\n");
+    assert!(
+        attribute.contains("#[deprecated("),
+        "the helper must be marked deprecated: {attribute}"
+    );
+    assert!(
+        attribute.contains("detect_available_encoders_with_info"),
+        "the deprecation note must name the replacement: {attribute}"
+    );
 }
 
 #[test]

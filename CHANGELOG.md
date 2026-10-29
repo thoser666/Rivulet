@@ -19,6 +19,28 @@
   follow; a superseded `develop` run only defers an alpha release to the newer
   run, which covers both commits.
 
+- fix(core,m8): **`detect_encoder_availability()` claimed every encoder was
+  available, on every machine — the second public answer to "can this machine
+  encode?" contradicted the first one.** `detect_available_encoders_with_info(codec)`
+  probes the real GStreamer element factories and carries a `why_not` per
+  candidate; the older per-encoder helper ignored its argument and returned
+  `RecordingConfigDetect::Available` unconditionally, so a consumer without
+  NVENC still got a `true`. Availability is a property of an *(encoder, codec)*
+  pair and the old signature has no codec, so it cannot be repaired in place:
+  it is now `#[deprecated]`, stays callable and re-exported for the `0.65`
+  line, and delegates to the new
+  `detect_encoder_availability_for_codec(encoder, codec)` with H.264 — the
+  codec it silently assumed all along. The new helper reads the same probe, so
+  both surfaces agree and a refusal carries the probe's structured `why_not`.
+  `rivulet-core/tests/recording_config.rs` pins the agreement for every
+  (encoder, codec) pair plus a hardware-independent source guard (the
+  deprecated helper must delegate, never return a constant, and its note must
+  name the replacement), and the previous test that asserted "every backend is
+  available" is gone — it was asserting the bug. Documented in
+  `docs/feature-detection.md` (single source of truth, migration example) and
+  `docs/m8-api-contract.md` (the first written deprecation); closes F-M8-006
+  (#345).
+
 - fix(deps): **the RustSec `zstd` family is removed instead of ignored —
   `Cargo Audit`, `Cargo Deny` and therefore the required `Security` check
   failed on every new commit.** `RUSTSEC-2026-0391` (`zstd >= 0.14.3`),
