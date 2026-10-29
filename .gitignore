@@ -98,3 +98,6 @@ fuzz/coverage/
 
 # M10 code-gen spike: rendered screenshots are regenerable binaries
 /scripts/codegen-spike/results/**/*.png
+
+# Local assistant tooling state (Qwen CLI) — never committed
+.qwen/
