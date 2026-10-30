@@ -11,8 +11,13 @@
   concurrency half: runs are grouped by ref and a push to the same
   pull-request branch cancels the superseded run instead of queueing a second
   one, while pushes to `develop`, scheduled runs and manual dispatches are
-  never cancelled. `rivulet-core/tests/ci_triggers.rs` guards both rules, so a
-  new workflow cannot reintroduce the duplicate or forget the group.
+  never cancelled. The scheduled and manual-only workflows that could stack
+  runs got the serializing form (`cancel-in-progress: false`): `nightly`,
+  `fuzz-deep` and `obs-upstream` run one at a time, and `distribution-readiness`
+  is grouped per channel so a manual check for one channel neither queues
+  behind nor cancels the weekly GitHub-channel validation.
+  `rivulet-core/tests/ci_triggers.rs` guards both pull-request rules, so a new
+  workflow cannot reintroduce the duplicate or forget the group.
 
 - feat(core,m8): **a public name now has a written path out of the API instead
   of disappearing in a minor bump** ([#344](https://github.com/thoser666/Rivulet/issues/344),

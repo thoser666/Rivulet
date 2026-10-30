@@ -20,6 +20,14 @@ on:
 permissions:
   contents: read
 
+# One campaign at a time. Two concurrent runs would both grow the corpus from
+# the same cache entry and the later save would overwrite the other's finds,
+# and cancelling a campaign mid-target throws away the minutes it already
+# spent. A manual dispatch therefore queues behind the weekly run.
+concurrency:
+  group: fuzz-deep
+  cancel-in-progress: false
+
 jobs:
   deep_fuzz:
     name: Deep fuzz (10 min per target)

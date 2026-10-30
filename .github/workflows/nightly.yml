@@ -13,6 +13,14 @@ on:
 permissions:
   contents: read
 
+# Nightly runs are serialized, not cancelled: a manual dispatch during the
+# daily run, or a schedule that GitHub queues late, must not kill a run whose
+# job summaries and artifacts the next day's triage reads. The second run
+# simply waits.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
 
