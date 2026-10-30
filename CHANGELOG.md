@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+- ci(workflows): **a push to a pull-request branch no longer starts the same
+  checks a second time.** #346 restricted `ci.yml`, but `Signing E2E` still
+  paired an all-branch `push` trigger with `pull_request`, so every branch push
+  ran the three signing smoke tests twice (`gh run list` shows the
+  `push`/`pull_request` pair for each commit). That trigger now covers only
+  `develop`, `master` and `release/**` — the refs that never get a
+  `pull_request` run. `Signing E2E`, `Security`, `OpenSSF Scorecard`,
+  `Ruleset Guard`, `Flatpak Build` and `Wiki translations` also got the
+  concurrency half: runs are grouped by ref and a push to the same
+  pull-request branch cancels the superseded run instead of queueing a second
+  one, while pushes to `develop`, scheduled runs and manual dispatches are
+  never cancelled. `rivulet-core/tests/ci_triggers.rs` guards both rules, so a
+  new workflow cannot reintroduce the duplicate or forget the group.
+
 - feat(core,m8): **a public name now has a written path out of the API instead
   of disappearing in a minor bump** ([#344](https://github.com/thoser666/Rivulet/issues/344),
   F-M8-005). M8 required an explicit deprecation, migration and compatibility

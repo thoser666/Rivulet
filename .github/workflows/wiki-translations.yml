@@ -16,6 +16,13 @@ on:
 permissions:
   contents: read
 
+# A newer run for the same ref supersedes the older one: pushing twice to a
+# pull-request branch cancels the superseded check instead of queueing a second
+# one behind it. Scheduled runs and manual dispatches are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   sync-and-check:
     runs-on: ubuntu-latest
