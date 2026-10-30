@@ -1,5 +1,29 @@
 ## [Unreleased]
 
+- feat(core,m9): **scene management gains the model the folder/search work
+  needs — folders that cannot be made cyclic, component scenes, and legacy
+  collections that still load** ([#319](https://github.com/thoser666/Rivulet/issues/319),
+  packages A and B). A scene now carries a `kind`: `Primary` (the
+  live-switching list) or `Component` (a reusable intro/BRB/panel layout that
+  stays switchable and exportable but stays out of the default picker);
+  `#[serde(default)]` means every collection exported before this change loads
+  unchanged as all-primary, so no existing user is stranded by an added field.
+  Hierarchy changes go through `set_parent`/`set_color`/`set_kind` instead of
+  writing `Scene` fields directly, and `set_parent` refuses a scene as its own
+  parent and a parent inside the moved scene's own subtree with a typed
+  `SceneHierarchyError` — the mutation is validated before the undo snapshot,
+  so a refused move leaves both the tree and the history untouched. Deleting a
+  folder now lifts its children to the folder's own parent instead of leaving
+  them with a parent that no longer exists, `duplicate_scene` keeps the source's
+  folder and kind instead of ejecting the copy to the top level, and
+  `ordered_scenes()` keeps a visited set so a dangling parent counts as a root
+  and a hand-edited cyclic collection cannot hang the traversal or drop a
+  scene. The spec — including the OBS group mapping and the split into the
+  scene-dock (C) and search (D) packages — is
+  [`docs/scene-management.md`](docs/scene-management.md), linked from the M9
+  section of the README and the M9 quality gate; 15 hardware-free regression
+  tests live in `rivulet-core/tests/scene.rs`.
+
 - ci(concurrency): **a branch push no longer runs the CI matrix twice.** Every
   push to a branch with an open pull request started this workflow twice — once
   for `push` (branches: `**`) and once for `pull_request` — and both ran the

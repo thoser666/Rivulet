@@ -502,6 +502,11 @@ Review perceived performance and hardware fallback behavior:
 - Capture and streaming leave bounded headroom for the game; p95/p99 frame-time,
   idle CPU, memory stability, and fallback evidence are recorded.
 - Unsupported GPUs degrade gracefully without blank previews or silent output.
+- Scene organization survives what users actually do to it: a folder cannot be
+  dropped into its own subtree, deleting a folder keeps its scenes reachable,
+  a collection written before scene kinds existed still opens, and a
+  hand-edited collection with a dangling parent or a cycle still lists every
+  scene exactly once. See [`scene-management.md`](scene-management.md).
 
 Exit evidence: representative performance report, backend matrix, and screenshots
 or recordings at the minimum and recommended hardware profiles.
