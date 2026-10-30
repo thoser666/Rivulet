@@ -12,6 +12,13 @@ permissions:
   # report and its review checklist.
   issues: write
 
+# Serialized: two runs would read the same cached delta state and both try to
+# create or update the single review issue. A manual dispatch waits for the
+# scheduled run instead of cancelling it.
+concurrency:
+  group: obs-upstream
+  cancel-in-progress: false
+
 jobs:
   check:
     name: Check latest OBS release notes

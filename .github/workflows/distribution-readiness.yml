@@ -45,6 +45,14 @@ on:
 permissions:
   contents: read
 
+# Grouped per channel, so a manual check for one distribution channel does not
+# queue behind (or cancel) the weekly GitHub-channel validation. Runs for the
+# same channel are serialized: the second one waits instead of being killed
+# mid-publication.
+concurrency:
+  group: distribution-readiness-${{ inputs.platform || 'github' }}
+  cancel-in-progress: false
+
 jobs:
   validate-release:
     name: Validate ${{ inputs.platform || 'github' }} distribution
