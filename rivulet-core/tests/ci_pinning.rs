@@ -6353,11 +6353,30 @@ fn m8_closeout_statements_match_across_readme_gate_and_report() {
             .unwrap_or_else(|| panic!("the M8 completion report must keep the {finding} row"));
         assert!(
             row.contains(&format!("/issues/{issue}")),
-            "the open {finding} row must link its tracking issue #{issue}, got: {row}"
+            "the {finding} row must link its tracking issue #{issue}, got: {row}"
         );
+    }
+    // A finding that was fixed after the closeout says so in its own row; the
+    // remaining ones are still recorded as open. Naming the IDs rather than
+    // counting words keeps the three surfaces tied to the report's table.
+    for finding in ["F-M8-003", "F-M8-004"] {
+        let row = report
+            .lines()
+            .find(|line| line.starts_with(&format!("| {finding} |")))
+            .unwrap_or_else(|| panic!("the M8 completion report must keep the {finding} row"));
         assert!(
-            row.contains("open"),
-            "the {finding} row must be recorded as open, got: {row}"
+            row.contains("| open |"),
+            "the still-unfixed {finding} row must be recorded as open, got: {row}"
+        );
+    }
+    for finding in ["F-M8-005", "F-M8-006"] {
+        let row = report
+            .lines()
+            .find(|line| line.starts_with(&format!("| {finding} |")))
+            .unwrap_or_else(|| panic!("the M8 completion report must keep the {finding} row"));
+        assert!(
+            row.contains("closed"),
+            "the fixed {finding} row must record its closure, got: {row}"
         );
     }
 
@@ -6429,23 +6448,30 @@ fn m8_closeout_statements_match_across_readme_gate_and_report() {
         )),
         "the report's summary must state the counts the criteria table carries: {satisfied} satisfied, {partial} partial"
     );
-    // Every surface names how many follow-ups remain, and the number is the
-    // number of open findings in the report's own table.
-    let open_findings = report
+    // Every surface names the follow-ups that are still open, and the report's
+    // own table decides which those are. Counting them in prose was brittle:
+    // the count changes when a follow-up is fixed, the IDs do not.
+    let open_findings: Vec<&str> = report
         .lines()
         .filter(|line| line.starts_with("| F-M8-"))
         .filter(|line| line.contains("| open |"))
-        .count();
-    let expected_word = number_word(open_findings);
+        .filter_map(|line| line.split('|').nth(1).map(str::trim))
+        .collect();
+    assert!(
+        !open_findings.is_empty(),
+        "the report must still record at least one open follow-up"
+    );
     for (label, section) in [
         ("README M8 section", readme_m8_section),
         ("M8 quality gate", gates_m8_section),
         ("M8 completion report", report.as_str()),
     ] {
-        assert!(
-            section.contains(expected_word),
-            "the {label} must state that {expected_word} follow-ups remain open"
-        );
+        for finding in &open_findings {
+            assert!(
+                section.contains(finding),
+                "the {label} must name the still-open follow-up {finding}"
+            );
+        }
     }
 }
 

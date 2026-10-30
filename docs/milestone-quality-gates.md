@@ -367,7 +367,10 @@ example run matrix, a generated public-API overview, and the
 [M8 completion report](m8-automation-completion-report.md), which records every
 criterion below as satisfied, partial or open. Four follow-ups stay named
 (F-M8-003 to F-M8-006) and are tracked in their own issues — the gate did not
-close by declaring them finished.
+close by declaring them finished. Two of them are closed since
+(F-M8-005 by [#344](https://github.com/thoser666/Rivulet/issues/344), F-M8-006
+by [#345](https://github.com/thoser666/Rivulet/issues/345)); F-M8-003 and
+F-M8-004 remain open.
 
 Review the API as a product consumed by another developer:
 
@@ -428,16 +431,15 @@ Workstream issues:
     examples. Closed on GitHub after review of that evidence.
 - [x] [#295](https://github.com/thoser666/Rivulet/issues/295) — feature detection
   and fallback as a queryable API with a machine-readable reason.
-  **DELIVERED — one helper is partial** — `detect_available_encoders_with_info()`
+  **DELIVERED** — `detect_available_encoders_with_info()`
   probes the real GStreamer element factories per codec, `encoder_fallback_for_codec()`
   reports the chosen backend plus a `why_chosen` reason, and `why_not` strings are
   non-localised, so no log parsing is needed anywhere; `RecordingConfigDetect`
   plus `detect_container_availability()` cover the codec/container axis and are
-  tested in `rivulet-core/tests/recording_config.rs`. What is **not** converged is
-  the older per-encoder helper: `detect_encoder_availability(encoder)` still
-  ignores its argument and answers `Available` by construction, so it disagrees
-  with the structured API it sits next to (F-M8-006). The criterion is satisfied
-  by the structured API; the stale helper is tracked, not silently kept.
+  tested in `rivulet-core/tests/recording_config.rs`. The older per-encoder helper
+  is deprecated and delegates to `detect_encoder_availability_for_codec()`, so it
+  can no longer disagree with the structured API (F-M8-006, closed by
+  [#345](https://github.com/thoser666/Rivulet/issues/345)).
 - [x] [#296](https://github.com/thoser666/Rivulet/issues/296) — capture backends
   behind one stable trait, with explicit lifecycle and thread-safety promises.
   Feeds the first criterion.
@@ -467,11 +469,13 @@ Workstream issues:
 The gate closed on the criteria above with four follow-ups named in the report
 rather than absorbed into a "done" verdict: F-M8-003 (`missing_docs` never
 activated, 696 undocumented public items), F-M8-004 (PipeWire/Metal-WGC capture
-paths), F-M8-005 (written deprecation and migration policy) and F-M8-006 (the
-stale per-encoder availability helper). None of them blocks the criterion it
-sits under — the structured API, the trait contract, the pinned API surface and
-the documented contract all exist — which is why the milestone is delivered
-while the gaps stay visible in
+paths), F-M8-005 (written deprecation and migration policy, **closed by
+[#344](https://github.com/thoser666/Rivulet/issues/344)** — see
+[`api-migration.md`](api-migration.md)) and F-M8-006 (the stale per-encoder
+availability helper, **closed by [#345](https://github.com/thoser666/Rivulet/issues/345)**).
+None of them blocks the criterion it sits under — the structured API, the trait
+contract, the pinned API surface and the documented contract all exist — which
+is why the milestone is delivered while the gaps stay visible in
 [m8-automation-completion-report.md](m8-automation-completion-report.md) and in
 their own tracking issues.
 

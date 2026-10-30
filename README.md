@@ -439,7 +439,7 @@ must not be implied by beta parity.
 
 ### 📦 M8 – Embeddable Engine & API
 
-**Status: Delivered** (opened 2026-10-05, closed 2026-10-27 — all six workstream issues, #292, #293, #294, #295, #296 and #297, delivered). The [M8 completion report](docs/m8-automation-completion-report.md) records every gate criterion individually and names the four follow-ups the exit evidence left open: F-M8-003, F-M8-004, F-M8-005 and F-M8-006.
+**Status: Delivered** (opened 2026-10-05, closed 2026-10-27 — all six workstream issues, #292, #293, #294, #295, #296 and #297, delivered). The [M8 completion report](docs/m8-automation-completion-report.md) records every gate criterion individually and names the four follow-ups the exit evidence left open: F-M8-003, F-M8-004, F-M8-005 and F-M8-006 — F-M8-005 (written deprecation and migration policy) is now closed by [`docs/api-migration.md`](docs/api-migration.md), and F-M8-006 by the #345 deprecation.
 
 *Differentiation pillar #2: `rivulet-core` is a normal library, not a monolith with retrofitted API.*
 

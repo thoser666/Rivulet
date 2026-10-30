@@ -13,7 +13,7 @@
   examples, and exit evidence (`cargo doc`, example run matrix, downstream
   consumer smoke test, API overview from code).
 - Overall result: **Delivered** — six workstreams closed, nine gate criteria
-  recorded individually (five satisfied, four partial), four follow-ups named
+  recorded individually (seven satisfied, two partial), four follow-ups named
   and tracked in their own issues instead of being absorbed into the verdict.
 
 ## Summary
@@ -45,9 +45,11 @@ here rather than carried forward:
   broken intra-doc links it found on the way are fixed (no `-A`/`--cap-lints`
   suppression was added).
 
-Four follow-ups remain and are **not** silently accepted as completion. Each
+Two follow-ups remain and are **not** silently accepted as completion. Each
 was found while producing the exit evidence, and each names the criterion it
-sits under, its tracking issue and its retest condition:
+sits under, its tracking issue and its retest condition. Two further findings
+(F-M8-005, F-M8-006) have since been closed by their own pull requests and are
+still listed below with that verdict:
 
 - **F-M8-003** (Medium, API documentation): `#![warn(missing_docs)]` is still not
   an active crate attribute; turning it on for real reports 696 undocumented
@@ -57,20 +59,26 @@ sits under, its tracking issue and its retest condition:
   `MetalWgcBackend` answer `BackendUnavailable` by construction; only
   `XCapBackend` captures. Tracked as
   [#343](https://github.com/thoser666/Rivulet/issues/343).
-- **F-M8-005** (Low, API policy): no written deprecation or migration policy
-  exists next to the contract. Tracked as
+- **F-M8-005** (Low, API policy): the written deprecation and migration policy
+  now lives in [`api-migration.md`](api-migration.md) and is enforced by the
+  `api_stability` removal, deprecation-note and policy-link guards. Closed by
   [#344](https://github.com/thoser666/Rivulet/issues/344).
-- **F-M8-006** (Low, feature detection): `detect_encoder_availability(encoder)`
-  ignores its argument and answers `Available`, disagreeing with
-  `detect_available_encoders_with_info()`. Tracked as
-  [#345](https://github.com/thoser666/Rivulet/issues/345).
+- **F-M8-006** (Low, feature detection): the per-encoder helper answered
+  `Available` for every input and disagreed with
+  `detect_available_encoders_with_info()`. **Closed by**
+  [#345](https://github.com/thoser666/Rivulet/issues/345): the helper is
+  deprecated, delegates to `detect_encoder_availability_for_codec()`, and both
+  surfaces are pinned against each other in `tests/recording_config.rs`.
 
 - Roadmap checkboxes: **6 / 6 checked** in the `README.md` M8 section; the
   pinned `ci_pinning` guards hold status, gate, report and issue references
   together.
-- Blocker/Critical findings: **0**; open High findings: **0**. The four open
-  items are Medium/Low and are all in the "documentation or implementation of an
-  already-delivered contract" class — none of them is a broken promise to a
+- Blocker/Critical findings: **0**; open High findings: **0**. Two of the four
+  follow-ups are closed (F-M8-005 by
+  [#344](https://github.com/thoser666/Rivulet/issues/344), F-M8-006 by
+  [#345](https://github.com/thoser666/Rivulet/issues/345)); the remaining two,
+  F-M8-003 and F-M8-004, are Medium and in the "documentation or implementation
+  of an already-delivered contract" class — neither is a broken promise to a
   consumer.
 
 ## Exit evidence (#297)
@@ -127,8 +135,9 @@ replaced by the refusal branch unnoticed. Locally, on a checkout whose
   detector) — [#295](https://github.com/thoser666/Rivulet/issues/295) —
   structured `EncoderInfo`/`EncoderFallback`/`CaptureBackendInfo`/`FeatureInfo`,
   `FEATURE_DETECTION_CACHE`, non-localised `why_not`, docs at
-  `docs/feature-detection.md`; the older per-encoder helper is not converged
-  (F-M8-006)
+  `docs/feature-detection.md`; the older per-encoder helper is deprecated and
+  delegates to the codec-aware helper (F-M8-006, closed by
+  [#345](https://github.com/thoser666/Rivulet/issues/345))
 - [x] Abstraction of capture backends (xcap, PipeWire, Metal/WGC) behind stable
   traits — [#296](https://github.com/thoser666/Rivulet/issues/296) —
   `CaptureBackend` trait (`Send+Sync`, lifecycle, typed `CaptureError`),
@@ -172,8 +181,8 @@ folded into a single verdict.
 | --- | --- | --- | --- |
 | 1 | Public names, defaults, error types, lifecycle and thread-safety guarantees coherent and documented | **partial** | `api_stability` guard, typed `RecordingConfigError`/`JobError`; documentation is not enforced because the `missing_docs` lint is inactive (F-M8-003) |
 | 2 | Examples compile and cover recording, streaming, dual output, encoders, frame delivery | **satisfied** | all seven examples run on three platforms in CI; `session_embed` covers frame delivery |
-| 3 | Feature detection and fallback available without parsing logs | **partial** | `detect_available_encoders_with_info`, `encoder_fallback_for_codec` with `why_chosen`/`why_not`; `detect_encoder_availability` still lies by construction (F-M8-006) |
-| 4 | Versioning, deprecation, migration and compatibility policy explicit | **partial** | `docs/m8-api-contract.md` plus the pinned surface; no written deprecation/migration path (F-M8-005) |
+| 3 | Feature detection and fallback available without parsing logs | **satisfied** | `detect_available_encoders_with_info`, `encoder_fallback_for_codec` with `why_chosen`/`why_not`; `detect_encoder_availability` is deprecated and delegates to the codec-aware helper (was F-M8-006) |
+| 4 | Versioning, deprecation, migration and compatibility policy explicit | **satisfied** | [`api-migration.md`](api-migration.md) names the window, the attribute, the migration table and what counts as a removal; `api_stability` fails on an undocumented removal or a note-less `#[deprecated]` (was F-M8-005) |
 | 5 | Invalid configuration fails early with typed, actionable errors | **satisfied** | `RecordingConfig::validate()` per-parameter, `tests/recording_config.rs`; `RecordingJob::start` validates before GStreamer |
 | 6 | API docs and examples work without depending on GUI-only state | **satisfied** | examples link no `egui`/`eframe`; `RecordingJob` is GUI-free |
 | 7 | Capture backend API coherent and documented | **partial** | `CaptureBackend` trait, stability matrix, 9 regression tests; PipeWire/Metal-WGC implementations are stubs (F-M8-004) |
@@ -181,13 +190,12 @@ folded into a single verdict.
 | 9 | Docs build without warnings | **satisfied** | `-D warnings` doc gate in CI, zero warnings (was F-M8-002) |
 
 There is no Blocker, Critical or open High finding. The milestone is delivered:
-five criteria are satisfied outright, and the four partial ones are each an
-unfinished *edge* of a delivered contract — a lint that is not switched on, a
-written policy that does not exist yet, two stub implementations behind a stable
-trait, and one stale helper beside the API that replaced it. Each of those four
-has its own tracking issue and a retest condition, and the README, the gate and
-this report name them together rather than one document claiming a completion
-the others hedge.
+seven criteria are satisfied outright, and the two partial ones are each an
+unfinished *edge* of a delivered contract — a lint that is not switched on and
+two stub implementations behind a stable trait. Each of those two has its own
+tracking issue and a retest condition, and the README, the gate and this report
+name them together rather than one document claiming a completion the others
+hedge.
 
 ## Findings and explicit follow-ups
 
@@ -201,14 +209,14 @@ own issues. Nothing is dropped between the two tables.
 | F-M8-002 | Low | **closed by #297** | Exit evidence | `cargo doc` warnings were only checked by the pre-push hook. The Lints job now runs the doc build with `RUSTDOCFLAGS=-D warnings`, and the 22 broken links it found are fixed. | [#297](https://github.com/thoser666/Rivulet/issues/297) | `Build API docs without warnings (M8 #297)` fails on the first new rustdoc warning |
 | F-M8-003 | Medium | open | API documentation | `#![warn(missing_docs)]` is not active; 696 undocumented public items (2026-10-13). "Stabilized" and "documented" are not the same claim yet. | [#342](https://github.com/thoser666/Rivulet/issues/342) | `docs/api-overview.md` reports `#![warn(missing_docs)]: active` and the build is warning-free with the lint on |
 | F-M8-004 | Medium | open | Capture backends | `PipeWireBackend` and `MetalWgcBackend` answer `BackendUnavailable` by construction; only `XCapBackend` captures real frames. | [#343](https://github.com/thoser666/Rivulet/issues/343) | Each backend captures frames on its platform and no longer answers `BackendUnavailable` there |
-| F-M8-005 | Low | open | API policy | No written deprecation or migration policy exists next to `docs/m8-api-contract.md`. | [#344](https://github.com/thoser666/Rivulet/issues/344) | The policy names the supported window and a removal fails the guard without a migration note |
-| F-M8-006 | Low | open | Feature detection | `detect_encoder_availability(encoder)` ignores its argument and answers `Available`, disagreeing with `detect_available_encoders_with_info()`. | [#345](https://github.com/thoser666/Rivulet/issues/345) | Both APIs agree for every encoder/codec pair, pinned by a test |
+| F-M8-005 | Low | **closed by #344** | API policy | No written deprecation or migration policy existed next to `docs/m8-api-contract.md`. [`api-migration.md`](api-migration.md) now names the window (at least one minor release), the `#[deprecated]` mechanics, the migration table, and what counts as a removal. | [#344](https://github.com/thoser666/Rivulet/issues/344) | `cargo test -p rivulet-core --test api_stability` fails on a removal that has no migration row and on a note-less `#[deprecated]`; the baseline-update command refuses an undocumented drop |
+| F-M8-006 | Low | **closed by #345** | Feature detection | `detect_encoder_availability(encoder)` ignored its argument and answered `Available`, disagreeing with `detect_available_encoders_with_info()`. The helper is deprecated, delegates to `detect_encoder_availability_for_codec()`, and the agreement is pinned in `tests/recording_config.rs`. | [#345](https://github.com/thoser666/Rivulet/issues/345) | Both APIs agree for every encoder/codec pair, pinned by a test |
 
 ## Decision
 
 - [ ] M8 gate passed without conditions.
 - [x] M8 delivered: six workstreams, nine criteria recorded individually
-  (five satisfied, four partial), four follow-ups named in the table above and
+  (seven satisfied, two partial), four follow-ups named in the table above and
   tracked in their own issues. The two evidence gaps of the first conditional
   pass (F-M8-001, F-M8-002) are closed by this workstream, not deferred.
 - [ ] Failed; release-blocking M8 work remains.

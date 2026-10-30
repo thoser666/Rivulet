@@ -20,6 +20,9 @@ hand-written.
 Usage:
     scripts/generate-api-overview.py          # rewrite the block in place
     scripts/generate-api-overview.py --check  # exit non-zero if the doc drifts
+    scripts/generate-api-overview.py --write-baseline
+                                              # freeze the current crate-root
+                                              # re-exports as the removal baseline
     scripts/generate-api-overview.py --self-test
 """
 
@@ -50,6 +53,31 @@ PUB_ITEM = re.compile(r"^pub (?:fn|struct|enum|trait|const|static|type|mod|use) 
 PUB_MOD = re.compile(r"^pub mod ([A-Za-z0-9_]+);")
 VERSION_LINE = re.compile(r'^version = "([^"]+)"')
 SECTION_HEADER = re.compile(r"^\[([^\]]+)\]")
+
+# The removal baseline read by `rivulet-core/tests/api_stability.rs`. It is the
+# crate-root surface of the last released line; the guard fails when a name
+# disappears from `docs/api-overview.md` without a migration row in
+# `docs/api-migration.md`. It is updated when a release line opens, not when a
+# guard fails (see the policy document).
+BASELINE = Path("rivulet-core") / "tests" / "api_surface_baseline.txt"
+
+BASELINE_HEADER = """\
+# Crate-root re-exports of rivulet-core, frozen at the last released version.
+#
+# This file is the removal baseline for docs/api-migration.md: the
+# `m8_api_removals_are_documented_in_the_migration_policy` test in
+# rivulet-core/tests/api_stability.rs fails when a name listed here is gone from
+# docs/api-overview.md and the "Applied migrations" table in
+# docs/api-migration.md does not document it with a replacement and a note.
+#
+# Regenerate ONLY when a new release line opens, and only after every removal in
+# that line has a migration row:
+#
+#     python scripts/generate-api-overview.py --write-baseline
+#
+# Regenerating it to silence a failing guard deletes the evidence the guard
+# exists for.
+"""
 
 
 def crate_version(root: Path) -> str:
@@ -310,6 +338,63 @@ def write(root: Path) -> int:
     return 0
 
 
+def export_names(root: Path) -> list[str]:
+    """Every crate-root name a consumer reaches as `rivulet_core::…`."""
+    lib_source = (root / CRATE / "src" / "lib.rs").read_text(encoding="utf-8")
+    return sorted({item for _, items in parse_exports(lib_source) for item in items})
+
+
+def documented_removals(root: Path) -> set[str]:
+    """Names with a row in the "Applied migrations" table of the policy doc."""
+    path = root / "docs" / "api-migration.md"
+    if not path.is_file():
+        return set()
+    documented: set[str] = set()
+    inside = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            inside = "applied migrations" in stripped.lower()
+            continue
+        if not inside or not stripped.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) < 4:
+            continue
+        item, _removed_in, replacement, note = cells
+        # A migration row needs a replacement and a note; "-" is a placeholder,
+        # not a migration path ("removed" is not a migration note either).
+        if not replacement or replacement in {"-", "—"} or not note:
+            continue
+        documented.update(re.findall(r"`([^`]+)`", item))
+    return documented
+
+
+def write_baseline(root: Path) -> int:
+    path = root / BASELINE
+    names = export_names(root)
+    previous: set[str] = set()
+    if path.is_file():
+        previous = {
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        }
+    documented = documented_removals(root)
+    undocumented = sorted(name for name in previous - set(names) if name not in documented)
+    if undocumented:
+        print(
+            "api-overview: refusing to drop names without a migration row in "
+            "docs/api-migration.md: " + ", ".join(undocumented),
+            file=sys.stderr,
+        )
+        return 1
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(BASELINE_HEADER + "".join(f"{name}\n" for name in names), encoding="utf-8")
+    print(f"api-overview: wrote {len(names)} names to {path}")
+    return 0
+
+
 FIXTURE_LIB = """\
 //! Fixture crate.
 pub mod alpha;
@@ -401,18 +486,49 @@ def self_test() -> int:
         )
         assert check(root) == 1, "--check must reject a module the doc does not list"
 
+        # The removal baseline: written from the surface, and refusing to drop a
+        # name that the migration policy does not document.
+        baseline = root / BASELINE
+        assert write_baseline(root) == 0, "the first baseline write must succeed"
+        written = baseline.read_text(encoding="utf-8")
+        assert "Alpha\n" in written and "ALPHA_LIMIT\n" in written, written
+        assert "`Beta`" not in written, "the baseline holds names, not backticks"
+
+        lib = (root / "rivulet-core" / "src" / "lib.rs").read_text(encoding="utf-8")
+        without_limit = lib.replace("pub use alpha::{Alpha, ALPHA_LIMIT};", "pub use alpha::Alpha;")
+        (root / "rivulet-core" / "src" / "lib.rs").write_text(without_limit, encoding="utf-8")
+        assert (
+            write_baseline(root) == 1
+        ), "removing a name without a migration row must refuse the baseline update"
+
+        (root / "docs" / "api-migration.md").write_text(
+            "## Applied migrations\n\n"
+            "| Removed or changed item | Removed in | Replacement | Migration note |\n"
+            "| --- | --- | --- | --- |\n"
+            "| `ALPHA_LIMIT` | 9.9.9 | `Alpha::LIMIT` | call the constant on the type |\n",
+            encoding="utf-8",
+        )
+        assert write_baseline(root) == 0, "a documented removal must be allowed"
+        assert "ALPHA_LIMIT\n" not in baseline.read_text(encoding="utf-8")
+
     print("api-overview: self-test passed")
     return 0
 
 
 def main(argv: list[str]) -> int:
     arguments = argv[1:]
-    unknown = [arg for arg in arguments if arg not in {"--check", "--self-test"}]
+    unknown = [
+        arg
+        for arg in arguments
+        if arg not in {"--check", "--self-test", "--write-baseline"}
+    ]
     if unknown:
         print(f"unknown arguments: {' '.join(unknown)}", file=sys.stderr)
         return 2
     if "--self-test" in arguments:
         return self_test()
+    if "--write-baseline" in arguments:
+        return write_baseline(REPO_ROOT)
     if "--check" in arguments:
         return check(REPO_ROOT)
     return write(REPO_ROOT)

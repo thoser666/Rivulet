@@ -1,5 +1,31 @@
 ## [Unreleased]
 
+- feat(core,m8): **a public name now has a written path out of the API instead
+  of disappearing in a minor bump** ([#344](https://github.com/thoser666/Rivulet/issues/344),
+  F-M8-005). M8 required an explicit deprecation, migration and compatibility
+  policy; the contract, the generated surface and the API pinning existed, but
+  nothing said how an item is retired, for how long it is announced, or where a
+  consumer reads what replaced it. [`docs/api-migration.md`](docs/api-migration.md)
+  is that document: pre-1.0 Cargo may break on a minor bump, but no public name
+  is removed inside a `0.x` minor line and every removal is announced for **at
+  least one minor release**; a deprecation carries `#[deprecated(since, note)]`
+  with the replacement named by path, a changelog entry, a *Scheduled removals*
+  row and a test for the replacement; a removal needs an *Applied migrations*
+  row with a replacement and a migration note before it merges, and lists what
+  counts as a removal — signature changes, dropped variants or fields, a field
+  added to a constructible public struct, and a changed answer with an unchanged
+  type. Three new guards in `rivulet-core/tests/api_stability.rs` enforce it: the
+  crate-root surface of the last released line
+  (`rivulet-core/tests/api_surface_baseline.txt`, 324 names) is compared with
+  the generated `docs/api-overview.md` table and every missing name must have a
+  migration row; every `#[deprecated]` in `rivulet-core/src` must carry `since`
+  and a non-empty `note`; and the policy must stay linked from the contract and
+  the overview. `python scripts/generate-api-overview.py --write-baseline`
+  refreshes the baseline and refuses to drop a name the policy does not
+  document, so silencing the guard takes a deliberate edit. Documented in
+  `docs/m8-api-contract.md` (contract summary), `docs/api-overview.md` (how the
+  surface shrinks) and the M8 report, where F-M8-005 moves to **closed**.
+
 - fix(core,m8): **`RecordingJob::stop()` could report `0` bytes for a file it
   had just written correctly.** The report was snapshotted at the *start* of
   the teardown, before `EOS` reached the muxer, so it described a file that did
