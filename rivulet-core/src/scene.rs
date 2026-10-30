@@ -1,5 +1,37 @@
+//! Scenes, scene collections, and the folder hierarchy between them.
+//!
+//! A [`Scene`] holds the sources and settings that are live at once; a
+//! [`SceneManager`] owns the collection, the active scene, its switch history
+//! and the undo/redo stacks, and reads/writes the JSON collection format.
+//!
+//! Scenes form a tree through [`Scene::parent`]: a scene with children doubles
+//! as a folder for the scene dock. Moves go through
+//! [`SceneManager::set_parent`], which refuses cycles with a typed
+//! [`SceneHierarchyError`], and [`Scene::kind`] separates the scenes a streamer
+//! switches through from reusable component scenes. The full contract,
+//! including how legacy and hand-edited collections load, is documented in
+//! `docs/scene-management.md`.
+
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use uuid::Uuid;
+
+/// What a scene is for in a collection ([#319](https://github.com/thoser666/Rivulet/issues/319)).
+///
+/// A `Primary` scene is part of the live-switching list a streamer works
+/// through during a show. A `Component` scene is a reusable building block
+/// (an intro layout, a BRB composition, a "just the chat" panel) that should
+/// not inflate that list: it is still switchable and still exportable, it is
+/// just filtered out of the default picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SceneKind {
+    /// A normal scene, shown in the live-switching list.
+    #[default]
+    Primary,
+    /// A reusable sub-scene, hidden from the default switching list.
+    Component,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
@@ -9,6 +41,11 @@ pub struct Scene {
     pub parent: Option<Uuid>,
     /// Color for UI color-coding (ARGB format as u32, e.g. 0xFF1A73E8 for blue)
     pub color: u32,
+    /// Whether this scene is part of the live-switching list or a reusable
+    /// component. `serde(default)` keeps collections exported before #319
+    /// loadable: they carry no `kind` field and every scene in them is primary.
+    #[serde(default)]
+    pub kind: SceneKind,
 }
 
 impl Scene {
@@ -18,36 +55,90 @@ impl Scene {
             name,
             parent: None,
             color: 0xFFFFFFFF, // default white
+            kind: SceneKind::Primary,
         }
     }
 
     pub fn with_parent(name: String, parent: Uuid) -> Self {
         Self {
-            id: Uuid::new_v4(),
-            name,
             parent: Some(parent),
-            color: 0xFFFFFFFF,
+            ..Self::new(name)
         }
     }
 
     pub fn with_color(name: String, color: u32) -> Self {
         Self {
-            id: Uuid::new_v4(),
-            name,
-            parent: None,
             color,
+            ..Self::new(name)
         }
     }
 
     pub fn with_parent_and_color(name: String, parent: Uuid, color: u32) -> Self {
         Self {
-            id: Uuid::new_v4(),
-            name,
             parent: Some(parent),
             color,
+            ..Self::new(name)
+        }
+    }
+
+    /// A reusable component scene, kept out of the live-switching list.
+    pub fn component(name: String) -> Self {
+        Self {
+            kind: SceneKind::Component,
+            ..Self::new(name)
+        }
+    }
+
+    /// Whether this scene is a reusable component rather than a live scene.
+    pub fn is_component(&self) -> bool {
+        self.kind == SceneKind::Component
+    }
+}
+
+/// Why a parent assignment was refused.
+///
+/// Every variant names the offending scene so an embedding application can
+/// surface the refusal next to the scene it was dropped on, instead of
+/// silently building a collection that renders as an empty tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SceneHierarchyError {
+    /// The scene that should move does not exist.
+    UnknownScene(Uuid),
+    /// The proposed parent does not exist.
+    UnknownParent(Uuid),
+    /// A scene cannot be its own parent.
+    SelfParent(Uuid),
+    /// The proposed parent is inside the moved scene's own subtree, which
+    /// would make the hierarchy a cycle.
+    Cycle {
+        /// The scene that should move.
+        scene: Uuid,
+        /// The proposed parent, a descendant of `scene`.
+        parent: Uuid,
+    },
+}
+
+impl std::fmt::Display for SceneHierarchyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownScene(id) => {
+                write!(f, "scene {id} does not exist")
+            }
+            Self::UnknownParent(id) => {
+                write!(f, "parent scene {id} does not exist")
+            }
+            Self::SelfParent(id) => {
+                write!(f, "scene {id} cannot be its own parent")
+            }
+            Self::Cycle { scene, parent } => write!(
+                f,
+                "scene {parent} is a descendant of scene {scene}; move it to a scene outside its own subtree"
+            ),
         }
     }
 }
+
+impl std::error::Error for SceneHierarchyError {}
 
 /// Manages the scene collection: adding/removing/renaming scenes and
 /// switching the active scene (the one whose sources are shown on output).
@@ -166,7 +257,16 @@ impl SceneManager {
         let Some(index) = self.scenes.iter().position(|s| s.id == id) else {
             return false;
         };
+        let former_parent = self.scenes[index].parent;
         self.scenes.remove(index);
+        // A child of the removed scene would keep a parent that no longer
+        // exists and drop out of `ordered_scenes` (and therefore out of the
+        // UI) entirely. Lifting it one level keeps it visible and switchable.
+        for scene in self.scenes.iter_mut() {
+            if scene.parent == Some(id) {
+                scene.parent = former_parent;
+            }
+        }
         self.history.retain(|h| *h != id);
         if self.active == Some(id) {
             // Restore the most recent still-existing scene from history,
@@ -179,6 +279,86 @@ impl SceneManager {
         }
         self.record_change(before);
         true
+    }
+
+    /// Moves a scene under `parent` (`None` moves it back to the top level).
+    ///
+    /// Refuses assignments that would produce an unusable tree: an unknown
+    /// scene or parent, a scene as its own parent, and a parent that is inside
+    /// the moved scene's own subtree (which would make the hierarchy a cycle
+    /// and hang a naive renderer). The rule is the same one a file manager
+    /// applies when you drop a folder into itself.
+    pub fn set_parent(
+        &mut self,
+        id: Uuid,
+        parent: Option<Uuid>,
+    ) -> Result<(), SceneHierarchyError> {
+        if self.get(id).is_none() {
+            return Err(SceneHierarchyError::UnknownScene(id));
+        }
+        if let Some(parent_id) = parent {
+            if parent_id == id {
+                return Err(SceneHierarchyError::SelfParent(id));
+            }
+            if self.get(parent_id).is_none() {
+                return Err(SceneHierarchyError::UnknownParent(parent_id));
+            }
+            if self.is_descendant_of(parent_id, id) {
+                return Err(SceneHierarchyError::Cycle {
+                    scene: id,
+                    parent: parent_id,
+                });
+            }
+        }
+        let before = self.snapshot();
+        if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == id) {
+            scene.parent = parent;
+        }
+        self.record_change(before);
+        Ok(())
+    }
+
+    /// Sets the color label of a scene; returns `false` for an unknown ID.
+    pub fn set_color(&mut self, id: Uuid, color: u32) -> bool {
+        let before = self.snapshot();
+        let Some(scene) = self.scenes.iter_mut().find(|s| s.id == id) else {
+            return false;
+        };
+        scene.color = color;
+        self.record_change(before);
+        true
+    }
+
+    /// Marks a scene as a live scene or a reusable component; returns `false`
+    /// for an unknown ID.
+    pub fn set_kind(&mut self, id: Uuid, kind: SceneKind) -> bool {
+        let before = self.snapshot();
+        let Some(scene) = self.scenes.iter_mut().find(|s| s.id == id) else {
+            return false;
+        };
+        scene.kind = kind;
+        self.record_change(before);
+        true
+    }
+
+    /// Whether `candidate` sits anywhere below `ancestor` in the tree.
+    ///
+    /// Iterative and step-bounded: imported collections can be hand-edited,
+    /// and a corrupt file must not turn a validation call into an endless walk.
+    fn is_descendant_of(&self, candidate: Uuid, ancestor: Uuid) -> bool {
+        let mut current = self.get(candidate).and_then(|scene| scene.parent);
+        let mut steps = 0;
+        while let Some(parent) = current {
+            if parent == ancestor {
+                return true;
+            }
+            steps += 1;
+            if steps > self.scenes.len() {
+                break;
+            }
+            current = self.get(parent).and_then(|scene| scene.parent);
+        }
+        false
     }
 
     /// Renames a scene; returns the old name or `None` if the scene is unknown.
@@ -254,13 +434,15 @@ impl SceneManager {
     }
 
     /// Create a copy with fresh scene IDs so it can be edited independently.
+    ///
+    /// The copy stays in the source scene's folder and keeps its kind, so
+    /// duplicating inside a folder does not eject the copy to the top level.
     pub fn duplicate_scene(&mut self, id: Uuid, name: impl Into<String>) -> Option<Uuid> {
         let source = self.get(id)?.clone();
         let before = self.snapshot();
         let mut copy = source;
         copy.id = Uuid::new_v4();
         copy.name = name.into();
-        copy.parent = None;
         let new_id = copy.id;
         self.scenes.push(copy);
         self.record_change(before);
@@ -290,22 +472,38 @@ impl SceneManager {
 
     /// All scene IDs ordered so that children directly follow their parent
     /// (depth-first, folders first) — a stable presentation order for the UI.
+    ///
+    /// Every scene appears exactly once, even in a collection that was
+    /// imported with a dangling or cyclic `parent`: orphaned scenes count as
+    /// roots, and a cycle cannot make the walk repeat or hang. A scene hidden
+    /// by a broken hierarchy would otherwise be unreachable from the UI.
     pub fn ordered_scenes(&self) -> Vec<Uuid> {
         let mut ordered: Vec<Uuid> = Vec::with_capacity(self.scenes.len());
+        let mut visited: HashSet<Uuid> = HashSet::with_capacity(self.scenes.len());
         for scene in &self.scenes {
-            if scene.parent.is_none() {
-                ordered.push(scene.id);
-                self.push_children(scene.id, &mut ordered);
+            let is_root = match scene.parent {
+                None => true,
+                Some(parent) => self.get(parent).is_none(),
+            };
+            if is_root {
+                self.push_subtree(scene.id, &mut ordered, &mut visited);
             }
+        }
+        // Anything still unvisited only exists inside a corrupt cycle.
+        for scene in &self.scenes {
+            self.push_subtree(scene.id, &mut ordered, &mut visited);
         }
         ordered
     }
 
-    fn push_children(&self, parent: Uuid, out: &mut Vec<Uuid>) {
+    fn push_subtree(&self, id: Uuid, out: &mut Vec<Uuid>, visited: &mut HashSet<Uuid>) {
+        if !visited.insert(id) {
+            return;
+        }
+        out.push(id);
         for scene in &self.scenes {
-            if scene.parent == Some(parent) {
-                out.push(scene.id);
-                self.push_children(scene.id, out);
+            if scene.parent == Some(id) {
+                self.push_subtree(scene.id, out, visited);
             }
         }
     }

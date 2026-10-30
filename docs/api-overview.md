@@ -104,7 +104,7 @@ re-export that disappeared.
 | `region` | Rectangular capture regions (subsets of a monitor) for region capture. | 1 | yes |
 | `render` | Headless deterministic rendering from code (M7 W3, issue #189). | 10 | yes |
 | `replay` | Replay buffer / instant replay support. | 4 | yes |
-| `scene` | (no module documentation) | 2 | yes |
+| `scene` | Scenes, scene collections, and the folder hierarchy between them. | 4 | yes |
 | `scene_snapshot` | (no module documentation) | 5 | yes |
 | `sdp` | Deterministic Session Description Protocol (SDP) helpers for WHIP/WebRTC. | 1 | yes |
 | `source` | Sources, scene bindings, and the scene-item clipboard (copy/paste/duplicate). | 9 | yes |
@@ -184,7 +184,7 @@ its own path.
 | `i18n` | `Locale` |
 | `preset` | `RecordingPreset` |
 | `region` | `CaptureRegion` |
-| `scene` | `Scene`, `SceneManager` |
+| `scene` | `Scene`, `SceneHierarchyError`, `SceneKind`, `SceneManager` |
 | `scene_snapshot` | `SceneSnapshot`, `SnapshotFrame`, `SnapshotLayer` |
 | `render` | `CanvasConfig`, `RenderConfigError`, `RenderError`, `RenderLayerConfig`, `RenderVideoReport`, `RenderVideoTarget`, `SceneRenderConfig`, `render_video` |
 | `transition` | `SceneTransition`, `TransitionKind` |
