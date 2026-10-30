@@ -13,6 +13,14 @@ permissions:
   security-events: write
   id-token: write
 
+# A newer run for the same ref supersedes the older one: pushing twice to a
+# pull-request branch cancels the superseded scan instead of queueing a second
+# one behind it. Pushes to develop, scheduled runs and manual dispatches are
+# never cancelled (the weekly scan still publishes its result).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   scorecard:
     name: OpenSSF Scorecard

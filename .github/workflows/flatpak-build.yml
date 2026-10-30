@@ -27,6 +27,13 @@ on:
 permissions:
   contents: read
 
+# A newer run for the same ref supersedes the older one: pushing twice to a
+# pull-request branch cancels the superseded build instead of queueing a second
+# one behind it. Pushes to develop and manual dispatches are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   flatpak-build:
     name: Build the Flatpak

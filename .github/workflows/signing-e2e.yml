@@ -6,12 +6,23 @@ name: Signing E2E
 
 on:
   push:
-    branches: [ "**" ]
+    # Same rule as ci.yml: a push to a branch that already has an open pull
+    # request is covered by the `pull_request` event, so an all-branch push
+    # trigger ran this smoke test a second time for every branch push. Keep
+    # the refs that never get a `pull_request` run.
+    branches: [ develop, master, "release/**" ]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# A newer run for the same ref supersedes the older one instead of queueing a
+# second smoke test behind it. Only pull-request runs are cancelled: pushes to
+# develop and manual dispatches always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   windows:

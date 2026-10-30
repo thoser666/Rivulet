@@ -11,6 +11,14 @@ on:
 permissions:
   contents: read
 
+# A newer run for the same ref supersedes the older one: pushing twice to a
+# pull-request branch cancels the superseded audit instead of queueing a second
+# one behind it. Pushes to develop, scheduled runs and manual dispatches are
+# never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   codeql:
     name: CodeQL (${{ matrix.language }})
