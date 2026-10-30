@@ -262,6 +262,16 @@ fn run_session(path: &Path, with_audio: bool) -> Result<SessionOutcome, String> 
     if on_disk == 0 {
         return Err("output file is empty".into());
     }
+    // The report describes the *finalized* file, so its byte count must be the
+    // file's length: a smaller number (or 0) means the counters were read
+    // before the muxer drained, and an embedder would misreport a good
+    // recording.
+    if report.bytes_written != on_disk {
+        return Err(format!(
+            "report says {} bytes, the file holds {on_disk}",
+            report.bytes_written
+        ));
+    }
     let _ = std::fs::remove_file(path);
 
     Ok(SessionOutcome::Ran(SessionEvidence {

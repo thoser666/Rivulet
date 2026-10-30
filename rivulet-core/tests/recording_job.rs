@@ -748,6 +748,66 @@ fn audio_and_video_are_pushed_and_reported_in_one_session() {
     let _ = std::fs::remove_file(temp_mp4("av"));
 }
 
+/// Regression (develop red, downstream smoke `audio+video`): the report was
+/// snapshotted *before* the muxer drained, so `bytes_written` could read `0`
+/// for a session whose file was written correctly — the muxer holds output
+/// back until every pad has prerolled and appends the index at EOS, which
+/// happens after the snapshot. Whatever the session produced, the numbers
+/// `stop()` returns must describe the finished file.
+#[test]
+fn the_report_counts_every_byte_the_sink_wrote_once_the_file_is_finalized() {
+    /// Run one session and return (reported bytes, bytes on disk).
+    fn run(tag: &str, with_audio: bool) -> (u64, u64) {
+        let path = temp_mp4(tag);
+        let mut config = file_config();
+        config.recording.path = Some(path.display().to_string());
+        if with_audio {
+            config = config.with_default_audio();
+        }
+        let (mut job, _events) = RecordingJob::start(config).expect("start");
+        for _ in 0..10 {
+            job.push_frame(&rgba_frame()).expect("video frame");
+        }
+        if with_audio {
+            for _ in 0..2 {
+                job.push_audio(&vec![0.0f32; (48_000 / FPS * 2) as usize])
+                    .expect("audio chunk");
+            }
+        }
+        let report = job.stop().expect("stop");
+        let on_disk = std::fs::metadata(&path).expect("output file").len();
+        let _ = std::fs::remove_file(&path);
+        (report.bytes_written, on_disk)
+    }
+
+    if !session_elements_present() {
+        refuse_or_continue(file_config());
+        return;
+    }
+
+    let (reported, on_disk) = run("bytes-video", false);
+    assert!(on_disk > 0, "a video-only session must write a file");
+    assert_eq!(
+        reported, on_disk,
+        "the report must count every byte the finalized video-only file holds"
+    );
+
+    if !audio_elements_present() {
+        let mut config = file_config().with_default_audio();
+        config.recording.path = Some(temp_mp4("bytes-av").display().to_string());
+        refuse_or_continue(config);
+        return;
+    }
+
+    let (reported, on_disk) = run("bytes-av", true);
+    assert!(on_disk > 0, "an audio+video session must write a file");
+    assert_eq!(
+        reported, on_disk,
+        "the report must count every byte the finalized audio+video file holds \
+         (a lower number, or 0, means the counters were read before the muxer drained)"
+    );
+}
+
 #[test]
 fn pushing_audio_without_an_audio_branch_is_a_typed_wrong_state() {
     let mut config = file_config(); // video only — no audio branch
