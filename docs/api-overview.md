@@ -217,3 +217,11 @@ module is public and whether it is re-exported; it does not say that every
 public item is documented, and it is not a semver guarantee on its own — the
 promise lives in `docs/m8-api-contract.md`, and the guard that enforces it is
 `rivulet-core/tests/api_stability.rs`.
+
+How a name leaves that surface is written down in
+[`api-migration.md`](api-migration.md): a deprecation window of at least one
+minor release, a migration row before a removal merges, and the removal baseline
+(`rivulet-core/tests/api_surface_baseline.txt`) that the `api_stability` guard
+compares this generated table against. The baseline is refreshed with
+`python scripts/generate-api-overview.py --write-baseline`, which refuses to
+drop a name the policy does not document.
