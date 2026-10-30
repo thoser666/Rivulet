@@ -423,8 +423,10 @@ pub struct SessionReport {
     /// Audio samples the embedder pushed (per channel count summed: total
     /// interleaved sample values pushed ÷ channels = frames of audio).
     pub audio_samples: u64,
-    /// Bytes written to the output file; `0` for stream-only sessions
-    /// (there is no local file to measure).
+    /// Bytes written to the output file — the length of the *finalized* file,
+    /// measured after the muxer drained, so it includes the index written at
+    /// end-of-stream. `0` for stream-only sessions (there is no local file to
+    /// measure).
     pub bytes_written: u64,
     /// Wall-clock time from `start` to `stop`/`Drop`, pauses included.
     pub elapsed: Duration,
@@ -978,9 +980,16 @@ impl RecordingJob {
     /// the muxer to finalize (up to [`EOS_BUDGET`], skipped when the pipeline
     /// already failed), set the pipeline to `NULL`, stop the ticker, emit
     /// [`SessionEvent::Stopped`].
+    ///
+    /// The report is snapshotted **after** the drain, not before it: a muxer
+    /// holds output back until every pad has prerolled and appends the index
+    /// (the MP4 `moov`) at EOS, so counters read at entry describe a file that
+    /// does not exist yet — they could read `0` bytes for a session whose
+    /// output is perfectly fine. Only `elapsed` is taken at entry, because it
+    /// times the session, not the teardown.
     fn finalize(&mut self) -> Result<SessionReport, JobError> {
         self.state = JobState::Stopped;
-        let report = self.report();
+        let elapsed = self.started.elapsed();
 
         // Stop the ticker before waiting on the bus: it polls the same
         // bus, and its filtered pop consumes messages that are not errors —
@@ -992,7 +1001,7 @@ impl RecordingJob {
         }
 
         let Some(pipeline) = self.pipeline.take() else {
-            return Ok(report); // already finalized (defensive; stop() consumes)
+            return Ok(self.report(elapsed)); // already finalized (defensive; stop() consumes)
         };
 
         if !self.failed.load(Ordering::Relaxed) {
@@ -1009,17 +1018,31 @@ impl RecordingJob {
         }
 
         let _ = pipeline.set_state(gst::State::Null);
+        let mut report = self.report(elapsed);
+        // The sink has drained, so the file itself is the truth for a file
+        // session. The pad probe counts every buffer *delivered* to the sink,
+        // which includes the muxer's in-place header rewrite — it can overstate
+        // a finalized file by the size of that rewrite.
+        if let Some(path) = report.path.as_deref() {
+            if let Ok(meta) = std::fs::metadata(path) {
+                report.bytes_written = meta.len();
+            }
+        }
         let _ = self.events.send(SessionEvent::Stopped(report.clone()));
         Ok(report)
     }
 
     /// Snapshot the counters into a report (works for `stop` and `Drop`).
-    fn report(&self) -> SessionReport {
+    ///
+    /// Call this only once the pipeline has been set to `NULL` (or never
+    /// started): the byte counter follows the file sink, so it is complete
+    /// only after the sink has drained.
+    fn report(&self, elapsed: Duration) -> SessionReport {
         SessionReport {
             frames_written: self.frames.load(Ordering::Relaxed),
             audio_samples: self.audio_samples.load(Ordering::Relaxed),
             bytes_written: self.bytes.load(Ordering::Relaxed),
-            elapsed: self.started.elapsed(),
+            elapsed,
             path: self.config.recording.path.as_ref().map(PathBuf::from),
         }
     }

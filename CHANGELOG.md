@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+- fix(core,m8): **`RecordingJob::stop()` could report `0` bytes for a file it
+  had just written correctly.** The report was snapshotted at the *start* of
+  the teardown, before `EOS` reached the muxer, so it described a file that did
+  not exist yet: a muxer holds output back until every pad has prerolled and
+  appends the index (the MP4 `moov`) at end-of-stream. The downstream consumer
+  smoke test caught it on `develop` — its `audio+video` session reported `0`
+  bytes while a green run of the same code reported 263 KB — and the same
+  snapshot could understate a video-only session too. The counters are now read
+  after the sink drained, and for a file session `bytes_written` is the
+  finalized file's length, because the sink-pad probe counts every *delivered*
+  buffer and therefore also the muxer's in-place header rewrite (it overstated
+  the file by 16 bytes). `elapsed` is still taken at the `stop()` call, since
+  it times the session rather than the teardown. Pinned by
+  `rivulet-core/tests/recording_job.rs`
+  (`the_report_counts_every_byte_the_sink_wrote_once_the_file_is_finalized`,
+  which ran the fix red against the old code) and by the smoke test's consumer,
+  which now asserts the report's byte count *equals* the file length instead of
+  merely being non-zero; documented on `SessionReport::bytes_written`.
+
 - feat(core,m9): **scene management gains the model the folder/search work
   needs — folders that cannot be made cyclic, component scenes, and legacy
   collections that still load** ([#319](https://github.com/thoser666/Rivulet/issues/319),
