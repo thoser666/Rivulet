@@ -5408,6 +5408,45 @@ fn scorecard_workflow_is_wired_for_sarif_and_provenance() {
             && workflow.contains("if-no-files-found: error"),
         "scorecard.yml must retain the SARIF artifact and fail if it is missing"
     );
+
+    // Code-scanning alert #92 (`TokenPermissionsID`, high) scored the workflow
+    // 0 for a *top-level* `security-events: write`, although the `scorecard`
+    // job already declares every write scope it needs. GitHub applies
+    // job-level permissions on their own, so the top-level copy was pure
+    // redundancy — dropping it clears the alert without narrowing what the job
+    // may do. Keep the workflow default read-only and the writes on the job.
+    let before_jobs = workflow
+        .split("\njobs:")
+        .next()
+        .expect("scorecard.yml must declare its jobs");
+    let defaults: Vec<&str> = before_jobs
+        .split("\npermissions:")
+        .nth(1)
+        .expect("scorecard.yml must declare workflow-level permissions")
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .collect();
+    assert!(
+        defaults.iter().all(|line| !line.contains(": write")),
+        "scorecard.yml workflow-level permissions must stay read-only: a top-level write \
+         scope rates the workflow 0 in Scorecard's Token-Permissions check and \
+         re-opens alert #92 (got {defaults:?})"
+    );
+    assert!(
+        defaults.iter().any(|line| line.trim() == "contents: read"),
+        "scorecard.yml must keep `contents: read` as the workflow-level token default"
+    );
+    let jobs = workflow
+        .split("\njobs:")
+        .nth(1)
+        .expect("scorecard.yml must declare its jobs");
+    assert!(
+        jobs.contains("security-events: write") && jobs.contains("id-token: write"),
+        "the scorecard job must keep `security-events: write` (SARIF upload) and \
+         `id-token: write` (OIDC publication) — the top-level copies were removed in \
+         favour of these"
+    );
 }
 
 #[test]

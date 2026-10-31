@@ -8,10 +8,16 @@ on:
     - cron: "17 4 * * 1"
   workflow_dispatch:
 
+# Keep the workflow-level token read-only. The two write scopes Scorecard
+# needs — `security-events` for the SARIF upload and `id-token` for
+# `publish_results` — are declared on the `scorecard` job below, and GitHub
+# applies job-level permissions on their own, so repeating them here granted
+# them to the workflow default for no benefit. That top-level write was the
+# only thing code-scanning alert #92 (`TokenPermissionsID`, high) flagged and
+# it scored the workflow 0, which failed the required `Security` check on
+# `develop`.
 permissions:
   contents: read
-  security-events: write
-  id-token: write
 
 # A newer run for the same ref supersedes the older one: pushing twice to a
 # pull-request branch cancels the superseded scan instead of queueing a second

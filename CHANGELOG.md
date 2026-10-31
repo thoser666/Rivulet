@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+- ci(workflows): **the OpenSSF Scorecard workflow keeps its token scopes on the
+  `scorecard` job, clearing code-scanning alert #92 (`TokenPermissionsID`,
+  high) that turned the required `Security` check red on `develop`.** The
+  workflow default repeated `security-events: write` and `id-token: write` at
+  the top level although the job already declared both; job-level permissions
+  replace the default, so the top-level copies granted nothing and only made
+  Scorecard score the workflow 0. The default is now `contents: read`, the
+  upload and OIDC publication keep their job scopes, and the ci_pinning guard
+  `scorecard_workflow_is_wired_for_sarif_and_provenance` fails if either side
+  drifts back.
+
 - fix(security): **the plugin host moves to `wasmtime`/`wasmtime-wasi` 49.0.5,
   clearing the four advisories that turned `Cargo Audit` red on every commit
   since 2026-10-30** (`RUSTSEC-2026-0420`, `-0422`, `-0423`, `-0424`). The
