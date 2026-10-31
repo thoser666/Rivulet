@@ -4,9 +4,11 @@ How Rivulet organizes scenes into folders, colours and reusable components, and
 what the model guarantees. Tracked by issue
 [#319](https://github.com/thoser666/Rivulet/issues/319).
 
-The first part of #319 — this document plus the scene model it describes — is
-implemented. The scene dock (tree rendering, drag & drop, search) follows in
-separate packages; see [Delivery packages](#delivery-packages).
+All four delivery packages of #319 are implemented: the model, the scene dock
+and its search. See [Delivery packages](#delivery-packages) for what shipped in
+which package. For the user-facing walkthrough — building folders, colour
+labels, components, drag & drop and search — see
+[scene-management-tutorial.md](scene-management-tutorial.md).
 
 ## Why this exists
 
@@ -120,8 +122,8 @@ forwards actions to the model API.
 | Drag & drop | `apply_drop` validates with `can_drop` before the manager snapshots, then calls `set_parent`. A refused move — self-parent, unknown target, or a parent inside the dropped scene's own subtree — is highlighted as invalid while dragging and explained in the status line on release, and changes nothing. |
 | Components | `set_kind` toggles a scene between primary and component. Components and everything below them are rendered in a separate, dimmed group but stay switchable. |
 
-The dock does not multi-select; search and filtering are package D (see
-[Search and filter](#search-and-filter)).
+The dock does not multi-select. Search and filtering are delivered as package D
+(see [Search and filter](#search-and-filter)).
 
 ### Search and filter
 
@@ -163,9 +165,10 @@ GUI work and any future importer agree on one shape.
 | **C. Scene dock** | Tree with indentation, collapse state per collection, colour swatch and picker, drag & drop to re-parent, component toggle | done ([#350](https://github.com/thoser666/Rivulet/issues/350)) |
 | **D. Search and filter** | Real-time search with "match anywhere"/"starts with", auto-expand of matches, component filter, persisted collapse state | done ([#351](https://github.com/thoser666/Rivulet/issues/351)) |
 
-Packages C and D are tracked as separate issues ([#350](https://github.com/thoser666/Rivulet/issues/350),
-[#351](https://github.com/thoser666/Rivulet/issues/351)) so the dock can be
-reviewed as UI work and the model as engine work.
+Packages C and D were tracked as separate issues
+([#350](https://github.com/thoser666/Rivulet/issues/350),
+[#351](https://github.com/thoser666/Rivulet/issues/351)) so the dock could be
+reviewed as UI work and the model as engine work. Both are closed.
 
 ## Tests
 

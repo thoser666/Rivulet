@@ -478,7 +478,7 @@ must not be implied by beta parity.
 - [ ] Zero-copy/GPU-direct capture paths (DMA-BUF, WGC/NVENC-direct, Metal IO)
 - [ ] Performance and footprint metrics (idle CPU/RAM, laptop battery) as CI checks
 - [ ] Modern UI foundation (egui) consistent across all platforms
-- [ ] Native scene management: folders, colour labels, reusable component scenes, search ([#319](https://github.com/thoser666/Rivulet/issues/319)) — the scene model (folders, component flag, cycle guard, OBS-compatible legacy loading) and the scene dock (indented tree, per-collection fold, colour labels, drag & drop, component group) are in place; search and filtering follow as package D. Spec: [`docs/scene-management.md`](docs/scene-management.md)
+- [x] Native scene management: folders, colour labels, reusable component scenes, search ([#319](https://github.com/thoser666/Rivulet/issues/319)) — delivered: scene model (folders, component flag, cycle guard, OBS-compatible legacy loading), scene dock (indented tree, per-collection fold, colour labels, drag & drop, component group) and search/filter. Spec: [`docs/scene-management.md`](docs/scene-management.md), tutorial: [`docs/scene-management-tutorial.md`](docs/scene-management-tutorial.md)
 
 **Goal:** Lightweight and future-proof — technically ahead where OBS has to retrofit.
 
