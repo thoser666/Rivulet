@@ -1,4 +1,17 @@
 ## [Unreleased]
+- docs(m9): **the modern-architecture milestone has workstream issues, not five
+  unchecked bullets.** [#360](https://github.com/thoser666/Rivulet/issues/360)
+  (WebGPU renderer), [#361](https://github.com/thoser666/Rivulet/issues/361)
+  (compute filters), [#362](https://github.com/thoser666/Rivulet/issues/362)
+  (zero-copy capture), [#363](https://github.com/thoser666/Rivulet/issues/363)
+  (resource metrics) and [#364](https://github.com/thoser666/Rivulet/issues/364)
+  (egui foundation) each carry scope, out-of-scope, acceptance criteria and an
+  estimate, and are linked from the README M9 section and from the M9 quality
+  gate with the criterion each one feeds. Dependencies are named rather than
+  implied: the compute filters need the renderer's pass graph, and the
+  zero-copy paths need both the renderer's device and the real PipeWire/Metal
+  backends from [#343](https://github.com/thoser666/Rivulet/issues/343). Scene
+  management stays delivered by #319/#350/#351 and is not duplicated.
 - docs(guide,m9): **scene management is documented for users, not only for the
   model.** The spec in `docs/scene-management.md` explains the invariants;
   nothing walked a user through building a folder, marking a scene, separating
