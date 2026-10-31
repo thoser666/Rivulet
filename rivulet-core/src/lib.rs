@@ -262,6 +262,11 @@ pub use region::CaptureRegion;
 pub mod scene;
 pub use scene::{Scene, SceneHierarchyError, SceneKind, SceneManager};
 
+pub mod scene_dock;
+pub use scene_dock::{
+    apply_drop, can_drop, dock_rows, drop_error_key, SceneColorLabel, SceneDock, SceneDockRow,
+};
+
 pub mod scene_snapshot;
 pub use scene_snapshot::{SceneSnapshot, SnapshotFrame, SnapshotLayer};
 

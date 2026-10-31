@@ -492,6 +492,67 @@ impl Default for HotkeyConfig {
     }
 }
 
+/// Disclosure control of the scene dock: a painted triangle (down = expanded,
+/// right = folded) instead of a glyph, so the tree does not depend on which
+/// characters the active font happens to cover.
+fn dock_disclosure(ui: &mut egui::Ui, expanded: bool, tooltip: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(14.0, 16.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let color = if response.hovered() {
+            ui.visuals().strong_text_color()
+        } else {
+            ui.visuals().text_color()
+        };
+        let center = rect.center();
+        let radius = 3.5;
+        let points = if expanded {
+            vec![
+                egui::pos2(center.x - radius, center.y - radius * 0.6),
+                egui::pos2(center.x + radius, center.y - radius * 0.6),
+                egui::pos2(center.x, center.y + radius * 0.8),
+            ]
+        } else {
+            vec![
+                egui::pos2(center.x - radius * 0.6, center.y - radius),
+                egui::pos2(center.x - radius * 0.6, center.y + radius),
+                egui::pos2(center.x + radius * 0.8, center.y),
+            ]
+        };
+        ui.painter().add(egui::Shape::convex_polygon(
+            points,
+            color,
+            egui::Stroke::NONE,
+        ));
+    }
+    theme::paint_interaction_stroke(ui, &response);
+    response.on_hover_text(tooltip)
+}
+
+/// Colour-label swatch of the scene dock.
+///
+/// A palette colour is filled, the neutral default is only outlined so "no
+/// label" never reads as a white label. The label name is in the tooltip and
+/// in the picker, so the colour is never the only carrier of meaning.
+fn dock_color_swatch(ui: &mut egui::Ui, argb: u32, tooltip: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+    if ui.is_rect_visible(rect) {
+        let r = ((argb >> 16) & 0xFF) as u8;
+        let g = ((argb >> 8) & 0xFF) as u8;
+        let b = (argb & 0xFF) as u8;
+        if argb != 0xFFFF_FFFF {
+            ui.painter()
+                .rect_filled(rect, 2.0, egui::Color32::from_rgb(r, g, b));
+        }
+        ui.painter().rect_stroke(
+            rect,
+            2.0,
+            egui::Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color),
+            egui::StrokeKind::Inside,
+        );
+    }
+    response.on_hover_text(tooltip)
+}
+
 /// Human-readable name for a key (covers the common set used by the app).
 fn key_name(key: egui::Key) -> &'static str {
     match key {
@@ -1631,6 +1692,17 @@ pub struct RivuletApp {
     scene_transition: rivulet_core::SceneTransition,
     #[serde(skip)]
     studio_mode: rivulet_core::StudioMode,
+    /// Scene dock collapse state, keyed by collection name (issue #350).
+    /// Persisted with the app settings: folding a folder is a view concern and
+    /// must neither dirty the collection nor create an undo step.
+    scene_dock: rivulet_core::SceneDock,
+    /// Scene currently being dragged in the dock. Not persisted.
+    #[serde(skip)]
+    scene_drag: Option<uuid::Uuid>,
+    /// Drop target hovered during the drag; `Some(None)` is the top-level
+    /// drop zone. Not persisted.
+    #[serde(skip)]
+    scene_drop_hover: Option<Option<uuid::Uuid>>,
     #[serde(skip)]
     scene_collection_input: String,
     #[serde(skip)]
@@ -2156,6 +2228,9 @@ impl Default for RivuletApp {
             transition_duration_ms: 300,
             scene_transition: rivulet_core::SceneTransition::default(),
             studio_mode: rivulet_core::StudioMode::new(),
+            scene_dock: rivulet_core::SceneDock::new(),
+            scene_drag: None,
+            scene_drop_hover: None,
             scene_collection_input: String::new(),
             scene_profile_input: String::new(),
             scene_hotkey_key: egui::Key::F1,
@@ -5256,95 +5331,419 @@ impl RivuletApp {
             }
         });
 
-        let ordered = self.scenes.ordered_scenes();
-        if ordered.is_empty() {
-            ui.label(self.tr("scenes_no_scenes"));
-        } else {
-            let mut rename_target: Option<(uuid::Uuid, String)> = None;
-            let mut remove_target: Option<uuid::Uuid> = None;
-            let mut switch_target: Option<uuid::Uuid> = None;
-
-            egui::ScrollArea::vertical()
-                .max_height(ui.available_height() - 80.0)
-                .show(ui, |ui| {
-                    for id in ordered {
-                        let Some(scene) = self.scenes.get(id).cloned() else {
-                            continue;
-                        };
-                        let is_active = Some(id) == active;
-                        ui.horizontal(|ui| {
-                            let response = ui.selectable_label(is_active, &scene.name);
-                            theme::paint_interaction_stroke(ui, &response);
-                            if response.clicked() {
-                                switch_target = Some(id);
-                            }
-                            if is_active {
-                                ui.label(
-                                    egui::RichText::new(self.tr("scenes_active"))
-                                        .small()
-                                        .color(colors.success),
-                                );
-                            }
-                            let rename_response = ui.small_button(self.tr("scenes_rename"));
-                            theme::paint_interaction_stroke(ui, &rename_response);
-                            if rename_response.clicked() {
-                                rename_target = Some((id, scene.name.clone()));
-                            }
-                            let duplicate_response = ui.small_button(self.tr("scenes_duplicate"));
-                            theme::paint_interaction_stroke(ui, &duplicate_response);
-                            if duplicate_response.clicked() {
-                                let _ = self.scenes.duplicate_scene(
-                                    id,
-                                    self.tr_fmt(
-                                        "scenes_duplicate_name",
-                                        std::slice::from_ref(&scene.name),
-                                    ),
-                                );
-                            }
-                            let remove_response = ui.small_button(self.tr("scenes_remove"));
-                            theme::paint_interaction_stroke(ui, &remove_response);
-                            if remove_response.clicked() {
-                                remove_target = Some(id);
-                            }
-                        });
-                    }
-                });
-
-            if let Some((id, old_name)) = rename_target {
-                if let Some(new_name) = self.scene_rename_prompt(ui, id, old_name) {
-                    self.scene_status = Some(self.tr_fmt("scenes_renamed", &[new_name]));
-                }
-            }
-            if let Some(id) = remove_target {
-                let name = self
-                    .scenes
-                    .get(id)
-                    .map(|s| s.name.clone())
-                    .unwrap_or_default();
-                if self.scenes.remove(id) {
-                    self.studio_mode.remove_scene(id);
-                    self.scene_status = Some(self.tr_fmt("scenes_removed", &[name]));
-                }
-            }
-            if let Some(id) = switch_target {
-                let name = self
-                    .scenes
-                    .get(id)
-                    .map(|s| s.name.clone())
-                    .unwrap_or_default();
-                if self.studio_mode.enabled() {
-                    self.studio_mode.set_preview(Some(id));
-                    self.scene_status = Some(self.tr_fmt("studio_preview_selected", &[name]));
-                } else if self.switch_active_scene(id) {
-                    let now = Instant::now();
-                    self.scene_transition = self.scene_transition_for_switch(active, Some(id), now);
-                    self.scene_status = Some(self.tr_fmt("scenes_switched", &[name]));
-                }
-            }
-        }
+        self.draw_scene_dock(ui, colors, active);
 
         if let Some(status) = &self.scene_status {
             ui.colored_label(colors.info, status);
+        }
+    }
+
+    /// Scene dock: the collection as an indented tree (issue #350, package C
+    /// of #319).
+    ///
+    /// The hierarchy, fold and drop rules live in `rivulet_core::scene_dock`
+    /// and are unit-tested without a window; this method draws the rows and
+    /// forwards the user's actions to the undoable `SceneManager` API.
+    fn draw_scene_dock(
+        &mut self,
+        ui: &mut egui::Ui,
+        colors: &theme::StatusColors,
+        active: Option<uuid::Uuid>,
+    ) {
+        const INDENT: f32 = 16.0;
+        const DISCLOSURE_WIDTH: f32 = 14.0;
+
+        let collection = self.scenes.collection().to_string();
+        // The scene on air and the preview scene stay visible however the
+        // folders are folded, so a collapsed dock can still show what is live
+        // (studio mode, #294).
+        let mut always_visible: Vec<uuid::Uuid> = Vec::new();
+        for id in [
+            self.scenes.active(),
+            self.studio_mode.preview(),
+            self.studio_mode.program(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            always_visible.push(id);
+        }
+        let collapsed = self.scene_dock.collapsed_in(&collection).clone();
+        let rows = rivulet_core::dock_rows(&self.scenes, &collapsed, &always_visible);
+        if rows.is_empty() {
+            ui.label(self.tr("scenes_no_scenes"));
+            return;
+        }
+
+        // Collected while the list borrows the manager, applied after the
+        // scroll area so no row can mutate the collection mid-render.
+        let mut switch_target: Option<uuid::Uuid> = None;
+        let mut rename_target: Option<(uuid::Uuid, String)> = None;
+        let mut remove_target: Option<uuid::Uuid> = None;
+        let mut duplicate_target: Option<uuid::Uuid> = None;
+        let mut color_target: Option<(uuid::Uuid, u32)> = None;
+        let mut kind_target: Option<(uuid::Uuid, rivulet_core::SceneKind)> = None;
+        let mut move_to_top: Option<uuid::Uuid> = None;
+        let mut toggle_collapse: Option<uuid::Uuid> = None;
+        let mut drag_started: Option<uuid::Uuid> = None;
+        let mut drag_stopped = false;
+        let mut drop_hover: Option<Option<uuid::Uuid>> = None;
+        let mut drop_denial: Option<&'static str> = None;
+        let dragging = self.scene_drag;
+
+        egui::ScrollArea::vertical()
+            .max_height(ui.available_height() - 80.0)
+            .show(ui, |ui| {
+                if let Some(dragged) = dragging {
+                    // Visible while dragging: the drop targets must not be
+                    // discoverable only by trying them.
+                    ui.label(
+                        egui::RichText::new(self.tr("scenes_drag_hint"))
+                            .small()
+                            .color(colors.hint),
+                    );
+                    // The one drop target that needs no existing scene: the
+                    // top level, which lifts the scene out of its folder.
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 20.0),
+                        egui::Sense::hover(),
+                    );
+                    let hovered = ui.rect_contains_pointer(rect);
+                    let verdict = rivulet_core::scene_dock::can_drop(&self.scenes, dragged, None);
+                    if hovered {
+                        drop_hover = Some(None);
+                        if let Err(error) = &verdict {
+                            drop_denial = Some(rivulet_core::scene_dock::drop_error_key(error));
+                        }
+                    }
+                    let stroke = match (hovered, verdict.is_ok()) {
+                        (true, true) => egui::Stroke::new(2.0, colors.success),
+                        (true, false) => egui::Stroke::new(2.0, colors.error),
+                        (false, _) => egui::Stroke::new(
+                            1.0,
+                            ui.visuals().widgets.noninteractive.bg_stroke.color,
+                        ),
+                    };
+                    ui.painter()
+                        .rect_stroke(rect, 3.0, stroke, egui::StrokeKind::Inside);
+                    ui.painter().text(
+                        rect.left_center() + egui::vec2(6.0, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        self.tr("scenes_move_to_top"),
+                        egui::FontId::proportional(12.0),
+                        ui.visuals().text_color(),
+                    );
+                }
+
+                let mut render_row = |ui: &mut egui::Ui, row: &rivulet_core::SceneDockRow| {
+                    let Some(scene) = self.scenes.get(row.id) else {
+                        return;
+                    };
+                    let is_active = Some(row.id) == active;
+                    let is_program =
+                        self.studio_mode.enabled() && self.studio_mode.program() == Some(row.id);
+                    let expanded = !collapsed.contains(&row.id);
+                    let inner = ui.horizontal(|ui| {
+                        ui.add_space(row.depth as f32 * INDENT);
+                        if row.has_children {
+                            let tooltip = format!(
+                                "{} · {}",
+                                self.tr("scenes_folder"),
+                                self.tr(if expanded {
+                                    "scenes_collapse"
+                                } else {
+                                    "scenes_expand"
+                                })
+                            );
+                            if dock_disclosure(ui, expanded, &tooltip).clicked() {
+                                toggle_collapse = Some(row.id);
+                            }
+                        } else {
+                            ui.add_space(DISCLOSURE_WIDTH);
+                        }
+                        // Colour is shown as a swatch and named in the tooltip
+                        // and in the picker: never the only signal.
+                        let color_name = rivulet_core::SceneColorLabel::from_argb(scene.color)
+                            .map(|label| self.tr(label.key()).to_owned())
+                            .unwrap_or_else(|| {
+                                format!(
+                                    "{} #{:06X}",
+                                    self.tr("scenes_color_custom"),
+                                    scene.color & 0x00FF_FFFF
+                                )
+                            });
+                        dock_color_swatch(
+                            ui,
+                            scene.color,
+                            &format!("{}: {color_name}", self.tr("scenes_color_label")),
+                        );
+                        let mut text = egui::RichText::new(&scene.name);
+                        if row.component {
+                            text = text.weak();
+                        }
+                        // The name is both the switch target and the drag
+                        // handle; a plain click never starts a drag in egui.
+                        let name_response = ui
+                            .add(
+                                egui::Button::new(text)
+                                    .selected(is_active)
+                                    .sense(egui::Sense::click_and_drag()),
+                            )
+                            .on_hover_text(self.tr("scenes_move_to_folder"));
+                        theme::paint_interaction_stroke(ui, &name_response);
+                        if name_response.clicked() {
+                            switch_target = Some(row.id);
+                        }
+                        if name_response.drag_started() {
+                            drag_started = Some(row.id);
+                        }
+                        if name_response.drag_stopped() {
+                            drag_stopped = true;
+                        }
+                        if is_active {
+                            ui.label(
+                                egui::RichText::new(self.tr("scenes_active"))
+                                    .small()
+                                    .color(colors.success),
+                            );
+                        } else if is_program {
+                            ui.label(
+                                egui::RichText::new(self.tr("scenes_live_badge"))
+                                    .small()
+                                    .color(colors.warning),
+                            );
+                        }
+                        if row.component {
+                            ui.label(
+                                egui::RichText::new(self.tr("scenes_component"))
+                                    .small()
+                                    .color(colors.hint),
+                            );
+                        }
+                        ui.menu_button("…", |ui| {
+                            ui.label(egui::RichText::new(self.tr("scenes_color_label")).small());
+                            for label in rivulet_core::SceneColorLabel::ALL {
+                                let selected =
+                                    rivulet_core::SceneColorLabel::from_argb(scene.color)
+                                        == Some(label);
+                                ui.horizontal(|ui| {
+                                    dock_color_swatch(ui, label.argb(), self.tr(label.key()));
+                                    if ui
+                                        .selectable_label(selected, self.tr(label.key()))
+                                        .clicked()
+                                    {
+                                        color_target = Some((row.id, label.argb()));
+                                    }
+                                });
+                            }
+                            ui.separator();
+                            // The toggle names the state it switches to.
+                            let (kind_key, target_kind) = if scene.is_component() {
+                                ("scenes_primary", rivulet_core::SceneKind::Primary)
+                            } else {
+                                ("scenes_component", rivulet_core::SceneKind::Component)
+                            };
+                            if ui.button(self.tr(kind_key)).clicked() {
+                                kind_target = Some((row.id, target_kind));
+                            }
+                            if scene.parent.is_some()
+                                && ui.button(self.tr("scenes_move_to_top")).clicked()
+                            {
+                                move_to_top = Some(row.id);
+                            }
+                        })
+                        .response
+                        .on_hover_text(self.tr("scenes_row_actions"));
+                        let rename_response = ui.small_button(self.tr("scenes_rename"));
+                        theme::paint_interaction_stroke(ui, &rename_response);
+                        if rename_response.clicked() {
+                            rename_target = Some((row.id, scene.name.clone()));
+                        }
+                        let duplicate_response = ui.small_button(self.tr("scenes_duplicate"));
+                        theme::paint_interaction_stroke(ui, &duplicate_response);
+                        if duplicate_response.clicked() {
+                            duplicate_target = Some(row.id);
+                        }
+                        let remove_response = ui.small_button(self.tr("scenes_remove"));
+                        theme::paint_interaction_stroke(ui, &remove_response);
+                        if remove_response.clicked() {
+                            remove_target = Some(row.id);
+                        }
+                    });
+                    // Drop feedback while dragging: valid targets highlight, a
+                    // refused one is marked and explained. The list itself is
+                    // only changed on release.
+                    if let Some(dragged) = dragging {
+                        if ui.rect_contains_pointer(inner.response.rect) {
+                            drop_hover = Some(Some(row.id));
+                            let verdict = rivulet_core::scene_dock::can_drop(
+                                &self.scenes,
+                                dragged,
+                                Some(row.id),
+                            );
+                            let stroke = match &verdict {
+                                Ok(()) => egui::Stroke::new(2.0, colors.success),
+                                Err(error) => {
+                                    drop_denial =
+                                        Some(rivulet_core::scene_dock::drop_error_key(error));
+                                    egui::Stroke::new(2.0, colors.error)
+                                }
+                            };
+                            ui.painter().rect_stroke(
+                                inner.response.rect.expand(1.0),
+                                3.0,
+                                stroke,
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                    }
+                };
+
+                let primary: Vec<_> = rows.iter().filter(|row| !row.component).collect();
+                let components: Vec<_> = rows.iter().filter(|row| row.component).collect();
+                for row in &primary {
+                    render_row(ui, row);
+                }
+                if !components.is_empty() {
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new(self.tr("scenes_components_group"))
+                            .small()
+                            .color(colors.hint),
+                    );
+                    for row in &components {
+                        render_row(ui, row);
+                    }
+                }
+            });
+
+        if let Some(key) = drop_denial {
+            let dragged_name = self
+                .scene_drag
+                .and_then(|id| self.scenes.get(id))
+                .map(|scene| scene.name.clone())
+                .unwrap_or_default();
+            ui.colored_label(colors.error, self.tr_fmt(key, &[dragged_name]));
+        }
+
+        // Drag state: the drag starts on a name and ends where the pointer is
+        // at release. Releasing over empty space cancels the move; the
+        // previous frame's target is kept for a frame in which egui reports
+        // the release before the hover.
+        let previous_hover = self.scene_drop_hover;
+        if let Some(id) = drag_started {
+            self.scene_drag = Some(id);
+        }
+        if drag_stopped {
+            let dragged = self.scene_drag.take();
+            if let (Some(dragged), Some(parent)) = (dragged, drop_hover.or(previous_hover)) {
+                self.apply_scene_drop(dragged, parent);
+            }
+        }
+        self.scene_drop_hover = if self.scene_drag.is_some() {
+            drop_hover
+        } else {
+            None
+        };
+
+        // ── Apply the collected actions ───────────────────────────────
+        if let Some(id) = toggle_collapse {
+            self.scene_dock.toggle(&collection, id);
+        }
+        if let Some((id, color)) = color_target {
+            self.scenes.set_color(id, color);
+        }
+        if let Some((id, kind)) = kind_target {
+            self.scenes.set_kind(id, kind);
+        }
+        if let Some(id) = move_to_top {
+            self.apply_scene_drop(id, None);
+        }
+        if let Some(id) = duplicate_target {
+            let name = self
+                .scenes
+                .get(id)
+                .map(|scene| scene.name.clone())
+                .unwrap_or_default();
+            let _ = self
+                .scenes
+                .duplicate_scene(id, self.tr_fmt("scenes_duplicate_name", &[name]));
+        }
+        if let Some((id, old_name)) = rename_target {
+            if let Some(new_name) = self.scene_rename_prompt(ui, id, old_name) {
+                self.scene_status = Some(self.tr_fmt("scenes_renamed", &[new_name]));
+            }
+        }
+        if let Some(id) = remove_target {
+            let name = self
+                .scenes
+                .get(id)
+                .map(|scene| scene.name.clone())
+                .unwrap_or_default();
+            if self.scenes.remove(id) {
+                self.studio_mode.remove_scene(id);
+                // Fold state of removed scenes is dropped with them, so a
+                // collection that lost scenes carries no stale state.
+                let existing: std::collections::BTreeSet<uuid::Uuid> =
+                    self.scenes.scenes().iter().map(|scene| scene.id).collect();
+                self.scene_dock.retain_existing(&collection, &existing);
+                if self.scene_drag == Some(id) {
+                    self.scene_drag = None;
+                }
+                self.scene_status = Some(self.tr_fmt("scenes_removed", &[name]));
+            }
+        }
+        if let Some(id) = switch_target {
+            let name = self
+                .scenes
+                .get(id)
+                .map(|scene| scene.name.clone())
+                .unwrap_or_default();
+            if self.studio_mode.enabled() {
+                self.studio_mode.set_preview(Some(id));
+                self.scene_status = Some(self.tr_fmt("studio_preview_selected", &[name]));
+            } else if self.switch_active_scene(id) {
+                let now = Instant::now();
+                self.scene_transition = self.scene_transition_for_switch(active, Some(id), now);
+                self.scene_status = Some(self.tr_fmt("scenes_switched", &[name]));
+            }
+        }
+    }
+
+    /// Apply a drop from the scene dock and report the outcome.
+    ///
+    /// A refused move is explained in the status line and changes nothing —
+    /// in particular, dropping a folder onto its own subtree must never look
+    /// like it worked.
+    fn apply_scene_drop(&mut self, dragged: uuid::Uuid, parent: Option<uuid::Uuid>) {
+        let collection = self.scenes.collection().to_string();
+        let dragged_name = self
+            .scenes
+            .get(dragged)
+            .map(|scene| scene.name.clone())
+            .unwrap_or_default();
+        match rivulet_core::scene_dock::apply_drop(&mut self.scenes, dragged, parent) {
+            Ok(()) => {
+                let status = match parent {
+                    Some(parent) => {
+                        // Reveal where the scene went, even if the target
+                        // folder was folded.
+                        self.scene_dock.set_collapsed(&collection, parent, false);
+                        let parent_name = self
+                            .scenes
+                            .get(parent)
+                            .map(|scene| scene.name.clone())
+                            .unwrap_or_default();
+                        self.tr_fmt("scenes_moved", &[dragged_name, parent_name])
+                    }
+                    None => self.tr_fmt("scenes_moved_to_top", &[dragged_name]),
+                };
+                self.scene_status = Some(status);
+            }
+            Err(error) => {
+                let key = rivulet_core::scene_dock::drop_error_key(&error);
+                self.scene_status = Some(self.tr_fmt(key, &[dragged_name]));
+            }
         }
     }
 
@@ -16279,6 +16678,86 @@ mod tests {
         let storage = MemoryStorage::default();
         assert!(RivuletApp::restore_from_storage(Some(&storage)).is_none());
         assert!(RivuletApp::restore_from_storage(None).is_none());
+    }
+
+    #[test]
+    fn scene_dock_collapse_state_survives_eframe_storage_round_trip() {
+        // The dock folds folders per collection (#350). Folding is a view
+        // concern, so it travels in the app blob like the other settings — and
+        // it must not leak between collections.
+        let folder = uuid::Uuid::new_v4();
+        let mut app = RivuletApp::default();
+        app.scene_dock.set_collapsed("Gaming", folder, true);
+        let mut storage = MemoryStorage::default();
+        eframe::App::save(&mut app, &mut storage);
+
+        let restored = RivuletApp::restore_from_storage(Some(&storage))
+            .expect("persisted app state must be restored");
+        assert!(
+            restored.scene_dock.is_collapsed("Gaming", folder),
+            "a folded folder must still be folded after a restart"
+        );
+        assert!(
+            !restored.scene_dock.is_collapsed("Podcast", folder),
+            "another collection must not inherit the fold"
+        );
+    }
+
+    #[test]
+    fn folding_a_folder_never_creates_an_undo_step() {
+        // Undo belongs to the collection: the user's first Ctrl+Z after folding
+        // a folder must undo their last scene change, not the fold.
+        let mut app = RivuletApp::default();
+        let folder = app.scenes.add(rivulet_core::Scene::new("Show".to_string()));
+        let undo_before = app.scenes.can_undo();
+
+        app.scene_dock.toggle(app.scenes.collection(), folder);
+
+        assert!(app.scene_dock.is_collapsed(app.scenes.collection(), folder));
+        assert_eq!(app.scenes.can_undo(), undo_before);
+    }
+
+    #[test]
+    fn a_refused_dock_drop_is_explained_and_changes_nothing() {
+        // Dropping a folder onto its own subtree must not look like it worked.
+        let mut app = RivuletApp::default();
+        let show = app.scenes.add(rivulet_core::Scene::new("Show".to_string()));
+        let game = app.scenes.add(rivulet_core::Scene::new("Game".to_string()));
+        app.scenes.set_parent(game, Some(show)).unwrap();
+        let before = app.scenes.export_json().expect("snapshot");
+
+        app.apply_scene_drop(show, Some(game));
+
+        assert_eq!(
+            app.scenes.export_json().unwrap(),
+            before,
+            "a refused drop must leave the collection untouched"
+        );
+        let status = app.scene_status.clone().unwrap_or_default();
+        assert!(!status.is_empty(), "a refused drop must not be silent");
+        assert!(
+            status.contains("Show"),
+            "the refusal names the scene it refused to move: {status}"
+        );
+    }
+
+    #[test]
+    fn a_dock_drop_moves_the_scene_and_unfolds_the_target() {
+        let mut app = RivuletApp::default();
+        let show = app.scenes.add(rivulet_core::Scene::new("Show".to_string()));
+        let game = app.scenes.add(rivulet_core::Scene::new("Game".to_string()));
+        app.scene_dock
+            .set_collapsed(app.scenes.collection(), show, true);
+
+        app.apply_scene_drop(game, Some(show));
+
+        assert_eq!(app.scenes.get(game).unwrap().parent, Some(show));
+        assert!(
+            !app.scene_dock.is_collapsed(app.scenes.collection(), show),
+            "the drop reveals where the scene went"
+        );
+        let status = app.scene_status.clone().unwrap_or_default();
+        assert!(status.contains("Game") && status.contains("Show"));
     }
 
     #[test]
