@@ -106,6 +106,19 @@ Changing `parent` and `color` goes through `set_parent`, `set_color` and
 `set_kind`, all of which are covered by the undo/redo history like `add`,
 `rename` and `remove`.
 
+## Folder defaults and transitions
+
+Switching uses one global transition today. A per-folder default
+([#368](https://github.com/thoser666/Rivulet/issues/368)) is the next step, and
+it deliberately does **not** become a field on `Scene`: `Scene` is a public
+struct a consumer can construct literally, so a new field would break every such
+caller under [`api-migration.md`](api-migration.md). The override therefore
+lives in the collection settings, keyed by the folder scene's ID, with
+`serde(default)` so collections written before the feature load unchanged.
+Resolution order: an explicit override on the target scene, else the nearest
+ancestor folder that has one, else the collection default, else the app
+default.
+
 ## Scene dock
 
 The dock (package C) renders the hierarchy on top of that model. Its rules are
@@ -122,8 +135,9 @@ forwards actions to the model API.
 | Drag & drop | `apply_drop` validates with `can_drop` before the manager snapshots, then calls `set_parent`. A refused move — self-parent, unknown target, or a parent inside the dropped scene's own subtree — is highlighted as invalid while dragging and explained in the status line on release, and changes nothing. |
 | Components | `set_kind` toggles a scene between primary and component. Components and everything below them are rendered in a separate, dimmed group but stay switchable. |
 
-The dock does not multi-select. Search and filtering are delivered as package D
-(see [Search and filter](#search-and-filter)).
+The dock does not multi-select yet ([#366](https://github.com/thoser666/Rivulet/issues/366)).
+Search and filtering are delivered as package D (see
+[Search and filter](#search-and-filter)).
 
 ### Search and filter
 
@@ -154,7 +168,8 @@ association (`group` / `id` pair on the OBS side). Migration maps:
 | Scene without a group | `parent = None` |
 
 The importer is not part of this package; the mapping is documented here so the
-GUI work and any future importer agree on one shape.
+GUI work and any future importer agree on one shape. The importer itself is
+[#367](https://github.com/thoser666/Rivulet/issues/367).
 
 ## Delivery packages
 

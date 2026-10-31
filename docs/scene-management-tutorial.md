@@ -167,11 +167,17 @@ Zusammenführen bearbeitet. Rivulet geht damit tolerant um:
 
 ## 11. Was (noch) nicht geht
 
-- **Mehrfachauswahl und Sammelverschieben** — Szenen werden einzeln bewegt.
+Diese drei Punkte sind eigene Vorhaben und als Issues hinterlegt, nicht
+verschwiegene Lücken:
+
+- **Mehrfachauswahl und Sammelverschieben** — Szenen werden derzeit einzeln
+  bewegt ([#366](https://github.com/thoser666/Rivulet/issues/366)).
 - **OBS-Sammlung importieren** — das Mapping ist dokumentiert (siehe
   [scene-management.md](scene-management.md#migrating-an-obs-collection)), der
-  Importer ist ein eigenes Vorhaben.
-- **Pro-Ordner-Standardtransition** — noch nicht Teil des Modells.
+  Importer ist ein eigenes Vorhaben
+  ([#367](https://github.com/thoser666/Rivulet/issues/367)).
+- **Pro-Ordner-Standardtransition** — noch nicht Teil des Modells
+  ([#368](https://github.com/thoser666/Rivulet/issues/368)).
 
 ## Weiterlesen
 
