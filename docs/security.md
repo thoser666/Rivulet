@@ -226,6 +226,9 @@ change. Do not silence the advisory or pin back to the yanked release.
   with `packaging/flatpak/generate-cargo-sources.sh`) were updated in the same
   change. The requirement is a caret range, so later `49.x` patches resolve
   automatically; no ignore entry was added.
+  `wasmtime_stays_on_a_patched_release_for_the_2026_advisories` regression-tests
+  both lockfiles against those bands. It encodes the bands instead of a single
+  minimum, because `50.0.0` sits above `49.0.5` and is still vulnerable.
 - The `zstd` family is removed rather than ignored, because no upgrade can
   reach a fixed release. `RUSTSEC-2026-0391` (`zstd >= 0.14.3`),
   `RUSTSEC-2026-0398` and `RUSTSEC-2026-0403` (`zstd-safe >= 8.2.0`) and

@@ -1750,6 +1750,91 @@ fn wasmtime_cache_feature_stays_disabled_so_the_zstd_advisories_stay_gone() {
     }
 }
 
+/// The patched bands for RUSTSEC-2026-0420/-0422/-0423/-0424 are
+/// `>= 49.0.5, < 50.0.0` and `>= 50.0.1`, so `50.0.0` is still vulnerable. A
+/// plain minimum comparison would accept it, which is why the release line is
+/// part of the check instead of a single version tuple.
+fn wasmtime_version_is_patched(version: &str) -> bool {
+    let mut parts = version.split('.').map(|part| part.parse::<u64>().ok());
+    let (major, minor, patch) = match (parts.next(), parts.next(), parts.next()) {
+        (Some(Some(major)), Some(Some(minor)), Some(Some(patch))) => (major, minor, patch),
+        _ => return false,
+    };
+    match major {
+        0..=48 => false,
+        49 => (minor, patch) >= (0, 5),
+        50 => (minor, patch) >= (0, 1),
+        _ => true,
+    }
+}
+
+#[test]
+fn wasmtime_stays_on_a_patched_release_for_the_2026_advisories() {
+    // RustSec published RUSTSEC-2026-0420 (`wasmtime-wasi`), -0422, -0423 and
+    // -0424 against 49.0.4 on 2026-10-29, the version both lockfiles carried;
+    // `Cargo Audit` and with it the required `Security` check failed on every
+    // commit until the workspace moved to 49.0.5. The caret range in the
+    // manifest cannot hold that fix, so this guard pins the patched bands for
+    // the advised pair in both lockfiles — the workspace one and the fuzz one,
+    // which is a separate workspace and resolves the same crates.
+    for lockfile in ["Cargo.lock", "fuzz/Cargo.lock"] {
+        let lock = read(lockfile).replace("\r\n", "\n");
+        for crate_name in ["wasmtime", "wasmtime-wasi"] {
+            let package = lock
+                .split("[[package]]")
+                .find(|package| package.contains(&format!("name = \"{crate_name}\"")))
+                .unwrap_or_else(|| panic!("{lockfile} must contain {crate_name}"));
+            let version = package
+                .lines()
+                .find(|line| line.starts_with("version = \""))
+                .and_then(|line| line.split('"').nth(1))
+                .unwrap_or_else(|| panic!("{crate_name} must have a lockfile version"));
+            assert!(
+                wasmtime_version_is_patched(version),
+                "{lockfile} locks {crate_name} {version}, which is outside the patched \
+                 bands for RUSTSEC-2026-0420/-0422/-0423/-0424 (`>= 49.0.5, < 50.0.0` \
+                 or `>= 50.0.1`); bump it instead of ignoring the advisories"
+            );
+        }
+    }
+
+    // The band logic is exercised directly as well, so a future refactor cannot
+    // quietly turn it back into a plain minimum: 50.0.0 sits above 49.0.5 and
+    // still carries all four advisories.
+    for (version, patched) in [
+        ("49.0.4", false),
+        ("49.0.5", true),
+        ("49.1.0", true),
+        ("50.0.0", false),
+        ("50.0.1", true),
+        ("51.0.0", true),
+    ] {
+        assert_eq!(
+            wasmtime_version_is_patched(version),
+            patched,
+            "wasmtime_version_is_patched must treat {version} as patched={patched}"
+        );
+    }
+
+    // The triage rationale and this guard's name must stay documented where the
+    // other advisory minimums live, so a later reader sees why the band is
+    // encoded by hand instead of as a plain minimum.
+    let security_docs = read("docs/security.md");
+    for needle in [
+        "RUSTSEC-2026-0420",
+        "RUSTSEC-2026-0422",
+        "RUSTSEC-2026-0423",
+        "RUSTSEC-2026-0424",
+        "wasmtime_stays_on_a_patched_release_for_the_2026_advisories",
+    ] {
+        assert!(
+            security_docs.contains(needle),
+            "docs/security.md must keep documenting the patched wasmtime bands \
+             (missing: {needle})"
+        );
+    }
+}
+
 #[test]
 fn security_policy_is_linked_from_readme_and_docs() {
     let readme = read("README.md");
