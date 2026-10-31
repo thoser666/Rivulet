@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+- fix(security): **the plugin host moves to `wasmtime`/`wasmtime-wasi` 49.0.5,
+  clearing the four advisories that turned `Cargo Audit` red on every commit
+  since 2026-10-30** (`RUSTSEC-2026-0420`, `-0422`, `-0423`, `-0424`). The
+  advisories describe the 49.0.4 the lockfile carried: `-0422` is a missing
+  type check for `i31`/`nullref` arguments that can panic, `-0423` a
+  cross-engine type confusion with host-created struct types that carry
+  supertypes, `-0424` unchecked memory use when transferring borrowed
+  resources between components, and `-0420` a `wasmtime-wasi` wasip3 UDP
+  `send` that can reach an address only allowed for receiving. The patched
+  bands are 49.0.5 and 50.0.1; staying on the 49 line keeps this a patch
+  update with no plugin ABI change, and the plugin sandbox keeps the feature
+  set it had (`default-features = false` without `cache`, see
+  [`docs/security.md`](docs/security.md)), so the zstd advisories stay gone.
+  `Cargo.lock`, `fuzz/Cargo.lock` and the Flatpak offline crate pin
+  (regenerated with `packaging/flatpak/generate-cargo-sources.sh`) move
+  together; `cargo audit` reports no vulnerabilities and the advisory is not
+  silenced with an ignore entry.
+
 - feat(gui,core,m9): **the scene list is now a scene dock: indented folders
   that fold per collection, colour labels, drag & drop re-parenting and a
   separate component group** ([#350](https://github.com/thoser666/Rivulet/issues/350),

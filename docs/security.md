@@ -209,6 +209,23 @@ change. Do not silence the advisory or pin back to the yanked release.
   circumvents fuel consumption defeats the per-call fuel budget the plugin
   sandbox relies on. These minimums are regression-tested against the
   committed lockfile; advisories are not silenced with an ignore entry.
+- On 2026-10-29 the RustSec database published four more `wasmtime` advisories:
+  `RUSTSEC-2026-0422` (a missing `i31`/`nullref` argument type check that can
+  panic), `RUSTSEC-2026-0423` (cross-engine type confusion with host-created
+  struct types that carry supertypes), `RUSTSEC-2026-0424` (unchecked memory
+  use when transferring borrowed resources between components) and, in
+  `wasmtime-wasi`, `RUSTSEC-2026-0420` (a wasip3 UDP `send` can deliver a
+  datagram to an address that is only allowed for receiving). All four describe
+  `wasmtime`/`wasmtime-wasi` 49.0.4, the version the lockfile carried, so
+  `Cargo Audit` failed the required `Security` check on every commit from
+  2026-10-30 onwards. The patched bands are `49.0.5` and `50.0.1`; the
+  workspace now resolves `49.0.5`, which keeps the change a patch update inside
+  the existing `49.0` requirement — no plugin ABI change, and the feature set
+  above (still no `cache`) is untouched. `fuzz/Cargo.lock` and the Flatpak
+  offline crate pin (`packaging/flatpak/cargo/cargo-sources.json`, regenerated
+  with `packaging/flatpak/generate-cargo-sources.sh`) were updated in the same
+  change. The requirement is a caret range, so later `49.x` patches resolve
+  automatically; no ignore entry was added.
 - The `zstd` family is removed rather than ignored, because no upgrade can
   reach a fixed release. `RUSTSEC-2026-0391` (`zstd >= 0.14.3`),
   `RUSTSEC-2026-0398` and `RUSTSEC-2026-0403` (`zstd-safe >= 8.2.0`) and
