@@ -111,6 +111,11 @@ Unter **Scenes** kannst du Szenen anlegen, umbenennen, duplizieren und löschen.
 - mit Chroma-Key-Einstellungen versehen werden,
 - als Bild, Text, Webcam, Browser, Media, Farbe, Audio oder Capture-Quelle dienen.
 
+Szenen lassen sich zu **Ordnern** gruppieren, mit **Farb-Labels** markieren, als
+**Komponenten** von der Umschaltliste trennen und über die **Suche** wiederfinden.
+Der vollständige Ablauf steht im Tutorial
+[Szenen verwalten: Ordner, Farben, Komponenten und Suche](scene-management-tutorial.md).
+
 **Ctrl+Z** macht unterstützte Szenenänderungen rückgängig; **Ctrl+Y** stellt sie wieder her. Im Studio Mode bearbeitest du die Preview-Szene und überträgst sie mit **Take** in das Program-Bild.
 
 ## 6. Live-Vorschau

@@ -1,4 +1,19 @@
 ## [Unreleased]
+- docs(guide,m9): **scene management is documented for users, not only for the
+  model.** The spec in `docs/scene-management.md` explains the invariants;
+  nothing walked a user through building a folder, marking a scene, separating
+  components and finding a scene in a large collection. `docs/scene-management-tutorial.md`
+  is that walkthrough: creating scenes, turning a scene into a folder by
+  dropping another scene onto it (there is deliberately no separate folder
+  type), collapsing per collection, the named colour palette, the
+  primary/component toggle, drag & drop onto a folder / between folders / back
+  to the top level including the visible refusal, the search box with
+  anywhere-vs-prefix, colour and component filters, and the `Ctrl/Cmd+F`,
+  `Esc`, `Enter` keys. It also states what does not exist yet (multi-select,
+  the OBS importer) instead of implying it. The spec's two stale "follows as
+  package D" sentences and the README M9 bullet now say delivered; the
+  README checkbox is checked and the user guide links the tutorial from
+  *Szenen und Quellen*.
 - feat(gui,core,m9): **the scene dock gets a search box and filters**
   ([#351](https://github.com/thoser666/Rivulet/issues/351), package D of
   [#319](https://github.com/thoser666/Rivulet/issues/319)). Scrolling was the
