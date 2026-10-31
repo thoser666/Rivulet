@@ -121,6 +121,19 @@ Current state:
   This is accepted deliberately: the `promote` job genuinely has to move the
   `weekly-latest` tag, so no narrower correct configuration exists, and
   Scorecard's heuristic cannot tell a needed write from an unneeded one.
+- **Alert #92 (`TokenPermissionsID`, high, fixed):** Scorecard scored
+  `.github/workflows/scorecard.yml` 0 for a top-level `security-events: write`
+  on 2026-10-30 and the blocking triage step failed the `Security` check on
+  `develop`. Unlike #85 this one was **redundancy, not a requirement**: the
+  `scorecard` job already declares `security-events: write` (SARIF upload) and
+  `id-token: write` (`publish_results`), and job-level permissions replace the
+  workflow default rather than add to it, so the top-level copies granted
+  nothing. They are gone; the workflow default is `contents: read` and every
+  write scope lives on the job that needs it. This also supersedes the reason
+  recorded for the earlier dismissal (#62): the upload is satisfied by the job
+  scope, not by a workflow-level grant. Pinned by
+  `scorecard_workflow_is_wired_for_sarif_and_provenance`, which fails if a
+  workflow-level write scope comes back or if the job loses either scope.
 
 #### Alert triage gate
 
