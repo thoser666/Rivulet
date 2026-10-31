@@ -105,7 +105,7 @@ re-export that disappeared.
 | `render` | Headless deterministic rendering from code (M7 W3, issue #189). | 10 | yes |
 | `replay` | Replay buffer / instant replay support. | 4 | yes |
 | `scene` | Scenes, scene collections, and the folder hierarchy between them. | 4 | yes |
-| `scene_dock` | Dock-level presentation state for the scene tree (issue #350). | 7 | yes |
+| `scene_dock` | Dock-level presentation state for the scene tree (issue #350). | 11 | yes |
 | `scene_snapshot` | (no module documentation) | 5 | yes |
 | `sdp` | Deterministic Session Description Protocol (SDP) helpers for WHIP/WebRTC. | 1 | yes |
 | `source` | Sources, scene bindings, and the scene-item clipboard (copy/paste/duplicate). | 9 | yes |
@@ -186,7 +186,7 @@ its own path.
 | `preset` | `RecordingPreset` |
 | `region` | `CaptureRegion` |
 | `scene` | `Scene`, `SceneHierarchyError`, `SceneKind`, `SceneManager` |
-| `scene_dock` | `SceneColorLabel`, `SceneDock`, `SceneDockRow`, `apply_drop`, `can_drop`, `dock_rows`, `drop_error_key` |
+| `scene_dock` | `SceneColorLabel`, `SceneDock`, `SceneDockRow`, `SceneFilterState`, `SceneSearchMode`, `apply_drop`, `can_drop`, `dock_rows`, `dock_rows_filtered`, `drop_error_key`, `first_match` |
 | `scene_snapshot` | `SceneSnapshot`, `SnapshotFrame`, `SnapshotLayer` |
 | `render` | `CanvasConfig`, `RenderConfigError`, `RenderError`, `RenderLayerConfig`, `RenderVideoReport`, `RenderVideoTarget`, `SceneRenderConfig`, `render_video` |
 | `transition` | `SceneTransition`, `TransitionKind` |
