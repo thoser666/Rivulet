@@ -1,4 +1,24 @@
 ## [Unreleased]
+- feat(gui,core,m9): **the scene dock gets a search box and filters**
+  ([#351](https://github.com/thoser666/Rivulet/issues/351), package D of
+  [#319](https://github.com/thoser666/Rivulet/issues/319)). Scrolling was the
+  slowest part of switching once a collection grew past a handful of scenes,
+  and a streamer with a dozen folders had to remember which folder a scene was
+  in. The dock now filters as the user types: `Match anywhere` (substring) or
+  `Starts with`, with the chosen mode persisted next to the fold state. A match
+  reveals itself inside a folded folder, and a matched folder opens with its
+  subtree, but the expansion is **transient** — the persisted
+  `SceneDock::collapsed` set is never written by a search, so clearing the query
+  restores exactly the fold state the user had instead of leaving the dock
+  unfolded. Folding, folding state and the tree rules stay in
+  `rivulet_core::scene_dock`, which keeps the filtering (`dock_rows_filtered`,
+  `first_match`) window-free and unit-tested; the GUI only draws the box and
+  forwards Esc (clear), Enter (switch to the first match in depth-first order,
+  skipping hidden components) and `Ctrl/Cmd+F` (focus). Component scenes can be
+  hidden independently of the query, the colour-label filter narrows the list,
+  and an active filter that matches nothing says so in both locales
+  (`scenes_search_no_matches`) instead of showing an empty dock.
+  `docs/scene-management.md` documents the rules and marks package D as done.
 
 - ci(workflows): **the OpenSSF Scorecard workflow keeps its token scopes on the
   `scorecard` job, clearing code-scanning alert #92 (`TokenPermissionsID`,

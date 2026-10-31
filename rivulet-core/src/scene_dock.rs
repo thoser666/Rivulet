@@ -30,7 +30,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{SceneHierarchyError, SceneKind, SceneManager};
+use crate::{Scene, SceneHierarchyError, SceneKind, SceneManager};
 
 /// A named colour label offered by the dock's picker.
 ///
@@ -38,7 +38,7 @@ use crate::{SceneHierarchyError, SceneKind, SceneManager};
 /// values the picker writes. [`SceneColorLabel::Neutral`] is the default
 /// ("no label") and is drawn as an outline rather than a filled swatch, so it
 /// is exempt from the minimum contrast the other entries have to reach.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SceneColorLabel {
     /// The default `Scene::color` (opaque white): no colour label.
     Neutral,
@@ -123,6 +123,117 @@ pub struct SceneDockRow {
     pub component: bool,
 }
 
+/// How the dock's search box matches a scene name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SceneSearchMode {
+    /// Match the query anywhere in the name (the default).
+    #[default]
+    Anywhere,
+    /// Match only names that start with the query.
+    StartsWith,
+}
+
+impl SceneSearchMode {
+    /// Every mode in picker order.
+    pub const ALL: [SceneSearchMode; 2] = [SceneSearchMode::Anywhere, SceneSearchMode::StartsWith];
+
+    /// i18n key naming this mode (see [`crate::Locale::tr`]).
+    pub fn key(self) -> &'static str {
+        match self {
+            SceneSearchMode::Anywhere => "scenes_search_mode_anywhere",
+            SceneSearchMode::StartsWith => "scenes_search_mode_starts_with",
+        }
+    }
+}
+
+/// The dock's search and filter state (issue #351).
+///
+/// The query is deliberately **not** persisted: a restart starts with the full
+/// list. The match mode, the component toggle and the colour filter are,
+/// because they are standing preferences rather than a one-off action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SceneFilterState {
+    /// Text in the dock's search box.
+    #[serde(skip)]
+    pub query: String,
+    /// How the query is matched against a scene name.
+    #[serde(default)]
+    pub mode: SceneSearchMode,
+    /// Whether component scenes are listed. `true` (the default) keeps the
+    /// package-C layout: components appear in their own dimmed group.
+    #[serde(default = "show_components_by_default")]
+    pub show_components: bool,
+    /// List only scenes carrying this colour label (`None` lists every colour).
+    #[serde(default)]
+    pub color: Option<SceneColorLabel>,
+}
+
+/// Serde default for [`SceneFilterState::show_components`].
+fn show_components_by_default() -> bool {
+    true
+}
+
+impl Default for SceneFilterState {
+    fn default() -> Self {
+        Self {
+            query: String::new(),
+            mode: SceneSearchMode::default(),
+            show_components: show_components_by_default(),
+            color: None,
+        }
+    }
+}
+
+impl SceneFilterState {
+    /// An empty filter: no query, no colour, components listed.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether the query contains anything but whitespace.
+    pub fn has_query(&self) -> bool {
+        !self.query.trim().is_empty()
+    }
+
+    /// Whether the filter can hide rows at all.
+    pub fn is_active(&self) -> bool {
+        self.has_query() || self.color.is_some()
+    }
+
+    /// Drop the query, keeping the mode and both filters.
+    pub fn clear_query(&mut self) {
+        self.query.clear();
+    }
+
+    /// Whether `scene` passes the filter.
+    ///
+    /// The name match is case-insensitive and compares against the trimmed
+    /// query, so a trailing space at the end of typing does not empty the list.
+    pub fn matches(&self, scene: &Scene) -> bool {
+        if !self.matches_name(&scene.name) {
+            return false;
+        }
+        match self.color {
+            None => true,
+            Some(label) => SceneColorLabel::from_argb(scene.color) == Some(label),
+        }
+    }
+
+    /// Case-insensitive name match in the selected [`SceneSearchMode`].
+    fn matches_name(&self, name: &str) -> bool {
+        let query = self.query.trim();
+        if query.is_empty() {
+            return true;
+        }
+        let needle = query.to_lowercase();
+        let haystack = name.to_lowercase();
+        match self.mode {
+            SceneSearchMode::Anywhere => haystack.contains(&needle),
+            SceneSearchMode::StartsWith => haystack.starts_with(&needle),
+        }
+    }
+}
+
 /// The rows the dock shows for `manager`, in the manager's depth-first order.
 ///
 /// `collapsed` folds away the subtree of the listed scenes; `always_visible`
@@ -137,6 +248,26 @@ pub fn dock_rows(
     collapsed: &BTreeSet<Uuid>,
     always_visible: &[Uuid],
 ) -> Vec<SceneDockRow> {
+    dock_rows_filtered(
+        manager,
+        collapsed,
+        always_visible,
+        &SceneFilterState::default(),
+    )
+}
+
+/// Like [`dock_rows`], but applies the dock's search and filter state.
+///
+/// Search expansion is **transient**: a matching scene force-opens its
+/// ancestor chain and its own subtree for this call only. `collapsed` is never
+/// mutated, so clearing the query restores exactly the fold state the user had,
+/// and a matched folder still shows what is inside it.
+pub fn dock_rows_filtered(
+    manager: &SceneManager,
+    collapsed: &BTreeSet<Uuid>,
+    always_visible: &[Uuid],
+    filter: &SceneFilterState,
+) -> Vec<SceneDockRow> {
     let total = manager.scenes().len();
     let parents_with_children: HashSet<Uuid> = manager
         .scenes()
@@ -146,6 +277,22 @@ pub fn dock_rows(
     let mut forced_open: HashSet<Uuid> = HashSet::new();
     for id in always_visible {
         collect_ancestors(manager, *id, total, &mut forced_open);
+    }
+    // A search keeps the matches, their ancestor chains (context, so a match
+    // inside a folded folder is reachable) and the subtrees of the matches (a
+    // matched folder has to show what is inside it). All of this is local to
+    // this call: `collapsed` stays exactly as the user left it.
+    let search_visible = search_visibility(manager, filter, total);
+    // `matches` treats an empty query as "everything", so the expansion must
+    // stay behind `is_active` — otherwise an unfiltered dock would force every
+    // folder open and folding would stop working.
+    if filter.is_active() {
+        for scene in manager.scenes() {
+            if filter.matches(scene) {
+                forced_open.insert(scene.id);
+                collect_ancestors(manager, scene.id, total, &mut forced_open);
+            }
+        }
     }
 
     let mut component_flags: HashMap<Uuid, bool> = HashMap::with_capacity(total);
@@ -166,6 +313,12 @@ pub fn dock_rows(
                 .copied()
                 .unwrap_or(false);
         component_flags.insert(id, component);
+        if !filter.show_components && component {
+            continue;
+        }
+        if filter.is_active() && !search_visible.contains(&id) {
+            continue;
+        }
         if hidden_by_collapse(manager, id, collapsed, &forced_open, total) {
             continue;
         }
@@ -393,4 +546,97 @@ pub fn drop_error_key(error: &SceneHierarchyError) -> &'static str {
         SceneHierarchyError::SelfParent(_) => "scene_hierarchy_self",
         SceneHierarchyError::Cycle { .. } => "scene_hierarchy_cycle",
     }
+}
+
+/// The scene `Enter` switches to: the first scene in the manager's depth-first
+/// order that the filter matches.
+///
+/// Folding is irrelevant here, because [`dock_rows_filtered`] opens the
+/// ancestor chain of every match: the scene this returns is exactly the one the
+/// dock reveals. Hidden components are skipped — switching to a row the dock
+/// does not show would be surprising. Returns `None` while the filter is
+/// inactive, which keeps `Enter` inert in an unfiltered dock.
+pub fn first_match(manager: &SceneManager, filter: &SceneFilterState) -> Option<Uuid> {
+    if !filter.is_active() {
+        return None;
+    }
+    let mut component_flags: HashMap<Uuid, bool> = HashMap::new();
+    for id in manager.ordered_scenes() {
+        let Some(scene) = manager.get(id) else {
+            continue;
+        };
+        let component = scene.kind == SceneKind::Component
+            || scene
+                .parent
+                .and_then(|parent| component_flags.get(&parent))
+                .copied()
+                .unwrap_or(false);
+        component_flags.insert(id, component);
+        if !filter.show_components && component {
+            continue;
+        }
+        if filter.matches(scene) {
+            return Some(id);
+        }
+    }
+    None
+}
+
+/// The rows a search keeps: every match, the ancestor chain of every match and
+/// the whole subtree of every match.
+///
+/// Ancestors are kept as context — without them a match inside a folded folder
+/// would have no parent row to sit under — and descendants are kept because a
+/// matched folder is only useful if it shows what is inside it.
+fn search_visibility(
+    manager: &SceneManager,
+    filter: &SceneFilterState,
+    total: usize,
+) -> HashSet<Uuid> {
+    let mut visible: HashSet<Uuid> = HashSet::new();
+    if !filter.is_active() {
+        return visible;
+    }
+    let mut matched: HashSet<Uuid> = HashSet::new();
+    for scene in manager.scenes() {
+        if filter.matches(scene) {
+            matched.insert(scene.id);
+            collect_ancestors(manager, scene.id, total, &mut visible);
+        }
+    }
+    for scene in manager.scenes() {
+        if matched.contains(&scene.id) || has_matched_ancestor(manager, scene.id, &matched, total) {
+            visible.insert(scene.id);
+        }
+    }
+    visible
+}
+
+/// Whether `id` or one of its ancestors is in `matched`.
+///
+/// Step-bounded and cycle-safe, like the other tree walks in this module.
+fn has_matched_ancestor(
+    manager: &SceneManager,
+    id: Uuid,
+    matched: &HashSet<Uuid>,
+    total: usize,
+) -> bool {
+    if matched.contains(&id) {
+        return true;
+    }
+    let mut seen = HashSet::new();
+    seen.insert(id);
+    let mut current = manager.get(id).and_then(|scene| scene.parent);
+    let mut steps = 0;
+    while let Some(parent) = current {
+        if matched.contains(&parent) {
+            return true;
+        }
+        if !seen.insert(parent) || steps > total {
+            break;
+        }
+        steps += 1;
+        current = manager.get(parent).and_then(|scene| scene.parent);
+    }
+    false
 }

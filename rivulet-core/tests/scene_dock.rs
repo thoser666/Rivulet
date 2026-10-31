@@ -12,7 +12,8 @@
 use std::collections::BTreeSet;
 
 use rivulet_core::scene_dock::{
-    apply_drop, can_drop, dock_rows, drop_error_key, SceneColorLabel, SceneDock,
+    apply_drop, can_drop, dock_rows, dock_rows_filtered, drop_error_key, first_match,
+    SceneColorLabel, SceneDock, SceneFilterState, SceneSearchMode,
 };
 use rivulet_core::{Locale, Scene, SceneHierarchyError, SceneManager};
 
@@ -450,4 +451,234 @@ fn the_palette_round_trips_and_names_are_translated() {
         Some(SceneColorLabel::Neutral),
         "a fresh scene is neutral"
     );
+}
+
+// ── Search and filter (package D, #351) ───────────────────────────────────
+fn filter(query: &str) -> SceneFilterState {
+    SceneFilterState {
+        query: query.to_string(),
+        ..SceneFilterState::default()
+    }
+}
+
+#[test]
+fn search_matches_anywhere_by_default_and_starts_with_on_request() {
+    let (manager, _) = manager_with(&["Game", "Retro Game", "Intro"]);
+    let rows = dock_rows_filtered(&manager, &BTreeSet::new(), &[], &filter("game"));
+    assert_eq!(
+        names_of(&manager, &rows),
+        ["Game", "Retro Game"],
+        "anywhere matches inside the name, in dock order"
+    );
+    let starts = SceneFilterState {
+        mode: SceneSearchMode::StartsWith,
+        ..filter("game")
+    };
+
+    let rows = dock_rows_filtered(&manager, &BTreeSet::new(), &[], &starts);
+    assert_eq!(
+        names_of(&manager, &rows),
+        ["Game"],
+        "starts-with rejects a match in the middle of the name"
+    );
+}
+
+#[test]
+fn search_is_case_insensitive_and_ignores_surrounding_whitespace() {
+    let (manager, _) = manager_with(&["Show", "Game"]);
+    let rows = dock_rows_filtered(&manager, &BTreeSet::new(), &[], &filter("  gAmE  "));
+    assert_eq!(names_of(&manager, &rows), ["Game"]);
+}
+
+#[test]
+fn a_match_inside_a_collapsed_folder_is_revealed_without_touching_the_fold_state() {
+    let (mut manager, ids) = manager_with(&["Show", "Game", "Chat"]);
+    manager.set_parent(ids[1], Some(ids[0])).unwrap();
+    manager.set_parent(ids[2], Some(ids[0])).unwrap();
+    let mut dock = SceneDock::new();
+    dock.set_collapsed("Gaming", ids[0], true);
+    let collapsed = dock.collapsed_in("Gaming").clone();
+
+    let rows = dock_rows_filtered(&manager, &collapsed, &[], &filter("chat"));
+    assert_eq!(
+        names_of(&manager, &rows),
+        ["Show", "Chat"],
+        "the ancestor chain of a match stays open"
+    );
+    assert_eq!(
+        dock.collapsed_in("Gaming"),
+        &collapsed,
+        "search expansion is transient and must not rewrite the fold state"
+    );
+
+    let rows = dock_rows_filtered(&manager, &collapsed, &[], &SceneFilterState::default());
+    assert_eq!(
+        names_of(&manager, &rows),
+        ["Show"],
+        "clearing the query restores exactly the previous fold state"
+    );
+}
+
+#[test]
+fn matching_a_folder_shows_what_is_inside_it() {
+    let (mut manager, ids) = manager_with(&["Show", "Game", "Chat"]);
+    manager.set_parent(ids[1], Some(ids[0])).unwrap();
+    manager.set_parent(ids[2], Some(ids[0])).unwrap();
+    let collapsed = BTreeSet::from([ids[0]]);
+    let rows = dock_rows_filtered(&manager, &collapsed, &[], &filter("show"));
+    assert_eq!(
+        names_of(&manager, &rows),
+        ["Show", "Game", "Chat"],
+        "a matched folder opens with its subtree"
+    );
+}
+
+#[test]
+fn components_can_be_hidden_independently_of_the_query() {
+    let (mut manager, ids) = manager_with(&["Game", "BRB"]);
+    manager.set_kind(ids[1], rivulet_core::SceneKind::Component);
+    let panel = manager.add(Scene::new("BRB Chat".to_string()));
+    manager.set_parent(panel, Some(ids[1])).unwrap();
+
+    let hidden = SceneFilterState {
+        show_components: false,
+        ..SceneFilterState::default()
+    };
+
+    let rows = dock_rows_filtered(&manager, &BTreeSet::new(), &[], &hidden);
+    assert_eq!(
+        names_of(&manager, &rows),
+        ["Game"],
+        "hiding components takes everything below them with it"
+    );
+
+    let rows = dock_rows_filtered(
+        &manager,
+        &BTreeSet::new(),
+        &[],
+        &SceneFilterState::default(),
+    );
+    assert_eq!(
+        names_of(&manager, &rows),
+        ["Game", "BRB", "BRB Chat"],
+        "the default still lists components in their own group"
+    );
+}
+
+#[test]
+fn a_query_without_matches_reports_an_active_filter_over_an_empty_dock() {
+    let (manager, _) = manager_with(&["Show", "Game"]);
+    let no_match = filter("zzz");
+    assert!(no_match.is_active(), "a query is an active filter");
+    assert!(
+        dock_rows_filtered(&manager, &BTreeSet::new(), &[], &no_match).is_empty(),
+        "nothing matches, so the dock has no rows"
+    );
+    assert!(
+        !SceneFilterState::default().is_active(),
+        "an empty filter must not trigger the no-match state"
+    );
+}
+
+#[test]
+fn first_match_follows_the_depth_first_order_and_skips_hidden_components() {
+    let (mut manager, ids) = manager_with(&["Intro", "BRB", "Game"]);
+    manager.set_kind(ids[1], rivulet_core::SceneKind::Component);
+    assert_eq!(
+        first_match(&manager, &filter("r")),
+        Some(ids[0]),
+        "the first match in dock order wins"
+    );
+    let hidden = SceneFilterState {
+        show_components: false,
+        ..filter("r")
+    };
+
+    assert_eq!(
+        first_match(&manager, &hidden),
+        Some(ids[0]),
+        "a hidden component is never the switch target"
+    );
+    assert_eq!(
+        first_match(&manager, &SceneFilterState::default()),
+        None,
+        "Enter stays inert without a filter"
+    );
+}
+
+#[test]
+fn the_colour_filter_narrows_the_rows_and_the_first_match() {
+    let mut manager = SceneManager::new();
+    let game = manager.add(Scene::new("Game".to_string()));
+    let mut chat = Scene::new("Chat".to_string());
+    chat.color = SceneColorLabel::Red.argb();
+    let chat = manager.add(chat);
+
+    let red = SceneFilterState {
+        color: Some(SceneColorLabel::Red),
+        ..SceneFilterState::default()
+    };
+
+    let rows = dock_rows_filtered(&manager, &BTreeSet::new(), &[], &red);
+    assert_eq!(
+        names_of(&manager, &rows),
+        ["Chat"],
+        "only the labelled scene survives the colour filter"
+    );
+    assert_eq!(first_match(&manager, &red), Some(chat));
+    assert_eq!(
+        first_match(&manager, &SceneFilterState::default()),
+        None,
+        "the unlabelled scene is only filtered out when a colour is chosen"
+    );
+    assert!(
+        manager.get(game).is_some(),
+        "the unlabelled scene must still exist"
+    );
+}
+
+#[test]
+fn the_match_mode_survives_a_round_trip_but_the_query_does_not() {
+    let state = SceneFilterState {
+        query: "game".to_string(),
+        mode: SceneSearchMode::StartsWith,
+        show_components: false,
+        color: Some(SceneColorLabel::Blue),
+    };
+
+    let json = serde_json::to_string(&state).expect("filter state must serialize");
+    let restored: SceneFilterState =
+        serde_json::from_str(&json).expect("filter state must deserialize");
+    assert_eq!(restored.mode, SceneSearchMode::StartsWith);
+    assert!(!restored.show_components);
+    assert_eq!(restored.color, Some(SceneColorLabel::Blue));
+    assert_eq!(restored.query, "", "the query is transient by design");
+}
+
+#[test]
+fn every_search_string_is_translated() {
+    let mut keys: Vec<&str> = rivulet_core::SceneSearchMode::ALL
+        .iter()
+        .map(|mode| mode.key())
+        .collect();
+    keys.extend([
+        "scenes_search_placeholder",
+        "scenes_search_clear",
+        "scenes_search_no_matches",
+        "scenes_filter_components",
+        "scenes_filter_color",
+        "scenes_filter_color_any",
+    ]);
+    for key in keys {
+        assert_ne!(
+            Locale::En.tr(key),
+            key,
+            "{key} is missing from the EN table"
+        );
+        assert_ne!(
+            Locale::De.tr(key),
+            key,
+            "{key} is missing from the DE table"
+        );
+    }
 }

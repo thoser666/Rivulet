@@ -1696,6 +1696,13 @@ pub struct RivuletApp {
     /// Persisted with the app settings: folding a folder is a view concern and
     /// must neither dirty the collection nor create an undo step.
     scene_dock: rivulet_core::SceneDock,
+    /// Scene dock search and filter state (issue #351). The query is not
+    /// persisted; the match mode, the component toggle and the colour filter
+    /// are, because they are standing preferences.
+    scene_filter: rivulet_core::SceneFilterState,
+    /// Set by the focus shortcut and consumed by the dock's search box.
+    #[serde(skip)]
+    scene_search_focus: bool,
     /// Scene currently being dragged in the dock. Not persisted.
     #[serde(skip)]
     scene_drag: Option<uuid::Uuid>,
@@ -2229,6 +2236,8 @@ impl Default for RivuletApp {
             scene_transition: rivulet_core::SceneTransition::default(),
             studio_mode: rivulet_core::StudioMode::new(),
             scene_dock: rivulet_core::SceneDock::new(),
+            scene_filter: rivulet_core::SceneFilterState::new(),
+            scene_search_focus: false,
             scene_drag: None,
             scene_drop_hover: None,
             scene_collection_input: String::new(),
@@ -5075,6 +5084,11 @@ impl RivuletApp {
     /// and add/rename/remove scenes. Pure state logic is testable via the
     /// `SceneManager` in rivulet-core; this method only renders and calls it.
     fn draw_scenes_view(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
+        // Ctrl/Cmd+F focuses the dock's search box (issue #351). The scene
+        // shortcuts do not use the key, so nothing is taken from the list.
+        if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
+            self.scene_search_focus = true;
+        }
         if self.scene_transition.is_active() {
             let progress = self.scene_transition.progress_at(Instant::now());
             ui.ctx()
@@ -5341,6 +5355,71 @@ impl RivuletApp {
     /// Scene dock: the collection as an indented tree (issue #350, package C
     /// of #319).
     ///
+    /// Search box, match mode and the two filters above the dock's rows
+    /// (issue #351). The rules live in `rivulet_core::scene_dock`; this only
+    /// edits the persisted `SceneFilterState` and forwards Esc and Enter.
+    fn draw_scene_search(&mut self, ui: &mut egui::Ui) {
+        const SEARCH_ID: &str = "scene_search_box";
+        let placeholder = self.tr("scenes_search_placeholder").to_string();
+        let components = self.tr("scenes_filter_components").to_string();
+        let any_colour = self.tr("scenes_filter_color_any").to_string();
+        ui.horizontal(|ui| {
+            if std::mem::take(&mut self.scene_search_focus) {
+                ui.memory_mut(|memory| memory.request_focus(egui::Id::new(SEARCH_ID)));
+            }
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut self.scene_filter.query)
+                    .id(egui::Id::new(SEARCH_ID))
+                    .hint_text(placeholder)
+                    .desired_width(150.0),
+            );
+            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                // Esc clears the query; the box keeps focus so the next
+                // keystroke starts a new search instead of doing nothing.
+                self.scene_filter.clear_query();
+                self.scene_status = None;
+            }
+            if response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if let Some(id) = rivulet_core::first_match(&self.scenes, &self.scene_filter) {
+                    self.switch_active_scene(id);
+                }
+            }
+            for mode in rivulet_core::SceneSearchMode::ALL {
+                let label = self.tr(mode.key());
+                let selected = self.scene_filter.mode == mode;
+                if ui
+                    .selectable_label(selected, label)
+                    .on_hover_text(label)
+                    .clicked()
+                {
+                    self.scene_filter.mode = mode;
+                }
+            }
+            ui.checkbox(&mut self.scene_filter.show_components, components);
+            let selected_colour = match self.scene_filter.color {
+                None => any_colour.clone(),
+                Some(label) => self.tr(label.key()).to_string(),
+            };
+            egui::ComboBox::from_id_salt("scene_search_colour")
+                .selected_text(selected_colour)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(self.scene_filter.color.is_none(), &any_colour)
+                        .clicked()
+                    {
+                        self.scene_filter.color = None;
+                    }
+                    for label in rivulet_core::SceneColorLabel::ALL {
+                        let text = self.tr(label.key());
+                        let selected = self.scene_filter.color == Some(label);
+                        if ui.selectable_label(selected, text).clicked() {
+                            self.scene_filter.color = Some(label);
+                        }
+                    }
+                });
+        });
+    }
+
     /// The hierarchy, fold and drop rules live in `rivulet_core::scene_dock`
     /// and are unit-tested without a window; this method draws the rows and
     /// forwards the user's actions to the undoable `SceneManager` API.
@@ -5368,10 +5447,21 @@ impl RivuletApp {
         {
             always_visible.push(id);
         }
+        self.draw_scene_search(ui);
         let collapsed = self.scene_dock.collapsed_in(&collection).clone();
-        let rows = rivulet_core::dock_rows(&self.scenes, &collapsed, &always_visible);
+        let rows = rivulet_core::dock_rows_filtered(
+            &self.scenes,
+            &collapsed,
+            &always_visible,
+            &self.scene_filter,
+        );
         if rows.is_empty() {
-            ui.label(self.tr("scenes_no_scenes"));
+            if self.scene_filter.is_active() {
+                let query = self.scene_filter.query.trim().to_string();
+                ui.label(self.tr_fmt("scenes_search_no_matches", &[query]));
+            } else {
+                ui.label(self.tr("scenes_no_scenes"));
+            }
             return;
         }
 

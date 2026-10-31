@@ -120,8 +120,24 @@ forwards actions to the model API.
 | Drag & drop | `apply_drop` validates with `can_drop` before the manager snapshots, then calls `set_parent`. A refused move — self-parent, unknown target, or a parent inside the dropped scene's own subtree — is highlighted as invalid while dragging and explained in the status line on release, and changes nothing. |
 | Components | `set_kind` toggles a scene between primary and component. Components and everything below them are rendered in a separate, dimmed group but stay switchable. |
 
-The dock deliberately does not search or filter (package D) and does not
-multi-select.
+The dock does not multi-select; search and filtering are package D (see
+[Search and filter](#search-and-filter)).
+
+### Search and filter
+
+Package D ([#351](https://github.com/thoser666/Rivulet/issues/351)) adds the
+search box and filters. The rules live in `rivulet_core::scene_dock` next to the
+tree rules, so they are testable without a window:
+
+| Concern | Rule |
+|---|---|
+| Matching | Case-insensitive on the scene name, against the trimmed query. `Match anywhere` is the default; `Starts with` only accepts a prefix. |
+| Expansion | A match force-opens its ancestor chain **and** its own subtree for that render only. The persisted fold state is never mutated, so clearing the query restores exactly the fold state the user had, and a matched folder shows what is inside it. |
+| Filters | The colour label narrows the rows and counts as a match for expansion. Component scenes can be hidden independently of the query, together with everything below them. |
+| No matches | An active filter with an empty result says so (`scenes_search_no_matches`) instead of showing an empty dock. |
+| Keyboard | `Ctrl/Cmd+F` focuses the box, `Esc` clears the query and keeps the focus, `Enter` switches to the first match in depth-first order; hidden components are skipped. |
+| Persistence | Match mode, component toggle and colour filter are saved with the app settings; the query is not. |
+
 
 ## Migrating an OBS collection
 
@@ -145,7 +161,7 @@ GUI work and any future importer agree on one shape.
 | **A. Spec and linking** | This document, README/quality-gate links, cross-references to #294–#297 | done |
 | **B. Core model** | `SceneKind`, `set_parent`/`set_color`/`set_kind`, cycle guard, `remove` reparenting, `duplicate_scene` fixes, compatibility + regression tests | done |
 | **C. Scene dock** | Tree with indentation, collapse state per collection, colour swatch and picker, drag & drop to re-parent, component toggle | done ([#350](https://github.com/thoser666/Rivulet/issues/350)) |
-| **D. Search and filter** | Real-time search with "match anywhere"/"starts with", auto-expand of matches, component filter, persisted collapse state | planned ([#351](https://github.com/thoser666/Rivulet/issues/351)) |
+| **D. Search and filter** | Real-time search with "match anywhere"/"starts with", auto-expand of matches, component filter, persisted collapse state | done ([#351](https://github.com/thoser666/Rivulet/issues/351)) |
 
 Packages C and D are tracked as separate issues ([#350](https://github.com/thoser666/Rivulet/issues/350),
 [#351](https://github.com/thoser666/Rivulet/issues/351)) so the dock can be
@@ -177,6 +193,10 @@ reviewed as UI work and the model as engine work.
   ones (self-parent, unknown target, own subtree) with their messages in both
   locales,
 - the component grouping and the palette's contrast on both theme backgrounds.
+- search and filter: anywhere vs. starts-with, case-insensitivity, a match
+  inside a folded folder (with the fold state asserted unchanged afterwards),
+  a matched folder opening its subtree, the component and colour filters, the
+  explicit no-match state, `first_match` order and the persisted match mode.
 
 No GStreamer, hardware or filesystem access is involved; the suites run in
 milliseconds.
