@@ -1,4 +1,17 @@
 ## [Unreleased]
+- docs(m9): **the three scene-management gaps are issues with scope, not
+  footnotes in a tutorial.** Multi-select and bulk move
+  ([#366](https://github.com/thoser666/Rivulet/issues/366)), the OBS
+  collection importer ([#367](https://github.com/thoser666/Rivulet/issues/367))
+  and per-folder default transitions
+  ([#368](https://github.com/thoser666/Rivulet/issues/368)) are now listed in
+  the README M9 checklist and linked from the tutorial's "Was (noch) nicht
+  geht", the M9 quality gate and the spec. Two design decisions are written
+  down rather than discovered later: a multi-selection move is **atomic** (any
+  refused scene refuses the whole drop, with the offending scene named), and
+  the per-folder transition does **not** become a `Scene` field, because that
+  is a breaking change under the migration policy -- it lives in the collection
+  settings keyed by folder ID, so older collections still load.
 - docs(m9): **the modern-architecture milestone has workstream issues, not five
   unchecked bullets.** [#360](https://github.com/thoser666/Rivulet/issues/360)
   (WebGPU renderer), [#361](https://github.com/thoser666/Rivulet/issues/361)

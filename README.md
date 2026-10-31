@@ -469,7 +469,7 @@ must not be implied by beta parity.
 
 ### ⚡ M9 – Modern Architecture
 
-**Status: Planned** — workstream issues opened: [#360](https://github.com/thoser666/Rivulet/issues/360) (WebGPU renderer), [#361](https://github.com/thoser666/Rivulet/issues/361) (compute filters), [#362](https://github.com/thoser666/Rivulet/issues/362) (zero-copy capture), [#363](https://github.com/thoser666/Rivulet/issues/363) (resource metrics), [#364](https://github.com/thoser666/Rivulet/issues/364) (egui foundation).
+**Status: Planned** — workstream issues opened: [#360](https://github.com/thoser666/Rivulet/issues/360) (WebGPU renderer), [#361](https://github.com/thoser666/Rivulet/issues/361) (compute filters), [#362](https://github.com/thoser666/Rivulet/issues/362) (zero-copy capture), [#363](https://github.com/thoser666/Rivulet/issues/363) (resource metrics), [#364](https://github.com/thoser666/Rivulet/issues/364) (egui foundation). Scene-management follow-ups: [#366](https://github.com/thoser666/Rivulet/issues/366) (multi-select and bulk move), [#367](https://github.com/thoser666/Rivulet/issues/367) (OBS collection import), [#368](https://github.com/thoser666/Rivulet/issues/368) (per-folder default transition).
 
 *Differentiation pillar #3: a modern render path from the ground up instead of OpenGL/D3D legacy.*
 
@@ -479,6 +479,9 @@ must not be implied by beta parity.
 - [ ] Performance and footprint metrics (idle CPU/RAM, laptop battery) as CI checks ([#363](https://github.com/thoser666/Rivulet/issues/363))
 - [ ] Modern UI foundation (egui) consistent across all platforms ([#364](https://github.com/thoser666/Rivulet/issues/364))
 - [x] Native scene management: folders, colour labels, reusable component scenes, search ([#319](https://github.com/thoser666/Rivulet/issues/319)) — delivered: scene model (folders, component flag, cycle guard, OBS-compatible legacy loading), scene dock (indented tree, per-collection fold, colour labels, drag & drop, component group) and search/filter. Spec: [`docs/scene-management.md`](docs/scene-management.md), tutorial: [`docs/scene-management-tutorial.md`](docs/scene-management-tutorial.md)
+- [ ] Scene multi-select and bulk move: drag, colour, kind and delete apply to a selection as one undo step ([#366](https://github.com/thoser666/Rivulet/issues/366))
+- [ ] OBS scene-collection importer, using the mapping documented in [`docs/scene-management.md`](docs/scene-management.md) ([#367](https://github.com/thoser666/Rivulet/issues/367))
+- [ ] Per-folder default transition: a folder's override applies to everything inside it, otherwise the collection default ([#368](https://github.com/thoser666/Rivulet/issues/368))
 
 **Goal:** Lightweight and future-proof — technically ahead where OBS has to retrofit.
 
