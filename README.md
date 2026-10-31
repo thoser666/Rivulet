@@ -469,15 +469,15 @@ must not be implied by beta parity.
 
 ### ⚡ M9 – Modern Architecture
 
-**Status: Planned**
+**Status: Planned** — workstream issues opened: [#360](https://github.com/thoser666/Rivulet/issues/360) (WebGPU renderer), [#361](https://github.com/thoser666/Rivulet/issues/361) (compute filters), [#362](https://github.com/thoser666/Rivulet/issues/362) (zero-copy capture), [#363](https://github.com/thoser666/Rivulet/issues/363) (resource metrics), [#364](https://github.com/thoser666/Rivulet/issues/364) (egui foundation).
 
 *Differentiation pillar #3: a modern render path from the ground up instead of OpenGL/D3D legacy.*
 
-- [ ] WebGPU renderer (wgpu) for preview, compositing, and effects
-- [ ] Compute-based video/audio filters (chroma key, scaling, filters) instead of CPU/shader legacy
-- [ ] Zero-copy/GPU-direct capture paths (DMA-BUF, WGC/NVENC-direct, Metal IO)
-- [ ] Performance and footprint metrics (idle CPU/RAM, laptop battery) as CI checks
-- [ ] Modern UI foundation (egui) consistent across all platforms
+- [ ] WebGPU renderer (wgpu) for preview, compositing, and effects ([#360](https://github.com/thoser666/Rivulet/issues/360))
+- [ ] Compute-based video/audio filters (chroma key, scaling, filters) instead of CPU/shader legacy ([#361](https://github.com/thoser666/Rivulet/issues/361))
+- [ ] Zero-copy/GPU-direct capture paths (DMA-BUF, WGC/NVENC-direct, Metal IO) ([#362](https://github.com/thoser666/Rivulet/issues/362))
+- [ ] Performance and footprint metrics (idle CPU/RAM, laptop battery) as CI checks ([#363](https://github.com/thoser666/Rivulet/issues/363))
+- [ ] Modern UI foundation (egui) consistent across all platforms ([#364](https://github.com/thoser666/Rivulet/issues/364))
 - [x] Native scene management: folders, colour labels, reusable component scenes, search ([#319](https://github.com/thoser666/Rivulet/issues/319)) — delivered: scene model (folders, component flag, cycle guard, OBS-compatible legacy loading), scene dock (indented tree, per-collection fold, colour labels, drag & drop, component group) and search/filter. Spec: [`docs/scene-management.md`](docs/scene-management.md), tutorial: [`docs/scene-management-tutorial.md`](docs/scene-management-tutorial.md)
 
 **Goal:** Lightweight and future-proof — technically ahead where OBS has to retrofit.

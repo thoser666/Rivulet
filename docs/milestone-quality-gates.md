@@ -515,6 +515,32 @@ Review perceived performance and hardware fallback behavior:
 Exit evidence: representative performance report, backend matrix, and screenshots
 or recordings at the minimum and recommended hardware profiles.
 
+Workstream issues:
+
+- [#360](https://github.com/thoser666/Rivulet/issues/360) — WebGPU renderer
+  (device shared with egui, preview without a CPU round-trip, compositor,
+  render graph, fallback with a named reason). Feeds criteria 1, 3 and 7.
+- [#361](https://github.com/thoser666/Rivulet/issues/361) — compute-based
+  video/audio filters on that graph, with a CPU-reference parity harness and
+  per-pass frame-budget feedback. Feeds criterion 5.
+- [#362](https://github.com/thoser666/Rivulet/issues/362) — zero-copy/GPU-direct
+  capture paths (DMA-BUF, WGC/NVENC-direct, Metal IO), coordinated with the
+  capture backends in [#343](https://github.com/thoser666/Rivulet/issues/343).
+  Feeds criteria 3, 6 and 7.
+- [#363](https://github.com/thoser666/Rivulet/issues/363) — performance and
+  footprint metrics as CI checks, applying the game-first targets in
+  [`resource-efficiency-goal.md`](resource-efficiency-goal.md). Feeds
+  criterion 2 and the exit evidence.
+- [#364](https://github.com/thoser666/Rivulet/issues/364) — egui UI foundation:
+  modules, widgets, tokens, i18n catalogue, kittest harness and the platform
+  parity matrix. Feeds criteria 1, 4 and 7.
+- Scene organization (criterion 8) was delivered by
+  [#319](https://github.com/thoser666/Rivulet/issues/319) with packages C and D
+  in [#350](https://github.com/thoser666/Rivulet/issues/350) and
+  [#351](https://github.com/thoser666/Rivulet/issues/351); see
+  [`scene-management.md`](scene-management.md) and the user tutorial
+  [`scene-management-tutorial.md`](scene-management-tutorial.md).
+
 ### M10: AI Chat Assistant
 
 Review privacy, control, and failure boundaries:
