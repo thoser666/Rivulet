@@ -1,5 +1,39 @@
 ## [Unreleased]
 
+- feat(gui,core,m9): **the scene list is now a scene dock: indented folders
+  that fold per collection, colour labels, drag & drop re-parenting and a
+  separate component group** ([#350](https://github.com/thoser666/Rivulet/issues/350),
+  package C of [#319](https://github.com/thoser666/Rivulet/issues/319)). The
+  old view iterated `ordered_scenes()` into one flat list, so folders, colour
+  labels and the primary/component distinction existed only in the model. The
+  dock renders the hierarchy the model already guarantees: the rules live in
+  the new `rivulet_core::scene_dock` module — free of a window and unit-tested —
+  and `rivulet-gui/src/app.rs` only draws them. `dock_rows()` turns the
+  depth-first order into indented rows and computes depth defensively, so a
+  hand-edited collection with a dangling parent or a cycle still renders every
+  scene exactly once; `SceneDock` keeps the fold state **per collection** and
+  travels in the persisted app settings, because folding must neither dirty
+  the collection nor create an undo step. The scene on air and the preview
+  scene (studio mode, #294) are kept reachable even when their folder is
+  folded, so a collapsed dock still shows what is live. Colour labels are a
+  named palette (`SceneColorLabel`) written through `set_color`, drawn as a
+  swatch next to the name, and every entry is legible as a graphical indicator
+  on both theme backgrounds (WCAG AA 3:1, tested); the neutral default is drawn
+  as an outline, and a colour is never the only signal — the label name is in
+  the tooltip and in the picker. Drag & drop moves a scene into a folder, out
+  of one, and between them through `apply_drop`, which validates with
+  `can_drop` first: a refused move (self-parent, unknown target, or a parent
+  inside the dropped scene's own subtree) is painted red while dragging and
+  explained in the status line on release, and leaves both the tree and the
+  undo history untouched. Components are switched through `set_kind` and
+  rendered in their own dimmed group, together with everything below them, so
+  they stay switchable without inflating the live list. 25 new strings exist in
+  English and German; `rivulet-core/tests/scene_dock.rs` covers the tree,
+  folding, broken input, the drop rules and the palette contrast, and the GUI's
+  `draw_scene_dock` wiring plus the collapse-state round-trip through
+  `eframe` storage are pinned by
+  `rivulet-gui/tests/ui_smoke.rs` and `rivulet-gui/src/app.rs`.
+
 - ci(workflows): **a push to a pull-request branch no longer starts the same
   checks a second time.** #346 restricted `ci.yml`, but `Signing E2E` still
   paired an all-branch `push` trigger with `pull_request`, so every branch push

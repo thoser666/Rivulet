@@ -120,6 +120,61 @@ fn responsive_contract_keeps_controls_reachable_on_narrow_windows() {
 }
 
 #[test]
+fn scene_dock_contract_exposes_tree_collapse_color_and_drop() {
+    // Issue #350: the scenes view must render the hierarchy the model already
+    // guarantees, not a flat list. The logic itself is tested in
+    // `rivulet-core/tests/scene_dock.rs`; this contract pins the wiring.
+    let source = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
+    let dock = source
+        .split_once("fn draw_scene_dock")
+        .map(|(_, rest)| rest)
+        .expect("draw_scene_dock must exist");
+    for required in [
+        "rivulet_core::dock_rows",
+        "dock_disclosure",
+        "dock_color_swatch",
+        "SceneColorLabel::ALL",
+        "scene_dock.toggle",
+        "rivulet_core::scene_dock::apply_drop",
+        "scene_drag",
+        "Sense::click_and_drag",
+    ] {
+        assert!(dock.contains(required), "the dock must wire up {required}");
+    }
+    assert!(
+        source.contains("self.draw_scene_dock(ui, colors, active)"),
+        "the scenes view must draw the dock"
+    );
+    assert!(
+        !source.contains("for id in ordered"),
+        "the flat scene list must not come back"
+    );
+    // Every string the dock shows is translated in both locales.
+    let i18n = fs::read_to_string("../rivulet-core/src/i18n.rs")
+        .expect("the i18n tables must be readable for the dock contract");
+    for key in [
+        "scenes_folder",
+        "scenes_collapse",
+        "scenes_expand",
+        "scenes_color_label",
+        "scenes_move_to_folder",
+        "scenes_move_to_top",
+        "scenes_component",
+        "scenes_components_group",
+        "scenes_primary",
+        "scenes_row_actions",
+        "scenes_live_badge",
+        "scene_hierarchy_cycle",
+    ] {
+        let occurrences = i18n.matches(&format!("\"{key}\"")).count();
+        assert_eq!(
+            occurrences, 2,
+            "{key} must exist in EN and DE, found {occurrences}"
+        );
+    }
+}
+
+#[test]
 fn accessibility_contract_requires_labels_focus_and_contrast() {
     let source = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
     let theme = fs::read_to_string("src/theme.rs").expect("theme source must be readable");

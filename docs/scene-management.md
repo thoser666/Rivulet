@@ -104,6 +104,25 @@ Changing `parent` and `color` goes through `set_parent`, `set_color` and
 `set_kind`, all of which are covered by the undo/redo history like `add`,
 `rename` and `remove`.
 
+## Scene dock
+
+The dock (package C) renders the hierarchy on top of that model. Its rules are
+implemented in `rivulet_core::scene_dock`, which keeps them free of a window so
+they can be unit-tested; the GUI in `rivulet-gui/src/app.rs` only draws rows and
+forwards actions to the model API.
+
+| Concern | Rule |
+|---|---|
+| Indentation | A row is indented by the number of existing ancestors above it. A dangling parent counts as a root, so hand-edited collections still render, and the depth walk is step-bounded so a cycle cannot loop. |
+| Collapse | Every scene with children gets a disclosure control. The fold state is **per collection** and persisted with the app settings — not on `Scene` — so folding never dirties the collection or creates an undo step. |
+| Live and preview | The scene on air and the studio preview scene keep their ancestor chain open even when a folder is folded, so a collapsed dock still shows what is live. |
+| Colour labels | A named palette (`SceneColorLabel`) written through `set_color`. The neutral default is drawn as an outline rather than a fill; every other entry reaches WCAG AA 3:1 against both theme backgrounds, and the label name is always available as text, so colour is never the only signal. |
+| Drag & drop | `apply_drop` validates with `can_drop` before the manager snapshots, then calls `set_parent`. A refused move — self-parent, unknown target, or a parent inside the dropped scene's own subtree — is highlighted as invalid while dragging and explained in the status line on release, and changes nothing. |
+| Components | `set_kind` toggles a scene between primary and component. Components and everything below them are rendered in a separate, dimmed group but stay switchable. |
+
+The dock deliberately does not search or filter (package D) and does not
+multi-select.
+
 ## Migrating an OBS collection
 
 The OBS scene collection JSON stores each scene with an optional group
@@ -125,7 +144,7 @@ GUI work and any future importer agree on one shape.
 |---|---|---|
 | **A. Spec and linking** | This document, README/quality-gate links, cross-references to #294–#297 | done |
 | **B. Core model** | `SceneKind`, `set_parent`/`set_color`/`set_kind`, cycle guard, `remove` reparenting, `duplicate_scene` fixes, compatibility + regression tests | done |
-| **C. Scene dock** | Tree with indentation, collapse state per collection, colour swatch and picker, drag & drop to re-parent, component toggle | planned ([#350](https://github.com/thoser666/Rivulet/issues/350)) |
+| **C. Scene dock** | Tree with indentation, collapse state per collection, colour swatch and picker, drag & drop to re-parent, component toggle | done ([#350](https://github.com/thoser666/Rivulet/issues/350)) |
 | **D. Search and filter** | Real-time search with "match anywhere"/"starts with", auto-expand of matches, component filter, persisted collapse state | planned ([#351](https://github.com/thoser666/Rivulet/issues/351)) |
 
 Packages C and D are tracked as separate issues ([#350](https://github.com/thoser666/Rivulet/issues/350),
@@ -146,7 +165,20 @@ reviewed as UI work and the model as engine work.
 - loading a collection written before `kind` existed,
 - dangling parent and cyclic import staying visible, unique and terminating.
 
-No GStreamer, hardware or filesystem access is involved; the suite runs in
+`rivulet-core/tests/scene_dock.rs` covers the dock on top of that model:
+
+- indentation for nested folders and the unchanged flat order for root scenes,
+- folding a subtree, and the live/preview scene staying reachable inside a
+  folded folder,
+- fold state per collection, its serialization round-trip and pruning of
+  removed scenes,
+- a dangling parent and a cycle still rendering every row exactly once,
+- legal drops (into a folder, back to the top level, undoable) and the refused
+  ones (self-parent, unknown target, own subtree) with their messages in both
+  locales,
+- the component grouping and the palette's contrast on both theme backgrounds.
+
+No GStreamer, hardware or filesystem access is involved; the suites run in
 milliseconds.
 
 ## Related work
