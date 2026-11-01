@@ -513,7 +513,9 @@ Review perceived performance and hardware fallback behavior:
   scene exactly once. See [`scene-management.md`](scene-management.md).
 
 Exit evidence: representative performance report, backend matrix, and screenshots
-or recordings at the minimum and recommended hardware profiles.
+or recordings at the minimum and recommended hardware profiles, plus the
+resource-metrics CI artifact (`scripts/resource-metrics.py`) as the trend those
+runs are compared against.
 
 Workstream issues:
 
@@ -530,7 +532,14 @@ Workstream issues:
 - [#363](https://github.com/thoser666/Rivulet/issues/363) — performance and
   footprint metrics as CI checks, applying the game-first targets in
   [`resource-efficiency-goal.md`](resource-efficiency-goal.md). Feeds
-  criterion 2 and the exit evidence.
+  criterion 2 and the exit evidence. **Delivered for the machine-checkable
+  subset:** `rivulet metrics` exposes the real startup, idle, preview and
+  record phases; `scripts/resource-metrics.py` samples the process externally
+  and gates idle CPU, RSS slope, memory growth, startup and headless frame time
+  against a committed baseline, keeps the synthetic capture-on/off A/B, and
+  records GPU utilisation and battery/thermal as `N/A`/`BLOCKED` with the
+  reason. Still hardware evidence: the game-side p99 frame-time delta, real
+  capture-backend overhead, GPU counters and laptop power behaviour.
 - [#364](https://github.com/thoser666/Rivulet/issues/364) — egui UI foundation:
   modules, widgets, tokens, i18n catalogue, kittest harness and the platform
   parity matrix. Feeds criteria 1, 4 and 7.

@@ -394,6 +394,65 @@ jobs:
         run: bash scripts/ci-render-smoke.sh
 
   ################################################################
+  # RESOURCE METRICS (M9, issue #363)
+  # Measures the real binary instead of a fixture: startup, a 60-second idle
+  # window, the headless render path and the synthetic capture-on/off A/B,
+  # sampled from outside the process, then gated against the committed
+  # scripts/resource-metrics-baseline/ci-linux.json. GPU and battery stay
+  # n/a/blocked with a reason here -- a shared runner cannot produce them.
+  ################################################################
+  resource_metrics:
+    name: Resource Metrics (M9 #363)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - name: Install GStreamer runtime, PipeWire headers and x264
+        # The measured session constructs the real engine (GStreamer init) and
+        # records through x264, so the runtime plugins are as necessary as the
+        # -dev headers.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libpipewire-0.3-dev \
+            libspa-0.2-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            gstreamer1.0-tools \
+            python3
+      - name: Build the measured binary
+        run: cargo build --locked -p rivulet-cli
+      - name: Resource-efficiency policy self-tests
+        # No binary needed: these prove the thresholds still fail on a
+        # regression and still pass on health, including the honest
+        # blocked/n/a semantics.
+        run: |
+          python3 scripts/resource-efficiency-check.py --self-test
+          python3 scripts/resource-metrics.py --self-test
+      - name: Measure and gate
+        run: |
+          python3 scripts/resource-metrics.py \
+            --profile ci-linux \
+            --ab \
+            --idle-seconds 60 \
+            --frames 30 \
+            --out target/resource-metrics/ci-linux.json
+      - name: Upload the resource report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: resource-metrics
+          path: target/resource-metrics/
+          if-no-files-found: warn
+
+  ################################################################
   # FUZZ SMOKE (libFuzzer regression run of the untrusted-input parsers)
   # Builds the fuzz targets with cargo-fuzz on nightly and runs a fixed,
   # short number of executions each. A crash (panic, overflow, hang under
@@ -514,7 +573,7 @@ jobs:
   ci:
     name: CI
     if: ${{ always() }}
-    needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, remote_companion_smoke, render_smoke, fuzz_smoke, coverage, roadmap_sync]
+    needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, remote_companion_smoke, render_smoke, resource_metrics, fuzz_smoke, coverage, roadmap_sync]
     runs-on: ubuntu-latest
     steps:
       - name: Require all CI jobs to pass
@@ -530,6 +589,7 @@ jobs:
             "${{ needs.rist_receiver_smoke.result }}" \
             "${{ needs.obs_websocket_smoke.result }}" \
             "${{ needs.remote_companion_smoke.result }}" \
+            "${{ needs.resource_metrics.result }}" \
             "${{ needs.fuzz_smoke.result }}" \
             "${{ needs.coverage.result }}" \
             "${{ needs.roadmap_sync.result }}"; do

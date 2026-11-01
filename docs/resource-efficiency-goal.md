@@ -49,18 +49,75 @@ insufficient: p95/p99 frame time and 1% lows matter more for games.
 2. Repeat with each capture backend and the intended encoder.
 3. Compare p50, p95, and p99 frame time, 1% lows, CPU, GPU, memory, and power.
 4. Repeat on the older-hardware profile.
-5. Attach the redacted JSON report to the milestone quality report.
+5. Attach the redacted JSON report to the milestone quality report. The
+   `scripts/resource-metrics.py` harness emits the same shape, so CI runs and
+   hardware runs are directly comparable.
 6. Investigate any regression before changing thresholds; do not hide it by
    averaging it away.
 
-CI now runs `scripts/resource-efficiency-check.py` against a deterministic fixture,
-checking the report schema, CPU delta, memory growth, p95/p99 frame time, 1% lows,
-and optional GPU utilization. Hardware-specific reports should use the same JSON
-shape and be validated locally before attaching them to a milestone report. CI
-validates schema, budgets, and deterministic policy tests; it does not pretend
-that a synthetic fixture is a hardware baseline. Real GPU, power, and game
-measurements are hardware evidence and must be marked `PASS`, `BLOCKED`, or
-`N/A` with the reason.
+CI runs two layers, and they answer different questions:
+
+- `scripts/resource-efficiency-check.py` validates the report **schema** and the
+  absolute targets any machine can be held to (idle CPU, memory growth, RSS
+  slope, positive startup and frame time, a reason on every `BLOCKED`/`N/A`
+  record). It keeps accepting reports that only carry the original four fields,
+  so the M6 harness and the deterministic fixture stay valid.
+- `scripts/resource-metrics.py` **measures the real application** and compares
+  it with a committed baseline per profile. It is the layer that fails when a
+  change makes Rivulet worse.
+
+## What CI measures, and what stays manual
+
+The harness drives the shipped binary (`rivulet metrics`, issue #363) through a
+defined scenario and samples the process from the outside — a process that
+reports its own footprint can be wrong about it. The phases are opt-in and each
+one is bracketed by `phase_start`/`phase_end` markers on stdout, so a sample is
+attributed to the window it was taken in:
+
+| Phase | Flag | What it measures |
+| --- | --- | --- |
+| startup | always | wall-clock from spawn to engine ready, plus the GStreamer bootstrap the engine reports itself |
+| idle | `--idle-seconds N` | process CPU, RSS slope, RSS growth, peak RSS and thread count, with the first 2 s dropped as settle time |
+| preview | `--config <scene.toml> --frames N` | p50/p95/p99 frame time and the 1 % low through `rivulet render`'s code path (scene model + snapshot + compositor) |
+| record | `--record-seconds N` | the capture-on half of the A/B: synthetic RGBA frames pushed through a real recording pipeline |
+
+Automated on every CI run (`--profile ci-linux`): startup, engine bootstrap,
+idle CPU, RSS slope and growth, peak RSS, thread count, headless frame time, and
+the synthetic capture-on/off CPU delta.
+
+Deliberately **manual**, because a shared runner cannot produce the number:
+GPU utilisation, the game-side p99 frame-time delta, real capture-backend
+overhead, encoder-specific behaviour, and battery/thermal behaviour on laptop
+hardware. Those are recorded as `PASS`, `BLOCKED`, or `N/A` with the reason —
+never inferred, never fabricated. The report carries `gpu` and `power` objects
+whose status is `n/a`/`blocked` with a reason on CI, and `--power` collects the
+OS telemetry (`/sys/class/power_supply`, `Win32_Battery`, `pmset`) where the
+machine has it.
+
+## Baselines and thresholds
+
+A number only says something relative to a recorded one, so each profile has a
+committed baseline under `scripts/resource-metrics-baseline/`. A run fails when
+a metric exceeds **both** its relative and its absolute allowance:
+
+| Metric | Relative allowance | Absolute target |
+| --- | --- | --- |
+| Idle CPU | baseline + 2 % | 2 % |
+| RSS slope | baseline + 4 MiB/min | 4 MiB/min |
+| Memory growth | — | 64 MiB |
+| Startup | 3× baseline | +500 ms |
+| p99 frame time | 2× baseline | +20 ms |
+
+The absolute target caps the relative allowance: a baseline recorded near the
+target cannot buy a larger budget. Updating a baseline is a deliberate commit
+(`--write-baseline`); CI never writes it. A profile without a measured baseline
+does not gate — the run records its numbers, says `seed` in the report, and the
+next deliberate run commits the baseline. That is how the first measurement of
+a new runner gets recorded without turning its noise into a red build.
+
+A regression names the metric, the baseline and the delta, and the report is
+uploaded as a CI artifact so the trend stays visible: a snapshot with no history
+would let a slow drift pass one run at a time.
 
 ## Ownership and roadmap
 
