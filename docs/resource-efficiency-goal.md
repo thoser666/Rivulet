@@ -78,7 +78,7 @@ attributed to the window it was taken in:
 | --- | --- | --- |
 | startup | always | wall-clock from spawn to engine ready, plus the GStreamer bootstrap the engine reports itself |
 | idle | `--idle-seconds N` | process CPU, RSS slope, RSS growth, peak RSS and thread count, with the first 2 s dropped as settle time |
-| preview | `--config <scene.toml> --frames N` | p50/p95/p99 frame time and the 1 % low through `rivulet render`'s code path (scene model + snapshot + compositor) |
+| preview | `--config <scene.toml> --frames N` | p50/p95/p99 frame time and the 1 % low through `rivulet render`'s code path (scene model + snapshot + compositor) on the committed 720p workload (`scripts/ci-resource-metrics/preview.toml`) |
 | record | `--record-seconds N` | the capture-on half of the A/B: synthetic RGBA frames pushed through a real recording pipeline |
 
 Automated on every CI run (`--profile ci-linux`): startup, engine bootstrap,

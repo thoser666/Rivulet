@@ -10104,6 +10104,20 @@ fn resource_metrics_gate_measures_the_binary_and_gates_a_baseline() {
             "the harness must record blocked/n-a with a reason, missing {required}"
         );
     }
+    // The preview workload must be a real composition: frame time on the 64x48
+    // render-smoke fixture is scheduling noise, not a measurement.
+    let preview = read("scripts/ci-resource-metrics/preview.toml");
+    for required in ["width = 1280", "height = 720", "[[layers]]"] {
+        assert!(
+            preview.contains(required),
+            "the frame-time workload must keep {required} -- a tiny canvas makes \
+             the p99 number meaningless"
+        );
+    }
+    assert!(
+        harness.contains("ci-resource-metrics"),
+        "the harness must measure the 720p workload, not the 64x48 smoke fixture"
+    );
 
     // The CLI phases it drives must exist and be reachable from the binary.
     let metrics = read("rivulet-cli/src/metrics.rs");

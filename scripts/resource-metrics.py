@@ -53,9 +53,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 #: never something CI writes on its own.
 BASELINE_DIR = REPO_ROOT / "scripts" / "resource-metrics-baseline"
 
-#: The scene the preview phase renders. Reusing the render-smoke config keeps
-#: "what CI renders" and "what CI measures" the same composition.
-DEFAULT_CONFIG = REPO_ROOT / "scripts" / "ci-render-smoke" / "card.toml"
+#: The scene the preview phase renders. Not the render-smoke card: that fixture
+#: proves byte-identical output on a 64x48 canvas, where per-frame cost is
+#: indistinguishable from scheduling noise. This one is 720p so the compositor
+#: has real work to do and a regression in the render path moves the number.
+DEFAULT_CONFIG = REPO_ROOT / "scripts" / "ci-resource-metrics" / "preview.toml"
 
 #: Minimum idle window. The goal doc says "60-second idle sample"; anything
 #: shorter is not the target being measured.

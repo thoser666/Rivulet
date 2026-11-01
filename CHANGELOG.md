@@ -4,7 +4,9 @@
   `cpu_delta_percent` and `memory_growth_mb` were `0.0` — it proved the
   validator worked and nothing about the application. Issue #363 closes that:
   `rivulet metrics` (new CLI subcommand) drives the real engine bootstrap, a
-  real 60-second idle window, the real headless render path and an optional
+  real 60-second idle window, the real headless render path (a committed 720p
+  composition, so per-frame cost is a real number rather than a 64x48 fixture's
+  scheduling noise) and an optional
   real recording session, marking each phase with `phase_start`/`phase_end`
   events; `scripts/resource-metrics.py` consumes those markers and samples the
   process **from outside** (CPU time, RSS, thread count per platform), so the
