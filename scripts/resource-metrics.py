@@ -877,6 +877,25 @@ def binary_profile(binary):
     return "release" if "release" in parts else "debug"
 
 
+def baseline_refusal(profile_name, allow_debug):
+    """Why a baseline must not be written from this binary, or `None`.
+
+    A baseline is the threshold reference every later run is compared with, so
+    it has to describe the binary users run. A debug build is orders of
+    magnitude slower in the render path; calibrating on it would either gate
+    release runs against numbers that make them trivially pass, or fail every
+    debug run against a release baseline.
+    """
+    if profile_name == "debug" and not allow_debug:
+        return (
+            "refusing to write a baseline from a debug binary: its numbers are "
+            "not what users run. Build with `cargo build --release` and pass "
+            "--binary target/release/rivulet, or use --allow-debug-baseline for "
+            "a throwaway local profile"
+        )
+    return None
+
+
 def measure(args):
     binary = resolve_binary(args.binary)
     config = Path(args.config)
@@ -1121,6 +1140,11 @@ def print_summary(report, verdicts, baseline_path):
     print(f"resource metrics: profile {entry['name']} ({entry['platform']}, "
           f"{entry['binary_profile']} binary)")
     print(f"  engine: {entry['engine']}" + (f" ({entry['engine_reason']})" if entry["engine_reason"] else ""))
+    if entry.get("binary_profile") == "debug":
+        print(
+            "  note: debug build -- these numbers are not comparable to a "
+            "release baseline (measure `--binary target/release/rivulet`)"
+        )
     print(f"  idle window: {entry['idle_seconds']:g} s "
           f"({entry['settle_seconds']:g} s settle, {entry['samples']} samples)")
     for key in (
@@ -1194,6 +1218,11 @@ def main(argv=None):
         help="write this measurement as the profile's baseline (a deliberate commit)",
     )
     parser.add_argument(
+        "--allow-debug-baseline",
+        action="store_true",
+        help="allow --write-baseline from a debug binary (throwaway local profiles only)",
+    )
+    parser.add_argument(
         "--require-engine",
         dest="require_engine",
         action="store_true",
@@ -1221,6 +1250,13 @@ def main(argv=None):
         args.record_seconds = args.idle_seconds
 
     try:
+        requested_binary = resolve_binary(args.binary)
+        if args.write_baseline:
+            refusal = baseline_refusal(
+                binary_profile(requested_binary), args.allow_debug_baseline
+            )
+            if refusal is not None:
+                raise MetricsError(refusal)
         report, verdicts, baseline_path, binary = measure(args)
     except MetricsError as error:
         print(f"resource metrics: {error}", file=sys.stderr)
@@ -1419,6 +1455,21 @@ def run_self_test():
     check(
         pass_status == PASS and pass_reason is None,
         f"a healthy run must pass without a reason, got {pass_status}/{pass_reason}",
+    )
+
+    # A baseline is the reference everyone is compared against, so it must
+    # describe the optimised binary users run.
+    check(
+        baseline_refusal("debug", False) is not None,
+        "writing a baseline from a debug binary must be refused",
+    )
+    check(
+        baseline_refusal("debug", True) is None,
+        "--allow-debug-baseline must permit a throwaway local baseline",
+    )
+    check(
+        baseline_refusal("release", False) is None,
+        "a release baseline must be written without extra flags",
     )
 
     # -- the numbers that must never look healthy -----------------------

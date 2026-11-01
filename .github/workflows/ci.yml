@@ -428,7 +428,10 @@ jobs:
             gstreamer1.0-tools \
             python3
       - name: Build the measured binary
-        run: cargo build --locked -p rivulet-cli
+        # Release, not debug: a baseline calibrated on a debug build would gate
+        # every future run against numbers no user ever sees (a 720p composite
+        # costs hundreds of milliseconds unoptimised).
+        run: cargo build --locked --release -p rivulet-cli
       - name: Resource-efficiency policy self-tests
         # No binary needed: these prove the thresholds still fail on a
         # regression and still pass on health, including the honest
@@ -440,9 +443,10 @@ jobs:
         run: |
           python3 scripts/resource-metrics.py \
             --profile ci-linux \
+            --binary target/release/rivulet \
             --ab \
             --idle-seconds 60 \
-            --frames 30 \
+            --frames 60 \
             --out target/resource-metrics/ci-linux.json
       - name: Upload the resource report
         if: always()

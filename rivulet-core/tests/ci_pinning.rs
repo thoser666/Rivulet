@@ -10164,7 +10164,10 @@ fn resource_metrics_gate_measures_the_binary_and_gates_a_baseline() {
         "python3 scripts/resource-efficiency-check.py --self-test",
         "python3 scripts/resource-metrics.py --self-test",
         "--profile ci-linux",
-        "cargo build --locked -p rivulet-cli",
+        // Release, not debug: a baseline calibrated on a debug build is the
+        // wrong reference for every later run.
+        "cargo build --locked --release -p rivulet-cli",
+        "--binary target/release/rivulet",
         "${{ needs.resource_metrics.result }}",
         "name: resource-metrics",
     ] {
@@ -10173,6 +10176,10 @@ fn resource_metrics_gate_measures_the_binary_and_gates_a_baseline() {
             "ci.yml must wire the resource metrics job: missing {required}"
         );
     }
+    assert!(
+        harness.contains("fn baseline_refusal") || harness.contains("def baseline_refusal"),
+        "a baseline must not be written from a debug binary without an explicit opt-in"
+    );
 
     // A baseline exists per gated profile, and the seed state is explicit so a
     // missing measurement can never look like a pass.

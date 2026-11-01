@@ -83,7 +83,10 @@ attributed to the window it was taken in:
 
 Automated on every CI run (`--profile ci-linux`): startup, engine bootstrap,
 idle CPU, RSS slope and growth, peak RSS, thread count, headless frame time, and
-the synthetic capture-on/off CPU delta.
+the synthetic capture-on/off CPU delta. The job measures a **release** build:
+a debug binary's render path is orders of magnitude slower, so a baseline taken
+from one would be the wrong reference for every later run (the harness refuses
+`--write-baseline` from a debug binary unless explicitly allowed).
 
 Deliberately **manual**, because a shared runner cannot produce the number:
 GPU utilisation, the game-side p99 frame-time delta, real capture-backend
@@ -110,7 +113,9 @@ a metric exceeds **both** its relative and its absolute allowance:
 
 The absolute target caps the relative allowance: a baseline recorded near the
 target cannot buy a larger budget. Updating a baseline is a deliberate commit
-(`--write-baseline`); CI never writes it. A profile without a measured baseline
+(`--write-baseline`); CI never writes it, and the harness refuses to write one
+from a debug build, because a baseline is the reference every later run is
+compared against. A profile without a measured baseline
 does not gate — the run records its numbers, says `seed` in the report, and the
 next deliberate run commits the baseline. That is how the first measurement of
 a new runner gets recorded without turning its noise into a red build.

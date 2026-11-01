@@ -11,6 +11,10 @@
   events; `scripts/resource-metrics.py` consumes those markers and samples the
   process **from outside** (CPU time, RSS, thread count per platform), so the
   footprint numbers do not come from the process being measured. The new CI job
+  measures a **release** build -- a debug binary's render path is orders of
+  magnitude slower, and a baseline taken from one would be the wrong reference
+  for every later run (`--write-baseline` refuses a debug binary unless
+  explicitly allowed). It
   gates idle CPU (2 % target), RSS slope, memory growth, startup and headless
   p99 frame time against a committed per-profile baseline, names the metric,
   baseline and delta on a regression, and records the synthetic capture-on/off

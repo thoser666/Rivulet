@@ -625,6 +625,11 @@ A runner without a GStreamer runtime gets `"engine": "unavailable"` plus the
 reason instead of a fabricated startup number: the harness records `blocked`
 with that reason, or fails the job when it was asked to require the engine.
 
+Measure a `--release` build. The render path is orders of magnitude slower
+unoptimised, so those numbers describe a binary nobody runs; `--write-baseline`
+refuses a debug binary unless `--allow-debug-baseline` marks the profile as a
+throwaway.
+
 Inspect JSON schema (shipped in W5) — one object with `pipeline`, the echoed
 `config`, and `features`:
 
