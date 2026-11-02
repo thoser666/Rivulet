@@ -270,6 +270,37 @@ impl SceneManager {
 
     pub fn remove(&mut self, id: Uuid) -> bool {
         let before = self.snapshot();
+        let removed = self.remove_inner(id);
+        if removed {
+            self.record_change(before);
+        }
+        removed
+    }
+
+    /// Removes several scenes as **one** undo step (#366).
+    ///
+    /// Each removal keeps the child-lifting rule of [`SceneManager::remove`]: an
+    /// unselected child of a selected folder moves up one level instead of
+    /// disappearing with its parent. Returns how many scenes were actually
+    /// removed; unknown IDs are skipped rather than failing the batch, because a
+    /// stale selection may name a scene another action already removed.
+    pub fn remove_many(&mut self, ids: &[Uuid]) -> usize {
+        let before = self.snapshot();
+        let mut removed = 0;
+        for id in ids {
+            if self.remove_inner(*id) {
+                removed += 1;
+            }
+        }
+        if removed > 0 {
+            self.record_change(before);
+        }
+        removed
+    }
+
+    /// The body of [`SceneManager::remove`] without the undo bookkeeping, so a
+    /// batch records one snapshot for all of its removals.
+    fn remove_inner(&mut self, id: Uuid) -> bool {
         let Some(index) = self.scenes.iter().position(|s| s.id == id) else {
             return false;
         };
@@ -295,8 +326,92 @@ impl SceneManager {
                 .filter(|h| self.scenes.iter().any(|s| s.id == *h))
                 .or_else(|| self.scenes.last().map(|s| s.id));
         }
-        self.record_change(before);
         true
+    }
+
+    /// Moves several scenes under `parent` as **one** undo step (#366).
+    ///
+    /// The whole batch is validated before anything changes, so a drag of a
+    /// selection is all-or-nothing: if one member would produce an unusable tree
+    /// the caller gets the same typed refusal a single move reports and the
+    /// collection is untouched. A partially applied move that looks like it
+    /// worked is exactly the bug this prevents.
+    ///
+    /// Dropping a selection onto one of its own members is refused as
+    /// [`SceneHierarchyError::SelfParent`] for that member: the folder would
+    /// become its own ancestor.
+    pub fn set_parent_many(
+        &mut self,
+        ids: &[Uuid],
+        parent: Option<Uuid>,
+    ) -> Result<usize, SceneHierarchyError> {
+        if let Some(parent_id) = parent {
+            if ids.contains(&parent_id) {
+                return Err(SceneHierarchyError::SelfParent(parent_id));
+            }
+            if self.get(parent_id).is_none() {
+                return Err(SceneHierarchyError::UnknownParent(parent_id));
+            }
+        }
+        for id in ids {
+            if self.get(*id).is_none() {
+                return Err(SceneHierarchyError::UnknownScene(*id));
+            }
+            if let Some(parent_id) = parent {
+                if self.is_descendant_of(parent_id, *id) {
+                    return Err(SceneHierarchyError::Cycle {
+                        scene: *id,
+                        parent: parent_id,
+                    });
+                }
+            }
+        }
+        let before = self.snapshot();
+        let mut moved = 0;
+        for id in ids {
+            if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == *id) {
+                scene.parent = parent;
+                moved += 1;
+            }
+        }
+        if moved > 0 {
+            self.record_change(before);
+        }
+        Ok(moved)
+    }
+
+    /// Sets the colour label of several scenes as one undo step (#366). Returns
+    /// how many scenes exist; unknown IDs are skipped.
+    pub fn set_color_many(&mut self, ids: &[Uuid], color: u32) -> usize {
+        let before = self.snapshot();
+        let mut changed = 0;
+        for id in ids {
+            if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == *id) {
+                scene.color = color;
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.record_change(before);
+        }
+        changed
+    }
+
+    /// Marks several scenes as live scenes or components as one undo step (#366).
+    /// Returns how many scenes exist; unknown IDs are skipped.
+    pub fn set_kind_many(&mut self, ids: &[Uuid], kind: SceneKind) -> usize {
+        let before = self.snapshot();
+        let mut changed = 0;
+        for id in ids {
+            if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == *id) {
+                scene.kind = kind;
+                changed += 1;
+            }
+        }
+        if changed > 0 {
+            self.record_change(before);
+        }
+        changed
     }
 
     /// Moves a scene under `parent` (`None` moves it back to the top level).

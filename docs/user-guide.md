@@ -118,6 +118,11 @@ Ordnerzeile): `Cut` oder `Fade` mit eigener Dauer, aufgelöst vom nächsten Ordn
 mit Eintrag bis zum Sammlungsstandard — und genauso für den Studio-`Take`. Die
 Details stehen im Tutorial unter
 [Standardtransition pro Ordner](scene-management-tutorial.md#11-standardtransition-pro-ordner).
+Mehrere Szenen lassen sich mit **Strg/Cmd-Klick** einzeln und mit
+**Umschalt-Klick** als Bereich auswählen; **Strg/Cmd+A** wählt die sichtbaren
+Zeilen, **Esc** hebt die Auswahl auf, **Entf** löscht sie nach Rückfrage. Ziehen
+an einer ausgewählten Zeile verschiebt die ganze Auswahl in einem Schritt — ist
+ein Ziel unzulässig, bewegt sich keine der Szenen.
 Der vollständige Ablauf steht im Tutorial
 [Szenen verwalten: Ordner, Farben, Komponenten und Suche](scene-management-tutorial.md).
 
