@@ -44,11 +44,12 @@ from the next frame and survive a restart.
   kept.
 
 - **`Delete` inside the scene dock is the selection's key.** While the Scenes
-  view is active and the dock has a non-empty selection, `Delete` removes the
-  selected scenes (asking for confirmation when more than one is selected)
+  view or the Live workspace is active and the dock has a non-empty selection,
+  `Delete` removes the selected scenes (asking for confirmation when more than one is selected)
   instead of deleting the selected composition source. The same block adds
   `Ctrl`/`Cmd`-click, `Shift`-click, `Ctrl`/`Cmd+A` and `Esc` for the selection;
-  all of them stay behind the text-input guard. See
+  all of them stay behind the text-input guard, and `Ctrl`/`Cmd+F` focuses the
+  search box wherever the dock is drawn. See
   [`scene-management.md`](scene-management.md#multi-select-and-bulk-actions).
 
 ## Platform matrix (honest)

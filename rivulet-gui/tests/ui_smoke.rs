@@ -8,6 +8,7 @@ use std::path::PathBuf;
 fn navigation_contract_covers_all_primary_views() {
     let source = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
     for key in [
+        "nav_live",
         "nav_record",
         "nav_mixer",
         "nav_scenes",
@@ -18,6 +19,30 @@ fn navigation_contract_covers_all_primary_views() {
         assert!(source.contains(key), "missing navigation key: {key}");
     }
     assert!(source.contains("fn all() -> &'static [AppView]"));
+}
+
+#[test]
+fn live_workspace_contract_keeps_session_and_switcher_on_one_page() {
+    // The live workspace exists so a running show never changes tabs to see what
+    // it sends. Pin the pieces: preview, scene dock, mixer and both session
+    // toggles, all rendered from the widgets the detail tabs already own.
+    let source = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
+    let start = source
+        .split_once("fn draw_live_view")
+        .map(|(_, rest)| rest)
+        .expect("live workspace must exist");
+    let body = start
+        .split_once("fn draw_scenes_view")
+        .map(|(body, _)| body)
+        .expect("live workspace must precede the scenes view");
+    assert!(body.contains("draw_recording_preview_sized"));
+    assert!(body.contains("draw_scene_dock"));
+    assert!(body.contains("draw_inline_audio_mixer"));
+    assert!(body.contains("draw_stream_start_stop_button"));
+    assert!(body.contains("start_active_recording"));
+    assert!(body.contains("take_studio_preview"));
+    // The dock's keys must follow the dock, not a single hard-coded tab.
+    assert!(source.contains("hosts_scene_dock"));
 }
 
 #[test]

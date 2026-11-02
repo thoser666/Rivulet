@@ -1,4 +1,18 @@
 ## [Unreleased]
+- feat(gui,m9): **a live workspace shows the picture, the scene switcher, the
+  mixer and both session toggles on one page, so a running show stops hopping
+  between tabs.** Recording and streaming lived in tabs separate from the scenes
+  they send, and neither showed what was on air: checking the picture during a
+  broadcast meant leaving the Stream tab, and switching scenes meant leaving it
+  again. The new `Live` view (first in the sidebar, and the view the app opens
+  on) composes the widgets the detail tabs already own — the encoder preview at
+  full width, the scene dock with multi-select and search, the inline mixer, and
+  a bar with record start/stop, stream start/stop and Studio `Take` — instead of
+  growing a second code path for any of them. `Take` and the stream gate moved
+  into `take_studio_preview` and `stream_configured`, so a Take resolves the same
+  transition (folder default, collection default, reduced motion) wherever it is
+  clicked, and the dock's keys (`Ctrl`/`Cmd+A`, `Esc`, `Delete`, `Ctrl`/`Cmd+F`)
+  now follow `AppView::hosts_scene_dock` instead of one hard-coded tab.
 - feat(gui,core,m9): **the scene dock selects several scenes and moves, colours,
   retypes or deletes them in one step — or refuses the batch whole**
   ([#366](https://github.com/thoser666/Rivulet/issues/366)). Re-organising a

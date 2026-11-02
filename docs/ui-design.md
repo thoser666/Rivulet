@@ -34,11 +34,14 @@ The GUI is a single egui/eframe application in `rivulet-gui/`:
 
 **Current layout:** a fixed left navigation panel (`egui::Panel::left`) drives
 the main navigation. Each sidebar entry maps to an `AppView` variant and the
-central panel renders the corresponding section. A future compact/collapsed
+central panel renders the corresponding section. The app opens on `Live`, the
+workspace a running show needs first; the detail tabs keep the per-area
+configuration and are never the only way to reach the picture or a scene switch. A future compact/collapsed
 sidebar may be added once iconography and keyboard navigation are specified.
 
 | Sidebar section | AppView | Milestone | Content |
 | --- | --- | --- | --- |
+| Live | `Live` | M9 | the workspace: encoder preview, scene switcher, inline mixer and the record/stream bar on one page |
 | Record | `Record` | M0/M1 | capture source (screen/window/camera/game), region, codec, preset, timer/FPS overlay |
 | Mixer | `Mixer` | M1 | audio filters, monitoring, levels |
 | Scenes | `Scenes` | M2 | scenes, named collections/profiles, duplication, sources, composition, transitions |
@@ -79,6 +82,14 @@ The top bar and navigation use the shared translucent `theme::glass_frame()`.
   waiting, and active states. Do not create a second full-rate recording
   pipeline for the thumbnail.
 
+- **Live workspace** (`AppView::Live`, OBS's main window as the reference):
+  composes the widgets the detail tabs already own — `draw_recording_preview_sized`
+  for the picture, `draw_scene_dock` for the switcher, `draw_inline_audio_mixer`
+  for the audio strip, plus the record and stream toggles — instead of duplicating
+  any of them. Anything both places share must be a helper, not a copy: `Take`
+  goes through `take_studio_preview` and the stream gate through
+  `stream_configured`, so behaviour cannot drift between tabs. The dock's keys
+  follow `AppView::hosts_scene_dock`, so a view that draws the dock gets them.
 - **Live lists** (e.g. the game-window picker): while the picker is open its
   underlying list is re-enumerated periodically (`GAME_WINDOWS_REFRESH_INTERVAL`)
   so new/closed windows appear without manual action. Re-resolve the current
