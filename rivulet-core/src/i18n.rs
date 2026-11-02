@@ -548,6 +548,7 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("midi_preset_delete", "Delete"),
                 ("midi_preset_delete_hint", "Delete this preset from the selected device"),
                 // Navigation
+                ("nav_live", "Live"),
                 ("nav_record", "Record"),
                 ("nav_mixer", "Mixer"),
                 ("nav_scenes", "Scenes"),
@@ -1437,6 +1438,7 @@ Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."
                 ("midi_preset_delete", "Löschen"),
                 ("midi_preset_delete_hint", "Preset für das ausgewählte Gerät löschen"),
                 // Navigation
+                ("nav_live", "Live"),
                 ("nav_record", "Aufnehmen"),
                 ("nav_mixer", "Mixer"),
                 ("nav_scenes", "Szenen"),

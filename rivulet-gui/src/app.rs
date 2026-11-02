@@ -266,7 +266,12 @@ enum UpdateUi {
 // --- Main navigation ---
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum AppView {
+    /// The live workspace: program picture, scene switcher, mixer and the
+    /// record/stream bar on one page, so a running show never has to change
+    /// tabs to see what it is sending. The detail tabs keep the per-area
+    /// configuration.
     #[default]
+    Live,
     Record,
     Mixer,
     Scenes,
@@ -280,6 +285,7 @@ impl AppView {
     /// All views in sidebar display order.
     fn all() -> &'static [AppView] {
         &[
+            AppView::Live,
             AppView::Record,
             AppView::Mixer,
             AppView::Scenes,
@@ -293,6 +299,7 @@ impl AppView {
     /// i18n key for the sidebar label and the view heading.
     fn nav_key(self) -> &'static str {
         match self {
+            AppView::Live => "nav_live",
             AppView::Record => "nav_record",
             AppView::Mixer => "nav_mixer",
             AppView::Scenes => "nav_scenes",
@@ -301,6 +308,13 @@ impl AppView {
             AppView::Settings => "nav_settings",
             AppView::Help => "nav_help",
         }
+    }
+
+    /// Whether this view renders the scene dock, and therefore whether the
+    /// multi-select keys (`Ctrl/Cmd+A`, `Esc`, `Delete`, copy/paste) act on
+    /// scenes (#366).
+    fn hosts_scene_dock(self) -> bool {
+        matches!(self, AppView::Live | AppView::Scenes)
     }
 
     /// Milestone of still-planned views (`None` once implemented).
@@ -5137,12 +5151,169 @@ impl RivuletApp {
     /// Scenes view: list scenes (folders first), switch the active scene,
     /// and add/rename/remove scenes. Pure state logic is testable via the
     /// `SceneManager` in rivulet-core; this method only renders and calls it.
-    fn draw_scenes_view(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
-        // Ctrl/Cmd+F focuses the dock's search box (issue #351). The scene
-        // shortcuts do not use the key, so nothing is taken from the list.
+    /// `Ctrl/Cmd+F` focuses the dock's search box (issue #351). Shared by the
+    /// Scenes view and the Live workspace, which both host the dock.
+    fn focus_scene_search_on_shortcut(&mut self, ui: &egui::Ui) {
         if ui.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
             self.scene_search_focus = true;
         }
+    }
+
+    /// Promote the studio preview scene to program through the resolved
+    /// transition. Resolution matches a direct switch — folder default,
+    /// collection default, then reduced motion (ui-005, #368) — so a folder
+    /// override is not silently ignored in the mode where transitions are most
+    /// visible. The Scenes view and the Live workspace both go through here, so
+    /// `Take` cannot mean two different things depending on where it was
+    /// clicked.
+    fn take_studio_preview(&mut self) {
+        let preview_name = self
+            .studio_mode
+            .preview()
+            .and_then(|id| self.scenes.get(id))
+            .map(|scene| scene.name.clone())
+            .unwrap_or_else(|| "—".to_string());
+        let now = Instant::now();
+        let resolved = self.resolved_transition(self.studio_mode.preview());
+        if let Some(transition) = self.studio_mode.take_with(resolved, now) {
+            if let Some(target) = self.studio_mode.program() {
+                let from = self.scenes.active();
+                if self.switch_active_scene(target) {
+                    self.scene_transition = transition;
+                    self.scene_status =
+                        Some(self.tr_fmt("studio_taken", std::slice::from_ref(&preview_name)));
+                    if from == Some(target) {
+                        self.scene_transition.clear();
+                    }
+                }
+            }
+        }
+    }
+
+    /// The live workspace (approved follow-up to #366): the picture that is on
+    /// air, the scene switcher, the mixer and the record/stream bar on one page.
+    /// OBS's main window is the reference; the detail tabs keep the per-area
+    /// configuration, and this view only composes the widgets they already own
+    /// rather than growing a second code path for any of them.
+    fn draw_live_view(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
+        self.focus_scene_search_on_shortcut(ui);
+
+        // Two different questions: where a switch in the dock points (the studio
+        // preview while composing) and what the engine actually sends (the
+        // program scene). Keeping them apart is what keeps Studio Mode honest.
+        let studio = self.studio_mode.enabled();
+        let switch_target = if studio {
+            self.studio_mode.preview()
+        } else {
+            self.scenes.active()
+        };
+        let switch_name = switch_target
+            .and_then(|id| self.scenes.get(id))
+            .map(|scene| scene.name.clone())
+            .unwrap_or_else(|| self.tr("scenes_no_scenes").to_string());
+        let mut header = self.tr_fmt(
+            if studio {
+                "studio_preview_label"
+            } else {
+                "scenes_active_label"
+            },
+            std::slice::from_ref(&switch_name),
+        );
+        if studio {
+            let program_name = self
+                .studio_mode
+                .program()
+                .and_then(|id| self.scenes.get(id))
+                .map(|scene| scene.name.clone())
+                .unwrap_or_else(|| "—".to_string());
+            header.push_str(" · ");
+            header.push_str(
+                &self.tr_fmt("studio_program_label", std::slice::from_ref(&program_name)),
+            );
+        }
+        ui.label(egui::RichText::new(header).strong().color(colors.success));
+
+        // ── Broadcast bar ─────────────────────────────────────────────────
+        // Both session toggles stay reachable without scrolling, which is the
+        // point of a workspace during a running show.
+        let recording = self.any_recording_active();
+        let recording_label = if recording {
+            format!("⏹ {}", self.tr("stop_recording"))
+        } else {
+            format!(
+                "⏺ {} [{}]",
+                self.tr("start_recording"),
+                self.hotkeys.label_for("record")
+            )
+        };
+        let configured = self.stream_configured();
+        let mut toggle_recording = false;
+        let mut take = false;
+        ui.horizontal_wrapped(|ui| {
+            let response = ui.add(
+                egui::Button::new(egui::RichText::new(recording_label).strong())
+                    .min_size(egui::vec2(170.0, 42.0)),
+            );
+            theme::paint_interaction_stroke(ui, &response);
+            if response.clicked() {
+                toggle_recording = true;
+            }
+            self.draw_stream_start_stop_button(ui, configured);
+            if studio {
+                let response = theme::accent_button(ui, self.tr("studio_take"))
+                    .on_hover_text(self.tr("studio_take_hint"));
+                if response.clicked() {
+                    take = true;
+                }
+            }
+        });
+        if toggle_recording {
+            if recording {
+                self.stop_active_recording();
+            } else {
+                self.start_active_recording();
+            }
+        }
+        if take {
+            self.take_studio_preview();
+        }
+        if let Some(status) = &self.record_status {
+            ui.colored_label(colors.info, status);
+        }
+        if let Some(status) = &self.stream_status_message {
+            ui.colored_label(colors.info, status);
+        }
+        if let Some(error) = &self.last_error {
+            ui.colored_label(colors.error, error);
+        }
+
+        // ── Picture ───────────────────────────────────────────────────────
+        ui.separator();
+        self.draw_recording_preview_sized(ui, 900.0);
+
+        // ── Scene switcher ────────────────────────────────────────────────
+        // The same dock as the Scenes view, including multi-select, so switching
+        // and selection rules cannot drift between the two places.
+        ui.separator();
+        ui.label(egui::RichText::new(self.tr("nav_scenes")).strong());
+        egui::ScrollArea::vertical()
+            .id_salt("live_scene_dock")
+            .max_height(240.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                self.draw_scene_dock(ui, colors, switch_target);
+            });
+
+        // ── Mixer ─────────────────────────────────────────────────────────
+        ui.separator();
+        ui.label(egui::RichText::new(self.tr("nav_mixer")).strong());
+        self.draw_inline_audio_mixer(ui);
+    }
+
+    fn draw_scenes_view(&mut self, ui: &mut egui::Ui, colors: &theme::StatusColors) {
+        // Ctrl/Cmd+F focuses the dock's search box (issue #351); shared with the
+        // Live workspace, so the key works wherever the dock is drawn.
+        self.focus_scene_search_on_shortcut(ui);
         if self.scene_transition.is_active() {
             let progress = self.scene_transition.progress_at(Instant::now());
             ui.ctx()
@@ -5210,28 +5381,7 @@ impl RivuletApp {
                 let take = theme::accent_button(ui, self.tr("studio_take"))
                     .on_hover_text(self.tr("studio_take_hint"));
                 if take.clicked() {
-                    let now = Instant::now();
-                    // A Take resolves like a direct switch — folder default,
-                    // collection default, then reduced motion (ui-005, #368) —
-                    // so a folder override is not silently ignored in the mode
-                    // where transitions are most visible.
-                    let resolved = self.resolved_transition(self.studio_mode.preview());
-                    if let Some(transition) = self.studio_mode.take_with(resolved, now) {
-                        if let Some(target) = self.studio_mode.program() {
-                            let from = self.scenes.active();
-                            if self.switch_active_scene(target) {
-                                self.scene_transition = transition;
-                                self.scene_status =
-                                    Some(self.tr_fmt(
-                                        "studio_taken",
-                                        std::slice::from_ref(&preview_name),
-                                    ));
-                                if from == Some(target) {
-                                    self.scene_transition.clear();
-                                }
-                            }
-                        }
-                    }
+                    self.take_studio_preview();
                 }
             });
         }
@@ -7181,11 +7331,19 @@ impl RivuletApp {
     }
 
     fn draw_recording_preview(&mut self, ui: &mut egui::Ui) {
+        self.draw_recording_preview_sized(ui, 480.0);
+    }
+
+    /// The same thumbnail at a caller-chosen maximum width: the Record view
+    /// keeps its 480 px panel while the Live workspace asks for the space it
+    /// has. One texture and one refresh path, so a larger preview cannot spawn
+    /// a second capture pipeline.
+    fn draw_recording_preview_sized(&mut self, ui: &mut egui::Ui, max_width: f32) {
         let colors = theme::StatusColors::for_ui(ui);
         ui.group(|ui| {
             ui.label(egui::RichText::new(self.tr("recording_preview_title")).strong());
             if let Some(preview) = &self.recording_preview.texture {
-                let max_width = ui.available_width().clamp(1.0, 480.0);
+                let max_width = ui.available_width().clamp(1.0, max_width);
                 let scale =
                     (max_width / self.recording_preview.width.max(1) as f32).clamp(0.05, 0.5);
                 let size = egui::vec2(
@@ -11475,6 +11633,20 @@ impl RivuletApp {
     }
 
     /// Start/stop streaming button of the Stream workspace action bar.
+    /// A stream can start once platform, ingest URL and key validate. Shared by
+    /// the Stream view and the Live workspace, so both agree on the same gate.
+    fn stream_configured(&self) -> bool {
+        !self.stream_key.trim().is_empty()
+            && StreamSettings::new(
+                self.stream_platform,
+                self.stream_ingest_url.clone(),
+                self.stream_key.clone(),
+            )
+            .with_preset(self.stream_preset)
+            .validate()
+            .is_ok()
+    }
+
     fn draw_stream_start_stop_button(&mut self, ui: &mut egui::Ui, configured: bool) {
         let label = if self.engine.is_streaming() {
             self.tr("stream_stop")
@@ -11518,15 +11690,7 @@ impl RivuletApp {
         // available space: the chat list is docked (bounded) on this page.
         let chat_list_height = (ui.available_height() * 0.45).clamp(160.0, 460.0);
 
-        let configured = !self.stream_key.trim().is_empty()
-            && StreamSettings::new(
-                self.stream_platform,
-                self.stream_ingest_url.clone(),
-                self.stream_key.clone(),
-            )
-            .with_preset(self.stream_preset)
-            .validate()
-            .is_ok();
+        let configured = self.stream_configured();
 
         // ── Action bar (Meld-style broadcast header): platform + preset on
         //    the left, the prominent start/stop button on the right. On
@@ -12304,7 +12468,7 @@ impl eframe::App for RivuletApp {
                     // In the Scenes view a non-empty selection owns `Delete`:
                     // otherwise the same key would also delete a source in the
                     // active scene (issue #366).
-                    if self.view == AppView::Scenes && !self.scene_selection.is_empty() {
+                    if self.view.hosts_scene_dock() && !self.scene_selection.is_empty() {
                         self.request_scene_selection_removal();
                     } else {
                         self.delete_selected_composition_source();
@@ -12314,7 +12478,7 @@ impl eframe::App for RivuletApp {
                 // text-input guard as the other scene keys, so `Ctrl+A`, `Esc`
                 // and `Delete` keep their editing meaning in rename and chat
                 // fields, and `Ctrl/Cmd+F` still focuses the search box.
-                if self.view == AppView::Scenes {
+                if self.view.hosts_scene_dock() {
                     if i.modifiers.command && i.key_pressed(egui::Key::A) {
                         let visible = self.scene_visible_ids.clone();
                         self.scene_selection.select_all(&visible);
@@ -12330,7 +12494,7 @@ impl eframe::App for RivuletApp {
                 // Scene-item copy/paste (issue #192): in-app only and gated on
                 // the Scenes view so Ctrl+C/V keep their text-edit meaning in
                 // every other view (chat, rename fields, stream info editor).
-                if self.view == AppView::Scenes {
+                if self.view.hosts_scene_dock() {
                     if i.key_pressed(egui::Key::C) && i.modifiers.command {
                         self.copy_selected_composition_source();
                     }
@@ -13770,6 +13934,12 @@ impl eframe::App for RivuletApp {
                     if self.view == AppView::Mixer {
                         self.sync_audio_routing();
                         self.draw_mixer_sources(ui);
+                    }
+
+                    // Live workspace: picture, scene switcher and mixer stay
+                    // together, with the record/stream bar above them.
+                    if self.view == AppView::Live {
+                        self.draw_live_view(ui, &colors);
                     }
 
                     // Scenes: list, switching, add/rename/remove
@@ -15708,8 +15878,12 @@ mod tests {
     // ── navigation (AppView) ───────────────────────────────────────
 
     #[test]
-    fn app_view_defaults_to_record() {
-        assert_eq!(AppView::default(), AppView::Record);
+    fn app_view_defaults_to_the_live_workspace() {
+        // OBS's main window is the reference: a running show needs the picture
+        // first, so the workspace is what the app opens on. The detail tabs keep
+        // the per-area configuration and are one click away.
+        assert_eq!(AppView::default(), AppView::Live);
+        assert_eq!(AppView::all().first(), Some(&AppView::Live));
     }
 
     #[test]
@@ -15738,7 +15912,15 @@ mod tests {
         for view in AppView::all() {
             assert!(!view.nav_key().is_empty(), "view has no nav key");
         }
-        assert_eq!(AppView::all().len(), 7);
+        assert_eq!(AppView::all().len(), 8);
+        // The live workspace is where the app opens: OBS's main window is the
+        // reference, and a running show needs the picture before anything else.
+        assert_eq!(AppView::all()[0], AppView::Live);
+        assert_eq!(AppView::default(), AppView::Live);
+        assert_eq!(AppView::Live.nav_key(), "nav_live");
+        assert!(AppView::Live.hosts_scene_dock());
+        assert!(AppView::Scenes.hosts_scene_dock());
+        assert!(!AppView::Record.hosts_scene_dock());
         assert_eq!(AppView::Help.nav_key(), "nav_help");
         assert!(AppView::Stream.planned_milestone().is_none());
     }
@@ -21830,20 +22012,20 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
     }
 
     #[test]
-    fn audio_mixer_ui_is_wired_into_all_three_placements() {
-        // The Mixer view hosts the full matrix; the Record and Stream views
-        // embed the same shared strip (single implementation, three
+    fn audio_mixer_ui_is_wired_into_all_inline_placements() {
+        // The Mixer view hosts the full matrix; the Record, Stream and Live
+        // views embed the same shared strip (single implementation, four
         // placements - the design-doc contract).
         let source = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
         assert!(source.contains("fn draw_mixer_sources"));
         assert!(source.contains("fn draw_audio_source_strip"));
         assert!(source.contains("fn draw_inline_audio_mixer"));
-        // Exactly two inline call sites (Record + Stream); the third
-        // string match is this test's own literal, so expect three.
+        // Exactly three inline call sites (Record, Stream, Live); the fourth
+        // string match is this test's own literal, so expect four.
         let inline_calls = source.matches("self.draw_inline_audio_mixer(ui);").count();
         assert_eq!(
-            inline_calls, 3,
-            "the inline strip must appear in the Record and Stream views"
+            inline_calls, 4,
+            "the inline strip must appear in the Record, Stream and Live views"
         );
         // The Mixer-view block hosts the matrix behind the sync hook.
         assert!(source.contains("self.sync_audio_routing();"));

@@ -151,7 +151,9 @@ parents form a cycle falls back instead of hanging the switch.
 
 ## Scene dock
 
-The dock (package C) renders the hierarchy on top of that model. Its rules are
+The dock (package C) renders the hierarchy on top of that model — in the Scenes
+view and again in the Live workspace, both through the same `draw_scene_dock`, so
+switching, selection and search behave identically in the two places. Its rules are
 implemented in `rivulet_core::scene_dock`, which keeps them free of a window so
 they can be unit-tested; the GUI in `rivulet-gui/src/app.rs` only draws rows and
 forwards actions to the model API.
