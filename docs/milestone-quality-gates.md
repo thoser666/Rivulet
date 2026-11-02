@@ -550,11 +550,12 @@ Workstream issues:
   [`scene-management.md`](scene-management.md) and the user tutorial
   [`scene-management-tutorial.md`](scene-management-tutorial.md).
 
-Scene follow-ups are extensions, not gaps in criterion 8: multi-select and bulk
-move ([#366](https://github.com/thoser666/Rivulet/issues/366)), the OBS
-collection importer ([#367](https://github.com/thoser666/Rivulet/issues/367)),
-and per-folder default transitions
-([#368](https://github.com/thoser666/Rivulet/issues/368)).
+Scene follow-ups are extensions, not gaps in criterion 8. Per-folder default
+transitions ([#368](https://github.com/thoser666/Rivulet/issues/368)) are
+delivered: resolution, undo, prune-on-delete and the studio `Take` are pinned by
+`rivulet-core/tests/folder_transition.rs`. Still open: multi-select and bulk move
+([#366](https://github.com/thoser666/Rivulet/issues/366)) and the OBS collection
+importer ([#367](https://github.com/thoser666/Rivulet/issues/367)).
 
 ### M10: AI Chat Assistant
 

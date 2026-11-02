@@ -13,8 +13,10 @@
 //! `docs/scene-management.md`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
+
+use crate::transition::TransitionDefault;
 
 /// What a scene is for in a collection ([#319](https://github.com/thoser666/Rivulet/issues/319)).
 ///
@@ -153,6 +155,15 @@ pub struct SceneManager {
     undo_stack: Vec<SceneSnapshot>,
     #[serde(skip)]
     redo_stack: Vec<SceneSnapshot>,
+    /// Per-folder default transitions, keyed by the folder scene's ID (#368).
+    ///
+    /// Deliberately not a field on [`Scene`]: `Scene` is public and constructible
+    /// literally, so a new field would be a breaking change under
+    /// `docs/api-migration.md`. The map travels with the collection instead, and
+    /// `#[serde(default)]` lets a collection written before the feature load with
+    /// no overrides at all.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    folder_transitions: HashMap<Uuid, TransitionDefault>,
     collection: String,
     profile: String,
 }
@@ -162,6 +173,7 @@ struct SceneSnapshot {
     scenes: Vec<Scene>,
     active: Option<Uuid>,
     history: Vec<Uuid>,
+    folder_transitions: HashMap<Uuid, TransitionDefault>,
     collection: String,
     profile: String,
 }
@@ -180,6 +192,7 @@ impl SceneManager {
             history: Vec::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            folder_transitions: HashMap::new(),
             collection: "Default".to_string(),
             profile: "Default".to_string(),
         }
@@ -190,6 +203,7 @@ impl SceneManager {
             scenes: self.scenes.clone(),
             active: self.active,
             history: self.history.clone(),
+            folder_transitions: self.folder_transitions.clone(),
             collection: self.collection.clone(),
             profile: self.profile.clone(),
         }
@@ -221,6 +235,7 @@ impl SceneManager {
         self.scenes = previous.scenes;
         self.active = previous.active;
         self.history = previous.history;
+        self.folder_transitions = previous.folder_transitions;
         self.collection = previous.collection;
         self.profile = previous.profile;
         true
@@ -235,6 +250,7 @@ impl SceneManager {
         self.scenes = next.scenes;
         self.active = next.active;
         self.history = next.history;
+        self.folder_transitions = next.folder_transitions;
         self.collection = next.collection;
         self.profile = next.profile;
         true
@@ -267,6 +283,8 @@ impl SceneManager {
                 scene.parent = former_parent;
             }
         }
+        // A removed folder takes its default with it; undo restores both.
+        self.folder_transitions.remove(&id);
         self.history.retain(|h| *h != id);
         if self.active == Some(id) {
             // Restore the most recent still-existing scene from history,
@@ -339,6 +357,75 @@ impl SceneManager {
         scene.kind = kind;
         self.record_change(before);
         true
+    }
+
+    /// The default transition configured on a folder itself, if any (#368).
+    ///
+    /// `None` means the folder inherits — from its own nearest ancestor folder,
+    /// or from the collection default.
+    pub fn folder_transition(&self, folder: Uuid) -> Option<TransitionDefault> {
+        self.folder_transitions.get(&folder).copied()
+    }
+
+    /// Sets a folder's default transition; returns `false` for an unknown ID.
+    ///
+    /// Undoable like `set_color`: the default is part of the collection file, so
+    /// setting one must never silently rewrite how a show plays without a way
+    /// back.
+    pub fn set_folder_transition(&mut self, folder: Uuid, transition: TransitionDefault) -> bool {
+        if self.get(folder).is_none() {
+            return false;
+        }
+        let before = self.snapshot();
+        self.folder_transitions.insert(folder, transition);
+        self.record_change(before);
+        true
+    }
+
+    /// Clears a folder's default so it inherits again. `false` when the folder is
+    /// unknown or had no default — clearing nothing is not an undo step.
+    pub fn clear_folder_transition(&mut self, folder: Uuid) -> bool {
+        if !self.folder_transitions.contains_key(&folder) {
+            return false;
+        }
+        let before = self.snapshot();
+        self.folder_transitions.remove(&folder);
+        self.record_change(before);
+        true
+    }
+
+    /// The transition a switch to `scene` plays (#368).
+    ///
+    /// Resolution order: the nearest ancestor folder that has a default —
+    /// walking outwards from `scene.parent` — then `fallback`, which is the
+    /// collection default the application supplies from its own settings (the
+    /// app default is that value's own fallback).
+    ///
+    /// An entry applies to everything *inside* the folder, so a folder switched
+    /// to directly counts as a scene like any other and inherits from its own
+    /// ancestors. That is the grain the issue defines and it keeps "the folder
+    /// says how its contents switch" true without a second rule.
+    ///
+    /// The walk is step-bounded: an imported, hand-edited collection can contain
+    /// a cycle, and resolving a transition must not hang the switch.
+    pub fn resolve_transition(
+        &self,
+        scene: Uuid,
+        fallback: TransitionDefault,
+    ) -> TransitionDefault {
+        let mut current = self.get(scene).and_then(|scene| scene.parent);
+        let mut steps = 0;
+        while let Some(folder) = current {
+            if let Some(transition) = self.folder_transitions.get(&folder) {
+                return *transition;
+            }
+            steps += 1;
+            if steps > self.scenes.len() {
+                break;
+            }
+            current = self.get(folder).and_then(|scene| scene.parent);
+        }
+        fallback
     }
 
     /// Whether `candidate` sits anywhere below `ancestor` in the tree.

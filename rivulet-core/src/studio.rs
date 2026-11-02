@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use uuid::Uuid;
 
-use crate::{SceneTransition, TransitionKind};
+use crate::{SceneTransition, TransitionDefault, TransitionKind};
 
 /// Separates the scene being prepared from the scene currently on program.
 ///
@@ -80,6 +80,21 @@ impl StudioMode {
         duration: Duration,
         now: Instant,
     ) -> Option<SceneTransition> {
+        let duration_ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
+        self.take_with(TransitionDefault::new(kind, duration_ms), now)
+    }
+
+    /// Promote preview to program with an already-resolved transition (#368).
+    ///
+    /// The caller resolves the folder default, so Studio Mode never has to know
+    /// where a transition came from — but a `Take` and a direct scene switch
+    /// therefore play the same transition for the same target, which is what
+    /// keeps a folder override from being silently ignored in studio mode.
+    pub fn take_with(
+        &mut self,
+        transition: TransitionDefault,
+        now: Instant,
+    ) -> Option<SceneTransition> {
         if !self.can_take() {
             return None;
         }
@@ -87,9 +102,9 @@ impl StudioMode {
         let to = self.preview?;
         self.program = Some(to);
 
-        let mut transition = SceneTransition::new(kind, duration);
-        transition.start(from, Some(to), now);
-        Some(transition)
+        let mut started = SceneTransition::from_default(transition);
+        started.start(from, Some(to), now);
+        Some(started)
     }
 }
 
@@ -143,6 +158,46 @@ mod tests {
         assert_eq!(transition.from, Some(program));
         assert_eq!(transition.to, Some(preview));
         assert_eq!(transition.progress_at(now), 0.0);
+    }
+
+    /// A resolved folder default is played verbatim by a Take: the kind and the
+    /// length come from the folder, not from the collection setting.
+    #[test]
+    fn take_with_plays_the_resolved_folder_default() {
+        let program = scene();
+        let preview = scene();
+        let now = Instant::now();
+        let mut studio = StudioMode::new();
+        studio.set_enabled(true, Some(program));
+        studio.set_preview(Some(preview));
+
+        let transition = studio
+            .take_with(TransitionDefault::new(TransitionKind::Fade, 750), now)
+            .expect("preview should be takeable");
+
+        assert_eq!(transition.kind, TransitionKind::Fade);
+        assert_eq!(transition.duration, Duration::from_millis(750));
+        assert!((transition.progress_at(now + Duration::from_millis(375)) - 0.5).abs() < 0.01);
+        assert_eq!(studio.program(), Some(preview));
+    }
+
+    /// A `Cut` folder default must not produce a frame at a partial progress:
+    /// the switch is complete at the instant it starts.
+    #[test]
+    fn take_with_a_cut_default_completes_immediately() {
+        let program = scene();
+        let preview = scene();
+        let now = Instant::now();
+        let mut studio = StudioMode::new();
+        studio.set_enabled(true, Some(program));
+        studio.set_preview(Some(preview));
+
+        let transition = studio
+            .take_with(TransitionDefault::new(TransitionKind::Cut, 2000), now)
+            .expect("preview should be takeable");
+
+        assert_eq!(transition.progress_at(now), 1.0);
+        assert!(transition.is_finished_at(now));
     }
 
     #[test]

@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum TransitionKind {
     #[default]
     Cut,
@@ -15,6 +17,52 @@ impl TransitionKind {
         match self {
             Self::Cut => "Cut",
             Self::Fade => "Fade",
+        }
+    }
+}
+
+/// A configured transition: the kind to play and how long it lasts.
+///
+/// Folder defaults and the collection default store this one type, so
+/// [`crate::SceneManager::resolve_transition`] can hand a single resolved value
+/// to the switch instead of a loose `(kind, duration)` pair that every call site
+/// would have to assemble itself. The duration is kept even for a `Cut`, which
+/// ignores it, so switching a folder back to `Fade` restores the length the user
+/// typed instead of a default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransitionDefault {
+    pub kind: TransitionKind,
+    /// Duration in milliseconds. Ignored by a `Cut`, which completes at once.
+    pub duration_ms: u64,
+}
+
+impl Default for TransitionDefault {
+    fn default() -> Self {
+        Self {
+            kind: TransitionKind::Cut,
+            duration_ms: 300,
+        }
+    }
+}
+
+impl TransitionDefault {
+    pub fn new(kind: TransitionKind, duration_ms: u64) -> Self {
+        Self { kind, duration_ms }
+    }
+
+    pub fn duration(&self) -> Duration {
+        Duration::from_millis(self.duration_ms)
+    }
+
+    /// The same transition with motion removed: a `Fade` becomes a `Cut`.
+    ///
+    /// Reduced motion is applied to the *resolved* transition rather than to
+    /// the stored one, so a folder default keeps its configured kind and length
+    /// and only the switch that plays it degrades (WCAG 2.3.3).
+    pub fn without_motion(self) -> Self {
+        Self {
+            kind: TransitionKind::Cut,
+            ..self
         }
     }
 }
@@ -47,6 +95,11 @@ impl SceneTransition {
             duration,
             ..Self::default()
         }
+    }
+
+    /// Build a transition from an already-resolved default (#368).
+    pub fn from_default(transition: TransitionDefault) -> Self {
+        Self::new(transition.kind, transition.duration())
     }
 
     pub fn start(&mut self, from: Option<Uuid>, to: Option<Uuid>, now: Instant) {
@@ -117,5 +170,40 @@ mod tests {
         transition.clear();
         assert!(transition.from.is_none());
         assert!(transition.to.is_none());
+    }
+
+    /// A configured default is what a collection stores, so it has to survive a
+    /// JSON round trip unchanged — including the duration of a `Cut`, which the
+    /// renderer ignores but the user gets back when they switch to `Fade`.
+    #[test]
+    fn a_transition_default_round_trips_through_json() {
+        let original = TransitionDefault::new(TransitionKind::Fade, 750);
+        let json = serde_json::to_string(&original).expect("serialisable");
+        assert_eq!(json, r#"{"kind":"fade","duration_ms":750}"#);
+        let restored: TransitionDefault = serde_json::from_str(&json).expect("deserialisable");
+        assert_eq!(restored, original);
+        assert_eq!(restored.duration(), Duration::from_millis(750));
+    }
+
+    /// Reduced motion degrades the kind and keeps the configured length, so
+    /// turning the preference back off restores exactly what the user set.
+    #[test]
+    fn without_motion_turns_a_fade_into_a_cut_and_keeps_the_length() {
+        let fade = TransitionDefault::new(TransitionKind::Fade, 900);
+        let still = fade.without_motion();
+        assert_eq!(still.kind, TransitionKind::Cut);
+        assert_eq!(still.duration_ms, 900);
+        // A cut resolves to a cut either way, so the second call is a no-op.
+        assert_eq!(still.without_motion(), still);
+    }
+
+    #[test]
+    fn a_resolved_default_builds_a_matching_scene_transition() {
+        let start = Instant::now();
+        let mut transition =
+            SceneTransition::from_default(TransitionDefault::new(TransitionKind::Fade, 400));
+        transition.start(None, Some(Uuid::new_v4()), start);
+        assert_eq!(transition.duration, Duration::from_millis(400));
+        assert!((transition.progress_at(start + Duration::from_millis(200)) - 0.5).abs() < 0.01);
     }
 }

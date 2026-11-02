@@ -165,9 +165,32 @@ Zusammenführen bearbeitet. Rivulet geht damit tolerant um:
 - Sammlungen aus älteren Versionen ohne Komponenten-Feld laden unverändert;
   fehlende Angaben bedeuten **Primär**.
 
-## 11. Was (noch) nicht geht
+## 11. Standardtransition pro Ordner
 
-Diese drei Punkte sind eigene Vorhaben und als Issues hinterlegt, nicht
+Jede Szene kann ihre eigene Transition haben: ein Schnitt zwischen zwei
+Game-Szenen, ein weicher Übergang vom Intro in die Show. Der Standard gilt pro
+Ordner und damit für alles, was darin liegt.
+
+1. Im `…`-Menü der Ordnerzeile **Standardtransition** öffnen. Dort stehen `Cut`
+   und `Fade` sowie bei `Fade` die Dauer — dieselben Regler wie bei der
+   Sammlungs-Transition über der Liste.
+2. Eine Auswahl setzt den Standard sofort (und ist mit `Ctrl+Z` rückgängig zu
+   machen). Solange keiner gesetzt ist, zeigt das Menü **Erbt**.
+3. **Sammlungsstandard erben** entfernt den Eintrag wieder.
+
+Aufgelöst wird von innen nach außen: der nächste Ordner mit eigenem Standard,
+sonst der Sammlungsstandard. Ein Ordner, den du direkt live schaltest, ist
+selbst eine Szene und erbt von *seinem* Ordner — der Eintrag beschreibt, wie
+sein Inhalt umschaltet. Wird ein Ordner gelöscht, verschwindet sein Eintrag mit
+ihm; Zuklappen lässt ihn unberührt.
+
+Auch im Studio-Modus gilt das: `Übernehmen` spielt den Standard des
+Vorschau-Ordners. Ein `Cut` ist sofort fertig (kein halb ausgeblendetes Bild),
+und ein `Fade` nutzt die Dauer des Ordners, nicht die globale.
+
+## 12. Was (noch) nicht geht
+
+Diese zwei Punkte sind eigene Vorhaben und als Issues hinterlegt, nicht
 verschwiegene Lücken:
 
 - **Mehrfachauswahl und Sammelverschieben** — Szenen werden derzeit einzeln
@@ -176,8 +199,6 @@ verschwiegene Lücken:
   [scene-management.md](scene-management.md#migrating-an-obs-collection)), der
   Importer ist ein eigenes Vorhaben
   ([#367](https://github.com/thoser666/Rivulet/issues/367)).
-- **Pro-Ordner-Standardtransition** — noch nicht Teil des Modells
-  ([#368](https://github.com/thoser666/Rivulet/issues/368)).
 
 ## Weiterlesen
 

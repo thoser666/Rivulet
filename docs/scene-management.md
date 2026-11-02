@@ -108,16 +108,46 @@ Changing `parent` and `color` goes through `set_parent`, `set_color` and
 
 ## Folder defaults and transitions
 
-Switching uses one global transition today. A per-folder default
-([#368](https://github.com/thoser666/Rivulet/issues/368)) is the next step, and
-it deliberately does **not** become a field on `Scene`: `Scene` is a public
+Transitions used to be one global setting: a cut between two game scenes and a
+fade from the intro into the show shared a duration, and the workaround was to
+change the global transition before every switch during a live show. A folder's
+default ([#368](https://github.com/thoser666/Rivulet/issues/368)) applies to
+everything inside it instead.
+
+It deliberately does **not** become a field on `Scene`: `Scene` is a public
 struct a consumer can construct literally, so a new field would break every such
-caller under [`api-migration.md`](api-migration.md). The override therefore
-lives in the collection settings, keyed by the folder scene's ID, with
-`serde(default)` so collections written before the feature load unchanged.
-Resolution order: an explicit override on the target scene, else the nearest
-ancestor folder that has one, else the collection default, else the app
-default.
+caller under [`api-migration.md`](api-migration.md). The value lives in the
+collection as `folder_transitions` on `SceneManager`, keyed by the folder
+scene's ID. It is exported with the collection, `#[serde(default)]` so a
+collection written before the feature loads unchanged, and omitted from the JSON
+while nothing is configured — an untouched collection exports exactly as it did
+before.
+
+Resolution order for a switch to `to`, written once in
+`SceneManager::resolve_transition`:
+
+| Step | Source |
+|---|---|
+| 1 | An override on the target scene itself — reserved for a later extension; per-scene overrides do not exist yet |
+| 2 | The nearest ancestor folder of `to` that has a default, walking outwards |
+| 3 | The collection default (the transition controls next to the dock) |
+| 4 | The application default, which the collection default is initialised from |
+
+An entry belongs to the folder's **contents**: a folder switched to directly is
+a scene like any other and inherits from its own ancestors. That keeps one rule
+— "the folder says how what is inside it switches" — instead of two, and it is
+the grain OBS users expect from a folder rather than from a per-scene override.
+
+`set_folder_transition` and `clear_folder_transition` are undoable like
+`set_color`. Deleting a folder prunes its entry (the delete itself is undoable,
+so the default returns with the folder), while folding one does not touch it:
+fold state lives in the dock and never in the collection. Studio mode resolves
+the same way, so a `Take` plays the preview scene's folder default; a `Cut`
+completes at the instant it starts instead of showing a half-faded frame, and a
+`Fade` uses the folder's duration rather than the global one. Reduced motion
+still degrades the *runtime* transition to a cut without changing what the
+collection stores. The walk is step-bounded, so a hand-edited collection whose
+parents form a cycle falls back instead of hanging the switch.
 
 ## Scene dock
 

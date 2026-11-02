@@ -113,6 +113,11 @@ Unter **Scenes** kannst du Szenen anlegen, umbenennen, duplizieren und löschen.
 
 Szenen lassen sich zu **Ordnern** gruppieren, mit **Farb-Labels** markieren, als
 **Komponenten** von der Umschaltliste trennen und über die **Suche** wiederfinden.
+Ordner können außerdem eine eigene **Standardtransition** tragen (Menü `…` in der
+Ordnerzeile): `Cut` oder `Fade` mit eigener Dauer, aufgelöst vom nächsten Ordner
+mit Eintrag bis zum Sammlungsstandard — und genauso für den Studio-`Take`. Die
+Details stehen im Tutorial unter
+[Standardtransition pro Ordner](scene-management-tutorial.md#11-standardtransition-pro-ordner).
 Der vollständige Ablauf steht im Tutorial
 [Szenen verwalten: Ordner, Farben, Komponenten und Suche](scene-management-tutorial.md).
 
