@@ -20966,11 +20966,9 @@ mod tests {
             .get(eframe::APP_KEY)
             .cloned()
             .unwrap_or_default();
-        eprintln!("DEBUG chat_accounts fragment: {:?}", {
-            let start = stored_json.find("chat_accounts").unwrap_or(0);
-            let end = (start + 300).min(stored_json.len());
-            &stored_json[start..end]
-        });
+        // The asserts below are the evidence: a debug print of the persisted
+        // state would only put the roster into the CI log (and CodeQL traced
+        // exactly that into alert rust/cleartext-logging #93).
         // The whole-app storage string legitimately mentions other token
         // fields (the legacy chat field, the EventSub credential), so a
         // blanket substring check would be meaningless. Instead assert the

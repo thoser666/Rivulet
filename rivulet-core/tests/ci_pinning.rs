@@ -5592,6 +5592,16 @@ fn chat_dock_surfaces_are_pinned() {
             && app.contains(".delete(account.platform, &account.channel)"),
         "the GUI must persist and clean chat tokens only via the OS vault"
     );
+    // Alert #93 (rust/cleartext-logging): the roster round-trip test printed a
+    // 300-character slice of the persisted app state with a leftover
+    // `eprintln!("DEBUG …")` line. The assertions next to it already prove the
+    // roster is token-free, so the print carried no evidence and only widened
+    // the blast radius of a future regression. A debug print of app state must
+    // not come back through another test.
+    assert!(
+        !app.contains("DEBUG chat_accounts") && !app.contains("eprintln!(\"DEBUG"),
+        "GUI sources must not print debuggable app state (CodeQL rust/cleartext-logging)"
+    );
     assert!(
         app.contains("chat_last_send_outcomes"),
         "the dock must keep per-platform broadcast outcomes for the feedback line"

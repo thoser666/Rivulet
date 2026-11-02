@@ -134,6 +134,17 @@ Current state:
   scope, not by a workflow-level grant. Pinned by
   `scorecard_workflow_is_wired_for_sarif_and_provenance`, which fails if a
   workflow-level write scope comes back or if the job loses either scope.
+- **Alert #93 (`rust/cleartext-logging`, high, fixed):** the roster
+  round-trip test in `rivulet-gui/src/app.rs` carried a leftover
+  `eprintln!("DEBUG chat_accounts fragment: …")` that printed 300 characters
+  of the persisted app state. CodeQL traced `chat_accounts` through the
+  serialized string into that print, which is exactly the finding: the test's
+  assertions already prove the roster persists as platform + channel only, so
+  the print added no evidence and widened the blast radius of a future
+  regression. The print is gone (test-only code, so no user-visible change and
+  no CHANGELOG entry), and `chat_dock_surfaces_are_pinned` in
+  `rivulet-core/tests/ci_pinning.rs` now fails if a `DEBUG` print of app state
+  returns.
 
 #### Alert triage gate
 
