@@ -422,13 +422,23 @@ pub fn frame_stats(times: &[f64]) -> FrameStats {
 }
 
 /// Nearest-rank percentile over an ascending slice. `NaN` for an empty slice.
+///
+/// The rank is `ceil(fraction * n)` (1-based), so the answer is always a frame
+/// that was actually measured — never an interpolation between two. With an
+/// even sample count that makes p50 the lower of the two middle frames: for
+/// `[1, 2, 3, 4]` the rank is 2 and the value 2. Rounding `(n - 1) * fraction`
+/// instead landed on the third frame (1.5 rounds to 2) and reported the upper
+/// median, which contradicted this doc comment and the sample count it was
+/// computed from.
 fn percentile(sorted: &[f64], fraction: f64) -> f64 {
     if sorted.is_empty() {
         return f64::NAN;
     }
-    let last = sorted.len() - 1;
-    let index = ((last as f64) * fraction).round() as usize;
-    sorted[index.min(last)]
+    let rank = (fraction.clamp(0.0, 1.0) * sorted.len() as f64)
+        .ceil()
+        .max(1.0);
+    let index = (rank as usize).saturating_sub(1).min(sorted.len() - 1);
+    sorted[index]
 }
 
 /// Frames per second implied by the mean of the slowest 1 % of frames.
@@ -765,6 +775,45 @@ animated = false
         assert_eq!(percentile(&sorted, 0.99), 10.0);
         assert_eq!(percentile(&sorted, 1.0), 10.0);
         assert!(percentile(&[], 0.5).is_nan());
+    }
+
+    /// An even frame count puts p50 on the **lower** of the two middle frames:
+    /// nearest rank is `ceil(0.50 * 4) = 2`, so the second frame. The previous
+    /// `round((n - 1) * fraction)` landed on the third one and reported the
+    /// upper median instead.
+    #[test]
+    fn an_even_sample_count_takes_the_lower_middle_frame_for_p50() {
+        let sorted = [1.0, 2.0, 3.0, 4.0];
+        assert_eq!(percentile(&sorted, 0.50), 2.0);
+        // The neighbouring ranks stay reachable instead of being skipped.
+        assert_eq!(percentile(&sorted, 0.75), 3.0);
+        assert_eq!(percentile(&sorted, 1.0), 4.0);
+        assert_eq!(percentile(&sorted, 0.0), 1.0);
+
+        let stats = frame_stats(&[4.0, 1.0, 3.0, 2.0]);
+        assert_eq!(stats.p50_ms, 2.0, "p50 is the second of four frames");
+        assert_eq!(stats.p95_ms, 4.0);
+        assert_eq!(stats.p99_ms, 4.0);
+    }
+
+    /// Every percentile names one of the samples and stays inside their range:
+    /// an interpolating percentile can report a frame time that never happened,
+    /// and the regression gate would then chase a phantom.
+    #[test]
+    fn every_percentile_is_one_of_the_measured_frames() {
+        let sorted: Vec<f64> = (1..=100).map(f64::from).collect();
+        assert_eq!(percentile(&sorted, 0.95), 95.0, "rank 95 of 100");
+        assert_eq!(percentile(&sorted, 0.99), 99.0, "rank 99 of 100");
+        for step in 0..=100 {
+            let value = percentile(&sorted, f64::from(step) / 100.0);
+            assert!(
+                sorted.contains(&value),
+                "p{step} returned {value}, which was never measured"
+            );
+        }
+        let single = [7.5];
+        assert_eq!(percentile(&single, 0.50), 7.5);
+        assert_eq!(percentile(&single, 0.99), 7.5);
     }
 
     #[test]

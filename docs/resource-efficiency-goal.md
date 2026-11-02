@@ -81,6 +81,13 @@ attributed to the window it was taken in:
 | preview | `--config <scene.toml> --frames N` | p50/p95/p99 frame time and the 1 % low through `rivulet render`'s code path (scene model + snapshot + compositor) on the committed 720p workload (`scripts/ci-resource-metrics/preview.toml`) |
 | record | `--record-seconds N` | the capture-on half of the A/B: synthetic RGBA frames pushed through a real recording pipeline |
 
+Frame percentiles are **nearest-rank** over the frames that were actually
+rendered: p50, p95 and p99 each name one measured frame (the `ceil(p · n)`-th
+smallest) rather than an interpolation between two, so no reported number is a
+frame time the run never produced. With an even frame count p50 is therefore
+the lower of the two middle frames, and the 1 % low next to it stays the mean of
+the slowest 1 % of frames.
+
 Automated on every CI run (`--profile ci-linux`): startup, engine bootstrap,
 idle CPU, RSS slope and growth, peak RSS, thread count, headless frame time, and
 the synthetic capture-on/off CPU delta. The job measures a **release** build:

@@ -18,7 +18,9 @@
   gates idle CPU (2 % target), RSS slope, memory growth, startup and headless
   p99 frame time against a committed per-profile baseline, names the metric,
   baseline and delta on a regression, and records the synthetic capture-on/off
-  CPU A/B. Where a shared runner cannot measure something — GPU utilisation,
+  CPU A/B. Frame percentiles are nearest-rank over the measured frames, so a
+  reported p50/p95/p99 is always a frame that was really rendered rather than
+  an interpolation between two. Where a shared runner cannot measure something — GPU utilisation,
   battery/thermal — the report says `n/a`/`blocked` with the reason instead of
   inventing a pass, and a profile without a measured baseline does not gate
   until the baseline is committed deliberately with `--write-baseline`. Both
