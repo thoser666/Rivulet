@@ -117,7 +117,7 @@ re-export that disappeared.
 | `telemetry` | Opt-in, privacy-friendly usage telemetry. | 7 | yes |
 | `test_helpers` | Deterministic test helpers (M7 W2b, issue #188): golden-frame comparison, | 11 | yes |
 | `text_source` | (no module documentation) | 5 | yes |
-| `transition` | (no module documentation) | 2 | yes |
+| `transition` | (no module documentation) | 3 | yes |
 | `twitch_chat` | Optional Twitch IRC chat reader for the streamer-facing chat dock. | 7 | yes |
 | `video_effects` | Video filters & effects applied to the recording pipeline before encoding. | 1 | yes |
 | `virtual_camera` | (no module documentation) | 5 | yes |
@@ -189,7 +189,7 @@ its own path.
 | `scene_dock` | `SceneColorLabel`, `SceneDock`, `SceneDockRow`, `SceneFilterState`, `SceneSearchMode`, `apply_drop`, `can_drop`, `dock_rows`, `dock_rows_filtered`, `drop_error_key`, `first_match` |
 | `scene_snapshot` | `SceneSnapshot`, `SnapshotFrame`, `SnapshotLayer` |
 | `render` | `CanvasConfig`, `RenderConfigError`, `RenderError`, `RenderLayerConfig`, `RenderVideoReport`, `RenderVideoTarget`, `SceneRenderConfig`, `render_video` |
-| `transition` | `SceneTransition`, `TransitionKind` |
+| `transition` | `SceneTransition`, `TransitionDefault`, `TransitionKind` |
 | `studio` | `StudioMode` |
 | `source` | `ChromaKey`, `Crop`, `SceneItemClipboard`, `SceneSource`, `Source`, `SourceKind`, `SourceManager`, `Transform` |
 | `image_source` | `ImageSource`, `is_image_file`, `supported_image_extensions` |

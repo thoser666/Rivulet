@@ -4779,28 +4779,38 @@ impl RivuletApp {
         }
     }
 
-    /// The scene transition to use for an upcoming switch: the user's
-    /// configured transition, except that a Fade collapses to a Cut when
-    /// reduced motion is active (WCAG 2.3.3; a fade is pure decoration and
-    /// loses meaning when it cannot animate).
+    /// The scene transition to use for an upcoming switch: the target's folder
+    /// default when one is set (#368), otherwise the user's configured
+    /// transition — except that a Fade collapses to a Cut when reduced motion is
+    /// active (WCAG 2.3.3; a fade is pure decoration and loses meaning when it
+    /// cannot animate).
     fn scene_transition_for_switch(
         &self,
         from: Option<uuid::Uuid>,
         to: Option<uuid::Uuid>,
         now: Instant,
     ) -> rivulet_core::SceneTransition {
-        let reduced = self.motion_applied.unwrap_or(false);
-        let kind = if reduced {
-            rivulet_core::TransitionKind::Cut
-        } else {
-            self.transition_kind
-        };
-        let mut transition = rivulet_core::SceneTransition::new(
-            kind,
-            std::time::Duration::from_millis(self.transition_duration_ms),
-        );
+        let resolved = self.resolved_transition(to);
+        let mut transition = rivulet_core::SceneTransition::new(resolved.kind, resolved.duration());
         transition.start(from, to, now);
         transition
+    }
+
+    /// Resolve the transition a switch to `to` plays: the nearest folder default,
+    /// else the collection default (the controls in this panel), then reduced
+    /// motion. Both a direct switch and a Studio `Take` go through here, so the
+    /// two cannot disagree about what a folder configured.
+    fn resolved_transition(&self, to: Option<uuid::Uuid>) -> rivulet_core::TransitionDefault {
+        let fallback =
+            rivulet_core::TransitionDefault::new(self.transition_kind, self.transition_duration_ms);
+        let resolved = to
+            .map(|id| self.scenes.resolve_transition(id, fallback))
+            .unwrap_or(fallback);
+        if self.motion_applied.unwrap_or(false) {
+            resolved.without_motion()
+        } else {
+            resolved
+        }
     }
 
     /// Called once per frame while a stop finalization may be in flight: when
@@ -5157,18 +5167,12 @@ impl RivuletApp {
                     .on_hover_text(self.tr("studio_take_hint"));
                 if take.clicked() {
                     let now = Instant::now();
-                    // Reduced motion collapses a Fade take to a Cut (ui-005):
-                    // reuse the same resolution as a direct scene switch.
-                    let take_kind = if self.motion_applied.unwrap_or(false) {
-                        rivulet_core::TransitionKind::Cut
-                    } else {
-                        self.transition_kind
-                    };
-                    if let Some(transition) = self.studio_mode.take(
-                        take_kind,
-                        std::time::Duration::from_millis(self.transition_duration_ms),
-                        now,
-                    ) {
+                    // A Take resolves like a direct switch — folder default,
+                    // collection default, then reduced motion (ui-005, #368) —
+                    // so a folder override is not silently ignored in the mode
+                    // where transitions are most visible.
+                    let resolved = self.resolved_transition(self.studio_mode.preview());
+                    if let Some(transition) = self.studio_mode.take_with(resolved, now) {
                         if let Some(target) = self.studio_mode.program() {
                             let from = self.scenes.active();
                             if self.switch_active_scene(target) {
@@ -5474,6 +5478,8 @@ impl RivuletApp {
         let mut color_target: Option<(uuid::Uuid, u32)> = None;
         let mut kind_target: Option<(uuid::Uuid, rivulet_core::SceneKind)> = None;
         let mut move_to_top: Option<uuid::Uuid> = None;
+        let mut transition_target: Option<(uuid::Uuid, Option<rivulet_core::TransitionDefault>)> =
+            None;
         let mut toggle_collapse: Option<uuid::Uuid> = None;
         let mut drag_started: Option<uuid::Uuid> = None;
         let mut drag_stopped = false;
@@ -5641,6 +5647,52 @@ impl RivuletApp {
                             {
                                 move_to_top = Some(row.id);
                             }
+                            // A folder default applies to everything inside it
+                            // and inherits from its own folder otherwise
+                            // (#368). The controls are the same kind/duration
+                            // pair as the collection setting above.
+                            if row.has_children {
+                                ui.separator();
+                                ui.label(egui::RichText::new(self.tr("folder_transition")).small());
+                                let configured = self.scenes.folder_transition(row.id);
+                                let mut chosen = configured.unwrap_or_else(|| {
+                                    rivulet_core::TransitionDefault::new(
+                                        self.transition_kind,
+                                        self.transition_duration_ms,
+                                    )
+                                });
+                                for kind in rivulet_core::TransitionKind::ALL {
+                                    if ui
+                                        .selectable_label(chosen.kind == kind, kind.label())
+                                        .clicked()
+                                    {
+                                        chosen.kind = kind;
+                                        transition_target = Some((row.id, Some(chosen)));
+                                    }
+                                }
+                                if chosen.kind == rivulet_core::TransitionKind::Fade {
+                                    let duration_label = self.tr("transition_duration").to_owned();
+                                    if ui
+                                        .add(
+                                            egui::Slider::new(&mut chosen.duration_ms, 50..=5000)
+                                                .text(duration_label),
+                                        )
+                                        .changed()
+                                    {
+                                        transition_target = Some((row.id, Some(chosen)));
+                                    }
+                                }
+                                if ui.button(self.tr("folder_transition_clear")).clicked() {
+                                    transition_target = Some((row.id, None));
+                                }
+                                if configured.is_none() {
+                                    ui.label(
+                                        egui::RichText::new(self.tr("folder_transition_inherits"))
+                                            .small()
+                                            .color(colors.hint),
+                                    );
+                                }
+                            }
                         })
                         .response
                         .on_hover_text(self.tr("scenes_row_actions"));
@@ -5781,6 +5833,31 @@ impl RivuletApp {
                     self.scene_drag = None;
                 }
                 self.scene_status = Some(self.tr_fmt("scenes_removed", &[name]));
+            }
+        }
+        if let Some((id, transition)) = transition_target {
+            let name = self
+                .scenes
+                .get(id)
+                .map(|scene| scene.name.clone())
+                .unwrap_or_default();
+            match transition {
+                Some(transition) => {
+                    if self.scenes.set_folder_transition(id, transition) {
+                        let described = format!(
+                            "{} · {} ms",
+                            transition.kind.label(),
+                            transition.duration_ms
+                        );
+                        self.scene_status =
+                            Some(self.tr_fmt("folder_transition_set", &[name, described]));
+                    }
+                }
+                None => {
+                    if self.scenes.clear_folder_transition(id) {
+                        self.scene_status = Some(self.tr_fmt("folder_transition_cleared", &[name]));
+                    }
+                }
             }
         }
         if let Some(id) = switch_target {

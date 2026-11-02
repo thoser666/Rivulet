@@ -55,6 +55,9 @@ LABEL_OVERRIDES = {
     "autoclip": "Auto-Clip",
     "ndi": "NDI",
     "vf": "Video",
+    # The guide is German, so the feature is documented under its localized
+    # name (the folder rows' transition default, see scene-management.md).
+    "folder": "Ordner",
 }
 
 # Acceptable alternative spellings for a topic (like VIEW_ALIASES). Used when

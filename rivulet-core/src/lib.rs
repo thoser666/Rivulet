@@ -278,7 +278,7 @@ pub use render::{
 };
 
 pub mod transition;
-pub use transition::{SceneTransition, TransitionKind};
+pub use transition::{SceneTransition, TransitionDefault, TransitionKind};
 
 pub mod studio;
 pub use studio::StudioMode;

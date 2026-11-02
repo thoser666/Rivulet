@@ -1,4 +1,32 @@
 ## [Unreleased]
+- feat(gui,core,m9): **a folder can carry its own transition, so a show stops
+  sharing one duration between a game cut and an intro fade**
+  ([#368](https://github.com/thoser666/Rivulet/issues/368)). Switching used the
+  single global transition for every scene, so a production that cuts between
+  game scenes and fades through the BRB screen had to change the global setting
+  between switches during a live show. The folder row's `…` menu now sets a
+  default transition for everything inside it, with the same kind/duration
+  controls as the collection setting and an "inherits" state while nothing is
+  set. The value does **not** become a field on `Scene` — that struct is public
+  and constructible literally, so a new field would be a breaking change under
+  [`docs/api-migration.md`](docs/api-migration.md) — it lives in the collection
+  as `folder_transitions` on `SceneManager`, keyed by the folder's ID, exported
+  with the collection and `#[serde(default)]`, and omitted from the JSON while
+  nothing is configured, so an untouched collection exports exactly as before.
+  `SceneManager::resolve_transition` states the order once: the nearest
+  ancestor folder with a default, else the collection default, else the app
+  default; the walk is step-bounded, so a hand-edited parent cycle falls back
+  instead of hanging the switch. Setting or clearing a default is undoable like
+  `set_color`, deleting a folder prunes its entry (undo restores both), and
+  folding one does not touch it. Studio mode honours the same resolution: a
+  `Take` plays the preview scene's folder default, a `Cut` completes at the
+  instant it starts instead of showing a half-faded frame, and a `Fade` uses the
+  folder's duration rather than the global one — while reduced motion still
+  degrades the runtime transition without changing what the collection stores.
+  `rivulet-core/tests/folder_transition.rs` pins the resolution order
+  (including a nested folder where only the outer one is set), undo/redo,
+  prune-on-delete, the fold-only case, the export/import round trip, a
+  collection written before the feature, and the cycle fallback.
 - feat(m9): **the resource-efficiency targets are measured by CI now, not by a
   fixture.** `scripts/resource-efficiency-check.py` validated a JSON file whose
   `cpu_delta_percent` and `memory_growth_mb` were `0.0` — it proved the
