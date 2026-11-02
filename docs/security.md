@@ -134,17 +134,23 @@ Current state:
   scope, not by a workflow-level grant. Pinned by
   `scorecard_workflow_is_wired_for_sarif_and_provenance`, which fails if a
   workflow-level write scope comes back or if the job loses either scope.
-- **Alert #93 (`rust/cleartext-logging`, high, fixed):** the roster
-  round-trip test in `rivulet-gui/src/app.rs` carried a leftover
-  `eprintln!("DEBUG chat_accounts fragment: …")` that printed 300 characters
-  of the persisted app state. CodeQL traced `chat_accounts` through the
-  serialized string into that print, which is exactly the finding: the test's
-  assertions already prove the roster persists as platform + channel only, so
-  the print added no evidence and widened the blast radius of a future
-  regression. The print is gone (test-only code, so no user-visible change and
-  no CHANGELOG entry), and `chat_dock_surfaces_are_pinned` in
-  `rivulet-core/tests/ci_pinning.rs` now fails if a `DEBUG` print of app state
-  returns.
+- **Alert #93 (`rust/cleartext-logging`, high, dismissed as *false
+  positive*):** CodeQL reports `self.chat_accounts` on its way to a log sink
+  and pins the instance to the remove-account confirmation in
+  `rivulet-gui/src/app.rs`. The roster cannot carry a secret: `ChatAccount` is
+  `platform` + `channel` only, the OAuth/session tokens live in the OS
+  credential vault (`ChatTokenStore`) and are read there at connect time, and
+  every chat log line in the tree is a static string (`MultiChat` documents
+  why). The first attempt was a root fix, not a dismissal: the roster
+  round-trip test still had a leftover `eprintln!` of the persisted state from
+  September - exactly the pattern the rule describes - so it was removed
+  (#375) and `chat_dock_surfaces_are_pinned` now fails if a `DEBUG` print of
+  app state returns. The alert survived that analysis and came back unchanged
+  at the same line, so what is left is CodeQL's modelling of the account list,
+  not a reachable leak. The canonical reason is `false positive`.
+  **Revisit when:** a token-bearing type reaches the roster, or a chat-derived
+  value is interpolated into a log line - then the finding is real and has to
+  be fixed, not re-dismissed.
 
 #### Alert triage gate
 
