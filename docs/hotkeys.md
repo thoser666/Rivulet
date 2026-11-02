@@ -43,6 +43,14 @@ from the next frame and survive a restart.
   active scene (Studio Mode Preview when enabled); scene-locked sources are
   kept.
 
+- **`Delete` inside the scene dock is the selection's key.** While the Scenes
+  view is active and the dock has a non-empty selection, `Delete` removes the
+  selected scenes (asking for confirmation when more than one is selected)
+  instead of deleting the selected composition source. The same block adds
+  `Ctrl`/`Cmd`-click, `Shift`-click, `Ctrl`/`Cmd+A` and `Esc` for the selection;
+  all of them stay behind the text-input guard. See
+  [`scene-management.md`](scene-management.md#multi-select-and-bulk-actions).
+
 ## Platform matrix (honest)
 
 | Platform | In-app rebinding | OS-level while unfocused |

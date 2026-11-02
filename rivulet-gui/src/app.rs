@@ -385,6 +385,29 @@ fn scene_history_shortcut(
     }
 }
 
+/// What a click on a dock row does to the selection (issue #366).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SelectMode {
+    /// Plain click: this row alone.
+    Replace,
+    /// Ctrl/Cmd-click: add or remove this row.
+    Toggle,
+    /// Shift-click: extend the range from the anchor.
+    Extend,
+}
+
+/// The scenes a drag from `dragged` moves: the whole selection when the drag
+/// started on a selected row, otherwise just that row (issue #366).
+///
+/// Kept free of `self` so the rule is testable without a window.
+fn drag_scenes(dragged: uuid::Uuid, selection: &rivulet_core::SceneSelection) -> Vec<uuid::Uuid> {
+    if selection.len() > 1 && selection.contains(dragged) {
+        selection.ids().to_vec()
+    } else {
+        vec![dragged]
+    }
+}
+
 // --- Hotkey configuration ---
 
 /// A key plus an optional set of modifiers (Ctrl/Alt/Shift/Super). This is the
@@ -775,6 +798,11 @@ enum PendingConfirmation {
         platform: rivulet_core::ChatPlatform,
         channel: String,
     },
+    /// Bulk delete of the dock selection (#366). Only staged for more than one
+    /// scene; a single row deletes immediately, like its own button.
+    RemoveScenes {
+        ids: Vec<uuid::Uuid>,
+    },
 }
 
 impl PendingConfirmation {
@@ -785,6 +813,7 @@ impl PendingConfirmation {
             }
             PendingConfirmation::RemoveAudioSource { .. } => "confirm_dialog_remove_audio_title",
             PendingConfirmation::RemoveChatAccount { .. } => "confirm_dialog_remove_chat_title",
+            PendingConfirmation::RemoveScenes { .. } => "confirm_dialog_bulk_delete_title",
         }
     }
 
@@ -795,6 +824,7 @@ impl PendingConfirmation {
             }
             PendingConfirmation::RemoveAudioSource { .. } => "confirm_dialog_remove_audio_message",
             PendingConfirmation::RemoveChatAccount { .. } => "confirm_dialog_remove_chat_message",
+            PendingConfirmation::RemoveScenes { .. } => "confirm_dialog_bulk_delete_message",
         }
     }
 
@@ -805,6 +835,7 @@ impl PendingConfirmation {
             }
             PendingConfirmation::RemoveAudioSource { .. } => "confirm_dialog_remove_audio_confirm",
             PendingConfirmation::RemoveChatAccount { .. } => "confirm_dialog_remove_chat_confirm",
+            PendingConfirmation::RemoveScenes { .. } => "confirm_dialog_bulk_delete_confirm",
         }
     }
 
@@ -815,6 +846,9 @@ impl PendingConfirmation {
             PendingConfirmation::RemoveChatAccount {
                 platform, channel, ..
             } => format!("{} · {}", platform.label(), channel),
+            // The message template says "{0} scenes", so the subject is the
+            // count rather than a name list that would not fit in the dialog.
+            PendingConfirmation::RemoveScenes { ids } => ids.len().to_string(),
         }
     }
 }
@@ -1706,6 +1740,14 @@ pub struct RivuletApp {
     /// Scene currently being dragged in the dock. Not persisted.
     #[serde(skip)]
     scene_drag: Option<uuid::Uuid>,
+    /// The dock's multi-selection (issue #366). Not persisted: like a text
+    /// selection it is a transient editing state, not part of the collection.
+    #[serde(skip)]
+    scene_selection: rivulet_core::SceneSelection,
+    /// The rows the dock drew in the last frame, so the selection shortcuts —
+    /// which run in the input pass before drawing — act on what is visible.
+    #[serde(skip)]
+    scene_visible_ids: Vec<uuid::Uuid>,
     /// Drop target hovered during the drag; `Some(None)` is the top-level
     /// drop zone. Not persisted.
     #[serde(skip)]
@@ -2239,6 +2281,8 @@ impl Default for RivuletApp {
             scene_filter: rivulet_core::SceneFilterState::new(),
             scene_search_focus: false,
             scene_drag: None,
+            scene_selection: rivulet_core::SceneSelection::new(),
+            scene_visible_ids: Vec::new(),
             scene_drop_hover: None,
             scene_collection_input: String::new(),
             scene_profile_input: String::new(),
@@ -5469,6 +5513,79 @@ impl RivuletApp {
             return;
         }
 
+        // ── Selection controls (#366) ────────────────────────────────
+        self.scene_visible_ids = rows.iter().map(|row| row.id).collect();
+        let visible_ids = self.scene_visible_ids.clone();
+        let mut select_target: Option<(uuid::Uuid, SelectMode)> = None;
+        let mut select_all_requested = false;
+        let mut clear_selection = false;
+        let mut bulk_color: Option<u32> = None;
+        let mut bulk_kind: Option<rivulet_core::SceneKind> = None;
+        let mut bulk_delete = false;
+        if !self.scene_selection.is_empty() {
+            let selected = self.scene_selection.len();
+            let hidden = self.scene_selection.hidden_count(&visible_ids);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    egui::RichText::new(
+                        self.tr_fmt("scenes_selected_count", &[selected.to_string()]),
+                    )
+                    .strong(),
+                );
+                // A filtered dock must not look like it lost rows: hidden
+                // selected scenes are counted here and stay in bulk actions.
+                if hidden > 0 {
+                    ui.label(
+                        egui::RichText::new(
+                            self.tr_fmt("scenes_selected_hidden", &[hidden.to_string()]),
+                        )
+                        .small()
+                        .color(colors.hint),
+                    );
+                }
+                if ui
+                    .small_button(self.tr("scenes_selection_select_all"))
+                    .clicked()
+                {
+                    select_all_requested = true;
+                }
+                if ui.small_button(self.tr("scenes_selection_clear")).clicked() {
+                    clear_selection = true;
+                }
+                // The selection's own context menu: one action, one undo
+                // step, applied to every selected scene.
+                ui.menu_button("…", |ui| {
+                    ui.label(egui::RichText::new(self.tr("scenes_selection_actions")).small());
+                    ui.separator();
+                    ui.label(egui::RichText::new(self.tr("scenes_color_label")).small());
+                    for label in rivulet_core::SceneColorLabel::ALL {
+                        ui.horizontal(|ui| {
+                            dock_color_swatch(ui, label.argb(), self.tr(label.key()));
+                            if ui.selectable_label(false, self.tr(label.key())).clicked() {
+                                bulk_color = Some(label.argb());
+                            }
+                        });
+                    }
+                    ui.separator();
+                    for (kind_key, kind) in [
+                        ("scenes_primary", rivulet_core::SceneKind::Primary),
+                        ("scenes_component", rivulet_core::SceneKind::Component),
+                    ] {
+                        if ui.button(self.tr(kind_key)).clicked() {
+                            bulk_kind = Some(kind);
+                        }
+                    }
+                    ui.separator();
+                    if ui.button(self.tr("scenes_remove")).clicked() {
+                        bulk_delete = true;
+                    }
+                })
+                .response
+                .on_hover_text(self.tr("scenes_selection_hint"));
+            });
+            ui.separator();
+        }
+
         // Collected while the list borrows the manager, applied after the
         // scroll area so no row can mutate the collection mid-render.
         let mut switch_target: Option<uuid::Uuid> = None;
@@ -5505,7 +5622,9 @@ impl RivuletApp {
                         egui::Sense::hover(),
                     );
                     let hovered = ui.rect_contains_pointer(rect);
-                    let verdict = rivulet_core::scene_dock::can_drop(&self.scenes, dragged, None);
+                    let drag_ids = drag_scenes(dragged, &self.scene_selection);
+                    let verdict =
+                        rivulet_core::scene_dock::can_drop_selection(&self.scenes, &drag_ids, None);
                     if hovered {
                         drop_hover = Some(None);
                         if let Err(error) = &verdict {
@@ -5535,12 +5654,22 @@ impl RivuletApp {
                     let Some(scene) = self.scenes.get(row.id) else {
                         return;
                     };
+                    let is_selected = self.scene_selection.contains(row.id);
+                    let modifiers = ui.input(|i| i.modifiers);
                     let is_active = Some(row.id) == active;
                     let is_program =
                         self.studio_mode.enabled() && self.studio_mode.program() == Some(row.id);
                     let expanded = !collapsed.contains(&row.id);
                     let inner = ui.horizontal(|ui| {
                         ui.add_space(row.depth as f32 * INDENT);
+                        // Selection has its own tick and a bold name, so it is
+                        // never just a colour change and never confusable with
+                        // the active/program badges further right.
+                        if is_selected {
+                            ui.label(egui::RichText::new("✓").color(colors.success));
+                        } else {
+                            ui.add_space(12.0);
+                        }
                         if row.has_children {
                             let tooltip = format!(
                                 "{} · {}",
@@ -5574,6 +5703,9 @@ impl RivuletApp {
                             &format!("{}: {color_name}", self.tr("scenes_color_label")),
                         );
                         let mut text = egui::RichText::new(&scene.name);
+                        if is_selected {
+                            text = text.strong();
+                        }
                         if row.component {
                             text = text.weak();
                         }
@@ -5588,7 +5720,14 @@ impl RivuletApp {
                             .on_hover_text(self.tr("scenes_move_to_folder"));
                         theme::paint_interaction_stroke(ui, &name_response);
                         if name_response.clicked() {
-                            switch_target = Some(row.id);
+                            if modifiers.shift {
+                                select_target = Some((row.id, SelectMode::Extend));
+                            } else if modifiers.command {
+                                select_target = Some((row.id, SelectMode::Toggle));
+                            } else {
+                                select_target = Some((row.id, SelectMode::Replace));
+                                switch_target = Some(row.id);
+                            }
                         }
                         if name_response.drag_started() {
                             drag_started = Some(row.id);
@@ -5718,9 +5857,10 @@ impl RivuletApp {
                     if let Some(dragged) = dragging {
                         if ui.rect_contains_pointer(inner.response.rect) {
                             drop_hover = Some(Some(row.id));
-                            let verdict = rivulet_core::scene_dock::can_drop(
+                            let drag_ids = drag_scenes(dragged, &self.scene_selection);
+                            let verdict = rivulet_core::scene_dock::can_drop_selection(
                                 &self.scenes,
-                                dragged,
+                                &drag_ids,
                                 Some(row.id),
                             );
                             let stroke = match &verdict {
@@ -5779,7 +5919,8 @@ impl RivuletApp {
         if drag_stopped {
             let dragged = self.scene_drag.take();
             if let (Some(dragged), Some(parent)) = (dragged, drop_hover.or(previous_hover)) {
-                self.apply_scene_drop(dragged, parent);
+                let ids = drag_scenes(dragged, &self.scene_selection);
+                self.apply_scene_drop(&ids, parent);
             }
         }
         self.scene_drop_hover = if self.scene_drag.is_some() {
@@ -5799,7 +5940,39 @@ impl RivuletApp {
             self.scenes.set_kind(id, kind);
         }
         if let Some(id) = move_to_top {
-            self.apply_scene_drop(id, None);
+            self.apply_scene_drop(&[id], None);
+        }
+        if select_all_requested {
+            self.scene_selection.select_all(&visible_ids);
+        }
+        if clear_selection {
+            self.scene_selection.clear();
+        }
+        if let Some((id, mode)) = select_target {
+            match mode {
+                SelectMode::Replace => self.scene_selection.select(id),
+                SelectMode::Toggle => self.scene_selection.toggle(id),
+                SelectMode::Extend => self.scene_selection.extend(id, &visible_ids),
+            }
+        }
+        if let Some(color) = bulk_color {
+            let ids = self.scene_selection.ids().to_vec();
+            let changed = self.scenes.set_color_many(&ids, color);
+            if changed > 0 {
+                self.scene_status =
+                    Some(self.tr_fmt("scenes_bulk_color_set", &[changed.to_string()]));
+            }
+        }
+        if let Some(kind) = bulk_kind {
+            let ids = self.scene_selection.ids().to_vec();
+            let changed = self.scenes.set_kind_many(&ids, kind);
+            if changed > 0 {
+                self.scene_status =
+                    Some(self.tr_fmt("scenes_bulk_kind_set", &[changed.to_string()]));
+            }
+        }
+        if bulk_delete {
+            self.request_scene_selection_removal();
         }
         if let Some(id) = duplicate_target {
             let name = self
@@ -5829,6 +6002,7 @@ impl RivuletApp {
                 let existing: std::collections::BTreeSet<uuid::Uuid> =
                     self.scenes.scenes().iter().map(|scene| scene.id).collect();
                 self.scene_dock.retain_existing(&collection, &existing);
+                self.scene_selection.retain_existing(&existing);
                 if self.scene_drag == Some(id) {
                     self.scene_drag = None;
                 }
@@ -5882,18 +6056,18 @@ impl RivuletApp {
     /// A refused move is explained in the status line and changes nothing —
     /// in particular, dropping a folder onto its own subtree must never look
     /// like it worked.
-    fn apply_scene_drop(&mut self, dragged: uuid::Uuid, parent: Option<uuid::Uuid>) {
+    fn apply_scene_drop(&mut self, ids: &[uuid::Uuid], parent: Option<uuid::Uuid>) {
         let collection = self.scenes.collection().to_string();
-        let dragged_name = self
-            .scenes
-            .get(dragged)
+        let fallback = ids
+            .first()
+            .and_then(|id| self.scenes.get(*id))
             .map(|scene| scene.name.clone())
             .unwrap_or_default();
-        match rivulet_core::scene_dock::apply_drop(&mut self.scenes, dragged, parent) {
-            Ok(()) => {
+        match rivulet_core::scene_dock::apply_drop_selection(&mut self.scenes, ids, parent) {
+            Ok(moved) => {
                 let status = match parent {
                     Some(parent) => {
-                        // Reveal where the scene went, even if the target
+                        // Reveal where the scenes went, even if the target
                         // folder was folded.
                         self.scene_dock.set_collapsed(&collection, parent, false);
                         let parent_name = self
@@ -5901,17 +6075,107 @@ impl RivuletApp {
                             .get(parent)
                             .map(|scene| scene.name.clone())
                             .unwrap_or_default();
-                        self.tr_fmt("scenes_moved", &[dragged_name, parent_name])
+                        if moved > 1 {
+                            self.tr_fmt("scenes_bulk_moved", &[moved.to_string(), parent_name])
+                        } else {
+                            self.tr_fmt("scenes_moved", &[fallback, parent_name])
+                        }
                     }
-                    None => self.tr_fmt("scenes_moved_to_top", &[dragged_name]),
+                    None => {
+                        if moved > 1 {
+                            self.tr_fmt("scenes_bulk_moved_to_top", &[moved.to_string()])
+                        } else {
+                            self.tr_fmt("scenes_moved_to_top", &[fallback])
+                        }
+                    }
                 };
                 self.scene_status = Some(status);
             }
             Err(error) => {
                 let key = rivulet_core::scene_dock::drop_error_key(&error);
-                self.scene_status = Some(self.tr_fmt(key, &[dragged_name]));
+                let name = self.scene_name_for_error(&error, &fallback);
+                self.scene_status = Some(self.tr_fmt(key, &[name]));
             }
         }
+    }
+
+    /// Name of the scene a hierarchy refusal points at, for the status line.
+    ///
+    /// Every variant carries an ID (a refused cycle carries the scene being
+    /// moved), so a bulk drop explains *which* member of the selection blocked
+    /// it instead of naming whichever row the drag started on.
+    fn scene_name_for_error(
+        &self,
+        error: &rivulet_core::SceneHierarchyError,
+        fallback: &str,
+    ) -> String {
+        use rivulet_core::SceneHierarchyError as Error;
+        let id = match error {
+            Error::UnknownScene(id) | Error::UnknownParent(id) | Error::SelfParent(id) => *id,
+            Error::Cycle { scene, .. } => *scene,
+        };
+        self.scenes
+            .get(id)
+            .map(|scene| scene.name.clone())
+            .unwrap_or_else(|| fallback.to_string())
+    }
+
+    /// Stage removing the whole selection (#366).
+    ///
+    /// One scene goes at once, exactly like the row's remove button; more than
+    /// one goes through the confirmation dialog, which names the count.
+    fn request_scene_selection_removal(&mut self) {
+        let ids = self.scene_selection.ids().to_vec();
+        if ids.is_empty() {
+            return;
+        }
+        if ids.len() == 1 {
+            self.remove_scenes(&ids);
+        } else {
+            self.pending_confirmation = Some(PendingConfirmation::RemoveScenes { ids });
+        }
+    }
+
+    /// Remove `ids` as one undo step and keep everything else reachable.
+    ///
+    /// Children of a removed folder are lifted by `SceneManager::remove_many`
+    /// (the same rule as a single delete), the dock's fold state is pruned, and
+    /// the selection drops the scenes that no longer exist.
+    fn remove_scenes(&mut self, ids: &[uuid::Uuid]) {
+        let names: Vec<String> = ids
+            .iter()
+            .filter_map(|id| self.scenes.get(*id))
+            .map(|scene| scene.name.clone())
+            .collect();
+        let removed = self.scenes.remove_many(ids);
+        if removed == 0 {
+            let existing: std::collections::BTreeSet<uuid::Uuid> =
+                self.scenes.scenes().iter().map(|scene| scene.id).collect();
+            self.scene_selection.retain_existing(&existing);
+            return;
+        }
+        for id in ids {
+            self.studio_mode.remove_scene(*id);
+        }
+        let collection = self.scenes.collection().to_string();
+        let existing: std::collections::BTreeSet<uuid::Uuid> =
+            self.scenes.scenes().iter().map(|scene| scene.id).collect();
+        self.scene_dock.retain_existing(&collection, &existing);
+        self.scene_selection.retain_existing(&existing);
+        if self
+            .scene_drag
+            .is_some_and(|dragged| !existing.contains(&dragged))
+        {
+            self.scene_drag = None;
+        }
+        self.scene_status = Some(if removed == 1 {
+            self.tr_fmt(
+                "scenes_removed",
+                &[names.first().cloned().unwrap_or_default()],
+            )
+        } else {
+            self.tr_fmt("scenes_bulk_removed", &[removed.to_string()])
+        });
     }
 
     fn export_scene_collection(&mut self) {
@@ -5951,6 +6215,9 @@ impl RivuletApp {
             }) {
             Ok(manager) => {
                 self.scenes = manager;
+                // The selection names IDs of the previous collection.
+                self.scene_selection.clear();
+                self.scene_visible_ids.clear();
                 self.scene_status =
                     Some(self.tr_fmt("scenes_imported", &[path.display().to_string()]));
             }
@@ -9633,6 +9900,7 @@ impl RivuletApp {
                     self.chat_action_pending = Some(ChatAction::Disconnect);
                 }
             }
+            PendingConfirmation::RemoveScenes { ids } => self.remove_scenes(&ids),
         }
     }
 
@@ -12033,7 +12301,31 @@ impl eframe::App for RivuletApp {
                 // shares the text-input guard so Delete keeps working for
                 // ordinary text editing (rename fields, chat input).
                 if self.hotkeys.delete_source.pressed_in(i) {
-                    self.delete_selected_composition_source();
+                    // In the Scenes view a non-empty selection owns `Delete`:
+                    // otherwise the same key would also delete a source in the
+                    // active scene (issue #366).
+                    if self.view == AppView::Scenes && !self.scene_selection.is_empty() {
+                        self.request_scene_selection_removal();
+                    } else {
+                        self.delete_selected_composition_source();
+                    }
+                }
+                // Multi-select shortcuts (#366). They sit behind the same
+                // text-input guard as the other scene keys, so `Ctrl+A`, `Esc`
+                // and `Delete` keep their editing meaning in rename and chat
+                // fields, and `Ctrl/Cmd+F` still focuses the search box.
+                if self.view == AppView::Scenes {
+                    if i.modifiers.command && i.key_pressed(egui::Key::A) {
+                        let visible = self.scene_visible_ids.clone();
+                        self.scene_selection.select_all(&visible);
+                    }
+                    if i.key_pressed(egui::Key::Escape)
+                        && !i.modifiers.any()
+                        && !self.scene_selection.is_empty()
+                        && self.pending_confirmation.is_none()
+                    {
+                        self.scene_selection.clear();
+                    }
                 }
                 // Scene-item copy/paste (issue #192): in-app only and gated on
                 // the Scenes view so Ctrl+C/V keep their text-edit meaning in
@@ -16893,7 +17185,7 @@ mod tests {
         app.scenes.set_parent(game, Some(show)).unwrap();
         let before = app.scenes.export_json().expect("snapshot");
 
-        app.apply_scene_drop(show, Some(game));
+        app.apply_scene_drop(&[show], Some(game));
 
         assert_eq!(
             app.scenes.export_json().unwrap(),
@@ -16916,7 +17208,7 @@ mod tests {
         app.scene_dock
             .set_collapsed(app.scenes.collection(), show, true);
 
-        app.apply_scene_drop(game, Some(show));
+        app.apply_scene_drop(&[game], Some(show));
 
         assert_eq!(app.scenes.get(game).unwrap().parent, Some(show));
         assert!(
@@ -18981,6 +19273,30 @@ mod tests {
         assert!(json.get("motion_applied").is_none());
         assert!(json.get("os_reduced_motion").is_none());
         assert!(json.get("os_reduced_motion_probed_at").is_none());
+    }
+
+    #[test]
+    fn dragging_a_selected_row_moves_the_whole_selection() {
+        let mut selection = rivulet_core::SceneSelection::new();
+        let a = uuid::Uuid::new_v4();
+        let b = uuid::Uuid::new_v4();
+        let c = uuid::Uuid::new_v4();
+
+        selection.select(a);
+        assert_eq!(drag_scenes(a, &selection), [a]);
+        assert_eq!(
+            drag_scenes(b, &selection),
+            [b],
+            "a row outside the selection drags alone"
+        );
+
+        selection.toggle(b);
+        assert_eq!(drag_scenes(b, &selection), [a, b]);
+        assert_eq!(
+            drag_scenes(c, &selection),
+            [c],
+            "dragging an unselected row never sweeps the selection along"
+        );
     }
 
     #[test]

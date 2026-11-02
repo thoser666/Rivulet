@@ -1,4 +1,29 @@
 ## [Unreleased]
+- feat(gui,core,m9): **the scene dock selects several scenes and moves, colours,
+  retypes or deletes them in one step — or refuses the batch whole**
+  ([#366](https://github.com/thoser666/Rivulet/issues/366)). Re-organising a
+  40-scene collection meant 40 drags and 40 undo steps, and there was no way to
+  put one colour on a set of scenes at all. `rivulet_core::scene_dock::SceneSelection`
+  holds the ordered IDs plus the anchor a shift-click extends from, so click,
+  toggle and range selection, `Ctrl`/`Cmd+A`, `Esc`, `Delete` and the filter
+  rules are testable without a window. A drag that starts on a selected row
+  moves the whole selection, and the move is **atomic**: every member is
+  validated before anything changes, so a scene that would land in its own
+  subtree refuses the drop, leaves the collection untouched and is named in the
+  status line — a partially applied move that looks like it worked is the
+  failure mode this avoids. `SceneManager::set_parent_many`, `set_color_many`,
+  `set_kind_many` and `remove_many` record one snapshot for the batch, so a
+  group action is exactly one undo step; bulk delete keeps the child-lifting
+  rule of a single delete and asks for confirmation with the count. Filtering is
+  sticky by design: hidden selected scenes stay selected, are counted in the
+  status line and stay in bulk actions, while `Ctrl`/`Cmd+A` selects only what is
+  visible. Selected rows get a tick and a bold name beside the *Active*/*Live*
+  badges, so selection, active scene and program scene are never distinguished
+  by colour alone. Inside the Scenes view a non-empty selection owns `Delete`, so
+  the key cannot also delete a source in the active scene.
+  `rivulet-core/tests/scene_selection.rs` pins the range rules over a folded
+  tree, the sticky filter, the atomic refusal, one-step colour/kind/delete and
+  the prune of a removed folder's transition.
 - feat(gui,core,m9): **a folder can carry its own transition, so a show stops
   sharing one duration between a game cut and an intro fade**
   ([#368](https://github.com/thoser666/Rivulet/issues/368)). Switching used the

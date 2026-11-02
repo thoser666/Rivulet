@@ -264,8 +264,9 @@ pub use scene::{Scene, SceneHierarchyError, SceneKind, SceneManager};
 
 pub mod scene_dock;
 pub use scene_dock::{
-    apply_drop, can_drop, dock_rows, dock_rows_filtered, drop_error_key, first_match,
-    SceneColorLabel, SceneDock, SceneDockRow, SceneFilterState, SceneSearchMode,
+    apply_drop, apply_drop_selection, can_drop, can_drop_selection, dock_rows, dock_rows_filtered,
+    drop_error_key, first_match, SceneColorLabel, SceneDock, SceneDockRow, SceneFilterState,
+    SceneSearchMode, SceneSelection,
 };
 
 pub mod scene_snapshot;

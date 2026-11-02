@@ -553,9 +553,11 @@ Workstream issues:
 Scene follow-ups are extensions, not gaps in criterion 8. Per-folder default
 transitions ([#368](https://github.com/thoser666/Rivulet/issues/368)) are
 delivered: resolution, undo, prune-on-delete and the studio `Take` are pinned by
-`rivulet-core/tests/folder_transition.rs`. Still open: multi-select and bulk move
-([#366](https://github.com/thoser666/Rivulet/issues/366)) and the OBS collection
-importer ([#367](https://github.com/thoser666/Rivulet/issues/367)).
+`rivulet-core/tests/folder_transition.rs`. Multi-select and bulk move
+([#366](https://github.com/thoser666/Rivulet/issues/366)) are delivered too and
+pinned by `rivulet-core/tests/scene_selection.rs` (atomic batch moves, one undo
+step per group action, documented sticky-filter semantics). Still open is the
+OBS collection importer ([#367](https://github.com/thoser666/Rivulet/issues/367)).
 
 ### M10: AI Chat Assistant
 

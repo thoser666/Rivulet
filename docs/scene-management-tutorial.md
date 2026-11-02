@@ -188,13 +188,31 @@ Auch im Studio-Modus gilt das: `Übernehmen` spielt den Standard des
 Vorschau-Ordners. Ein `Cut` ist sofort fertig (kein halb ausgeblendetes Bild),
 und ein `Fade` nutzt die Dauer des Ordners, nicht die globale.
 
-## 12. Was (noch) nicht geht
+## 12. Mehrfachauswahl und Sammelaktionen
 
-Diese zwei Punkte sind eigene Vorhaben und als Issues hinterlegt, nicht
-verschwiegene Lücken:
+Mehrere Szenen gleichzeitig bearbeiten statt eine nach der anderen:
 
-- **Mehrfachauswahl und Sammelverschieben** — Szenen werden derzeit einzeln
-  bewegt ([#366](https://github.com/thoser666/Rivulet/issues/366)).
+- **Strg/Cmd-Klick** fügt eine Szene zur Auswahl hinzu oder nimmt sie heraus,
+  **Umschalt-Klick** wählt den Bereich von der Ankerzeile bis zur geklickten
+  Zeile — über die Zeilen, die gerade sichtbar sind: Kinder eines zugeklappten
+  Ordners erreichst du erst, wenn du ihn aufklappst.
+- **Strg/Cmd+A** wählt die sichtbaren Zeilen, **Esc** hebt die Auswahl auf.
+- Ziehst du an einer ausgewählten Zeile, wandert die **ganze Auswahl** in den
+  Zielordner — als ein Undo-Schritt. Ist eine Szene dabei, die dort nicht hin
+  darf (eigener Unterordner, unbekanntes Ziel), bewegt sich **keine** von ihnen,
+  und die Statuszeile nennt die störende Szene.
+- Das `…`-Menü neben der Auswahl setzt Farblabel oder Szenentyp für alle
+  ausgewählten Szenen in einem Schritt; **Entf** löscht die Auswahl, ab zwei
+  Szenen mit Rückfrage, die die Anzahl nennt.
+- Filter und Auswahl vertragen sich: ausgeblendete Szenen bleiben ausgewählt,
+  werden in der Statuszeile mitgezählt und wirken bei Sammelaktionen mit — nur
+  **Strg/Cmd+A** meint ausschließlich, was du siehst.
+
+## 13. Was (noch) nicht geht
+
+Dieser Punkt ist ein eigenes Vorhaben und als Issue hinterlegt, nicht
+verschwiegene Lücke:
+
 - **OBS-Sammlung importieren** — das Mapping ist dokumentiert (siehe
   [scene-management.md](scene-management.md#migrating-an-obs-collection)), der
   Importer ist ein eigenes Vorhaben

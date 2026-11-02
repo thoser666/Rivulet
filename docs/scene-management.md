@@ -165,7 +165,26 @@ forwards actions to the model API.
 | Drag & drop | `apply_drop` validates with `can_drop` before the manager snapshots, then calls `set_parent`. A refused move — self-parent, unknown target, or a parent inside the dropped scene's own subtree — is highlighted as invalid while dragging and explained in the status line on release, and changes nothing. |
 | Components | `set_kind` toggles a scene between primary and component. Components and everything below them are rendered in a separate, dimmed group but stay switchable. |
 
-The dock does not multi-select yet ([#366](https://github.com/thoser666/Rivulet/issues/366)).
+### Multi-select and bulk actions
+
+Issue [#366](https://github.com/thoser666/Rivulet/issues/366) adds a selection on
+top of the tree. The rules live in `rivulet_core::scene_dock::SceneSelection` and
+the bulk mutations in `SceneManager`, so click/toggle/extend and the
+all-or-nothing move are testable without a window.
+
+| Concern | Rule |
+|---|---|
+| Click | A plain click selects that row alone and switches to it — the previous single-row behaviour. |
+| Toggle | `Ctrl`/`Cmd`-click adds or removes one row and makes it the anchor. Removing the anchor leaves none, so the next shift-click starts a fresh range instead of guessing. |
+| Range | `Shift`-click selects from the anchor to the clicked row over the rows **currently drawn**. A folded folder's children are not reachable by a range until it is open; without a usable anchor (none, or filtered away) the click degrades to a plain selection. |
+| Keyboard | `Ctrl`/`Cmd+A` selects the visible rows, `Esc` clears the selection, `Delete` removes it. All three sit behind the text-input guard, so they keep their editing meaning in rename and chat fields; inside the Scenes view a non-empty selection owns `Delete` instead of the `delete_source` hotkey. |
+| Dragging | A drag that starts on a selected row moves the **whole** selection, in one undo step. Dragging an unselected row never sweeps the selection along. |
+| Atomicity | The batch is validated before anything moves. One member that would violate the hierarchy (self-parent, own subtree, unknown target) refuses the whole drop, changes nothing, and the status line names that scene. Dropping a selection onto one of its own members is refused for the same reason. |
+| Colour and kind | The selection's `…` menu applies a colour label or `SceneKind` to every selected scene as one undo step. |
+| Delete | Removes every selected scene as one undo step with the existing child-lifting rule; more than one scene is confirmed in a dialog that names the count. |
+| Filtering | **The selection is sticky.** A filter can hide selected rows but never deselects them: the status line counts the hidden ones and bulk actions include them, so a filtered dock cannot silently act on half the selection. `Ctrl`/`Cmd+A` is the deliberate exception — it selects only what is visible, because "all" there means what the user can see. |
+| Visuals | Selected rows get a tick and a bold name; the active scene keeps its *Active* badge and the studio program scene its *Live* badge, so colour is never the only signal and the three states cannot be confused. |
+
 Search and filtering are delivered as package D (see
 [Search and filter](#search-and-filter)).
 
@@ -209,6 +228,7 @@ GUI work and any future importer agree on one shape. The importer itself is
 | **B. Core model** | `SceneKind`, `set_parent`/`set_color`/`set_kind`, cycle guard, `remove` reparenting, `duplicate_scene` fixes, compatibility + regression tests | done |
 | **C. Scene dock** | Tree with indentation, collapse state per collection, colour swatch and picker, drag & drop to re-parent, component toggle | done ([#350](https://github.com/thoser666/Rivulet/issues/350)) |
 | **D. Search and filter** | Real-time search with "match anywhere"/"starts with", auto-expand of matches, component filter, persisted collapse state | done ([#351](https://github.com/thoser666/Rivulet/issues/351)) |
+| **E. Multi-select and bulk actions** | Selection with click/toggle/range over the drawn rows, atomic bulk move, bulk colour, kind and delete as single undo steps, sticky filter semantics | done ([#366](https://github.com/thoser666/Rivulet/issues/366)) |
 
 Packages C and D were tracked as separate issues
 ([#350](https://github.com/thoser666/Rivulet/issues/350),
@@ -216,6 +236,14 @@ Packages C and D were tracked as separate issues
 reviewed as UI work and the model as engine work. Both are closed.
 
 ## Tests
+
+`rivulet-core/tests/scene_selection.rs` pins the selection rules of
+[#366](https://github.com/thoser666/Rivulet/issues/366): click/toggle/extend over
+a folded tree, the sticky filter (hidden rows stay selected and counted),
+anchors that survive or move with filtering, the atomic bulk move (including a
+refusal that names the member and a selection dropped onto itself), one undo
+step for colour, kind and delete, child-lifting and transition pruning on bulk
+delete, and unknown IDs being skipped.
 
 `rivulet-core/tests/scene.rs` pins the invariants above:
 

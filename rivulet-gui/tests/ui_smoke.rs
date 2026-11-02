@@ -175,6 +175,51 @@ fn scene_dock_contract_exposes_tree_collapse_color_and_drop() {
 }
 
 #[test]
+fn scene_multi_select_contract_exposes_selection_and_bulk_actions() {
+    // Issue #366: the selection rules are core-tested in
+    // `rivulet-core/tests/scene_selection.rs`; this pins the wiring.
+    let source = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
+    let dock = source
+        .split_once("fn draw_scene_dock")
+        .map(|(_, rest)| rest)
+        .expect("draw_scene_dock must exist");
+    for required in [
+        "scene_selection",
+        "rivulet_core::scene_dock::can_drop_selection",
+        "rivulet_core::scene_dock::apply_drop_selection",
+        "set_color_many",
+        "set_kind_many",
+        "request_scene_selection_removal",
+        "SelectMode::Extend",
+        "SelectMode::Toggle",
+        "scenes_selected_count",
+        "scenes_selected_hidden",
+    ] {
+        assert!(dock.contains(required), "the dock must wire up {required}");
+    }
+    assert!(
+        source.contains("drag_scenes") && source.contains("egui::Key::A"),
+        "a drag must carry the selection and Ctrl/Cmd+A must select the visible rows"
+    );
+    let i18n = fs::read_to_string("../rivulet-core/src/i18n.rs")
+        .expect("the i18n tables must be readable for the dock contract");
+    for key in [
+        "scenes_selected_count",
+        "scenes_selected_hidden",
+        "scenes_selection_clear",
+        "scenes_bulk_moved",
+        "scenes_bulk_removed",
+        "confirm_dialog_bulk_delete_title",
+    ] {
+        let occurrences = i18n.matches(&format!("\"{key}\"")).count();
+        assert_eq!(
+            occurrences, 2,
+            "{key} must exist in EN and DE, found {occurrences}"
+        );
+    }
+}
+
+#[test]
 fn accessibility_contract_requires_labels_focus_and_contrast() {
     let source = fs::read_to_string("src/app.rs").expect("GUI source must be readable");
     let theme = fs::read_to_string("src/theme.rs").expect("theme source must be readable");

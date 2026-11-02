@@ -548,6 +548,175 @@ pub fn drop_error_key(error: &SceneHierarchyError) -> &'static str {
     }
 }
 
+/// The dock's multi-selection (issue #366).
+///
+/// Ordered IDs plus the anchor a shift-click extends from. The type is pure
+/// data, so click/toggle/extend and the filter rules are testable without a
+/// window; the GUI only feeds it the row the user hit and the rows it drew.
+///
+/// **Filtering is sticky**: hiding a selected scene does not deselect it. The
+/// status line counts the hidden rows separately and bulk actions include them,
+/// so "select six, type a filter, recolour" cannot silently skip half the
+/// selection. `Ctrl/Cmd+A` deliberately selects only the rows that are visible —
+/// that is the one action whose meaning is "what I can see".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SceneSelection {
+    ids: Vec<Uuid>,
+    /// Where a shift-click range starts. Survives filtering, so a range can be
+    /// extended again after the query changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    anchor: Option<Uuid>,
+}
+
+impl SceneSelection {
+    /// An empty selection.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The selected scenes in the order they were added.
+    pub fn ids(&self) -> &[Uuid] {
+        &self.ids
+    }
+
+    /// How many scenes are selected, including rows a filter hides.
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    /// Whether nothing is selected.
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+
+    /// Whether `id` is selected.
+    pub fn contains(&self, id: Uuid) -> bool {
+        self.ids.contains(&id)
+    }
+
+    /// The anchor a shift-click extends from.
+    pub fn anchor(&self) -> Option<Uuid> {
+        self.anchor
+    }
+
+    /// Drop the whole selection, anchor included.
+    pub fn clear(&mut self) {
+        self.ids.clear();
+        self.anchor = None;
+    }
+
+    /// A plain click: this row alone.
+    pub fn select(&mut self, id: Uuid) {
+        self.ids.clear();
+        self.ids.push(id);
+        self.anchor = Some(id);
+    }
+
+    /// A `Ctrl`/`Cmd`-click: add or remove one row, and make it the anchor.
+    ///
+    /// Removing the anchor leaves no anchor behind rather than inventing one,
+    /// so the next shift-click starts a fresh range instead of guessing which
+    /// neighbouring row the user meant.
+    pub fn toggle(&mut self, id: Uuid) {
+        if let Some(position) = self.ids.iter().position(|candidate| *candidate == id) {
+            self.ids.remove(position);
+            if self.anchor == Some(id) {
+                self.anchor = None;
+            }
+        } else {
+            self.ids.push(id);
+            self.anchor = Some(id);
+        }
+    }
+
+    /// A `Shift`-click: replace the selection with the range from the anchor to
+    /// `id` over `visible`, the rows the dock drew in drawing order.
+    ///
+    /// Rows a filter or a folded folder hides are not part of the range — a
+    /// folded folder's children only become reachable once it is open. Without a
+    /// usable anchor (none, or filtered away) this degrades to a plain click
+    /// rather than selecting an arbitrary range.
+    pub fn extend(&mut self, id: Uuid, visible: &[Uuid]) {
+        let Some(anchor) = self.anchor.filter(|anchor| visible.contains(anchor)) else {
+            self.select(id);
+            return;
+        };
+        let (Some(from), Some(to)) = (
+            visible.iter().position(|candidate| *candidate == anchor),
+            visible.iter().position(|candidate| *candidate == id),
+        ) else {
+            self.select(id);
+            return;
+        };
+        let (start, end) = if from <= to { (from, to) } else { (to, from) };
+        self.ids = visible[start..=end].to_vec();
+        // The anchor stays where it was: a second shift-click widens or narrows
+        // the same range instead of starting a new one at the other end.
+    }
+
+    /// `Ctrl/Cmd+A`: every visible row, in drawing order. Keeps the anchor while
+    /// it is still visible and otherwise moves it to the first visible row.
+    pub fn select_all(&mut self, visible: &[Uuid]) {
+        self.ids = visible.to_vec();
+        if !self.anchor.is_some_and(|anchor| visible.contains(&anchor)) {
+            self.anchor = visible.first().copied();
+        }
+    }
+
+    /// How many selected scenes the current rows do not show. The status line
+    /// names this count so a filtered dock cannot look like it lost rows.
+    pub fn hidden_count(&self, visible: &[Uuid]) -> usize {
+        self.ids.iter().filter(|id| !visible.contains(id)).count()
+    }
+
+    /// Drop selections that no longer exist, so deleting scenes cannot leave
+    /// phantom IDs behind in a later bulk action.
+    pub fn retain_existing(&mut self, existing: &BTreeSet<Uuid>) {
+        self.ids.retain(|id| existing.contains(id));
+        if self
+            .anchor
+            .is_some_and(|anchor| !existing.contains(&anchor))
+        {
+            self.anchor = None;
+        }
+    }
+}
+
+/// Whether a whole selection may be moved under `parent` (#366).
+///
+/// Validates each member with [`can_drop`] and refuses a parent that is itself
+/// part of the selection, which would make a folder its own ancestor.
+/// Non-mutating, so the dock can colour a drop target while the pointer is
+/// still moving.
+pub fn can_drop_selection(
+    manager: &SceneManager,
+    ids: &[Uuid],
+    parent: Option<Uuid>,
+) -> Result<(), SceneHierarchyError> {
+    if let Some(parent_id) = parent {
+        if ids.contains(&parent_id) {
+            return Err(SceneHierarchyError::SelfParent(parent_id));
+        }
+    }
+    for id in ids {
+        can_drop(manager, *id, parent)?;
+    }
+    Ok(())
+}
+
+/// Move a whole selection under `parent` as **one** undo step, or none of it.
+///
+/// Returns the number of scenes moved, so the status line can say "moved 6
+/// scenes" instead of pretending the drag moved one.
+pub fn apply_drop_selection(
+    manager: &mut SceneManager,
+    ids: &[Uuid],
+    parent: Option<Uuid>,
+) -> Result<usize, SceneHierarchyError> {
+    can_drop_selection(manager, ids, parent)?;
+    manager.set_parent_many(ids, parent)
+}
+
 /// The scene `Enter` switches to: the first scene in the manager's depth-first
 /// order that the filter matches.
 ///
