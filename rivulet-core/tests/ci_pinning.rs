@@ -4192,7 +4192,7 @@ fn develop_required_checks_have_stable_job_names() {
             && ci.contains("cargo test -p rivulet-core --test ci_pinning")
             && ci.contains("name: CI")
             && ci.contains(
-                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, remote_companion_smoke, render_smoke, fuzz_smoke, coverage, roadmap_sync]"
+                "needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, remote_companion_smoke, render_smoke, resource_metrics, fuzz_smoke, coverage, roadmap_sync]"
             ),
         "CI must expose dedicated Pinning-Tests and aggregate CI checks"
     );
@@ -10058,5 +10058,170 @@ fn camera_provider_chains_cover_every_platform_and_are_documented() {
     assert!(
         i18n.contains("(\"camera_none\", \"Keine Kamera gefunden.\")"),
         "the German locale must say 'Keine Kamera gefunden.'"
+    );
+}
+
+/// M9 #363: the resource-efficiency gate must measure the real binary and gate
+/// it against committed numbers, not validate a fixture that says `0.0`.
+///
+/// This pins the whole chain, because each link is easy to lose silently: the
+/// CLI phases the harness drives, the external sampler (a process reporting its
+/// own footprint would make the numbers unfalsifiable), the baseline policy,
+/// the honest blocked/n-a semantics, the CI job, and the docs that say which
+/// numbers are automated and which stay hardware evidence.
+#[test]
+fn resource_metrics_gate_measures_the_binary_and_gates_a_baseline() {
+    let harness = read("scripts/resource-metrics.py");
+    for required in [
+        "--self-test",
+        "--write-baseline",
+        "def gate(",
+        "def run_self_test",
+        "idle_cpu_percent",
+        "rss_slope_mb_per_min",
+        "startup_ms",
+        "ABSOLUTE_MAX",
+        "scripts/resource-metrics-baseline",
+        "seed",
+        "\"delta\"",
+    ] {
+        assert!(
+            harness.contains(required),
+            "the resource harness must keep {required} -- removing it drops the measurement, the baseline or the named delta"
+        );
+    }
+    // The footprint numbers must be sampled from outside the measured process.
+    for required in ["/proc/{pid}/stat", "GetProcessTimes", "ps\", \"-o", "rss="] {
+        assert!(
+            harness.contains(required),
+            "the harness must sample the child process externally, missing {required}"
+        );
+    }
+    // Where it cannot measure, it must say so instead of inventing a pass.
+    for required in ["\"blocked\"", "\"n/a\"", "reason"] {
+        assert!(
+            harness.contains(required),
+            "the harness must record blocked/n-a with a reason, missing {required}"
+        );
+    }
+    // The preview workload must be a real composition: frame time on the 64x48
+    // render-smoke fixture is scheduling noise, not a measurement.
+    let preview = read("scripts/ci-resource-metrics/preview.toml");
+    for required in ["width = 1280", "height = 720", "[[layers]]"] {
+        assert!(
+            preview.contains(required),
+            "the frame-time workload must keep {required} -- a tiny canvas makes \
+             the p99 number meaningless"
+        );
+    }
+    assert!(
+        harness.contains("ci-resource-metrics"),
+        "the harness must measure the 720p workload, not the 64x48 smoke fixture"
+    );
+
+    // The CLI phases it drives must exist and be reachable from the binary.
+    let metrics = read("rivulet-cli/src/metrics.rs");
+    for required in [
+        "pub fn run_metrics",
+        "phase_start",
+        "phase_end",
+        "\"report\"",
+        "RivuletEngine::new",
+        "render_frame",
+        "set_video_encoder(VideoEncoder::Software)",
+    ] {
+        assert!(
+            metrics.contains(required),
+            "`rivulet metrics` must keep {required}"
+        );
+    }
+    let main = read("rivulet-cli/src/main.rs");
+    for required in ["\"metrics\" =>", "rivulet metrics"] {
+        assert!(main.contains(required), "the binary must expose {required}");
+    }
+
+    // The schema gate validates the new fields and still fails a regression.
+    let checker = read("scripts/resource-efficiency-check.py");
+    for required in [
+        "--self-test",
+        "MAX_IDLE_CPU_PERCENT",
+        "MAX_RSS_SLOPE_MB_PER_MIN",
+        "STATUS_NEEDS_REASON",
+        "def run_self_test",
+        "OPTIONAL_NUMERIC_FIELDS",
+    ] {
+        assert!(
+            checker.contains(required),
+            "resource-efficiency-check.py must keep {required}"
+        );
+    }
+
+    // The CI job runs both policy self-tests, the measured profile and the
+    // artifact upload, and the aggregate CI job depends on it.
+    let ci = read(".github/workflows/ci.yml");
+    for required in [
+        "resource_metrics:",
+        "python3 scripts/resource-efficiency-check.py --self-test",
+        "python3 scripts/resource-metrics.py --self-test",
+        "--profile ci-linux",
+        // Release, not debug: a baseline calibrated on a debug build is the
+        // wrong reference for every later run.
+        "cargo build --locked --release -p rivulet-cli",
+        "--binary target/release/rivulet",
+        "${{ needs.resource_metrics.result }}",
+        "name: resource-metrics",
+    ] {
+        assert!(
+            ci.contains(required),
+            "ci.yml must wire the resource metrics job: missing {required}"
+        );
+    }
+    assert!(
+        harness.contains("fn baseline_refusal") || harness.contains("def baseline_refusal"),
+        "a baseline must not be written from a debug binary without an explicit opt-in"
+    );
+
+    // A baseline exists per gated profile, and the seed state is explicit so a
+    // missing measurement can never look like a pass.
+    let baseline = read("scripts/resource-metrics-baseline/ci-linux.json");
+    assert!(
+        baseline.contains("\"profile\": \"ci-linux\""),
+        "the ci-linux baseline must name its profile"
+    );
+    assert!(
+        baseline.contains("\"status\": \"seed\"") || baseline.contains("\"status\": \"measured\""),
+        "a baseline must declare whether it gates (`measured`) or not (`seed`)"
+    );
+
+    // Docs, roadmap and changelog stay attached to the delivery.
+    let goal = read("docs/resource-efficiency-goal.md");
+    for required in [
+        "What CI measures, and what stays manual",
+        "Baselines and thresholds",
+        "rivulet metrics",
+        "`BLOCKED`",
+        "seed",
+    ] {
+        assert!(
+            goal.contains(required),
+            "the resource goal doc must explain {required}"
+        );
+    }
+    let cli_doc = read("docs/m7-automation.md");
+    assert!(
+        cli_doc.contains("rivulet metrics"),
+        "the CLI surface reference must list `rivulet metrics`"
+    );
+    let readme = read("README.md");
+    assert!(
+        readme.contains(
+            "- [x] Performance and footprint metrics (idle CPU/RAM, laptop battery) as CI checks ([#363]"
+        ),
+        "the README M9 checkbox must record the delivery"
+    );
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        changelog.contains("feat(m9): **the resource-efficiency targets are measured by CI now"),
+        "CHANGELOG must record the resource-metrics delivery"
     );
 }

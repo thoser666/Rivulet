@@ -13,6 +13,7 @@
 pub mod config;
 pub mod failure;
 pub mod inspect;
+pub mod metrics;
 pub mod render;
 pub mod source;
 

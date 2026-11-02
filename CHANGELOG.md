@@ -1,4 +1,35 @@
 ## [Unreleased]
+- feat(m9): **the resource-efficiency targets are measured by CI now, not by a
+  fixture.** `scripts/resource-efficiency-check.py` validated a JSON file whose
+  `cpu_delta_percent` and `memory_growth_mb` were `0.0` — it proved the
+  validator worked and nothing about the application. Issue #363 closes that:
+  `rivulet metrics` (new CLI subcommand) drives the real engine bootstrap, a
+  real 60-second idle window, the real headless render path (a committed 720p
+  composition, so per-frame cost is a real number rather than a 64x48 fixture's
+  scheduling noise) and an optional
+  real recording session, marking each phase with `phase_start`/`phase_end`
+  events; `scripts/resource-metrics.py` consumes those markers and samples the
+  process **from outside** (CPU time, RSS, thread count per platform), so the
+  footprint numbers do not come from the process being measured. The new CI job
+  measures a **release** build -- a debug binary's render path is orders of
+  magnitude slower, and a baseline taken from one would be the wrong reference
+  for every later run (`--write-baseline` refuses a debug binary unless
+  explicitly allowed). It
+  gates idle CPU (2 % target), RSS slope, memory growth, startup and headless
+  p99 frame time against a committed per-profile baseline, names the metric,
+  baseline and delta on a regression, and records the synthetic capture-on/off
+  CPU A/B. Frame percentiles are nearest-rank over the measured frames, so a
+  reported p50/p95/p99 is always a frame that was really rendered rather than
+  an interpolation between two. Where a shared runner cannot measure something — GPU utilisation,
+  battery/thermal — the report says `n/a`/`blocked` with the reason instead of
+  inventing a pass, and a profile without a measured baseline does not gate
+  until the baseline is committed deliberately with `--write-baseline`. Both
+  scripts grew `--self-test` policy tests (too-high idle CPU, growing RSS slope,
+  startup regression, a `blocked` record without a reason each fail), the
+  validator accepts the new optional fields without invalidating older reports,
+  and `docs/resource-efficiency-goal.md` now states what is automated and what
+  stays hardware evidence. Ships with `ci_pinning` guards, a CI job and the
+  README M9 checkbox.
 - docs(m9): **the three scene-management gaps are issues with scope, not
   footnotes in a tutorial.** Multi-select and bulk move
   ([#366](https://github.com/thoser666/Rivulet/issues/366)), the OBS

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "profile": "ci-linux",
+  "status": "seed",
+  "recorded_at": null,
+  "platform": "linux",
+  "runner": "GitHub Actions ubuntu-latest",
+  "binary_profile": "debug",
+  "metrics": {},
+  "notes": "Seed baseline for scripts/resource-metrics.py. A seed does not gate: the Resource Metrics job records the first real measurement, uploads it as the `resource-metrics` artifact, and the numbers are committed here deliberately with `--write-baseline` in the same PR -- never written by CI itself. Update it the same way when a new runner image changes the floor, and record why in CHANGELOG.md."
+}

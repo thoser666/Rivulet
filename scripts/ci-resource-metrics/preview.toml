@@ -1,0 +1,47 @@
+# Preview workload for the resource-metrics harness (M9, issue #363).
+#
+# Deliberately *not* `scripts/ci-render-smoke/card.toml`: that fixture exists to
+# prove byte-identical output on a 64x48 canvas, where per-frame cost is
+# indistinguishable from scheduling noise. Frame time is only a meaningful
+# measurement when the compositor has real work to do, so this config renders
+# a 720p canvas with an animated layer -- small enough to run on a shared CI
+# runner in well under a second for 30 frames, large enough that a regression
+# in the render path moves the number.
+name = "MetricsPreview"
+collection = "CI"
+profile = "Default"
+fps = 30
+
+[canvas]
+width = 1280
+height = 720
+
+[[layers]]
+name = "Backdrop"
+kind = "Color"
+animated = false
+z_order = 0
+visible = true
+
+[layers.transform]
+x = 0.0
+y = 0.0
+width = 1280.0
+height = 720.0
+rotation = 0.0
+opacity = 1.0
+
+[[layers]]
+name = "Motion"
+kind = "Image"
+animated = true
+z_order = 1
+visible = true
+
+[layers.transform]
+x = 160.0
+y = 90.0
+width = 960.0
+height = 540.0
+rotation = 0.0
+opacity = 0.75

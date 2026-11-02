@@ -24,6 +24,7 @@ USAGE:
     rivulet inspect --config <file.toml> [--json] # print the pipeline, don't record
     rivulet render --config <scene.toml> --frame <n> --png <out.png>
     rivulet render --config-dir <scenes/> --out-dir <renders/>   # batch
+    rivulet metrics [--idle-seconds <n>] [--config <scene.toml>]  # measure phases
     rivulet help                                 # show this help
 
 FLAGS (record):
@@ -56,6 +57,16 @@ FLAGS (render):
         --summary <file>      batch summary JSON (default <out-dir>/summary.json)
         --json                print the batch summary to stdout as well
 
+FLAGS (metrics):
+        --idle-seconds <n>    hold the engine idle for N seconds (default 0)
+    -c, --config <file>       scene composition rendered as the preview workload
+        --frames <n>          frames the preview workload renders (default 30)
+        --record-seconds <n>  drive a synthetic recording for N seconds (default 0)
+        --width <px>          synthetic capture width (default 640)
+        --height <px>         synthetic capture height (default 360)
+        --fps <n>             synthetic capture frame rate (default 30)
+        --no-engine           skip the GStreamer engine bootstrap
+
 STREAMS:
     stdout  JSON status events (started/progress/stopped, or failed on error)
     stderr  human-readable diagnostics
@@ -75,6 +86,8 @@ enum Command {
     Record,
     Inspect,
     Render,
+    /// `rivulet metrics`: phase timings for the M9 resource harness (#363).
+    Metrics,
 }
 
 struct RecordArgs {
@@ -89,6 +102,8 @@ struct RecordArgs {
     /// `render`: its own flags. Rendering configures a composition rather than
     /// a recording, so its vocabulary does not overlap with `record`'s.
     render: rivulet_cli::render::RenderArgs,
+    /// `metrics`: its own flags for the same reason.
+    metrics: rivulet_cli::metrics::MetricsArgs,
 }
 
 fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
@@ -108,6 +123,10 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
                 command = Command::Render;
                 rest = &args[1..];
             }
+            "metrics" => {
+                command = Command::Metrics;
+                rest = &args[1..];
+            }
             "help" | "--help" | "-h" => {
                 return Ok(RecordArgs {
                     command,
@@ -117,11 +136,12 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
                     dry_run: false,
                     show_help: true,
                     render: rivulet_cli::render::RenderArgs::default(),
+                    metrics: rivulet_cli::metrics::MetricsArgs::default(),
                 })
             }
             other => {
                 return Err(format!(
-                    "unknown command {other:?} (expected \"record\", \"inspect\" or \"render\")"
+                    "unknown command {other:?} (expected \"record\", \"inspect\", \"render\" or \"metrics\")"
                 ))
             }
         }
@@ -135,16 +155,25 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
         dry_run: false,
         show_help: false,
         render: rivulet_cli::render::RenderArgs::default(),
+        metrics: rivulet_cli::metrics::MetricsArgs::default(),
     };
 
-    // `render` has its own flag vocabulary, so it is parsed by its own parser
-    // and never sees the recording flags below.
+    // `render` and `metrics` have their own flag vocabularies, so they are
+    // parsed by their own parsers and never see the recording flags below.
     if command == Command::Render {
         if rest.iter().any(|arg| arg == "--help" || arg == "-h") {
             parsed.show_help = true;
             return Ok(parsed);
         }
         parsed.render = rivulet_cli::render::parse_render_args(rest)?;
+        return Ok(parsed);
+    }
+    if command == Command::Metrics {
+        if rest.iter().any(|arg| arg == "--help" || arg == "-h") {
+            parsed.show_help = true;
+            return Ok(parsed);
+        }
+        parsed.metrics = rivulet_cli::metrics::parse_metrics_args(rest)?;
         return Ok(parsed);
     }
     let mut i = 0;
@@ -245,6 +274,8 @@ fn run() -> i32 {
         // shows the overall usage (which summarizes every subcommand).
         if parsed.command == Command::Render {
             print!("{}", rivulet_cli::render::USAGE);
+        } else if parsed.command == Command::Metrics {
+            print!("{}", rivulet_cli::metrics::USAGE);
         } else {
             print!("{USAGE}");
         }
@@ -256,6 +287,12 @@ fn run() -> i32 {
         // Rendering builds a composition from a scene config, so it must not
         // go through the recording config path (and its `output.path` default).
         return rivulet_cli::render::run_render(&parsed.render);
+    }
+
+    if parsed.command == Command::Metrics {
+        // A metrics run measures phases; it never records to a config's
+        // output path, so it skips the recording config path entirely.
+        return rivulet_cli::metrics::run_metrics(&parsed.metrics);
     }
 
     // Load config file, then apply flag overrides (flags win).

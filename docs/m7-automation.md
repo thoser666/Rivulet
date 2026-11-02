@@ -585,6 +585,7 @@ rivulet record --config recording.toml [--output FILE] [--duration SECS]
 rivulet inspect --config recording.toml [--json]            (shipped, W5)
 rivulet render --config scene.toml --frame N --png out.png    (shipped, W3)
 rivulet render --config-dir scenes/ --out-dir renders/        (shipped, W3 batch)
+rivulet metrics [--idle-seconds N] [--config scene.toml]      (shipped, M9 #363)
 rivulet stream --config streaming.toml [--json]       (NOT shipped — #289)
 ```
 
@@ -608,6 +609,26 @@ identical recording is achievable in-process without spawning the binary
   exits 0 without pushing a frame.
 - `--duration`, `--width`, `--height`, `--fps` and `--dry-run` are rejected
   under `inspect` (exit 2) rather than silently ignored.
+
+`rivulet metrics` (M9, issue #363) does not render a file and does not decide
+whether a number is good: it drives one phase at a time and writes
+newline-delimited JSON on stdout — `phase_start`, `phase_end`, then a final
+`report`. `scripts/resource-metrics.py` consumes those markers, samples the
+process from outside (CPU time, RSS, thread count), and gates the result against
+a committed baseline. The phase timings only the process can see (engine
+bootstrap, per-frame render cost) come from this command; the footprint numbers
+deliberately do not, because a process reporting its own memory can be wrong
+about it. See [`resource-efficiency-goal.md`](resource-efficiency-goal.md) for
+which numbers are automated and which stay hardware evidence.
+
+A runner without a GStreamer runtime gets `"engine": "unavailable"` plus the
+reason instead of a fabricated startup number: the harness records `blocked`
+with that reason, or fails the job when it was asked to require the engine.
+
+Measure a `--release` build. The render path is orders of magnitude slower
+unoptimised, so those numbers describe a binary nobody runs; `--write-baseline`
+refuses a debug binary unless `--allow-debug-baseline` marks the profile as a
+throwaway.
 
 Inspect JSON schema (shipped in W5) — one object with `pipeline`, the echoed
 `config`, and `features`:
