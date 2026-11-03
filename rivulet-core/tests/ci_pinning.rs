@@ -83,20 +83,20 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v3.0.3",
     ),
     (
-        "github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370",
-        "v4.39.1",
+        "github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26",
+        "v4.39.2",
     ),
     (
-        "github/codeql-action/autobuild@9b3254085494b55a0f7c4c2b3d2d52cc712ce370",
-        "v4.39.1",
+        "github/codeql-action/autobuild@1fc58d04a4d4374f921bdac573c3811c240f9c26",
+        "v4.39.2",
     ),
     (
-        "github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370",
-        "v4.39.1",
+        "github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26",
+        "v4.39.2",
     ),
     (
-        "github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370",
-        "v4.39.1",
+        "github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26",
+        "v4.39.2",
     ),
     (
         "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
@@ -10403,5 +10403,84 @@ fn dismissed_alerts_are_registered_and_rechecked() {
     assert!(
         read(".github/workflows/ci.yml").contains("scripts/check-dismissed-alerts.py --self-test"),
         "the Lints job must self-test the dismissed-alert checker"
+    );
+}
+
+#[test]
+fn beta_checklist_matches_the_gate_scope() {
+    // The checklist claimed macOS signing was mandatory and listed eleven
+    // secrets, while scripts/check-beta-gate.py deliberately keeps macOS out of
+    // the beta scope (`REQUIRED_SECRETS = ... # macOS excluded`). Anyone
+    // following it would have bought an Apple membership for a Windows+Linux
+    // release that never needed one, so the scope, the secret names, the links
+    // and the anchor are pinned together here.
+    let checklist = read("docs/beta-scope-windows-linux/BETA-v0.66.0-checklist.md");
+
+    assert!(
+        checklist.contains("The beta scope is Windows and Linux"),
+        "the checklist must name the beta scope (Windows and Linux)"
+    );
+    assert!(
+        checklist.contains("macOS is not part of this beta scope"),
+        "the checklist must state explicitly that macOS is outside the beta scope"
+    );
+    // Either Windows path satisfies the gate, so both must stay documented.
+    for env_var in [
+        "WINDOWS_CERT_BASE64",
+        "WINDOWS_CERT_PASSWORD",
+        "SIGNPATH_API_TOKEN",
+        "SIGNPATH_ORGANIZATION_ID",
+        "SIGNPATH_PROJECT_SLUG",
+        "SIGNPATH_SIGNING_POLICY_SLUG",
+    ] {
+        assert!(
+            checklist.contains(env_var),
+            "the checklist must name every Windows secret the gate requires"
+        );
+    }
+    // The exact drift this guard exists for: macOS secrets demanded for a beta
+    // that does not ship macOS.
+    for macos_var in ["MACOS_CERT_BASE64", "APPLE_ID", "APPLE_APP_PASSWORD"] {
+        assert!(
+            !checklist.contains(macos_var),
+            "the checklist must not require a macOS secret for a Windows+Linux beta"
+        );
+    }
+    assert!(
+        checklist.contains("scripts/check-beta-gate.py"),
+        "the checklist must point at the gate script"
+    );
+    assert!(
+        read("docs/code-signing.md").contains("BETA-v0.66.0-checklist.md"),
+        "docs/code-signing.md must link the beta checklist so the two cannot drift apart"
+    );
+
+    // Relative links are the other way this file rotted: it sits one directory
+    // deeper than its targets but linked them as if it were at the repo root.
+    for (link, target) in [
+        ("](../code-signing.md)", "docs/code-signing.md"),
+        (
+            "](../../.github/workflows/build-package.yml)",
+            ".github/workflows/build-package.yml",
+        ),
+        (
+            "](../../scripts/check-beta-gate.py)",
+            "scripts/check-beta-gate.py",
+        ),
+        ("](../../README.md#beta-gate)", "README.md"),
+    ] {
+        assert!(
+            checklist.contains(link),
+            "the checklist must link {target} as {link}"
+        );
+        assert!(
+            repo_file(target).exists(),
+            "{target} does not exist - the checklist links into a void"
+        );
+    }
+    // A relative link is only half the promise: the anchor has to exist too.
+    assert!(
+        read("README.md").contains("### Beta-Gate"),
+        "README.md must keep the '### Beta-Gate' heading the checklist links to"
     );
 }
