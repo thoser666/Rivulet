@@ -318,6 +318,18 @@ Every change to `develop` passes a review before it lands:
    hygiene expectations for both maintainers live in
    [`docs/clean-desk.md`](docs/clean-desk.md).
 
+**When `CI` goes red for infrastructure reasons.** The aggregate `CI` job judges
+the whole `needs` context with
+[`scripts/check-ci-jobs.py`](scripts/check-ci-jobs.py), so it picks up every job
+it depends on and names the one that did not succeed. A job that never got a
+runner reports `abandoned` (or `cancelled` when it had started): GitHub stopped
+it while it was queued, which says nothing about the code under test. `CI` still
+fails — an unverified job must not look green — so the recovery is
+`gh run rerun <run-id> --failed`, not a new push. Before that script existed the
+aggregate compared a hand-maintained list of twelve results and silently ignored
+`render_smoke`, and the log line was the opaque
+`A required CI job finished with: abandoned`.
+
 ---
 
 ## Definition of Done (Acceptable Contributions)

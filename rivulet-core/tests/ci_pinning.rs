@@ -2358,10 +2358,10 @@ fn ossf_silver_gap_closures_are_pinned() {
     }
     assert!(
         ci.contains("name: Statement Coverage (rivulet-core >= 80%)")
-            && ci.contains("bash scripts/coverage-gate.sh")
-            && ci.contains("needs.coverage.result"),
-        "ci.yml must run the coverage gate and aggregate it"
+            && ci.contains("bash scripts/coverage-gate.sh"),
+        "ci.yml must run the coverage gate"
     );
+    assert_aggregate_requires(&ci, "coverage");
     // The coverage job must install the same GStreamer *runtime* plugin
     // packages as the test job: the gate runs the real pipeline/e2e tests
     // under llvm-cov, and without x264enc/flvmux/mp4mux/etc. (dev headers
@@ -3429,10 +3429,7 @@ fn obs_websocket_smoke_is_wired_up() {
         workflow.contains("cargo test -p rivulet-obs-websocket --test client_smoke -- --nocapture"),
         "CI must run the real-client smoke test against the server"
     );
-    assert!(
-        workflow.contains("needs.obs_websocket_smoke.result"),
-        "the CI aggregate must require the OBS WebSocket smoke result"
-    );
+    assert_aggregate_requires(&workflow, "obs_websocket_smoke");
     // The smoke must drive the server over a real loopback TCP connection.
     let smoke = read("rivulet-obs-websocket/tests/client_smoke.rs");
     assert!(smoke.contains("real (non-mock) WebSocket client"));
@@ -3489,10 +3486,7 @@ fn m6_remote_companion_is_wired_up_and_pinned() {
             .contains("cargo test -p rivulet-obs-websocket --test companion_smoke -- --nocapture"),
         "CI must run the companion smoke test against the real server"
     );
-    assert!(
-        workflow.contains("needs.remote_companion_smoke.result"),
-        "the CI aggregate must require the Remote Companion smoke result"
-    );
+    assert_aggregate_requires(&workflow, "remote_companion_smoke");
     // The crate must expose the companion surface the GUI wires up: a config,
     // a running handle, and the widened bind + permission options on the obs
     // server.
@@ -4255,11 +4249,10 @@ fn roadmap_sync_check_keeps_docs_and_milestones_aligned() {
         ci.contains("name: Roadmap-Sync Check")
             && ci.contains("scripts/check-roadmap-sync.py --self-test")
             && ci.contains("python3 scripts/check-roadmap-sync.py")
-            && ci.contains("issues: read")
-            && ci.contains("needs.roadmap_sync.result"),
-        "CI must run the roadmap-sync checker with issues read access and \
-         require it in the aggregate"
+            && ci.contains("issues: read"),
+        "CI must run the roadmap-sync checker with issues read access"
     );
+    assert_aggregate_requires(&ci, "roadmap_sync");
 }
 
 #[test]
@@ -10196,7 +10189,6 @@ fn resource_metrics_gate_measures_the_binary_and_gates_a_baseline() {
         // wrong reference for every later run.
         "cargo build --locked --release -p rivulet-cli",
         "--binary target/release/rivulet",
-        "${{ needs.resource_metrics.result }}",
         "name: resource-metrics",
     ] {
         assert!(
@@ -10204,6 +10196,7 @@ fn resource_metrics_gate_measures_the_binary_and_gates_a_baseline() {
             "ci.yml must wire the resource metrics job: missing {required}"
         );
     }
+    assert_aggregate_requires(&ci, "resource_metrics");
     assert!(
         harness.contains("fn baseline_refusal") || harness.contains("def baseline_refusal"),
         "a baseline must not be written from a debug binary without an explicit opt-in"
@@ -11069,4 +11062,79 @@ fn scene_to_stream_tutorial_connects_scene_authoring_to_the_output() {
             );
         }
     }
+}
+
+#[test]
+fn ci_aggregate_evaluates_every_required_job() {
+    // `CI` is a required status check on `develop`, so it has to judge the whole
+    // `needs` context. It used to interpolate one `needs.<job>.result` per line:
+    // `render_smoke` was missing from that list (a failing Render Smoke could
+    // not turn `CI` red) and a job cancelled before it started surfaced only as
+    // "A required CI job finished with: abandoned", naming neither the job nor
+    // the recovery.
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("CI_NEEDS_JSON: ${{ toJSON(needs) }}")
+            && ci.contains("python3 scripts/check-ci-jobs.py"),
+        "the CI aggregate job must evaluate the whole needs context"
+    );
+    assert!(
+        !ci.contains("A required CI job finished with")
+            && !ci.contains("${{ needs.lints.result }}"),
+        "the CI aggregate job must not fall back to the hand-maintained result list"
+    );
+    assert!(
+        ci.contains("scripts/check-ci-jobs.py --self-test"),
+        "CI must run the aggregate evaluator self-test"
+    );
+    assert!(
+        ci.contains("render_smoke, resource_metrics"),
+        "`CI` must still depend on render_smoke; the evaluator now covers it"
+    );
+
+    let checker = read("scripts/check-ci-jobs.py");
+    for marker in [
+        "def evaluate",
+        "sorted(needs)",
+        "--self-test",
+        "abandoned",
+        "gh run rerun",
+    ] {
+        assert!(
+            checker.contains(marker),
+            "check-ci-jobs.py must contain {marker}"
+        );
+    }
+}
+/// The jobs the aggregate `CI` job depends on.
+///
+/// The aggregate used to interpolate one `needs.<job>.result` per line, so the
+/// tests asserted on those strings. It now hands the whole `needs` context to
+/// `scripts/check-ci-jobs.py`; what makes a job gate the check is its membership
+/// in `needs`, which is what these helpers read.
+fn aggregate_needs(ci: &str) -> Vec<String> {
+    let job = ci
+        .split("    name: CI\n")
+        .nth(1)
+        .or_else(|| ci.split("    name: CI\r\n").nth(1))
+        .expect("the CI aggregate job must exist");
+    let line = job
+        .lines()
+        .find(|line| line.trim_start().starts_with("needs: ["))
+        .expect("the CI aggregate job must list its needs");
+    line.trim()
+        .trim_start_matches("needs: [")
+        .trim_end_matches(']')
+        .split(',')
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
+
+fn assert_aggregate_requires(ci: &str, job: &str) {
+    let needs = aggregate_needs(ci);
+    assert!(
+        needs.iter().any(|entry| entry == job),
+        "the CI aggregate job must require `{job}` in needs (found: {needs:?})"
+    );
 }

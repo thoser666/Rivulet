@@ -594,28 +594,14 @@ jobs:
     needs: [lints, beta_gate, build_and_test, pinning_tests, srt_receiver_smoke, rist_receiver_smoke, obs_websocket_smoke, remote_companion_smoke, render_smoke, resource_metrics, fuzz_smoke, coverage, roadmap_sync]
     runs-on: ubuntu-latest
     steps:
-      - name: Require all CI jobs to pass
+      - name: Explain the required-job results
         shell: bash
+        env:
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           set -euo pipefail
-          for result in \
-            "${{ needs.lints.result }}" \
-            "${{ needs.beta_gate.result }}" \
-            "${{ needs.build_and_test.result }}" \
-            "${{ needs.pinning_tests.result }}" \
-            "${{ needs.srt_receiver_smoke.result }}" \
-            "${{ needs.rist_receiver_smoke.result }}" \
-            "${{ needs.obs_websocket_smoke.result }}" \
-            "${{ needs.remote_companion_smoke.result }}" \
-            "${{ needs.resource_metrics.result }}" \
-            "${{ needs.fuzz_smoke.result }}" \
-            "${{ needs.coverage.result }}" \
-            "${{ needs.roadmap_sync.result }}"; do
-            if [[ "$result" != "success" ]]; then
-              echo "A required CI job finished with: $result" >&2
-              exit 1
-            fi
-          done
+          python3 scripts/check-ci-jobs.py --self-test
+          python3 scripts/check-ci-jobs.py
 
   ################################################################
   # BETA-GATE READINESS DASHBOARD (pure Python, no build needed)
