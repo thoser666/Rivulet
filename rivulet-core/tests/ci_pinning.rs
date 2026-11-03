@@ -10425,7 +10425,7 @@ fn beta_checklist_matches_the_gate_scope() {
         "the checklist must state explicitly that macOS is outside the beta scope"
     );
     // Either Windows path satisfies the gate, so both must stay documented.
-    for secret in [
+    for env_var in [
         "WINDOWS_CERT_BASE64",
         "WINDOWS_CERT_PASSWORD",
         "SIGNPATH_API_TOKEN",
@@ -10434,16 +10434,16 @@ fn beta_checklist_matches_the_gate_scope() {
         "SIGNPATH_SIGNING_POLICY_SLUG",
     ] {
         assert!(
-            checklist.contains(secret),
-            "the checklist must name the Windows secret '{secret}'"
+            checklist.contains(env_var),
+            "the checklist must name every Windows secret the gate requires"
         );
     }
     // The exact drift this guard exists for: macOS secrets demanded for a beta
     // that does not ship macOS.
-    for absent in ["MACOS_CERT_BASE64", "APPLE_ID", "APPLE_APP_PASSWORD"] {
+    for macos_var in ["MACOS_CERT_BASE64", "APPLE_ID", "APPLE_APP_PASSWORD"] {
         assert!(
-            !checklist.contains(absent),
-            "the checklist must not require the macOS secret '{absent}' for a Windows+Linux beta"
+            !checklist.contains(macos_var),
+            "the checklist must not require a macOS secret for a Windows+Linux beta"
         );
     }
     assert!(
