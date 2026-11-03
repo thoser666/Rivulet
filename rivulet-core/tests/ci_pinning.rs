@@ -10235,3 +10235,75 @@ fn resource_metrics_gate_measures_the_binary_and_gates_a_baseline() {
         "CHANGELOG must record the resource-metrics delivery"
     );
 }
+
+#[test]
+fn security_docs_pin_the_dismissal_checklist() {
+    // A dismissal is only auditable if it is written down, and the checklist is
+    // what separates "we looked at the data flow" from "we clicked the button".
+    // Alert #93 had both halves: a real leftover debug print that had to go
+    // (#375), and a finding CodeQL keeps re-reporting for a type that cannot
+    // hold a secret. Dismissing without a revisit condition would have been the
+    // silent version of that.
+    let docs = read("docs/security.md");
+    let section = docs
+        .split("#### Dismissing an alert (checklist)")
+        .nth(1)
+        .expect("docs/security.md must keep the alert-dismissal checklist");
+    let section = section
+        .split("### Dependabot alert management")
+        .next()
+        .expect("the checklist must stay inside the code-scanning section");
+    for needle in [
+        "false positive",
+        "used in tests",
+        "won't fix",
+        "Revisit when",
+    ] {
+        assert!(
+            section.contains(needle),
+            "the dismissal checklist must keep naming `{needle}`"
+        );
+    }
+    assert!(
+        section.contains("root fix"),
+        "the checklist must keep asking for the root fix before a dismissal"
+    );
+}
+
+#[test]
+fn macos_gstreamer_install_retries_against_registry_flakes() {
+    // 2026-11-02: the `Install macOS dependencies` step of a docs-only pull
+    // request died on `curl: (6) Could not resolve host: ghcr.io` (Homebrew
+    // bottles) while every other job was green, which blocked a documentation
+    // change for half an hour. `brew install` is idempotent, so the three
+    // workflows that provision GStreamer on macOS retry it before failing -
+    // and a bare install must not come back.
+    for workflow in ["ci.yml", "nightly.yml", "build-package.yml"] {
+        let text = read(&format!(".github/workflows/{workflow}"));
+        assert!(
+            text.contains("for attempt in 1 2 3; do"),
+            "{workflow} must retry the Homebrew install against ghcr.io flakes"
+        );
+        assert!(
+            text.contains("if brew install gstreamer"),
+            "{workflow} must retry the GStreamer install itself, not another formula"
+        );
+        let unretried = text
+            .lines()
+            .any(|line| line.trim_start().starts_with("brew install gstreamer"));
+        assert!(
+            !unretried,
+            "{workflow} still runs a bare `brew install gstreamer` outside the retry loop"
+        );
+    }
+    let docs = read("docs/gstreamer-ci.md");
+    assert!(
+        docs.contains("## macOS runners (Homebrew)"),
+        "docs/gstreamer-ci.md must document the macOS Homebrew path"
+    );
+    assert!(
+        docs.contains("ghcr.io")
+            && docs.contains("macos_gstreamer_install_retries_against_registry_flakes"),
+        "the macOS section must name the failure mode and the guard that pins it"
+    );
+}

@@ -1,8 +1,9 @@
-# GStreamer CI provisioning (Windows)
+# GStreamer CI provisioning
 
-How Windows CI installs the GStreamer MSVC SDK, which installer
+How CI installs GStreamer: the Windows MSVC SDK path (which installer
 generations exist, and how to move the version pin — including to the
-1.28 series, whose installer format changed completely.
+1.28 series, whose installer format changed completely), and the Homebrew
+path the macOS jobs take (at the end).
 
 ## The two installer generations
 
@@ -74,3 +75,35 @@ identical for both generations.
 
 The helper needs **no changes** for the move: both generations are
 already implemented and were verified locally.
+
+## macOS runners (Homebrew)
+
+`ci.yml`, `nightly.yml` and `build-package.yml` install the GStreamer formulae
+through Homebrew:
+
+```sh
+for attempt in 1 2 3; do
+  if brew install gstreamer gst-plugins-base gst-plugins-good \
+      gst-plugins-bad gst-plugins-ugly gst-libav; then
+    exit 0
+  fi
+  sleep $((attempt * 30))
+done
+```
+
+Homebrew downloads bottles from `ghcr.io`. On 2026-11-02 the step failed on a
+docs-only pull request while every other job was green:
+
+```
+==> Downloading bottle manifests
+##[error]Failed to download resource "libthai (0.1.30)"
+curl: (6) Could not resolve host: ghcr.io
+```
+
+That is a runner DNS failure, not a dependency problem, and it blocked a
+documentation-only change for half an hour. `brew install` is idempotent, so
+the step now retries three times with a 30 s / 60 s backoff before it fails for
+real. `macos_gstreamer_install_retries_against_registry_flakes` in
+`rivulet-core/tests/ci_pinning.rs` fails if a bare, unretried
+`brew install gstreamer` comes back to any of the three workflows - the retry
+is the fix, not an optional nicety.

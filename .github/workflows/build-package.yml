@@ -90,7 +90,18 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew untap aws/tap 2>/dev/null || true
-          brew install gstreamer
+          # Retry against ghcr.io flakes (see docs/gstreamer-ci.md): a release
+          # build must not die on a container-registry DNS hiccup when the
+          # install is idempotent.
+          for attempt in 1 2 3; do
+            if brew install gstreamer; then
+              exit 0
+            fi
+            echo "::warning::brew install failed (attempt $attempt of 3); retrying in $((attempt * 30))s"
+            sleep $((attempt * 30))
+          done
+          echo "::error::brew install failed after 3 attempts - see the log above for the failing bottle"
+          exit 1
 
       - name: Build release binary
         run: cargo build --release --package rivulet-gui --package rivulet-launcher --package rivulet-updater --target ${{ inputs.target }}

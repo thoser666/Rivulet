@@ -63,7 +63,7 @@ impl ChatMessage {
 }
 
 /// Config for connecting to an IRC server (defaults to Twitch).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct TwitchChatConfig {
     /// IRC endpoint in `host:port` form. Defaults to `irc.chat.twitch.tv:6697`
     /// (TLS); tests override this with a local listener.
@@ -76,6 +76,21 @@ pub struct TwitchChatConfig {
     pub oauth_token: String,
     /// Lowercase channel name to join (`#name` is appended).
     pub channel: String,
+}
+
+/// The OAuth token is a credential, so `Debug` is written by hand and reports
+/// it as `<redacted>` - a `{:?}` of this config must never reach a log line or
+/// a panic message (CodeQL `rust/cleartext-logging`). Everything else stays
+/// readable.
+impl std::fmt::Debug for TwitchChatConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TwitchChatConfig")
+            .field("endpoint", &self.endpoint)
+            .field("nick", &self.nick)
+            .field("oauth_token", &"<redacted>")
+            .field("channel", &self.channel)
+            .finish()
+    }
 }
 
 impl Default for TwitchChatConfig {
