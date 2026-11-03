@@ -66,8 +66,10 @@ GITHUB_REMOTE_RE = re.compile(r"github\.com[/:]([^/]+)/([^/]+?)(?:\.git)?$")
 
 # All secrets the signing automation needs (README → Releases → Code signing).
 # Windows signing is satisfied by EITHER the PFX/signtool pair OR the SignPath
-# Foundation secrets (free for open source, file-based signing request); macOS
-# always needs the Apple set. Linux GPG is optional for the beta gate.
+# Foundation secrets (free for open source, file-based signing request). macOS is
+# outside the beta scope (`v0.66.0` ships Windows and Linux), so MACOS_SECRETS is
+# documentation for that later scope only and never gates the beta. Linux GPG is
+# optional for the beta gate.
 WINDOWS_PFX_SECRETS = ["WINDOWS_CERT_BASE64", "WINDOWS_CERT_PASSWORD"]
 WINDOWS_SIGNPATH_SECRETS = [
     "SIGNPATH_API_TOKEN",
@@ -95,12 +97,12 @@ def windows_signing_satisfied(present):
 def missing_signing_secrets(present):
     """Return the secrets still missing. Windows is satisfied by EITHER path:
     when one Windows alternative is complete, the other's secrets are NOT
-    reported missing (only macOS is always mandatory)."""
+    reported missing. The macOS secrets never gate the beta: `v0.66.0` ships
+    Windows and Linux (see MACOS_SECRETS)."""
     missing: list[str] = []
     if not windows_signing_satisfied(present):
         missing += [s for s in WINDOWS_PFX_SECRETS if s not in present]
         missing += [s for s in WINDOWS_SIGNPATH_SECRETS if s not in present]
-    missing += [s for s in MACOS_SECRETS if s not in present]
     return missing
 
 BLOCKER_LABEL = "release-blocker"
@@ -373,7 +375,7 @@ def evaluate(repo, ref, token):
                     "criterion": 4,
                     "name": "Code-signing secrets configured",
                     "status": "met",
-                    "detail": f"Windows signing via {windows}, macOS signing secrets complete",
+                    "detail": f"Windows signing via {windows} (macOS outside the beta scope)",
                 }
             )
 
@@ -535,7 +537,7 @@ def run_self_test():
                 "criterion": 4,
                 "name": "Code-signing secrets configured",
                 "status": "met",
-                "detail": "Windows signing via SignPath, macOS signing secrets complete",
+                "detail": "Windows signing via SignPath",
             }
         ],
         "READY",
@@ -550,7 +552,22 @@ def run_self_test():
         and sample.splitlines()[-1] == "- note-b",
     )
 
-    # 6. Matrix parsing: the structured ci.yml parse must see every OS the
+    # 6. The beta scope is Windows + Linux, so a complete Windows secret set
+    # has to satisfy the gate: demanding the Apple secrets would make
+    # criterion 4 unreachable without a paid membership this release does
+    # not need.
+    case(
+        "pfx-only secret set satisfies the gate",
+        missing_signing_secrets(set(WINDOWS_PFX_SECRETS)) == []
+        and not any(s in REQUIRED_SECRETS for s in MACOS_SECRETS),
+    )
+    case(
+        "signpath-only secret set satisfies the gate",
+        missing_signing_secrets(set(WINDOWS_SIGNPATH_SECRETS)) == []
+        and missing_signing_secrets(set()) != [],
+    )
+
+    # 7. Matrix parsing: the structured ci.yml parse must see every OS the
     # build matrix lists (skipped where PyYAML is not installed; the
     # checker itself falls back to the line-based scan in that case).
     try:

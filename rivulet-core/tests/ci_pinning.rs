@@ -10484,3 +10484,30 @@ fn beta_checklist_matches_the_gate_scope() {
         "README.md must keep the '### Beta-Gate' heading the checklist links to"
     );
 }
+#[test]
+fn beta_gate_does_not_require_macos_secrets() {
+    // `v0.66.0` ships Windows and Linux, so criterion 4 has to be reachable
+    // without an Apple Developer membership. The checker and the README row it
+    // documents once disagreed with the checklist, which demanded the Windows
+    // secrets only: the checker appended the five macOS secrets to `missing`
+    // anyway, so the gate could never be met.
+    let checker = read("scripts/check-beta-gate.py");
+    assert!(
+        !checker.contains("missing += [s for s in MACOS_SECRETS"),
+        "check-beta-gate.py must not report the macOS secrets missing for a Windows+Linux beta"
+    );
+
+    let readme = read("README.md");
+    let row = readme
+        .lines()
+        .find(|line| line.contains("Code-signing secrets configured"))
+        .expect("README must document the code-signing gate criterion");
+    assert!(
+        row.contains("WINDOWS_CERT_") && row.contains("#50"),
+        "the README criterion must require the Windows secrets and defer macOS (issue #50)"
+    );
+    assert!(
+        !row.contains("MACOS_CERT_*`/`APPLE_*` secrets set"),
+        "the README criterion must not demand macOS secrets for the beta"
+    );
+}
