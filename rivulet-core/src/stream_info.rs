@@ -110,7 +110,7 @@ impl StreamInfoUpdate {
 
 /// Credentials for one platform update. Tokens travel by value into the
 /// HTTPS request only; they are never formatted into errors or logs.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct InfoCredentials {
     /// Platform OAuth user token (`Authorization: Bearer …`).
     pub token: String,
@@ -120,6 +120,22 @@ pub struct InfoCredentials {
     pub broadcaster_id: String,
     /// YouTube broadcast video id (`videos.update` target).
     pub video_id: String,
+}
+
+/// The OAuth token is a credential, so `Debug` reports it as `<redacted>`
+/// (CodeQL `rust/cleartext-logging`, alert #93) instead of relying on the
+/// comment above: a `{:?}` in an error chain would have printed the token. The
+/// platform identifiers stay readable - a failed update report needs them, and
+/// none of them is a secret.
+impl std::fmt::Debug for InfoCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InfoCredentials")
+            .field("token", &"<redacted>")
+            .field("client_id", &self.client_id)
+            .field("broadcaster_id", &self.broadcaster_id)
+            .field("video_id", &self.video_id)
+            .finish()
+    }
 }
 
 /// Overridable endpoints (production defaults; tests point at a puppet).

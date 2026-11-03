@@ -146,6 +146,20 @@ jobs:
           # pipefail keeps the script's exit code authoritative while the
           # Markdown still lands in the step summary.
           python3 scripts/check-code-scanning-alerts.py --comment | tee -a "$GITHUB_STEP_SUMMARY"
+      # The triage step above only sees *open* alerts. A dismissal takes a
+      # finding out of that view permanently, so this step cross-checks every
+      # dismissed alert against the revisit condition recorded in
+      # docs/security.md and fails when that condition is back (alert #93 had
+      # no such brake: the dismissal was recorded in prose and nothing would
+      # have noticed a re-added `#[derive(Debug)]`).
+      - name: Re-check dismissed alerts against their revisit conditions
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python3 scripts/check-dismissed-alerts.py --comment | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Require security checks to pass
         env:
           CODEQL_RESULT: ${{ needs.codeql.result }}
