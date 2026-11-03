@@ -1,62 +1,91 @@
-# Erstes Beta: v0.66.0 — Was noch nötig ist
+# First beta: v0.66.0 — what is still missing
 
-## Voraussetzungen (Beta-Gate)
+## Beta-gate prerequisites
 
-Der echte Gate-Check steht in `scripts/check-beta-gate.py` und wird mit Token ausgewertet:
+The gate itself lives in `scripts/check-beta-gate.py` and is evaluated with a
+token:
 
-```
+```bash
 GH_TOKEN="$(gh auth token)" python3 scripts/check-beta-gate.py
 ```
 
-**Aktuell:** `NOT READY (1 not met)`. Fehlendes Kriterium:
+**State on 2026-11-03: `NOT READY (1 not met)`.** Five of the six criteria are
+met; only criterion 4 is open:
 
-| # | Kriterium | Status | Was fehlt |
-|---|---|---|---|
-| 4 | Code-Signing-Secrets konfiguriert | **not-met** | 11 Secrets nicht vorhanden |
-| 1,2,3,5,6 | M1/M3, Platform-Parity, CI-green, keine release-blockers | ✅ met | — |
+| # | Criterion | Status | What is missing |
+| --- | --- | --- | --- |
+| 4 | Code-signing secrets configured | **not-met** | one complete Windows signing path (2 or 4 secrets) |
+| 1, 2, 3, 5, 6 | M1/M3 complete, platform parity, CI green on `develop`, no release blockers | ✅ met | — |
 
-**Fehlende Secrets im Repository (current state via PAT):**
+### The beta scope is Windows and Linux
+
+`v0.66.0` ships Windows and Linux. **macOS is not part of this beta scope** and
+therefore not part of the gate: `scripts/check-beta-gate.py` requires
+`WINDOWS_PFX_SECRETS` **or** `WINDOWS_SIGNPATH_SECRETS` and keeps macOS out of
+the requirement on purpose (`REQUIRED_SECRETS = ...  # macOS excluded from beta
+scope`). The five `MACOS_*`/`APPLE_*` secrets only become necessary once macOS
+enters the scope — Apple Developer Program, $99/year, tracked in issue #50 and
+described in [`docs/code-signing.md`](../code-signing.md). Do not buy that
+membership for `v0.66.0`.
+
+**Missing secrets — one of the two Windows paths is enough:**
 
 ```
-[
-  'WINDOWS_CERT_BASE64', 'WINDOWS_CERT_PASSWORD',
-  'SIGNPATH_API_TOKEN', 'SIGNPATH_ORGANIZATION_ID', 'SIGNPATH_PROJECT_SLUG', 'SIGNPATH_SIGNING_POLICY_SLUG',
-  'MACOS_CERT_BASE64', 'MACOS_CERT_PASSWORD', 'APPLE_ID', 'APPLE_APP_PASSWORD', 'APPLE_TEAM_ID'
-]
+Path A (PFX):      WINDOWS_CERT_BASE64, WINDOWS_CERT_PASSWORD
+Path B (SignPath): SIGNPATH_API_TOKEN, SIGNPATH_ORGANIZATION_ID,
+                   SIGNPATH_PROJECT_SLUG, SIGNPATH_SIGNING_POLICY_SLUG
 ```
 
-## Was nach Erfüllung kommt
+Path B is free for qualifying open source, but the SignPath Foundation
+application was rejected in October 2026 (too few stars/downloads). The
+realistic options today are therefore a purchased OV certificate
+(≈ $100–200/year, Path A) or Azure Artifact Signing ($9.99/month); the free
+comparison and the exact steps are in [`docs/code-signing.md`](../code-signing.md).
 
-1. **MacOS-Secrets** (5/5) setzen → dann ist macOS-Pfad erfüllt. Ohne das hilft keine Windows-Entscheidung.
-2. **Windows-Pfad** einen der beiden Wege komplettieren (ein Weg genügt, beide nicht):
-   - **Pfad A (PFX):** `WINDOWS_CERT_BASE64` + `WINDOWS_CERT_PASSWORD` (selbst gekauftes Code-Signing-Zertifikat zum Base64-Encodieren).
-   - **Pfad B (SignPath Foundation, kostenlos):** alle 4 `SIGNPATH_*` Secrets (nach Anmeldung + Projekt-Policy im Portal).
-3. Sobald macOS + einer der Windows-Pfade komplett sind, lautet die Gate-Auswertung: **`READY`**.
-4. Dann **manuelles Tag** erstellen: `git tag v0.66.0` (ohne Alpha-Suffix!), pushen, dann CI-Run (`ci.yml`) baut den Release. Beta/RC-Tags = Pre-releases.
-5. Der Release-Build (`build-package.yml`) signiert dann automatisch (macOS + gewählter Windows-Pfad) und veröffentlicht.
+## What happens once the gate is met
 
-## Hinweise
+1. Set one complete Windows path: Path A (`WINDOWS_CERT_BASE64` +
+   `WINDOWS_CERT_PASSWORD`) **or** Path B (all four `SIGNPATH_*`). The two paths
+   are mutually exclusive — `build-package.yml` prefers SignPath and falls back
+   to signtool.
+2. Re-run the gate: `GH_TOKEN="$(gh auth token)" python3 scripts/check-beta-gate.py`
+   → the verdict flips to `READY`.
+3. Create the manual tag and push it: `git tag v0.66.0` (no alpha suffix), then
+   `git push origin v0.66.0`.
+4. CI builds the tag through the beta/RC/stable path in `ci.yml`;
+   `build-package.yml` signs the packages with the configured path and
+   publishes them.
+5. The release appears as a **pre-release** (`v0.66.0`).
 
-- **macOS ist Pflicht** für den offiziellen Gate. Es gibt kein Free-Tier; Apple Developer Program ($99/Jahr) nötig.
-- **Windows-Pfad A** ist günstiger aber nicht kostenlos; **Pfad B SignPath** kostenlos, wenn akzeptiert (Anwendung aktuell abgelehnt, Oct 2026, siehe `docs/code-signing.md`).
-- **Linux/Scoop etc.** brauchen kein Signing → fallen nicht an.
-- **Workflow-Logik:** `build-package.yml` entscheidet: Wenn alle 4 `SIGNPATH_*` da → SignPath genutzt, PFX ignoriert. Sonst wenn beide `WINDOWS_CERT_*` da → signtool. Sonst unsigned.
-- **Release-Trigger:** `Release (Alpha)` wird per `workflow_run` nach erfolgreichem CI ausgelöst, nicht beim Push.
-- **Erster Beta-Tag:** `v0.66.0` (kein Alpha-Suffix).
-- **Beta-Gate-Definition:** [CONTRIBUTING.md:101](CONTRIBUTING.md#L101): manuelles Tag `vX.Y.Z`, CI baut Release, Beta/RC-Tags = Pre-releases.
+## Notes
 
-## Checkliste (nach Gate erfüllt)
+- **Linux needs no signing secret**: the AppImage ships a detached GPG
+  signature (`LINUX_GPG_PRIVATE_KEY`, optional passphrase), which the gate does
+  not require. Scoop and the other package channels need no signing at all.
+- **The gate is manual and criteria-based, never date-driven** — the six
+  criteria are defined in the [README](../README.md#beta-gate) and evaluated by
+  the script; the release channel only describes *how* the tag is built.
+- **`GITHUB_TOKEN` in Actions can never read Actions secrets**, so criterion 4
+  stays `unverified` in CI by design and is confirmed locally with a PAT that
+  can read repository secrets.
+- **Alpha releases are unaffected**: `Release (Alpha)` is triggered by
+  `workflow_run` after a green CI run, not by a tag.
 
-- [ ] macOS Secrets (5) gesetzt
-- [ ] Windows-Pfad A **od** B komplett (nicht beide)
+## Checklist
+
+- [ ] One complete Windows path (A **or** B, not both)
 - [ ] `GH_TOKEN="$(gh auth token)" python3 scripts/check-beta-gate.py` → `READY`
-- [ ] `git tag v0.66.0` anlegen
-- [ ] pushen (`git push origin v0.66.0`)
-- [ ] CI läuft → `build-package.yml` signiert und veröffentlicht
-- [ ] Release erscheint als Pre-release (`v0.66.0`)
+- [ ] `git tag v0.66.0`
+- [ ] `git push origin v0.66.0`
+- [ ] CI run → `build-package.yml` signs and publishes
+- [ ] Release is listed as a pre-release (`v0.66.0`)
 
 ## Links
 
-- [Code-Signing-Doku: `docs/code-signing.md`](docs/code-signing.md) — alle 3 Pfade mit Schritt-für-Schritt
-- [Release-Pipeline: `.github/workflows/build-package.yml`](.github/workflows/build-package.yml) — Secret-Definition + SignPath-Action
-- [Beta-Gate-Skript: `scripts/check-beta-gate.py`](scripts/check-beta-gate.py) — Kriterien 1–6
+- [Code signing: `docs/code-signing.md`](../code-signing.md) — all paths with
+  step-by-step instructions
+- [Release pipeline: `.github/workflows/build-package.yml`](../../.github/workflows/build-package.yml)
+  — secret definitions and the SignPath action
+- [Beta-gate script: `scripts/check-beta-gate.py`](../../scripts/check-beta-gate.py)
+  — criteria 1–6
+- [Beta-gate criteria in the README](../../README.md#beta-gate)

@@ -39,7 +39,11 @@ honest comparison (prices verified September 2026):
 3. **Use Azure Artifact Signing** ($9.99/month) for Windows signing
 4. **Stay unsigned for now** (current state) - Windows artifacts work but show "unknown publisher" warnings. **macOS:** Gatekeeper blocks unsigned apps entirely; for an external beta, macOS would require a paid Apple Developer Program membership and notarization (tracked in [#50](https://github.com/thoser666/Rivulet/issues/50)). For the current beta scope (Windows + Linux) macOS signing is deliberately deferred.
 
-Keep macOS on the paid Apple Developer Program when beta approaches (unavoidable platform tax), and stay on the existing free GPG signing for Linux.
+Keep macOS on the paid Apple Developer Program for when macOS enters the beta
+scope (unavoidable platform tax; `v0.66.0` ships Windows and Linux only, so the
+beta gate does not require it — see [the beta
+checklist](beta-scope-windows-linux/BETA-v0.66.0-checklist.md)), and stay on the
+existing free GPG signing for Linux.
 
 **SignPath artifacts:** `rivulet-windows-unsigned-exe-<run_id>` (ZIP with
 the three executables) and `rivulet-windows-unsigned-msi-<run_id>` — the
