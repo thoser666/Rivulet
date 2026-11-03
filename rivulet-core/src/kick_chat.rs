@@ -30,7 +30,7 @@ use crate::twitch_chat::{ChatConnState, ChatMessage};
 
 /// Config for connecting to Kick chat. Defaults to the public Pusher endpoint
 /// and Kick API; tests override them with local listeners.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct KickChatConfig {
     /// Pusher WebSocket URL. Defaults to the public `ws-us2` endpoint Kick
     /// uses with the client app key.
@@ -42,6 +42,21 @@ pub struct KickChatConfig {
     pub channel: String,
     /// Session token (`x-sess-token` style) for sending. Empty = read-only.
     pub token: String,
+}
+
+/// The session token is a credential, so `Debug` is written by hand and reports
+/// it as `<redacted>` - a `{:?}` of this config must never reach a log line or
+/// a panic message (CodeQL `rust/cleartext-logging`). Everything else stays
+/// readable.
+impl std::fmt::Debug for KickChatConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KickChatConfig")
+            .field("ws_endpoint", &self.ws_endpoint)
+            .field("api_base", &self.api_base)
+            .field("channel", &self.channel)
+            .field("token", &"<redacted>")
+            .finish()
+    }
 }
 
 impl Default for KickChatConfig {

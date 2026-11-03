@@ -782,7 +782,20 @@ jobs:
         run: |
           # Remove the preinstalled, untrusted "aws/tap" (tap trust warning).
           brew untap aws/tap 2>/dev/null || true
-          brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
+          # Homebrew fetches bottles from ghcr.io. A DNS hiccup there
+          # ("curl: (6) Could not resolve host: ghcr.io") failed this step on a
+          # docs-only pull request while every other job was green, so retry the
+          # install instead of failing the run: `brew install` is idempotent and
+          # a later attempt usually resolves. See docs/gstreamer-ci.md.
+          for attempt in 1 2 3; do
+            if brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav; then
+              exit 0
+            fi
+            echo "::warning::brew install failed (attempt $attempt of 3); retrying in $((attempt * 30))s"
+            sleep $((attempt * 30))
+          done
+          echo "::error::brew install failed after 3 attempts - see the log above for the failing bottle"
+          exit 1
 
       - name: Cache dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

@@ -5,6 +5,13 @@ Rivulet initializes file logging before the GUI starts. Logs are written as
 per local calendar day. ANSI color sequences are disabled so files can be
 attached directly to bug reports.
 
+Chat credentials never reach a log line. Stream keys are redacted out of
+pipeline descriptions (see below), and the chat configuration - the Twitch
+OAuth token, the Kick session token and the YouTube API key - renders as
+`<redacted>` in its own `Debug` output, so a debug line, a panic message or an
+error chain cannot surface one. `rivulet-core/tests/chat_secret_redaction.rs`
+pins that for `ChatConfig`, `TwitchChatConfig` and `KickChatConfig`.
+
 ## Retention
 
 The default retention is **14 days**. Configure it before launching Rivulet:

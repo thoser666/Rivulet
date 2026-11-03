@@ -147,7 +147,12 @@ Current state:
   (#375) and `chat_dock_surfaces_are_pinned` now fails if a `DEBUG` print of
   app state returns. The alert survived that analysis and came back unchanged
   at the same line, so what is left is CodeQL's modelling of the account list,
-  not a reachable leak. The canonical reason is `false positive`.
+  not a reachable leak. The canonical reason is `false positive`. The type that
+  *does* carry the secret - `ChatConfig`, with the token and the YouTube API
+  key - now implements `Debug` by hand and renders both as `<redacted>`, as do
+  `TwitchChatConfig` and `KickChatConfig`, so a future debug line cannot
+  reopen the same finding through the config path;
+  `rivulet-core/tests/chat_secret_redaction.rs` pins all three.
   **Revisit when:** a token-bearing type reaches the roster, or a chat-derived
   value is interpolated into a log line - then the finding is real and has to
   be fixed, not re-dismissed.
@@ -176,6 +181,36 @@ Up to now the only enforcement of this policy lived in a human reading the
   Note that dismissing an alert on GitHub also removes it from the gate's
   input: the script only sees *open* alerts. A dismissal therefore has to be
   justified in this section, not just clicked in the UI.
+
+#### Dismissing an alert (checklist)
+
+A dismissal is the exception, never the first move - and clicking the button is
+not the record; the written reason is. Work through these steps in order, and
+stop at the first one that turns the alert into a real finding:
+
+1. **Try the root fix first.** The alert names a line, so look at what actually
+   reaches it. #93 is the cautionary case in both directions: a leftover debug
+   print of app state really was in the tree and had to go (#375), but removing
+   it did not clear the finding, because the flagged sink was the token-free
+   roster.
+2. **Follow the data, not the message.** Ask which type carries the secret and
+   where it lives: a value that is token-free by construction (like
+   `ChatAccount`) cannot leak one, however the line is read.
+3. **Check whether the finding is reachable.** Deterministic test vectors, a
+   `#[cfg(test)]`-only path or a helper without a caller are not a
+   vulnerability; a token that is written to a log, a panic message or an error
+   chain is, even if nothing logs it today.
+4. **Use a canonical GitHub reason** - `false positive`, `used in tests` or
+   `won't fix`. The free-text note is capped at 280 characters, so the full
+   argument goes here, not into the note.
+5. **Record the evidence in this file** under `Current state`: what you changed,
+   why the alert survived the fix attempt, and what would make it real.
+6. **Write a `Revisit when:` condition.** An alert dismissed for a reason that
+   expires silently is a dismissal nobody can audit. If the condition can no
+   longer be expressed, the dismissal is wrong.
+
+`security_docs_pin_the_dismissal_checklist` fails if this checklist, the three
+canonical reasons or the `Revisit when` rule disappear from this section.
 
 ### Dependabot alert management
 

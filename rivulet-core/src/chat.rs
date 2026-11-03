@@ -52,7 +52,7 @@ impl ChatPlatform {
 /// Config for connecting the chat dock. Endpoints default to the public
 /// platform endpoints and are overridable (tests point them at local
 /// listeners); the GUI only sets `platform`, `channel` and `token`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ChatConfig {
     pub platform: ChatPlatform,
     /// Twitch IRC endpoint (`host:port`). Empty → default.
@@ -101,6 +101,35 @@ impl ChatConfig {
             rate_limit: None,
             youtube_quota: None,
         }
+    }
+}
+
+/// What a secret renders as in `Debug` output.
+const SECRET_PLACEHOLDER: &str = "<redacted>";
+
+/// `ChatConfig` is the type that carries the session token and the YouTube API
+/// key, so its `Debug` impl is written by hand: `#[derive(Debug)]` printed
+/// both, and any `{:?}` in a log line, a panic message or an error chain would
+/// then have written a credential out in clear - the pattern CodeQL
+/// `rust/cleartext-logging` reports. Every other field stays readable so a
+/// debug line is still worth printing; the two secrets are the only redaction.
+impl std::fmt::Debug for ChatConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChatConfig")
+            .field("platform", &self.platform)
+            .field("twitch_endpoint", &self.twitch_endpoint)
+            .field("kick_ws_endpoint", &self.kick_ws_endpoint)
+            .field("kick_api_base", &self.kick_api_base)
+            .field("youtube_page_endpoint", &self.youtube_page_endpoint)
+            .field("youtube_poll_endpoint", &self.youtube_poll_endpoint)
+            .field("youtube_send_endpoint", &self.youtube_send_endpoint)
+            .field("youtube_api_key", &SECRET_PLACEHOLDER)
+            .field("youtube_live_chat_id", &self.youtube_live_chat_id)
+            .field("channel", &self.channel)
+            .field("token", &SECRET_PLACEHOLDER)
+            .field("rate_limit", &self.rate_limit)
+            .field("youtube_quota", &self.youtube_quota)
+            .finish()
     }
 }
 
