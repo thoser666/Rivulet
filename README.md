@@ -192,8 +192,8 @@ are met:
 | --- | --- | --- |
 | 1 | **M1 – Solid Recording complete** | ✅ All M1 items checked (audio filters/monitoring, hardware encoding, hotkeys, timer overlay, region capture, codec UI, presets) |
 | 2 | **M3 – Streaming complete** | All M3 checklist items checked (RTMP/RTMPS, dual output, adaptive bitrate, stream-key management, WebRTC/WHIP, SRT/RIST) |
-| 3 | **Platform parity (M5 release blocker)** | Recording + streaming verified on **Windows and Linux**; macOS capture implemented and verified (currently open) |
-| 4 | **Code-signing secrets configured** | `WINDOWS_CERT_*` and `MACOS_CERT_*`/`APPLE_*` secrets set in the repo so a beta build produces **signed** packages (the automation itself is already smoke-tested without secrets by `signing-e2e.yml`) |
+| 3 | **Platform parity (M5 release blocker)** | Recording + streaming verified on **Windows and Linux**; macOS capture parity tracked by the M5 roadmap checkbox |
+| 4 | **Code-signing secrets configured** | Windows: the `WINDOWS_CERT_*` pair **or** the four `SIGNPATH_*` secrets set in the repo so a beta build produces **signed** packages (the automation itself is already smoke-tested without secrets by `signing-e2e.yml`). macOS is outside the beta scope (`v0.66.0` ships Windows and Linux), so the `MACOS_*`/`APPLE_*` secrets are only needed once macOS enters it ([#50](https://github.com/thoser666/Rivulet/issues/50)) |
 | 5 | **CI fully green on `develop`** | All checks pass: build, full test suite, actionlint, ShellCheck, action-pin checks, asset-drift check |
 | 6 | **No known release-blocking bugs** | No open issue marked as release blocker (the recording frame-loss and no-frame-timeout regressions are fixed) |
 
