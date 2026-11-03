@@ -196,12 +196,36 @@ use gstreamer::prelude::{Cast, ElementExt};
 /// Signaling remains HTTP-based while media is provided by a GStreamer
 /// `webrtcbin` branch. The branch description is deterministic and can be
 /// validated without contacting an SFU.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct WhipSettings {
     endpoint: String,
     bearer_token: Option<String>,
     connect_timeout: Duration,
     trickle_ice: bool,
+}
+
+/// `<redacted>` marker shared by the credential-bearing configs in this module.
+const REDACTED_SECRET: &str = "<redacted>";
+/// Placeholder for an ingest URL that can embed the stream key in its path.
+const REDACTED_STREAM_URL: &str = "<redacted stream URL>";
+
+/// The bearer token is a WHIP credential, so `Debug` is written by hand and
+/// reports it as `<redacted>` (CodeQL `rust/cleartext-logging`, alert #93). The
+/// endpoint, the timeout and the trickle flag stay readable, and an absent
+/// token still renders as `None` so "not configured" and "configured and
+/// redacted" stay distinguishable in a log.
+impl std::fmt::Debug for WhipSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WhipSettings")
+            .field("endpoint", &self.endpoint)
+            .field(
+                "bearer_token",
+                &self.bearer_token.as_ref().map(|_| REDACTED_SECRET),
+            )
+            .field("connect_timeout", &self.connect_timeout)
+            .field("trickle_ice", &self.trickle_ice)
+            .finish()
+    }
 }
 
 impl WhipSettings {
@@ -945,7 +969,7 @@ impl VodTrack {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct StreamSettings {
     pub platform: StreamPlatform,
     pub ingest_url: String,
@@ -956,6 +980,29 @@ pub struct StreamSettings {
     pub multitrack_video: MultitrackVideo,
     pub vod_track: VodTrack,
 }
+
+/// `StreamSettings` carries the stream key twice: as `stream_key` and inside
+/// `ingest_url`, which for custom and Kick ingests can include the key in its
+/// path. Both are redacted (CodeQL `rust/cleartext-logging`, alert #93) -
+/// `#[derive(Debug)]` printed both, and any `{:?}` would have written a live
+/// stream key into a log, a panic message or an error chain. The platform and
+/// the preset selection stay readable, because that is what explains a failed
+/// session. `masked_key()` remains the deliberate short prefix for the UI.
+impl std::fmt::Debug for StreamSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamSettings")
+            .field("platform", &self.platform)
+            .field("ingest_url", &REDACTED_STREAM_URL)
+            .field("stream_key", &REDACTED_SECRET)
+            .field("preset", &self.preset)
+            .field("adaptive_bitrate", &self.adaptive_bitrate)
+            .field("delay", &self.delay)
+            .field("multitrack_video", &self.multitrack_video)
+            .field("vod_track", &self.vod_track)
+            .finish()
+    }
+}
+
 impl StreamSettings {
     pub fn new(
         platform: StreamPlatform,

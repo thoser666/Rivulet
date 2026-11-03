@@ -5,12 +5,22 @@ Rivulet initializes file logging before the GUI starts. Logs are written as
 per local calendar day. ANSI color sequences are disabled so files can be
 attached directly to bug reports.
 
-Chat credentials never reach a log line. Stream keys are redacted out of
-pipeline descriptions (see below), and the chat configuration - the Twitch
-OAuth token, the Kick session token and the YouTube API key - renders as
-`<redacted>` in its own `Debug` output, so a debug line, a panic message or an
-error chain cannot surface one. `rivulet-core/tests/chat_secret_redaction.rs`
-pins that for `ChatConfig`, `TwitchChatConfig` and `KickChatConfig`.
+Credentials never reach a log line. Stream keys are redacted out of pipeline
+descriptions (see below), and every config type that carries a secret renders
+it as `<redacted>` in its own `Debug` output, so a debug line, a panic message
+or an error chain cannot surface one:
+
+- chat: `ChatConfig` (Twitch OAuth token, YouTube API key), `TwitchChatConfig`
+  (`oauth_token`) and `KickChatConfig` (session `token`),
+- streaming: `StreamSettings` (stream key *and* ingest URL, which can embed the
+  key) and `WhipSettings` (bearer token),
+- platform updates and alerts: `InfoCredentials` (OAuth token) and
+  `AlertsReceiverConfig` (Twitch EventSub secret).
+
+`rivulet-core/tests/chat_secret_redaction.rs` and
+`rivulet-core/tests/credential_debug_redaction.rs` pin the behaviour; a
+`Debug` impl that hides a secret but also hides the endpoint or the port would
+fail those tests, because the output has to stay useful for diagnosis.
 
 ## Retention
 

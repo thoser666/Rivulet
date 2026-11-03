@@ -10307,3 +10307,101 @@ fn macos_gstreamer_install_retries_against_registry_flakes() {
         "the macOS section must name the failure mode and the guard that pins it"
     );
 }
+
+#[test]
+fn credential_types_redact_their_debug_output() {
+    // `#[derive(Debug)]` on a type that carries a credential is the sink CodeQL
+    // `rust/cleartext-logging` reports: any `{:?}` renders the secret. The
+    // runtime tests (chat_secret_redaction.rs, credential_debug_redaction.rs)
+    // prove the hand-written impls behave; this guard proves the impls still
+    // exist and that no derive came back, so a revert cannot pass unnoticed in
+    // a build that never formats these types.
+    let types = [
+        ("rivulet-core/src/chat.rs", "ChatConfig"),
+        ("rivulet-core/src/twitch_chat.rs", "TwitchChatConfig"),
+        ("rivulet-core/src/kick_chat.rs", "KickChatConfig"),
+        ("rivulet-core/src/stream.rs", "StreamSettings"),
+        ("rivulet-core/src/stream.rs", "WhipSettings"),
+        ("rivulet-core/src/stream_info.rs", "InfoCredentials"),
+        ("rivulet-core/src/alerts_webhook.rs", "AlertsReceiverConfig"),
+    ];
+    for (path, name) in types {
+        let source = read(path).replace("\r\n", "\n");
+        assert!(
+            source.contains(&format!("impl std::fmt::Debug for {name}")),
+            "{name} in {path} must implement Debug by hand instead of deriving it"
+        );
+        assert!(
+            source.contains("<redacted>"),
+            "{path} must render the credential as <redacted>"
+        );
+        // The line directly above the struct is its attribute list: if `Debug`
+        // reappears there, the hand-written impl would be shadowed by a derive.
+        let marker = format!("pub struct {name} ");
+        let index = source
+            .find(&marker)
+            .unwrap_or_else(|| panic!("{name} not found in {path}"));
+        let attribute = source[..index]
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or_default();
+        assert!(
+            !attribute.contains("Debug"),
+            "{name} in {path} derives Debug again: {attribute}"
+        );
+    }
+    for test_file in [
+        "rivulet-core/tests/chat_secret_redaction.rs",
+        "rivulet-core/tests/credential_debug_redaction.rs",
+    ] {
+        assert!(
+            read(test_file).contains("#[test]"),
+            "{test_file} must exist and pin the redaction behaviour"
+        );
+    }
+}
+
+#[test]
+fn dismissed_alerts_are_registered_and_rechecked() {
+    // A dismissal removes an alert from the open-alert gate, so from then on
+    // nothing noticed when its reason expired - #93 was recorded in prose only.
+    // The register in docs/security.md carries the revisit condition, the
+    // checker evaluates it, and two jobs run the checker (the weekly Security
+    // gate and the Lints self-test).
+    let docs = read("docs/security.md");
+    assert!(
+        docs.contains("### Dismissed alert register"),
+        "docs/security.md must keep the dismissed-alert register"
+    );
+    for marker in [
+        "derive-debug:rivulet-core/src/chat.rs:ChatConfig",
+        "derive-debug:rivulet-core/src/stream.rs:StreamSettings",
+        "Revisit when",
+        "grandfathered",
+    ] {
+        assert!(docs.contains(marker), "the register must keep '{marker}'");
+    }
+    let checker = read("scripts/check-dismissed-alerts.py");
+    for marker in [
+        "derive-debug",
+        "state=dismissed",
+        "REGISTER_HEADING",
+        "REGISTER_ENFORCED_FROM",
+        "--self-test",
+    ] {
+        assert!(
+            checker.contains(marker),
+            "the dismissed-alert checker must keep '{marker}'"
+        );
+    }
+    assert!(
+        read(".github/workflows/security.yml")
+            .contains("scripts/check-dismissed-alerts.py --comment"),
+        "the Security workflow must re-check dismissed alerts"
+    );
+    assert!(
+        read(".github/workflows/ci.yml").contains("scripts/check-dismissed-alerts.py --self-test"),
+        "the Lints job must self-test the dismissed-alert checker"
+    );
+}

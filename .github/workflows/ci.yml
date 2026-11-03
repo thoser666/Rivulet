@@ -219,6 +219,9 @@ jobs:
           python3 scripts/generate-api-overview.py --self-test
           python3 scripts/generate-api-overview.py --check
 
+      - name: Self-test the dismissed-alert register checker
+        run: python3 scripts/check-dismissed-alerts.py --self-test
+
       # M8 #297 exit evidence: `cargo doc` without warnings. The flags are the
       # point — a plain `cargo doc` only *prints* broken intra-doc links and
       # bare URLs, and 22 of them had accumulated before this step existed. If

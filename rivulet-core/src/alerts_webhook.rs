@@ -63,7 +63,7 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 const EVENT_CHANNEL_CAPACITY: usize = 256;
 
 /// Receiver settings persisted by the GUI.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AlertsReceiverConfig {
     /// Loopback port to bind (`127.0.0.1:<port>`). `0` picks an ephemeral
     /// port (used by tests).
@@ -72,6 +72,24 @@ pub struct AlertsReceiverConfig {
     /// (`403`). Stored locally by the GUI, never logged or serialized into any
     /// event model.
     pub twitch_secret: String,
+}
+
+/// The EventSub secret is a credential, so `Debug` reports it as `<redacted>`
+/// (CodeQL `rust/cleartext-logging`, alert #93) rather than trusting the "never
+/// logged" comment above. An empty secret is the documented disabled state and
+/// stays visible as `None`, which is the half a debug line should say.
+impl std::fmt::Debug for AlertsReceiverConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let secret = if self.twitch_secret.is_empty() {
+            None
+        } else {
+            Some("<redacted>")
+        };
+        f.debug_struct("AlertsReceiverConfig")
+            .field("port", &self.port)
+            .field("twitch_secret", &secret)
+            .finish()
+    }
 }
 
 impl Default for AlertsReceiverConfig {

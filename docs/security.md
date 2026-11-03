@@ -212,6 +212,47 @@ stop at the first one that turns the alert into a real finding:
 `security_docs_pin_the_dismissal_checklist` fails if this checklist, the three
 canonical reasons or the `Revisit when` rule disappear from this section.
 
+### Dismissed alert register
+
+`check-code-scanning-alerts.py` fails on **open** alerts only, which is exactly
+why a dismissal needs its own record: from the moment the button is clicked,
+nothing looks at that finding again. This table is that record, and
+`scripts/check-dismissed-alerts.py` enforces it - it runs in the Security
+workflow (weekly, after every push to `develop`, and non-blocking on pull
+requests for the same reason the open-alert gate is):
+
+- a dismissed alert without a row here fails, unless it predates the register,
+- a row whose alert is no longer dismissed (fixed or re-opened) fails, because
+  the register has to shrink when its reason disappears,
+- a row whose documented reason disagrees with the dismissal GitHub recorded
+  fails, and
+- a row whose machine check is true again fails: the condition under which the
+  alert must be re-triaged has returned.
+
+Dismissals made **before 2026-11-03** are grandfathered: they were dismissed
+before there was a place to write a revisit condition down, and demanding a row
+for each of them would fail the gate on day one for reasons nobody can still
+reconstruct. The checker counts them (`grandfathered` in `--json`) instead of
+failing. Every dismissal from that date on needs a row - a new alert dismissed
+with a free-text note alone is exactly what this register exists to prevent.
+
+| Alert | Rule | Reason | Revisit when | Machine check |
+| --- | --- | --- | --- | --- |
+| #93 | `rust/cleartext-logging` | `false positive` | a credential-bearing config derives `Debug` again, or a new secret field is added to one without redaction | `derive-debug:rivulet-core/src/chat.rs:ChatConfig; derive-debug:rivulet-core/src/twitch_chat.rs:TwitchChatConfig; derive-debug:rivulet-core/src/kick_chat.rs:KickChatConfig; derive-debug:rivulet-core/src/stream.rs:StreamSettings; derive-debug:rivulet-core/src/stream.rs:WhipSettings; derive-debug:rivulet-core/src/stream_info.rs:InfoCredentials; derive-debug:rivulet-core/src/alerts_webhook.rs:AlertsReceiverConfig` |
+
+The machine check is a deliberately small DSL - a register nobody can evaluate
+mechanically is prose with a table around it. Cells separate several checks with
+`;`, and the only kind is `derive-debug:<path>:<Type>`: it is true when
+`<Type>` in `<path>` carries `#[derive(.., Debug, ..)]` again. Add a kind only
+together with its parser and a `--self-test` case in the checker.
+
+Run it locally:
+
+```bash
+python3 scripts/check-dismissed-alerts.py --self-test   # offline logic test
+python3 scripts/check-dismissed-alerts.py               # needs gh + security-events:read
+```
+
 ### Dependabot alert management
 
 GitHub Dependabot reports vulnerable dependencies under
@@ -508,6 +549,13 @@ tracked rather than silently dismissed.
 - Remove personal paths and tokens from logs before attaching them to issues.
 - Rotate a credential immediately if Push Protection reports it or if it appears
   in a commit, even when the commit is later removed.
+- Credential-bearing config types render their secrets as `<redacted>` in their
+  own `Debug` output (`ChatConfig`, `TwitchChatConfig`, `KickChatConfig`,
+  `StreamSettings` - stream key and ingest URL - `WhipSettings`,
+  `InfoCredentials`, `AlertsReceiverConfig`). A `{:?}` must never be a way to
+  write a token to a log line, a panic message or an error chain;
+  `chat_secret_redaction.rs` and `credential_debug_redaction.rs` pin the
+  behaviour and a ci_pinning guard keeps the hand-written impls in place.
 
 Push Protection does not replace credential rotation, least-privilege tokens, or
 review of external release assets. It also cannot detect every proprietary or
