@@ -11138,3 +11138,43 @@ fn assert_aggregate_requires(ci: &str, job: &str) {
         "the CI aggregate job must require `{job}` in needs (found: {needs:?})"
     );
 }
+
+/// A workflow that runs a repository script is only as reliable as the file
+/// being in the checkout.
+///
+/// The aggregate once failed with `python3: can't open file
+/// .../scripts/check-ci-jobs.py` although both the step and the script were
+/// part of the branch: a merge of `develop` into the pull request had dropped
+/// the file. The scan below reads every `python3 scripts/<name>` invocation in
+/// the workflow and checks it against the working tree, so a dropped or renamed
+/// script fails here instead of on a 20-minute CI run.
+#[test]
+fn every_script_the_workflow_runs_exists_in_the_repository() {
+    let ci = read(".github/workflows/ci.yml");
+    let mut checked = 0;
+    for line in ci.lines() {
+        let Some(rest) = line.split("python3 scripts/").nth(1) else {
+            continue;
+        };
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_' || *c == '-')
+            .collect();
+        assert!(!name.is_empty(), "unparseable script reference: {line}");
+        let path = format!("scripts/{name}");
+        assert!(
+            repo_file(&path).is_file(),
+            "the workflow runs {path} but the repository does not contain it"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 1,
+        "the scan found no python3 scripts/<name> invocation in ci.yml"
+    );
+    let aggregate = read("scripts/check-ci-jobs.py");
+    assert!(
+        aggregate.contains("def evaluate("),
+        "the aggregate evaluator lost its evaluation function"
+    );
+}

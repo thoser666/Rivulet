@@ -318,6 +318,21 @@ Every change to `develop` passes a review before it lands:
    hygiene expectations for both maintainers live in
    [`docs/clean-desk.md`](docs/clean-desk.md).
 
+### Rebase a pull request branch, do not merge `develop` into it
+
+A `git merge develop` inside a pull request adds a merge commit, and the DCO
+check judges **every** commit on the branch: the merge commit carries no
+`Signed-off-by`, so the whole pull request fails DCO even though the real commit
+is signed off. A merge can also drop a file that exists only on the branch: that
+is how the aggregate step once failed with
+
+```
+python3: can't open file '.../scripts/check-ci-jobs.py': [Errno 2] No such file or directory
+```
+
+although the script was part of the commit. Rebase instead
+(`git rebase origin/develop`) and publish with `git push --force-with-lease`.
+
 **When `CI` goes red for infrastructure reasons.** The aggregate `CI` job judges
 the whole `needs` context with
 [`scripts/check-ci-jobs.py`](scripts/check-ci-jobs.py), so it picks up every job
