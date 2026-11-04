@@ -146,8 +146,9 @@ Bildschirm-, Spiel-, Webcam- und Browser-Ebenen liefern echte Pixel; Bild-,
 Text-, Media-, Farb- und Audio-Ebenen erscheinen bis zur Renderer-Anbindung als
 Layout-Kachel. Die Komposition rechnet in der Szenenfläche von 1920x1080:
 Solange sie aktiv ist, zeichnet Rivulet in dieser Auflösung auf — für die native
-Capture-Auflösung die Option ausschalten. Eine Szene ohne sichtbare Ebene ändert
-nichts, dann wird weiterhin das rohe Capture-Bild aufgenommen.
+Capture-Auflösung die Option ausschalten. Eine Szene ohne sichtbare Bild-Ebene
+(auch eine reine Audio-Szene) ändert nichts, dann wird weiterhin das rohe
+Capture-Bild aufgenommen.
 
 
 ## 6. Live-Vorschau

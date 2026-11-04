@@ -8,8 +8,9 @@
   that enters `process_raw_frame`, so recording and streaming share one
   composition and the Record preview shows it as well. Output is the scene
   canvas (1920x1080) while the toggle is on — a persisted, default-on option in
-  the Scenes and Live views — and a scene without a visible layer falls back to
-  the raw capture frame instead of a black canvas. Screen, game, webcam and
+  the Scenes and Live views — and a scene without a visual layer (including an
+  audio-only scene) falls back to the raw capture frame instead of a black
+  canvas. Screen, game, webcam and
   browser layers carry real pixels; the other kinds keep their layout tile until
   their renderers exist (#217). Because this path runs per frame, the snapshot
   rasterizer gained an axis-aligned fast path that samples one source index per

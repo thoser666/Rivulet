@@ -71,7 +71,14 @@ pub fn compose_scene(
 ) -> Option<ComposedFrame> {
     let mut snapshot = SceneSnapshot::from_scene(scene, sources, collection, profile)
         .with_size(LIVE_CANVAS_WIDTH, LIVE_CANVAS_HEIGHT);
-    if snapshot.layers.is_empty() {
+    // Audio layers belong to the scene but carry no picture: an audio-only
+    // scene must keep the raw capture frame instead of replacing the show with
+    // the canvas background.
+    if !snapshot
+        .layers
+        .iter()
+        .any(|layer| !matches!(layer.kind, SourceKind::Audio))
+    {
         return None;
     }
     snapshot.attach_frames(&|source_id: Uuid| {
@@ -156,6 +163,15 @@ mod tests {
         let scene = Scene::new("Empty".to_string());
         let sources = SourceManager::new();
         let capture = solid(1, 1, [1, 2, 3, 255]);
+        assert!(
+            compose_scene(&scene, &sources, "Default", "Default", Some(&capture), None).is_none()
+        );
+    }
+
+    #[test]
+    fn audio_only_scene_keeps_the_raw_capture_frame() {
+        let (scene, sources, _) = scene_with(SourceKind::Audio);
+        let capture = solid(1, 1, [11, 22, 33, 255]);
         assert!(
             compose_scene(&scene, &sources, "Default", "Default", Some(&capture), None).is_none()
         );

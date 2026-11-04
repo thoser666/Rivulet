@@ -223,7 +223,7 @@ window:
 | Capture layers | `ScreenCapture`, `GameCapture` and `Webcam` layers receive the picture the capture pipeline just produced, whatever its native size. |
 | Browser layers | Receive the newest browser-source frame (`BrowserSource::latest_frame`). |
 | Other kinds | `Image`, `Text`, `Media`, `Color` and `Audio` keep their stable layout tile until their platform renderers exist ([#217](https://github.com/thoser666/Rivulet/issues/217)); they are never silently blanked. |
-| Empty scene | A scene with no visible layer returns `None` and the raw capture frame is recorded unchanged, so a misconfigured scene cannot black out a show. |
+| Empty scene | A scene with no visual layer — none at all, or only audio layers — returns `None` and the raw capture frame is recorded unchanged, so a misconfigured scene cannot black out a show. |
 | Cost | Composition runs on the CPU once per captured frame. Unrotated layers — every live capture and browser layer — take a row-wise nearest-neighbour path instead of the rotation math, and an unrotated 1:1 layer copies rows directly. |
 
 Recording resolution follows the canvas while composition is on: a 1440p
