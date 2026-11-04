@@ -127,7 +127,7 @@ a metric exceeds **both** its relative and its absolute allowance:
 | Idle CPU | baseline + 2 % | 2 % |
 | RSS slope | baseline + 4 MiB/min | 4 MiB/min |
 | Memory growth | — | 64 MiB |
-| Startup | 3× baseline | +500 ms |
+| Startup | 3× baseline | +1500 ms |
 | p99 frame time | 2× baseline | +20 ms |
 
 The absolute target caps the relative allowance: a baseline recorded near the
@@ -138,6 +138,13 @@ compared against. A profile without a measured baseline
 does not gate — the run records its numbers, says `seed` in the report, and the
 next deliberate run commits the baseline. That is how the first measurement of
 a new runner gets recorded without turning its noise into a red build.
+
+The startup floor is measured rather than guessed. The same workload on the same
+runner image reported 411 ms and then 1144 ms on consecutive runs — a 2.8×
+spread with no code change. A +500 ms floor left 8 % of headroom and would have
+failed a healthy build, which is how a gate teaches people to ignore it. Below
+~1.5 s a startup difference on a shared runner is scheduling, not code; a
+synchronous plugin scan or a network wait still trips the 3× factor.
 
 `ci-linux` is measured (2026-11-04, `ubuntu-latest`, release build, seed state
 replaced from the job's own artifact). Its idle CPU, RSS slope and memory growth

@@ -1,4 +1,13 @@
 ## [Unreleased]
+- fix(m9): **the startup allowance absorbs measured shared-runner noise instead
+  of failing healthy builds.** With the `ci-linux` baseline committed, the next
+  run reported startup 1144 ms against a 411 ms baseline — a 2.8x spread on the
+  same workload and runner image with no code change — and passed with only 8 %
+  of headroom under the old `+500 ms` floor. The floor is now `+1500 ms`, which
+  is where a startup difference stops being scheduling on a shared runner, while
+  the 3x factor still trips on a real blow-up (a synchronous plugin scan, a
+  network wait). The self-test pins the actual observation: 411 → 1144 ms must
+  pass, 2000 ms must fail.
 - ci(m9): **the `ci-linux` resource baseline is measured now, not a seed.**
   The seed recorded no numbers, so every run was `blocked` and nothing gated.
   `scripts/resource-metrics-baseline/ci-linux.json` now carries the numbers from
