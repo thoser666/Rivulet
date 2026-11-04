@@ -1,6 +1,6 @@
 //! Live scene composition for the recording and streaming output path.
 //!
-//! [`SceneSnapshot`](crate::SceneSnapshot) already turns a scene layout into
+//! [`SceneSnapshot`] already turns a scene layout into
 //! RGBA pixels; this module decides **which live picture fills which layer** and
 //! keeps the result on one output canvas, so the encoder receives a stable
 //! resolution while the scene dock decides what is on air.
