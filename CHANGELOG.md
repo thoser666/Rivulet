@@ -1,4 +1,38 @@
 ## [Unreleased]
+- feat(m7): **release builds are now proven bit-reproducible by a second,
+  independent rebuild instead of being described as such.** Every release built
+  its artifacts exactly once: `SHA256SUMS` (issue #190) proves the files a user
+  downloads are the files CI uploaded, but nothing proved that a fresh build of
+  the same commit produces the same bytes. `.github/workflows/reproducible-build.yml`
+  now builds the release ref twice per platform on two separate runners, stages
+  both payloads with the same script the release uses, and compares fingerprints.
+  A differing **payload** byte fails the job and names the file; container drift
+  (ZIP, MSI, AppImage, DMG, `.asc`) and metadata drift (`LICENSE`,
+  `SHA256SUMS`) is reported as documented, never gated; a pair that cannot be
+  compared (different target, rustc, Cargo, GStreamer version, commit,
+  `SOURCE_DATE_EPOCH`, remap destination or linker arguments) is `not
+  comparable` rather than a pass. The normalized inputs live in one script
+  (`scripts/release-build-env.sh`) that the release build consumes as well —
+  `--remap-path-prefix` for the checkout and Cargo home, `SOURCE_DATE_EPOCH`
+  from the commit timestamp, and on Windows `/Brepro /DEBUG:NONE` — because
+  measuring a different recipe than the one that ships would prove nothing. The
+  job runs per release in parallel to publishing (it does not gate it) and still
+  fails the workflow run; `docs/release-platforms.md` reports the measured
+  result per channel instead of a static claim. Measured while building it: two
+  Windows builds of the same source three seconds apart differ in the PE
+  timestamp and a synthetic PDB signature, and `/Brepro` alone is not enough —
+  with `/DEBUG:NONE` they are identical.
+- fix(m7): **the Windows version resource is generated instead of harvested from
+  a `HashMap`, removing the last nondeterministic build step.** With
+  `/Brepro /DEBUG:NONE` in place, two relinks of a crate that embeds its icon
+  through `winres::WindowsResource::new()` + `set_icon` still differed in 115
+  bytes, and the diff was the `StringFileInfo` entry order: winres keeps the
+  version strings in a `HashMap` and writes them in iteration order, which is
+  randomized per process. `rivulet-gui/build.rs` now writes the `.rc` itself in a
+  fixed order (same numeric fields, same four strings, same icon id) and hands it
+  to `set_resource_file`; three consecutive relinks are byte-identical, and the
+  icon, `ProductName` and version still show in Explorer exactly as before. A
+  `ci_pinning` guard fails if `set_icon` comes back.
 - fix(m9): **the startup allowance absorbs measured shared-runner noise instead
   of failing healthy builds.** With the `ci-linux` baseline committed, the next
   run reported startup 1144 ms against a 411 ms baseline — a 2.8x spread on the

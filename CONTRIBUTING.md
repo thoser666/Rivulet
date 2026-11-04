@@ -253,6 +253,17 @@ guards that CI would check later: the CI pinning tests
 self-tests (`generate-action-pins.py --check`, parity-checklist/release-
 notes/theme-contrast/apt-parity checks, `generate-release-notes.sh
 --self-test`).
+
+If `actionlint` is installed, the hook also lints every workflow; with
+`shellcheck` on `PATH` as well, it checks the `run:` blocks too — the same
+check the CI Lints job performs, and the only one that catches a shell mistake
+inside a workflow step. On Windows the hook passes `-shellcheck=` because
+actionlint's shellcheck integration deadlocks there once a `run:` block outgrows
+the anonymous-pipe buffer; the Linux Lints job still checks those blocks.
+
+```bash
+go install github.com/rhysd/actionlint/cmd/actionlint@latest
+```
 Disable just that stage with `RIVULET_PRE_PUSH_FAST_TESTS=0 git push`; skip
 the whole hook for a single push with `RIVULET_SKIP_PRE_PUSH=1 git push`
 (or `git push --no-verify`).

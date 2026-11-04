@@ -9,11 +9,7 @@ fn main() {
     // Windows: embed rivulet_logo.ico as the application icon so it shows in
     // Explorer, taskbar, ALT-TAB, etc.
     #[cfg(target_os = "windows")]
-    {
-        let mut res = winres::WindowsResource::new();
-        res.set_icon("assets/rivulet_logo.ico");
-        res.compile().expect("failed to compile Windows resource");
-    }
+    embed_windows_resources();
 
     // Copy the Vulkan layer manifest (JSON) to the workspace target directory
     // so VulkanLayerConfig::find() can locate it next to the built layer DLL.
@@ -26,6 +22,74 @@ fn main() {
     // import DLLs).
     #[cfg(target_os = "windows")]
     copy_webview2_loader();
+}
+
+// Windows: the resource file is generated here instead of by
+// `winres::WindowsResource::new()` + `set_icon`, because winres keeps the
+// version-info fields and strings in `HashMap`s and writes them in iteration
+// order -- which is randomized per process. Two builds of the same source
+// therefore produced different `StringFileInfo` ordering and different bytes
+// (measured with the /Brepro /DEBUG:NONE flags already in place, issue #288).
+// Writing the same fields in a fixed order removes the only nondeterministic
+// step in the Windows build without changing what Explorer shows.
+#[cfg(target_os = "windows")]
+fn embed_windows_resources() {
+    use std::fmt::Write as _;
+
+    let name = std::env::var("CARGO_PKG_NAME").expect("CARGO_PKG_NAME");
+    let version = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
+    // VERSIONINFO's numeric fields are four 16-bit values, so the pre-release
+    // suffix (`-alpha.55`) cannot be represented there; it stays in the string
+    // fields, exactly as winres produced it.
+    let mut numbers = [0u16; 4];
+    for (index, part) in version
+        .split(['-', '+'])
+        .next()
+        .unwrap_or_default()
+        .split('.')
+        .take(4)
+        .enumerate()
+    {
+        numbers[index] = part.parse().unwrap_or(0);
+    }
+
+    let mut rc = String::new();
+    rc.push_str("#pragma code_page(65001)\n");
+    rc.push_str("1 VERSIONINFO\n");
+    writeln!(
+        rc,
+        "FILEVERSION {}, {}, {}, {}",
+        numbers[0], numbers[1], numbers[2], numbers[3]
+    )
+    .expect("write to a String");
+    writeln!(
+        rc,
+        "PRODUCTVERSION {}, {}, {}, {}",
+        numbers[0], numbers[1], numbers[2], numbers[3]
+    )
+    .expect("write to a String");
+    rc.push_str("FILEOS 0x40004\n");
+    rc.push_str("FILETYPE 0x1\n");
+    rc.push_str("FILESUBTYPE 0x0\n");
+    rc.push_str("FILEFLAGSMASK 0x3f\n");
+    rc.push_str("FILEFLAGS 0x0\n");
+    rc.push_str("{\nBLOCK \"StringFileInfo\"\n{\nBLOCK \"000004b0\"\n{\n");
+    writeln!(rc, "VALUE \"FileVersion\", \"{version}\"").expect("write to a String");
+    writeln!(rc, "VALUE \"ProductVersion\", \"{version}\"").expect("write to a String");
+    writeln!(rc, "VALUE \"ProductName\", \"{name}\"").expect("write to a String");
+    writeln!(rc, "VALUE \"FileDescription\", \"{name}\"").expect("write to a String");
+    rc.push_str("}\n}\nBLOCK \"VarFileInfo\" { VALUE \"Translation\", 0x0, 0x04b0 }\n}\n");
+    rc.push_str("1 ICON \"assets/rivulet_logo.ico\"\n");
+
+    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
+    let rc_path = std::path::Path::new(&out_dir).join("rivulet.rc");
+    std::fs::write(&rc_path, rc).expect("failed to write the Windows resource file");
+    println!("cargo:rerun-if-changed=assets/rivulet_logo.ico");
+    println!("cargo:rerun-if-env-changed=CARGO_PKG_VERSION");
+
+    let mut res = winres::WindowsResource::new();
+    res.set_resource_file(rc_path.to_str().expect("OUT_DIR must be valid UTF-8"));
+    res.compile().expect("failed to compile Windows resource");
 }
 
 fn copy_layer_manifest() {

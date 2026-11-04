@@ -1,0 +1,266 @@
+name: Reproducible Build
+
+# Issue #288 (M7 F7-M7-001): prove that the shipped release payload is
+# bit-reproducible, instead of claiming it.
+#
+# Every release only ever built the artefacts once. `SHA256SUMS` proves the
+# files a user downloads are the files CI uploaded (issue #190), but it says
+# nothing about whether a second, independent build of the same commit would
+# produce the same bytes. This workflow answers exactly that: the same ref is
+# built twice on two separate runners, both runs stage the payload with the
+# same script the release uses, and the two fingerprints are compared.
+#
+# What is compared, and what is not
+# ---------------------------------
+# `payload` (the executables a user runs) must be byte-identical. That is the
+# gate.
+#
+# `container` archives (.zip, .msi, .dmg, .AppImage, .asc) and `metadata`
+# (LICENSE, SHA256SUMS) are reported as documented byte drift, never gated:
+# they embed archive member mtimes, WiX-harvested GUIDs and signature
+# timestamps. See docs/release-platforms.md.
+#
+# The comparison is rebuild-a vs rebuild-b, NOT rebuild vs the published
+# asset. Code signing rewrites the payload once certificates exist (issue #50),
+# so gating against the published file would start failing the day signing is
+# enabled, for a reason that has nothing to do with determinism. The release
+# build consumes the same recipe (`scripts/release-build-env.sh`) and the same
+# staging step (`scripts/stage-release-payload.sh`), so a reproducible
+# rebuild of the same commit implies a reproducible release build.
+#
+# A pair that cannot be compared is not a pass: differing toolchain, target,
+# GStreamer version, commit, `SOURCE_DATE_EPOCH`, remap targets or linker
+# arguments produce `not-comparable` and fail the job as well.
+#
+# Non-blocking for publishing
+# ---------------------------
+# `release.yml` runs this in parallel to the GitHub release (not in its
+# `needs`), so a divergence is reported loudly without retroactively blocking a
+# release whose artefacts were already built and verified. It still fails the
+# workflow run.
+#
+# The release is rebuilt on every alpha release, which is what makes the
+# guarantee continuous rather than a one-off measurement.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Branch, tag or SHA that the release was built from
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or SHA to rebuild twice
+        required: false
+        type: string
+        default: develop
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  ################################################################
+  # BUILD THE SAME REF TWICE, ON TWO SEPARATE RUNNERS
+  ################################################################
+  rebuild:
+    name: Rebuild (${{ matrix.platform }}, run ${{ matrix.run }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux, windows, macos]
+        run: [a, b]
+        include:
+          - platform: linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - platform: windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - platform: macos
+            os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref }}
+          token: ${{ github.token }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Kept in sync with build-package.yml on purpose: the rebuild must see the
+      # same native libraries as the release build, and a dependency that exists
+      # in one place only makes the rebuild fail loudly here. The GStreamer
+      # version is recorded in the fingerprint, because macOS installs it
+      # floating from Homebrew -- a version skew between the two runs must be
+      # reported as `not-comparable`, not as a determinism failure.
+      - name: Install Linux release dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libssl-dev libdbus-1-dev libasound2-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+            gstreamer1.0-tools libglib2.0-dev \
+            libpipewire-0.3-dev libspa-0.2-dev
+
+      - name: Cache GStreamer MSIs
+        if: runner.os == 'Windows'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: C:/gstreamer-cache
+          key: gstreamer-msvc-1.26.11
+
+      - name: Install Windows release dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install msys2 --params "/NoUpdate /InstallDir:C:/msys64"
+          C:/msys64/usr/bin/bash -lc "pacman -S --noconfirm mingw-w64-x86_64-pkg-config"
+          echo "C:/msys64/mingw64/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          pwsh packaging/windows/install-gstreamer.ps1 -Version "1.26.11"
+
+      - name: Install macOS release dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew untap aws/tap 2>/dev/null || true
+          for attempt in 1 2 3; do
+            if brew install gstreamer; then
+              exit 0
+            fi
+            echo "::warning::brew install failed (attempt $attempt of 3); retrying in $((attempt * 30))s"
+            sleep $((attempt * 30))
+          done
+          echo "::error::brew install failed after 3 attempts - see the log above for the failing bottle"
+          exit 1
+
+      - name: Derive deterministic build inputs
+        # One definition of "normalized" for the release build and this rebuild;
+        # the ci_pinning guard fails if either workflow stops calling it. `tee`
+        # puts the values in the log so a divergence report can be read next to
+        # the inputs that produced it.
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/release-build-env.sh | tee -a "$GITHUB_ENV"
+
+      - name: Build release binaries
+        run: cargo build --release --package rivulet-gui --package rivulet-launcher --package rivulet-updater --target ${{ matrix.target }}
+
+      - name: Stage release payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/stage-release-payload.sh \
+            --platform "${{ matrix.platform }}" \
+            --target "${{ matrix.target }}" \
+            --staging staging
+
+      - name: Fingerprint the staged payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `python3` is not guaranteed on the Windows image; both names are.
+          PY=python3
+          command -v python3 >/dev/null 2>&1 || PY=python
+          # The file name carries platform and run because the compare job
+          # downloads all six artifacts with `merge-multiple: true`: a plain
+          # `fingerprint.json` in every artifact would collapse into one file
+          # and five of the six rebuilds would silently never be compared.
+          "$PY" scripts/reproducible-build.py fingerprint \
+            --dir staging \
+            --out "fingerprint-${{ matrix.platform }}-${{ matrix.run }}.json" \
+            --label "${{ matrix.platform }} run ${{ matrix.run }}" \
+            --target "${{ matrix.target }}"
+
+      - name: Upload fingerprint
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fingerprint-${{ matrix.platform }}-${{ matrix.run }}
+          path: fingerprint-${{ matrix.platform }}-${{ matrix.run }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  ################################################################
+  # COMPARE THE TWO REBUILDS
+  ################################################################
+  compare:
+    name: Compare rebuilds
+    needs: rebuild
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Download fingerprints
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: fingerprint-*
+          path: fingerprints
+          merge-multiple: true
+
+      - name: Compare the two rebuilds per platform
+        # Deliberately not `set -e`: one platform's divergence must not hide the
+        # other two verdicts. The worst outcome drives the exit code at the end.
+        shell: bash
+        run: |
+          set -uo pipefail
+          severity=0
+          summary="$RUNNER_TEMP/summary.md"
+          : >"$summary"
+
+          for platform in linux windows macos; do
+            left="fingerprints/fingerprint-$platform-a.json"
+            right="fingerprints/fingerprint-$platform-b.json"
+            echo "::group::Compare $platform"
+            python3 scripts/reproducible-build.py compare \
+              --left "$left" \
+              --right "$right" \
+              --summary "$RUNNER_TEMP/summary-$platform.md"
+            code=$?
+            echo "::endgroup::"
+
+            if [[ -f "$RUNNER_TEMP/summary-$platform.md" ]]; then
+              cat "$RUNNER_TEMP/summary-$platform.md" >>"$summary"
+            else
+              # The name is wrapped in a Markdown code span; the backticks are
+              # escaped inside double quotes, because a literal backtick in a
+              # single-quoted string reads like command substitution to the
+              # shell linter (SC2016) and fails the Lints job.
+              printf '### %s: **not comparable**\n\nNo comparison output: one or both fingerprints are missing.\n\n' \
+                "\`$platform\`" >>"$summary"
+            fi
+
+            case "$code" in
+              0) ;;
+              1)
+                echo "::error::$platform rebuilds diverge: the same commit produced different payload bytes"
+                severity=1
+                ;;
+              *)
+                echo "::error::$platform rebuilds are not comparable: see the job summary for the differing build input"
+                if [[ "$severity" -eq 0 ]]; then
+                  severity=2
+                fi
+                ;;
+            esac
+          done
+
+          cat "$summary" >>"$GITHUB_STEP_SUMMARY"
+          exit "$severity"

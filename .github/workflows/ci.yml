@@ -128,7 +128,7 @@ jobs:
       - name: ShellCheck macOS packaging scripts
         run: |
           sudo apt-get install -y shellcheck
-          shellcheck packaging/macos/*.sh scripts/release-branch.sh scripts/test-release-branch.sh scripts/ci-render-smoke.sh
+          shellcheck packaging/macos/*.sh scripts/release-branch.sh scripts/test-release-branch.sh scripts/ci-render-smoke.sh scripts/release-build-env.sh scripts/stage-release-payload.sh .githooks/pre-push
 
       - name: Test release-branch reconciliation
         run: bash scripts/test-release-branch.sh
@@ -146,6 +146,17 @@ jobs:
         # regression-tested on every push instead of first being exercised on
         # a published release.
         run: python3 scripts/release-manifest.py --self-test
+
+      - name: Test the reproducible-build tooling
+        # Issue #288: the rebuild-and-compare gate is only as honest as these
+        # three scripts. The comparison tool must keep its payload/container/
+        # metadata split and its `not comparable` verdict, the env script must
+        # keep the remap and MSVC linker flags, and the staging script must keep
+        # the layout both the release and the rebuild consume.
+        run: |
+          python3 scripts/reproducible-build.py --self-test
+          bash scripts/release-build-env.sh --self-test
+          bash scripts/stage-release-payload.sh --self-test
 
       - name: Check user-guide freshness (AppView + feature coverage)
         run: |
@@ -651,6 +662,17 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+
+      - name: Test the reproducible-build shell scripts
+        # Issue #288: these run on every OS on purpose. The scripts encode the
+        # Windows path translation (`cygpath`, otherwise the remap matches
+        # nothing) and the stripping behaviour, so a Linux-only self-test would
+        # never exercise the branch a Windows release depends on.
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/release-build-env.sh --self-test
+          bash scripts/stage-release-payload.sh --self-test
 
       # --- Install Linux dependencies ---
       - name: Install Linux dependencies (if applicable)
