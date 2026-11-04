@@ -10114,6 +10114,19 @@ fn resource_metrics_gate_measures_the_binary_and_gates_a_baseline() {
             "the harness must record blocked/n-a with a reason, missing {required}"
         );
     }
+    // A sampler that silently stopped reading reports a perfectly quiet
+    // process, so the harness must be able to prove it saw this one, and must
+    // refuse a launcher whose child does the actual work.
+    for required in [
+        "def assert_sampler_live",
+        "def sampler_evidence",
+        "LAUNCHER_SUFFIXES",
+    ] {
+        assert!(
+            harness.contains(required),
+            "the harness must prove its sampler read the measured process, missing {required}"
+        );
+    }
     // The preview workload must be a real composition: frame time on the 64x48
     // render-smoke fixture is scheduling noise, not a measurement.
     let preview = read("scripts/ci-resource-metrics/preview.toml");
@@ -10189,6 +10202,12 @@ fn resource_metrics_gate_measures_the_binary_and_gates_a_baseline() {
     assert!(
         harness.contains("fn baseline_refusal") || harness.contains("def baseline_refusal"),
         "a baseline must not be written from a debug binary without an explicit opt-in"
+    );
+    // The schema gate must reject a measured report whose readings cannot be
+    // shown to come from the measured process.
+    assert!(
+        checker.contains("def _validate_sampler"),
+        "the schema gate must require sampler evidence on a measured report"
     );
 
     // A baseline exists per gated profile, and the seed state is explicit so a

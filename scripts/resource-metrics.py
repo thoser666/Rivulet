@@ -533,6 +533,7 @@ class MeasuredRun:
     samples: list
     stderr_path: Path
     exit_code: int
+    pid: int | None = None
 
 
 def run_measured(binary, metrics_args, label, out_dir, timeout):
@@ -654,6 +655,7 @@ def run_measured(binary, metrics_args, label, out_dir, timeout):
         samples=samples,
         stderr_path=stderr_path,
         exit_code=exit_code,
+        pid=process.pid,
     )
 
 
@@ -715,6 +717,78 @@ def phase_cpu_percent(run, name, settle_seconds=0.0):
     start = phase.started_at + settle_seconds
     window = [sample for sample in run.samples if start <= sample.wall <= phase.ended_at]
     return cpu_percent(window)
+
+
+def sampler_backend():
+    if sys.platform.startswith("linux"):
+        return "proc"
+    if sys.platform == "win32":
+        return "psapi"
+    if sys.platform == "darwin":
+        return "ps"
+    return "unsupported"
+
+
+def sampler_evidence(run):
+    """Evidence that the sampler read *this* process, and not a dead handle.
+
+    An idle process genuinely reports ~0 % CPU and a flat RSS, so a sampler
+    that silently stopped reading looks exactly like a healthy quiet run: every
+    delta is 0, every gate passes. The way out is to check the counter against
+    work the process provably did. The preview phase renders N frames through
+    the compositor, which is CPU time by definition; a sampler that sees no CPU
+    time there was not looking at the renderer.
+    """
+    samples = run.samples
+    if not samples:
+        return None
+    preview = [sample for sample in samples if sample.phase == "preview"]
+    preview_span = (
+        preview[-1].cpu_seconds - preview[0].cpu_seconds if len(preview) >= 2 else None
+    )
+    rss = [sample.rss_mb for sample in samples]
+    threads = [sample.threads for sample in samples if sample.threads is not None]
+    return {
+        "backend": sampler_backend(),
+        "samples": len(samples),
+        "cpu_seconds": samples[-1].cpu_seconds - samples[0].cpu_seconds,
+        "preview_cpu_seconds": preview_span,
+        "rss_min_mb": min(rss),
+        "rss_max_mb": max(rss),
+        "threads_max": max(threads) if threads else None,
+    }
+
+
+def assert_sampler_live(run, label):
+    """Fail the run when the sampler observed nothing.
+
+    Silently reporting zeros would be the worst outcome this harness can
+    produce: a table of `0.0`s that passes every gate while measuring nothing.
+    """
+    evidence = sampler_evidence(run)
+    if evidence is None:
+        raise MetricsError(f"{label}: the sampler produced no samples")
+    backend = evidence["backend"]
+    if evidence["rss_max_mb"] <= 0.0:
+        raise MetricsError(
+            f"{label}: the {backend} sampler read 0 MiB RSS for the whole run; a "
+            "live process always has resident memory, so the sampler is not "
+            f"reading pid {run.pid}"
+        )
+    if evidence["cpu_seconds"] <= 0.0:
+        raise MetricsError(
+            f"{label}: the {backend} sampler saw no CPU time at all; the run "
+            "initialised the engine and rendered frames, so a zero span means it "
+            "was reading the wrong process"
+        )
+    rendered = evidence["preview_cpu_seconds"]
+    if rendered is not None and rendered <= 0.0:
+        raise MetricsError(
+            f"{label}: the preview phase rendered frames but the {backend} sampler "
+            "saw no CPU time during it; the frame-time numbers and the sampler "
+            "disagree about which process did the work"
+        )
+    return evidence
 
 
 def frame_metrics(run):
@@ -856,13 +930,31 @@ def run_status(verdicts, engine, engine_reason, profile):
 # --------------------------------------------------------------------------
 
 
+#: Extensions that start another process instead of *being* the measured one.
+#: Sampling the launcher measures a shell that mostly waits: it reports a quiet
+#: process no matter what the renderer does.
+LAUNCHER_SUFFIXES = (".cmd", ".bat", ".ps1", ".sh", ".py", ".pl")
+
+
 def resolve_binary(requested):
     if requested:
         path = Path(requested)
         if not path.is_file():
             raise MetricsError(f"--binary: {path} does not exist")
+        if path.suffix.lower() in LAUNCHER_SUFFIXES:
+            raise MetricsError(
+                f"--binary: {path.name} is a launcher, not the measured binary: the "
+                "sampler reads one pid, and a launcher's child is a different "
+                "process (it would look idle no matter what the renderer does). "
+                "Point --binary at the executable itself (target/release/rivulet)"
+            )
         return path
-    candidates = [REPO_ROOT / "target" / "debug" / "rivulet", REPO_ROOT / "target" / "debug" / "rivulet.exe"]
+    candidates = [
+        REPO_ROOT / "target" / "release" / "rivulet",
+        REPO_ROOT / "target" / "release" / "rivulet.exe",
+        REPO_ROOT / "target" / "debug" / "rivulet",
+        REPO_ROOT / "target" / "debug" / "rivulet.exe",
+    ]
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -938,6 +1030,10 @@ def measure(args):
             f"only {len(window)} samples landed in the idle window; the sampler "
             f"({sys.platform}) or the settle window ({args.settle_seconds:g} s) is wrong"
         )
+
+    # Prove the sampler was reading this process before any number from it is
+    # allowed into the report: a dead sampler reports a perfectly quiet process.
+    sampler = assert_sampler_live(idle_run, label="capture-off")
 
     idle_cpu = cpu_percent(window)
     slope = rss_slope_mb_per_min(window)
@@ -1024,6 +1120,7 @@ def measure(args):
                 "samples": len(window),
                 "preview_config": str(config),
                 "preview_frames": args.frames,
+                "sampler": sampler,
                 "frame_time_reference": frame_time_reference,
                 "frame_time_evidence": (
                     "headless render path (scene model + snapshot + compositor) via "
@@ -1147,6 +1244,15 @@ def print_summary(report, verdicts, baseline_path):
         )
     print(f"  idle window: {entry['idle_seconds']:g} s "
           f"({entry['settle_seconds']:g} s settle, {entry['samples']} samples)")
+    sampler = entry.get("sampler") or {}
+    if sampler:
+        print(
+            f"  sampler: {sampler.get('backend')} "
+            f"({sampler.get('samples')} samples, "
+            f"{sampler.get('cpu_seconds'):.3f} s CPU, "
+            f"RSS {sampler.get('rss_min_mb'):.2f}-{sampler.get('rss_max_mb'):.2f} MiB "
+            "-- proof the readings came from this process)"
+        )
     for key in (
         "startup_ms",
         "engine_init_ms",
@@ -1472,6 +1578,85 @@ def run_self_test():
         "a release baseline must be written without extra flags",
     )
 
+    # -- sampler liveness ------------------------------------------------
+    # The dangerous failure mode: a sampler that stopped reading reports a
+    # perfectly quiet process, so every gate passes on zeros.
+    def fake_run(sample_list):
+        return MeasuredRun(
+            label="self-test",
+            command=[],
+            startup_ms=1.0,
+            engine="gstreamer",
+            report={},
+            phases={},
+            samples=sample_list,
+            stderr_path=Path("unused"),
+            exit_code=0,
+            pid=4242,
+        )
+
+    def sampler_error(sample_list):
+        try:
+            assert_sampler_live(fake_run(sample_list), "self-test")
+        except MetricsError as error:
+            return str(error)
+        return None
+
+    live = [
+        Sample(0.0, 0.05, 20.0, 1, "startup"),
+        Sample(1.0, 0.06, 20.0, 1, "idle"),
+        Sample(2.0, 0.07, 20.1, 1, "idle"),
+        Sample(3.0, 0.45, 21.0, 1, "preview"),
+        Sample(4.0, 0.80, 21.0, 1, "preview"),
+    ]
+    evidence = assert_sampler_live(fake_run(live), "self-test")
+    check(
+        evidence["samples"] == 5 and evidence["rss_max_mb"] == 21.0,
+        f"live evidence must describe the samples it saw, got {evidence}",
+    )
+    check(
+        abs(evidence["preview_cpu_seconds"] - 0.35) < 1e-9,
+        f"preview CPU must be the span inside the phase, got {evidence}",
+    )
+    check(
+        evidence["backend"] == sampler_backend(),
+        "the evidence must name the OS mechanism that produced it",
+    )
+
+    dead = [Sample(float(index), 0.0, 0.0, 1, "idle") for index in range(4)]
+    check(
+        sampler_error(dead) is not None,
+        "a sampler reading 0 MiB and 0 s CPU must fail the run",
+    )
+    melted = [
+        Sample(0.0, 0.1, 20.0, 1, "startup"),
+        Sample(1.0, 0.4, 20.0, 1, "preview"),
+        Sample(2.0, 0.4, 20.0, 1, "preview"),
+    ]
+    check(
+        "preview" in (sampler_error(melted) or "").lower(),
+        "rendering frames with no sampled CPU must name the preview phase",
+    )
+    check(sampler_error([]) is not None, "no samples at all must fail the run")
+
+    # -- the measured process must be the binary, not a launcher ---------
+    # A wrapper reports a quiet process: the actual work happens in its child,
+    # which the sampler never looks at.
+    launcher = Path(tempfile.gettempdir()) / "resource-metrics-launcher.cmd"
+    launcher.write_text("@echo off\r\nexit /b 0\r\n", encoding="utf-8")
+    try:
+        try:
+            resolve_binary(str(launcher))
+            refusal = None
+        except MetricsError as error:
+            refusal = str(error)
+        check(
+            refusal is not None and "launcher" in refusal,
+            f"a launcher must not be accepted as the measured binary, got {refusal}",
+        )
+    finally:
+        launcher.unlink(missing_ok=True)
+
     # -- the numbers that must never look healthy -----------------------
     check(
         gate({"idle_cpu_percent": float("nan")}, baseline)[0]["status"] == NA,
@@ -1508,6 +1693,15 @@ def run_self_test():
         "samples": 232,
         "preview_config": "scripts/ci-render-smoke/card.toml",
         "preview_frames": 30,
+        "sampler": {
+            "backend": "proc",
+            "samples": 232,
+            "cpu_seconds": 1.25,
+            "preview_cpu_seconds": 0.4,
+            "rss_min_mb": 21.0,
+            "rss_max_mb": 22.5,
+            "threads_max": 14,
+        },
         "frame_time_reference": None,
         "capture_ab": {"status": NA, "reason": "not requested (--ab)"},
         "gpu": {"status": NA, "reason": "no GPU counter on this runner"},

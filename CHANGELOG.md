@@ -1,4 +1,33 @@
 ## [Unreleased]
+- ci(m9): **the `ci-linux` resource baseline is measured now, not a seed.**
+  The seed recorded no numbers, so every run was `blocked` and nothing gated.
+  `scripts/resource-metrics-baseline/ci-linux.json` now carries the numbers from
+  the first green Resource Metrics run on `ubuntu-latest` (release build, 60 s
+  idle, 60 frames of the 720p workload): startup ≈411 ms, p99 frame time
+  ≈84 ms, and genuinely `0.0` idle CPU / RSS slope / memory growth — an idle
+  recorder does nothing, which is why the absolute targets (2 % CPU, 4 MiB/min,
+  64 MiB growth) are the real bound and the report's `sampler` evidence is what
+  keeps that zero honest. From now on a change that makes steady-state
+  footprint or frame cost worse fails the required `CI` check with the metric,
+  baseline, delta and allowance in the log.
+- fix(m9): **the resource report proves the sampler read the measured process,
+  and refuses a launcher.** An idle recorder genuinely uses ~0 % CPU and a flat
+  RSS, so a sampler that silently stopped reading produces a table of `0.0`s
+  that satisfies every budget — the run looks exceptionally healthy because
+  nothing was measured. Every report now carries a `sampler` object (backend,
+  sample count, CPU seconds, RSS range) and the harness aborts when that
+  evidence is impossible: zero resident memory, no CPU time across a run that
+  initialised the engine and rendered frames, or frames rendered with no sampled
+  CPU during the preview. The schema gate requires the object on a measured
+  report, so a hand-written report cannot skip it either. `--binary` must be the
+  executable, not a wrapper: a launcher's child is a different pid, and
+  measuring the shell reports a process that stays idle while the renderer
+  works (`.cmd`, `.bat`, `.sh`, `.py`, `.ps1`, `.pl` are refused with that
+  reason). Verified end-to-end against a compiled stand-in binary that burns
+  19 % CPU and grows 19 MiB/min while idle: the report shows those numbers,
+  fails the schema gate, and a calibrated second run passes; pointing the
+  harness at the same stand-in's `.cmd` wrapper had reported 0.000 % and a flat
+  10.75 MiB.
 - feat(gui,m9): **a live workspace shows the picture, the scene switcher, the
   mixer and both session toggles on one page, so a running show stops hopping
   between tabs.** Recording and streaming lived in tabs separate from the scenes

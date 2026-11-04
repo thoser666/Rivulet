@@ -95,6 +95,18 @@ a debug binary's render path is orders of magnitude slower, so a baseline taken
 from one would be the wrong reference for every later run (the harness refuses
 `--write-baseline` from a debug binary unless explicitly allowed).
 
+Trusting the sampler is the whole point, so the report has to justify it. An
+idle process genuinely reads ~0 % CPU and a flat RSS, which means a sampler that
+silently stopped reading looks exactly like a healthy quiet run — every delta is
+zero, every gate passes. Every report therefore carries a `sampler` object
+(backend, sample count, CPU seconds, RSS range) and the run aborts when that
+evidence is impossible: zero resident memory, no CPU time at all across a run
+that initialised the engine and rendered frames, or frames rendered with no
+sampled CPU during the preview phase. The schema gate rejects a measured report
+without the object, and `--binary` must be the executable itself — a launcher's
+child is a different pid, so measuring a wrapper would report a shell that looks
+idle while the renderer works.
+
 Deliberately **manual**, because a shared runner cannot produce the number:
 GPU utilisation, the game-side p99 frame-time delta, real capture-backend
 overhead, encoder-specific behaviour, and battery/thermal behaviour on laptop
@@ -126,6 +138,16 @@ compared against. A profile without a measured baseline
 does not gate — the run records its numbers, says `seed` in the report, and the
 next deliberate run commits the baseline. That is how the first measurement of
 a new runner gets recorded without turning its noise into a red build.
+
+`ci-linux` is measured (2026-11-04, `ubuntu-latest`, release build, seed state
+replaced from the job's own artifact). Its idle CPU, RSS slope and memory growth
+are honestly `0.0`: an idle recorder does nothing, so the absolute targets are
+the bound that matters there, and the `sampler` evidence in each run is what
+keeps that zero honest. The gating numbers on this runner are startup
+(≈0.4 s) and headless p99 frame time (≈84 ms for the 720p workload) — both are
+compared with their own baseline, so a shared-runner outlier within the budget
+is noise rather than a red build, while a real doubling of the render cost fails
+the run and names itself.
 
 A regression names the metric, the baseline and the delta, and the report is
 uploaded as a CI artifact so the trend stays visible: a snapshot with no history
