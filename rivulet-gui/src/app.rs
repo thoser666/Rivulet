@@ -931,6 +931,62 @@ impl RestreamTargetConfig {
 const AUDIO_TRACKS_STORAGE_KEY: &str = "audio_tracks_v1";
 
 /// The main application structure.
+/// Compose the active scene into one output frame before it reaches the
+/// encoder.
+///
+/// Recording and streaming share the engine pipeline, so this is the single
+/// path from a capture frame to the output picture: the Stream and Record views
+/// show the active scene too, instead of only the raw capture. The frame is
+/// returned unchanged when composition is disabled, when no scene is active, or
+/// when the active scene has no visible layer — a misconfigured scene must never
+/// black out a recording or a stream. Composition runs on the scene canvas
+/// ([`rivulet_core::LIVE_CANVAS_WIDTH`] x [`rivulet_core::LIVE_CANVAS_HEIGHT`]);
+/// capture and browser layers carry real pixels, the remaining kinds keep their
+/// layout tile until their renderers exist.
+///
+/// Free rather than a method so the capture loops can keep their receiver
+/// borrows while the frame is composed: it borrows only the scene, source and
+/// browser state it reads, never all of `self`.
+fn compose_output_frame(
+    enabled: bool,
+    scenes: &rivulet_core::SceneManager,
+    sources: &rivulet_core::SourceManager,
+    browser: &rivulet_core::BrowserSource,
+    frame: RawFrame,
+) -> RawFrame {
+    if !enabled {
+        return frame;
+    }
+    let Some(scene) = scenes.active().and_then(|id| scenes.get(id)) else {
+        return frame;
+    };
+    let capture = rivulet_core::SnapshotFrame::new(frame.width, frame.height, frame.data.clone());
+    let browser_frame = browser.latest_frame().and_then(|browser| {
+        rivulet_core::SnapshotFrame::new(browser.width, browser.height, browser.rgba.clone())
+    });
+    match rivulet_core::live_compositor::compose_scene(
+        scene,
+        sources,
+        scenes.collection(),
+        scenes.profile(),
+        capture.as_ref(),
+        browser_frame.as_ref(),
+    ) {
+        Some(composed) => RawFrame {
+            data: composed.rgba,
+            width: composed.width,
+            height: composed.height,
+        },
+        None => frame,
+    }
+}
+
+/// Default for [`RivuletApp::compose_scene`]: on, because a scene the user built
+/// should be what the recording and the stream show.
+fn scene_composition_default() -> bool {
+    true
+}
+
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct RivuletApp {
@@ -1697,6 +1753,12 @@ pub struct RivuletApp {
     // Scenes (multiple scenes & switching)
     #[serde(skip)]
     scenes: rivulet_core::SceneManager,
+
+    /// Whether recording and streaming carry the composed active scene
+    /// instead of the raw capture picture. Persisted: it is an output
+    /// preference, not runtime state.
+    #[serde(default = "scene_composition_default")]
+    compose_scene: bool,
     /// Browser source configuration for the active scene. The native webview
     /// adapter is intentionally not stored in the app state yet; this config
     /// is the portable contract used by the future WebView2/WebKit backend.
@@ -2277,6 +2339,7 @@ impl Default for RivuletApp {
             view: AppView::Record,
 
             scenes: rivulet_core::SceneManager::new(),
+            compose_scene: scene_composition_default(),
             browser_source: rivulet_core::BrowserSource::default(),
             browser_backend: None,
             browser_backend_failed: false,
@@ -4260,7 +4323,14 @@ impl RivuletApp {
                     &raw,
                 )
                 .into_owned();
-                if !paused {
+                let frame = compose_output_frame(
+                    self.compose_scene,
+                    &self.scenes,
+                    &self.source_manager,
+                    &self.browser_source,
+                    frame,
+                );
+                if !self.is_paused {
                     self.engine
                         .process_raw_frame(&frame.data, frame.width, frame.height);
                 }
@@ -4271,30 +4341,44 @@ impl RivuletApp {
         // Drain camera frames if camera capture is active
         if let Some(rx) = &self.camera_rx {
             while let Ok(frame) = rx.try_recv() {
+                let frame = compose_output_frame(
+                    self.compose_scene,
+                    &self.scenes,
+                    &self.source_manager,
+                    &self.browser_source,
+                    RawFrame {
+                        data: frame.data.clone(),
+                        width: frame.width,
+                        height: frame.height,
+                    },
+                );
                 if !paused {
                     self.engine
                         .process_raw_frame(&frame.data, frame.width, frame.height);
                 }
-                self.pending_preview_frame = Some(RawFrame {
-                    data: frame.data.clone(),
-                    width: frame.width,
-                    height: frame.height,
-                });
+                self.pending_preview_frame = Some(frame);
                 self.last_frame_at = Some(Instant::now());
             }
         }
         // Drain game capture frames if game capture is active
         if let Some(rx) = &self.game_capture_rx {
             while let Ok(frame) = rx.try_recv() {
+                let frame = compose_output_frame(
+                    self.compose_scene,
+                    &self.scenes,
+                    &self.source_manager,
+                    &self.browser_source,
+                    RawFrame {
+                        data: frame.data.clone(),
+                        width: frame.width,
+                        height: frame.height,
+                    },
+                );
                 if !paused {
                     self.engine
                         .process_raw_frame(&frame.data, frame.width, frame.height);
                 }
-                self.pending_preview_frame = Some(RawFrame {
-                    data: frame.data.clone(),
-                    width: frame.width,
-                    height: frame.height,
-                });
+                self.pending_preview_frame = Some(frame);
                 self.last_frame_at = Some(Instant::now());
             }
         }
@@ -4603,7 +4687,14 @@ impl RivuletApp {
                     &raw,
                 )
                 .into_owned();
-                if !paused {
+                let frame = compose_output_frame(
+                    self.compose_scene,
+                    &self.scenes,
+                    &self.source_manager,
+                    &self.browser_source,
+                    frame,
+                );
+                if !self.is_paused {
                     self.engine
                         .process_raw_frame(&frame.data, frame.width, frame.height);
                 }
@@ -5290,6 +5381,10 @@ impl RivuletApp {
         // ── Picture ───────────────────────────────────────────────────────
         ui.separator();
         self.draw_recording_preview_sized(ui, 900.0);
+        let composition_label = self.tr("scene_composition_toggle").to_owned();
+        let composition_hint = self.tr("scene_composition_hint").to_owned();
+        ui.checkbox(&mut self.compose_scene, composition_label)
+            .on_hover_text(composition_hint);
 
         // ── Scene switcher ────────────────────────────────────────────────
         // The same dock as the Scenes view, including multi-select, so switching
@@ -5542,6 +5637,10 @@ impl RivuletApp {
                 self.save_scene_snapshot();
             }
         });
+        let composition_label = self.tr("scene_composition_toggle").to_owned();
+        let composition_hint = self.tr("scene_composition_hint").to_owned();
+        ui.checkbox(&mut self.compose_scene, composition_label)
+            .on_hover_text(composition_hint);
 
         self.draw_scene_dock(ui, colors, active);
 
@@ -12541,6 +12640,13 @@ impl eframe::App for RivuletApp {
                             frame,
                         )
                         .into_owned();
+                        let frame = compose_output_frame(
+                            self.compose_scene,
+                            &self.scenes,
+                            &self.source_manager,
+                            &self.browser_source,
+                            frame,
+                        );
                         if !self.is_paused {
                             self.engine
                                 .process_raw_frame(&frame.data, frame.width, frame.height);
@@ -12618,30 +12724,44 @@ impl eframe::App for RivuletApp {
             // Drain camera frames
             if let Some(rx) = &self.camera_rx {
                 while let Ok(frame) = rx.try_recv() {
+                    let frame = compose_output_frame(
+                        self.compose_scene,
+                        &self.scenes,
+                        &self.source_manager,
+                        &self.browser_source,
+                        RawFrame {
+                            data: frame.data.clone(),
+                            width: frame.width,
+                            height: frame.height,
+                        },
+                    );
                     if !paused {
                         self.engine
                             .process_raw_frame(&frame.data, frame.width, frame.height);
                     }
-                    self.pending_preview_frame = Some(RawFrame {
-                        data: frame.data.clone(),
-                        width: frame.width,
-                        height: frame.height,
-                    });
+                    self.pending_preview_frame = Some(frame);
                     self.last_frame_at = Some(Instant::now());
                 }
             }
             // Drain game capture frames
             if let Some(rx) = &self.game_capture_rx {
                 while let Ok(frame) = rx.try_recv() {
+                    let frame = compose_output_frame(
+                        self.compose_scene,
+                        &self.scenes,
+                        &self.source_manager,
+                        &self.browser_source,
+                        RawFrame {
+                            data: frame.data.clone(),
+                            width: frame.width,
+                            height: frame.height,
+                        },
+                    );
                     if !paused {
                         self.engine
                             .process_raw_frame(&frame.data, frame.width, frame.height);
                     }
-                    self.pending_preview_frame = Some(RawFrame {
-                        data: frame.data.clone(),
-                        width: frame.width,
-                        height: frame.height,
-                    });
+                    self.pending_preview_frame = Some(frame);
                     self.last_frame_at = Some(Instant::now());
                 }
             }
@@ -22823,5 +22943,121 @@ type = {{ kind = "ui_panel", entry_point = "plugin.wasm" }}
                 "{key} must be #[serde(skip)] (transient backend state)"
             );
         }
+    }
+
+    // ── Live scene composition ──────────────────────────────────
+
+    #[test]
+    fn scene_composition_is_on_by_default_and_persisted() {
+        assert!(scene_composition_default());
+        let app = RivuletApp::default();
+        assert!(app.compose_scene);
+        let serialized = serde_json::to_value(&app).expect("app must serialize");
+        assert_eq!(
+            serialized.get("compose_scene"),
+            Some(&serde_json::Value::Bool(true)),
+            "the toggle is an output preference and must persist"
+        );
+    }
+
+    #[test]
+    fn compose_scene_frame_composes_the_active_scene() {
+        let mut app = RivuletApp::default();
+        let scene = rivulet_core::Scene::new("Live".to_string());
+        let scene_id = scene.id;
+        app.scenes.add(scene);
+        app.scenes.switch_to(scene_id);
+        let source = app.source_manager.add_source(rivulet_core::Source::new(
+            "Screen".to_string(),
+            rivulet_core::SourceKind::ScreenCapture,
+        ));
+        app.source_manager.bind_source(source, scene_id, None);
+
+        let frame = RawFrame {
+            data: [200u8, 10, 10, 255].repeat(4),
+            width: 2,
+            height: 2,
+        };
+        let composed = compose_output_frame(
+            app.compose_scene,
+            &app.scenes,
+            &app.source_manager,
+            &app.browser_source,
+            frame,
+        );
+        assert_eq!(composed.width, rivulet_core::LIVE_CANVAS_WIDTH);
+        assert_eq!(composed.height, rivulet_core::LIVE_CANVAS_HEIGHT);
+        assert_eq!(&composed.data[..4], &[200, 10, 10, 255]);
+    }
+
+    #[test]
+    fn compose_scene_frame_passes_the_capture_through() {
+        let raw = || RawFrame {
+            data: [1u8, 2, 3, 4].repeat(4),
+            width: 2,
+            height: 2,
+        };
+        let mut app = RivuletApp {
+            compose_scene: false,
+            ..RivuletApp::default()
+        };
+        let scene = rivulet_core::Scene::new("Live".to_string());
+        let scene_id = scene.id;
+        app.scenes.add(scene);
+        app.scenes.switch_to(scene_id);
+        let source = app.source_manager.add_source(rivulet_core::Source::new(
+            "Screen".to_string(),
+            rivulet_core::SourceKind::ScreenCapture,
+        ));
+        app.source_manager.bind_source(source, scene_id, None);
+
+        let frame = compose_output_frame(
+            app.compose_scene,
+            &app.scenes,
+            &app.source_manager,
+            &app.browser_source,
+            raw(),
+        );
+        assert_eq!((frame.width, frame.height), (2, 2));
+        assert_eq!(&frame.data[..4], &[1, 2, 3, 4]);
+
+        // Enabled, but the active scene has no visible layer: the capture is
+        // still recorded unchanged.
+        app.compose_scene = true;
+        let empty = rivulet_core::Scene::new("Empty".to_string());
+        let empty_id = empty.id;
+        app.scenes.add(empty);
+        app.scenes.switch_to(empty_id);
+        let frame = compose_output_frame(
+            app.compose_scene,
+            &app.scenes,
+            &app.source_manager,
+            &app.browser_source,
+            raw(),
+        );
+        assert_eq!((frame.width, frame.height), (2, 2));
+        assert_eq!(&frame.data[..4], &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn every_capture_path_submits_through_the_compositor() {
+        let source = include_str!("app.rs");
+        let lines: Vec<&str> = source.lines().collect();
+        let mut pushes = 0;
+        for (index, line) in lines.iter().enumerate() {
+            if !line.trim_start().starts_with(".process_raw_frame(&") {
+                continue;
+            }
+            pushes += 1;
+            let start = index.saturating_sub(20);
+            assert!(
+                lines[start..index]
+                    .iter()
+                    .any(|line| line.contains("compose_output_frame(")),
+                "a capture frame reached the encoder without scene composition at line {}",
+                index + 1
+            );
+        }
+        assert_eq!(pushes, 7, "one encoder push per capture drain");
     }
 }

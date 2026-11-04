@@ -10832,3 +10832,68 @@ fn beta_gate_does_not_require_macos_secrets() {
         "the README criterion must not demand macOS secrets for the beta"
     );
 }
+
+/// Live composition is only worth having if every capture path uses it and the
+/// contract stays documented. This fails if a drain pushes raw frames again, if
+/// the canvas or the empty-scene fallback disappears, or if a doc drops the
+/// section that tells users where the toggle is.
+#[test]
+fn live_scene_composition_reaches_the_output() {
+    let lib = read("rivulet-core/src/lib.rs");
+    assert!(lib.contains("pub mod live_compositor;"));
+    assert!(lib.contains("ComposedFrame"));
+
+    let compositor = read("rivulet-core/src/live_compositor.rs");
+    for marker in [
+        "pub const LIVE_CANVAS_WIDTH: u32 = 1920;",
+        "pub const LIVE_CANVAS_HEIGHT: u32 = 1080;",
+        "pub fn accepts_live_capture",
+        "pub fn compose_scene(",
+        "SourceKind::ScreenCapture | SourceKind::GameCapture | SourceKind::Webcam",
+        "fn scene_without_visible_layers_returns_none",
+    ] {
+        assert!(
+            compositor.contains(marker),
+            "live_compositor.rs must keep: {marker}"
+        );
+    }
+
+    let app = read("rivulet-gui/src/app.rs");
+    assert!(app.contains("fn compose_output_frame("));
+    assert!(app.contains("scene_composition_default"));
+    assert!(app.contains("compose_scene: scene_composition_default()"));
+    assert!(app.contains("#[serde(default = \"scene_composition_default\")]"));
+    let lines: Vec<&str> = app.lines().collect();
+    let mut pushes = 0;
+    for (index, line) in lines.iter().enumerate() {
+        if !line.trim_start().starts_with(".process_raw_frame(&") {
+            continue;
+        }
+        pushes += 1;
+        let start = index.saturating_sub(20);
+        assert!(
+            lines[start..index]
+                .iter()
+                .any(|line| line.contains("compose_output_frame(")),
+            "a capture frame reaches the encoder without composition at app.rs:{}",
+            index + 1
+        );
+    }
+    assert_eq!(pushes, 7, "one encoder push per capture drain");
+
+    let i18n = read("rivulet-core/src/i18n.rs");
+    assert_eq!(i18n.matches("(\"scene_composition_toggle\"").count(), 2);
+    assert_eq!(i18n.matches("(\"scene_composition_hint\"").count(), 2);
+
+    let doc = read("docs/scene-management.md");
+    assert!(doc.contains("## Live composition"));
+    assert!(doc.contains("1920x1080"));
+    assert!(doc.contains("live_scene_composition_reaches_the_output"));
+    let guide = read("docs/user-guide.md");
+    assert!(guide.contains("Szenen-Komposition in Aufnahme und Stream"));
+    assert!(guide.contains("1920x1080"));
+    let readme = read("README.md");
+    assert!(readme.contains("**Live scene composition**"));
+    let changelog = read("CHANGELOG.md");
+    assert!(changelog.contains("live_compositor"));
+}
