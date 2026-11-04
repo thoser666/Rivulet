@@ -630,6 +630,14 @@ unoptimised, so those numbers describe a binary nobody runs; `--write-baseline`
 refuses a debug binary unless `--allow-debug-baseline` marks the profile as a
 throwaway.
 
+Point `--binary` at the executable itself, not at a wrapper script: the sampler
+reads one pid, and a launcher's child is a different process — measuring
+`rivulet.cmd` would report the shell, which looks idle no matter what the
+renderer does. The harness refuses launcher suffixes (`.cmd`, `.bat`, `.sh`,
+`.py`, …) for that reason, and every report carries a `sampler` object (backend,
+sample count, CPU seconds, RSS range) that the schema gate requires before a
+measured report is accepted.
+
 Inspect JSON schema (shipped in W5) — one object with `pipeline`, the echoed
 `config`, and `features`:
 

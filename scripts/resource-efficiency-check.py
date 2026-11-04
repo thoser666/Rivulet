@@ -115,6 +115,7 @@ def _validate_profile(sample):
 
     errors.extend(_validate_optional_fields(name, sample))
     errors.extend(_validate_verdicts(name, sample))
+    errors.extend(_validate_sampler(name, sample))
     errors.extend(_validate_status(name, sample))
     return errors
 
@@ -162,6 +163,41 @@ def _validate_optional_fields(name, sample):
         threads = sample["threads_max"]
         if not isinstance(threads, int) or isinstance(threads, bool) or threads <= 0:
             errors.append(f"{name}: threads_max must be a positive integer")
+    return errors
+
+
+def _validate_sampler(name, sample):
+    """A measured report must be able to prove the sampler saw the process.
+
+    Without this, a harness whose sampler silently stopped reading produces a
+    table of `0.0`s that satisfies every budget: the run looks exceptionally
+    healthy because nothing was measured.
+    """
+    if "verdicts" not in sample:
+        return []
+    sampler = sample.get("sampler")
+    if not isinstance(sampler, dict):
+        return [
+            f"{name}: a measured report needs a `sampler` object proving the "
+            "readings came from the measured process"
+        ]
+    errors = []
+    if not _has_text(sampler.get("backend")):
+        errors.append(f"{name}: sampler.backend must name the OS mechanism used")
+    samples = sampler.get("samples")
+    if not isinstance(samples, int) or isinstance(samples, bool) or samples < 3:
+        errors.append(f"{name}: sampler.samples must be at least 3")
+    if not _is_number(sampler.get("cpu_seconds")) or sampler["cpu_seconds"] <= 0:
+        errors.append(
+            f"{name}: sampler.cpu_seconds must be positive -- the run initialised "
+            "the engine and rendered frames, so a zero span means the sampler was "
+            "not reading it"
+        )
+    if not _is_number(sampler.get("rss_max_mb")) or sampler["rss_max_mb"] <= 0:
+        errors.append(
+            f"{name}: sampler.rss_max_mb must be positive -- a live process always "
+            "has resident memory"
+        )
     return errors
 
 
@@ -237,7 +273,23 @@ def _base_profile(**overrides):
         "p99_frame_time_ms": 5.0,
     }
     profile.update(overrides)
+    if "verdicts" in profile and "sampler" not in profile:
+        # A measured report always carries both: its verdicts are only
+        # trustworthy if the harness can prove it read the process.
+        profile["sampler"] = _live_sampler()
     return profile
+
+
+def _live_sampler():
+    return {
+        "backend": "proc",
+        "samples": 232,
+        "cpu_seconds": 1.25,
+        "preview_cpu_seconds": 0.4,
+        "rss_min_mb": 21.0,
+        "rss_max_mb": 22.5,
+        "threads_max": 14,
+    }
 
 
 def _report(*profiles):
@@ -331,6 +383,36 @@ def run_self_test():
             )
         ),
     )
+
+    # -- a measured report must prove the sampler saw the process ----------
+    no_sampler = _base_profile(
+        status="pass",
+        verdicts=[{"metric": "startup_ms", "status": "pass", "measured": 120.0}],
+    )
+    no_sampler.pop("sampler")
+    expect_error(
+        "measured report without sampler evidence",
+        _report(no_sampler),
+        "sampler",
+    )
+    for field, value in (
+        ("cpu_seconds", 0.0),
+        ("rss_max_mb", 0.0),
+        ("samples", 1),
+        ("backend", None),
+    ):
+        broken = dict(_live_sampler(), **{field: value})
+        expect_error(
+            f"sampler evidence with {field}={value!r}",
+            _report(
+                _base_profile(
+                    status="pass",
+                    verdicts=[{"metric": "startup_ms", "status": "pass", "measured": 1.0}],
+                    sampler=broken,
+                )
+            ),
+            f"sampler.{field}",
+        )
     expect_error(
         "non-positive p99", _report(_base_profile(p99_frame_time_ms=0.0)), "p99_frame_time_ms"
     )

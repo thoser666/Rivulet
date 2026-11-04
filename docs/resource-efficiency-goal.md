@@ -95,6 +95,18 @@ a debug binary's render path is orders of magnitude slower, so a baseline taken
 from one would be the wrong reference for every later run (the harness refuses
 `--write-baseline` from a debug binary unless explicitly allowed).
 
+Trusting the sampler is the whole point, so the report has to justify it. An
+idle process genuinely reads ~0 % CPU and a flat RSS, which means a sampler that
+silently stopped reading looks exactly like a healthy quiet run — every delta is
+zero, every gate passes. Every report therefore carries a `sampler` object
+(backend, sample count, CPU seconds, RSS range) and the run aborts when that
+evidence is impossible: zero resident memory, no CPU time at all across a run
+that initialised the engine and rendered frames, or frames rendered with no
+sampled CPU during the preview phase. The schema gate rejects a measured report
+without the object, and `--binary` must be the executable itself — a launcher's
+child is a different pid, so measuring a wrapper would report a shell that looks
+idle while the renderer works.
+
 Deliberately **manual**, because a shared runner cannot produce the number:
 GPU utilisation, the game-side p99 frame-time delta, real capture-backend
 overhead, encoder-specific behaviour, and battery/thermal behaviour on laptop
