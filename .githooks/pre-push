@@ -76,4 +76,36 @@ if [[ "${RIVULET_PRE_PUSH_FAST_TESTS:-}" != "0" ]]; then
   fi
 fi
 
+# ── Workflow lint ────────────────────────────────────────────────────────
+# The Lints job runs actionlint, which runs shellcheck over every `run:` block.
+# That is the check a literal backtick in a single-quoted shell string trips
+# (SC2016), and it is not something `cargo fmt` or clippy can see. The hook does
+# not download tools, so it lints only when actionlint is installed; without a
+# shell linter, actionlint still checks the workflow schema but not the scripts.
+if command -v actionlint >/dev/null 2>&1; then
+  echo "pre-push: actionlint"
+  # The files are passed explicitly: `actionlint` with no arguments can block on
+  # stdin in an interactive shell, which would hang the push with no output.
+  workflows=()
+  while IFS= read -r workflow; do
+    workflows+=("$workflow")
+  done < <(git ls-files '.github/workflows/*.yml' '.github/workflows/*.yaml')
+  if [[ "${#workflows[@]}" -gt 0 ]]; then
+    actionlint_flags=(-color)
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*)
+        # actionlint pipes every `run:` block to shellcheck. On Windows that
+        # deadlocks once a block outgrows the anonymous-pipe buffer: the ~6 KB
+        # block in pat-expiry-guard.yml hangs the push forever. The workflow
+        # schema is still linted here, and the run blocks are still shellchecked
+        # by the Linux Lints job (which is why this only skips the integration).
+        actionlint_flags+=(-shellcheck=)
+        ;;
+    esac
+    actionlint "${actionlint_flags[@]}" "${workflows[@]}"
+  fi
+else
+  echo "pre-push: actionlint not found — skipping workflow lint (CI Lints runs it)"
+fi
+
 echo "pre-push: all checks passed"

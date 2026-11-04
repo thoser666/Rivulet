@@ -24,6 +24,7 @@ const WORKFLOWS: &[&str] = &[
     "obs-upstream.yml",
     "pat-expiry-guard.yml",
     "release.yml",
+    "reproducible-build.yml",
     "ruleset-guard.yml",
     "scorecard.yml",
     "security.yml",
@@ -7569,22 +7570,26 @@ fn build_package_artifacts_have_platform_unique_basenames() {
 
     // Each platform's stage step must create its qualified copy from the
     // shared rivulet-gui build (packaging steps keep reading the bare name).
-    let linux_stage = build_package
-        .split("Stage binary (Linux)")
-        .nth(1)
-        .unwrap_or_default();
-    let macos_stage = build_package
-        .split("Stage binary (macOS)")
-        .nth(1)
-        .unwrap_or_default();
+    // Since issue #288 the copy is made by `scripts/stage-release-payload.sh`,
+    // which the release build and the rebuild-and-compare job both call -- the
+    // collision guarantee moved with it, so it is pinned there.
     assert!(
-        linux_stage.contains("cp staging/rivulet-gui staging/rivulet-linux-x86_64-gui"),
-        "the Linux stage step must create the platform-qualified upload copy"
+        build_package.contains("bash scripts/stage-release-payload.sh"),
+        "build-package.yml must stage through the shared staging script"
     );
+    let staging_script = read("scripts/stage-release-payload.sh");
     assert!(
-        macos_stage.contains("cp staging/rivulet-gui staging/rivulet-macos-aarch64-gui"),
-        "the macOS stage step must create the platform-qualified upload copy"
+        staging_script
+            .contains("cp \"$staging/rivulet-gui\" \"$staging/rivulet-$platform-$arch-gui\""),
+        "the Linux/macOS stage must create the platform-qualified upload copy"
     );
+    for qualified in ["rivulet-linux-x86_64-gui", "rivulet-macos-aarch64-gui"] {
+        assert!(
+            staging_script.contains(qualified),
+            "the staging self-test must pin the qualified name {qualified}, \
+             otherwise a rename would only surface on a release"
+        );
+    }
 
     // Windows bare names are already unique (exe suffixes), and the Windows
     // stage renames the launcher to rivulet.exe — but pin the exe uploads
@@ -10252,6 +10257,303 @@ fn resource_metrics_gate_measures_the_binary_and_gates_a_baseline() {
     assert!(
         changelog.contains("feat(m9): **the resource-efficiency targets are measured by CI now"),
         "CHANGELOG must record the resource-metrics delivery"
+    );
+}
+
+#[test]
+fn release_rebuild_and_compare_is_pinned_to_the_release_workflow() {
+    // Issue #288 (M7 F7-M7-001): "reproducible builds" used to be a claim in
+    // the docs. The claim is only a guarantee if a job keeps making it, so this
+    // guard pins the wiring: two builds of the same ref on two runners, one
+    // comparison of the staged payload, and one shared recipe for the release
+    // build and the rebuild.
+    //
+    // Normalise line endings before any multi-line slice: a Windows checkout is
+    // CRLF, so a `\n`-based needle would miss there while passing locally.
+    let rebuild = read(".github/workflows/reproducible-build.yml").replace("\r\n", "\n");
+    let release = read(".github/workflows/release.yml").replace("\r\n", "\n");
+    let build_package = read(".github/workflows/build-package.yml").replace("\r\n", "\n");
+
+    // 1. Called by the release, and dispatchable so it can be exercised on
+    //    develop before a release depends on it.
+    for required in [
+        "workflow_call:",
+        "workflow_dispatch:",
+        "on:\n  workflow_call:",
+    ] {
+        assert!(
+            rebuild.contains(required),
+            "reproducible-build.yml must stay callable and dispatchable: missing {required}"
+        );
+    }
+
+    // 2. The same ref is built twice, per platform, on separate runners: a
+    //    second build on the *same* machine would share every cache and prove
+    //    nothing about an independent rebuild.
+    for required in [
+        "        platform: [linux, windows, macos]",
+        "        run: [a, b]",
+        "    runs-on: ${{ matrix.os }}",
+        "ref: ${{ inputs.ref }}",
+    ] {
+        assert!(
+            rebuild.contains(required),
+            "the rebuild matrix must build every release platform twice on fresh runners: missing {required}"
+        );
+    }
+
+    // 3. The comparison is the gate and it must report: divergence names the
+    //    file in the job summary, and a missing fingerprint fails instead of
+    //    silently skipping a platform.
+    for required in [
+        "  compare:",
+        "    needs: rebuild",
+        "reproducible-build.py compare",
+        "fingerprints/fingerprint-$platform-a.json",
+        "fingerprints/fingerprint-$platform-b.json",
+        "--summary",
+        "\"$GITHUB_STEP_SUMMARY\"",
+        "pattern: fingerprint-*",
+        "merge-multiple: true",
+        "if-no-files-found: error",
+        "exit \"$severity\"",
+    ] {
+        assert!(
+            rebuild.contains(required),
+            "the compare job must consume and publish the fingerprints: missing {required}"
+        );
+    }
+    // All six artifacts are downloaded with `merge-multiple: true`, so a shared
+    // file name would collapse them into one file and five rebuilds would never
+    // be compared. The produced name must be the one the compare job reads.
+    assert!(
+        rebuild.contains("--out \"fingerprint-${{ matrix.platform }}-${{ matrix.run }}.json\"")
+            && rebuild.contains("path: fingerprint-${{ matrix.platform }}-${{ matrix.run }}.json"),
+        "each rebuild must fingerprint into a platform- and run-unique file, otherwise \
+         `merge-multiple: true` overwrites five of the six fingerprints"
+    );
+    // One platform's divergence must not hide the other verdicts.
+    assert!(
+        rebuild.contains("set -uo pipefail"),
+        "the compare loop must keep running after a divergence so every platform is reported; \
+         `set -e` would stop at the first failing platform"
+    );
+
+    // 4. It rebuilds exactly the targets the release builds. A stale target
+    //    list would compare a channel nobody publishes.
+    let mut targets = 0;
+    for target in [
+        "x86_64-unknown-linux-gnu",
+        "x86_64-pc-windows-msvc",
+        "aarch64-apple-darwin",
+    ] {
+        assert!(
+            release.contains(target),
+            "release.yml no longer builds {target}; update the rebuild matrix with it"
+        );
+        if rebuild.contains(target) {
+            targets += 1;
+        }
+    }
+    assert_eq!(
+        targets, 3,
+        "the rebuild must cover every release target; otherwise a channel is never checked"
+    );
+
+    // 5. One recipe, two consumers. If the rebuild re-implemented the flags or
+    //    the staging layout, a green result would describe a build nobody ships.
+    for (path, workflow) in [
+        ("build-package.yml", &build_package),
+        ("reproducible-build.yml", &rebuild),
+    ] {
+        let env_step = workflow
+            .find("bash scripts/release-build-env.sh")
+            .unwrap_or_else(|| panic!("{path} must derive the deterministic build inputs"));
+        let build = workflow
+            .find("cargo build --release --package rivulet-gui")
+            .unwrap_or_else(|| panic!("{path} must build the release binaries"));
+        let stage = workflow
+            .find("bash scripts/stage-release-payload.sh")
+            .unwrap_or_else(|| panic!("{path} must stage the payload with the shared script"));
+        assert!(
+            env_step < build,
+            "{path} must export the deterministic build inputs before `cargo build`, \
+             otherwise the build is not normalized"
+        );
+        assert!(build < stage, "{path} must stage after the build");
+    }
+    // The inline copies this replaced must not come back: a second definition of
+    // the layout is exactly what makes a green comparison meaningless.
+    for forbidden in [
+        "cp target/${{ inputs.target }}/release/rivulet-gui staging/",
+        "strip staging/rivulet-gui",
+        "Copy-Item \"target/${{ inputs.target }}/release/rivulet-gui.exe\"",
+    ] {
+        assert!(
+            !build_package.contains(forbidden),
+            "build-package.yml must stage through scripts/stage-release-payload.sh, found {forbidden}"
+        );
+    }
+
+    // 6. The release wires the job, and publishing must not wait for it: the
+    //    alpha channel publishes on every qualifying push, and a brand-new gate
+    //    must report loudly without retroactively blocking a built release.
+    assert!(
+        release.contains("uses: ./.github/workflows/reproducible-build.yml"),
+        "release.yml must call the rebuild-and-compare workflow"
+    );
+    assert!(
+        release.contains("ref: ${{ needs.version.outputs.release_branch }}"),
+        "the rebuild must be pinned to the release branch that was published, \
+         not to a moving ref"
+    );
+    let github_release = &release[release
+        .find("  github_release:")
+        .expect("release.yml must keep the GitHub release job")..];
+    let needs = github_release
+        .lines()
+        .find(|line| line.trim_start().starts_with("needs:"))
+        .expect("the GitHub release job must declare its needs");
+    assert!(
+        !needs.contains("reproducible"),
+        "the rebuild must not gate publishing (issue #288: report, do not block), found {needs}"
+    );
+    let reproducible = &release[release
+        .find("  reproducible:")
+        .expect("release.yml must declare the reproducible job")..];
+    let rebuild_needs = reproducible
+        .lines()
+        .find(|line| line.trim_start().starts_with("needs:"))
+        .expect("the reproducible job must build after the release build");
+    for required in ["check", "version", "build"] {
+        assert!(
+            rebuild_needs.contains(required),
+            "the rebuild must run after {required}, found {rebuild_needs}"
+        );
+    }
+
+    // 7. The scripts' own guarantees are regression-tested on every push
+    //    instead of first being exercised on a release.
+    let ci = read(".github/workflows/ci.yml").replace("\r\n", "\n");
+    for required in [
+        "python3 scripts/reproducible-build.py --self-test",
+        "bash scripts/release-build-env.sh --self-test",
+        "bash scripts/stage-release-payload.sh --self-test",
+    ] {
+        assert!(
+            ci.contains(required),
+            "ci.yml must run the self-test that keeps this gate honest: missing {required}"
+        );
+    }
+    // A literal backtick inside a single-quoted shell string reads like command
+    // substitution (SC2016) and fails the Lints job; linting the hook in CI is
+    // what keeps that class of mistake out of the workflow `run:` blocks too.
+    assert!(
+        ci.contains(".githooks/pre-push"),
+        "the Lints job must shellcheck .githooks/pre-push: the hook is bash and a \
+         syntax error there disables every local pre-push check without a message"
+    );
+
+    // 8. The tool must keep the three buckets, the comparability fields and the
+    //    refusal to call "nothing measured" a pass.
+    let tool = read("scripts/reproducible-build.py");
+    for required in [
+        "CONTAINER_SUFFIXES",
+        "METADATA_NAMES",
+        "COMPARABLE_FIELDS",
+        "NOT_COMPARABLE",
+        "def render_summary",
+        "def _exit_code",
+        "SOURCE_DATE_EPOCH",
+        "no payload files",
+    ] {
+        assert!(
+            tool.contains(required),
+            "reproducible-build.py must keep {required} -- without it a divergence, a documented drift and an unmeasured pair become the same report"
+        );
+    }
+    let env_script = read("scripts/release-build-env.sh");
+    for required in [
+        "--remap-path-prefix",
+        "SOURCE_DATE_EPOCH",
+        "/Brepro",
+        "/DEBUG:NONE",
+        "cygpath",
+    ] {
+        assert!(
+            env_script.contains(required),
+            "release-build-env.sh must keep {required}; a build that is not normalized \
+             would make the comparison fail for reasons nobody can fix"
+        );
+    }
+
+    // The translation must be gated on the runner OS, not on `cygpath` existing:
+    // Git Bash ships `cygpath` on every Windows runner, so keying off the binary
+    // rewrote the Linux half of the self-test (`/home/runner/...` became
+    // `C:\Program Files\Git\home\...`, whose space the whitespace check refused)
+    // and the Windows build job went red while Linux stayed green.
+    assert!(
+        env_script.contains("to_native \"$runner_os\""),
+        "release-build-env.sh must pass the runner OS into the path translation; \
+         a translation keyed on `cygpath` alone rewrites Linux paths on Windows runners"
+    );
+    assert!(
+        env_script.contains("if [[ \"$runner_os\" == \"Windows\" ]]"),
+        "release-build-env.sh must translate POSIX paths on Windows runners only"
+    );
+
+    // 8b. The linker flags are not enough on Windows: winres writes the
+    //     version-info fields from a `HashMap`, so the resource bytes change
+    //     from build to build even with /Brepro (measured: 115 differing bytes,
+    //     with the StringFileInfo entries in a different order). The crate must
+    //     therefore generate a fixed-order resource file itself.
+    let gui_build = read("rivulet-gui/build.rs");
+    assert!(
+        gui_build.contains("set_resource_file"),
+        "rivulet-gui/build.rs must compile a generated, fixed-order resource file; \
+         `WindowsResource::new()` + `set_icon` is nondeterministic (winres writes its \
+         `HashMap`s in random order, issue #288)"
+    );
+    assert!(
+        !gui_build.contains("set_icon("),
+        "rivulet-gui/build.rs must not go back to `set_icon`, which makes the Windows \
+         payload differ between two builds of the same commit"
+    );
+
+    // 9. The Windows runner executes these very scripts through Git Bash; a
+    //    CRLF checkout turns `set -euo pipefail` into a syntax error, so the
+    //    line-ending policy is part of the gate, not a formatting preference.
+    let attributes = read(".gitattributes");
+    for required in [
+        "*.sh text eol=lf",
+        "*.py text eol=lf",
+        ".githooks/* text eol=lf",
+    ] {
+        assert!(
+            attributes.contains(required),
+            ".gitattributes must keep `{required}`: the Windows runner runs the \
+             deterministic-build and staging scripts through Git Bash, and a CRLF \
+             checkout breaks them there while Linux CI stays green"
+        );
+    }
+
+    // 10. Docs and changelog stay attached to the delivery.
+    let platforms = read("docs/release-platforms.md");
+    for required in [
+        "reproducible-build.yml",
+        "payload",
+        "container",
+        "not comparable",
+    ] {
+        assert!(
+            platforms.contains(required),
+            "docs/release-platforms.md must document the rebuild-and-compare job: missing {required}"
+        );
+    }
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        changelog.contains("reproducible"),
+        "CHANGELOG.md must record the rebuild-and-compare delivery"
     );
 }
 

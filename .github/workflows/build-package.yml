@@ -103,48 +103,35 @@ jobs:
           echo "::error::brew install failed after 3 attempts - see the log above for the failing bottle"
           exit 1
 
+      - name: Derive deterministic build inputs
+        # Issue #288: the same recipe the rebuild-and-compare job uses. The
+        # ci_pinning guard fails if either workflow stops calling it, because a
+        # rebuild that measures a different recipe proves nothing about the
+        # artefact that ships.
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/release-build-env.sh | tee -a "$GITHUB_ENV"
+
       - name: Build release binary
         run: cargo build --release --package rivulet-gui --package rivulet-launcher --package rivulet-updater --target ${{ inputs.target }}
 
       # ------------------------------------------------------------------
       # PACKAGING (per platform)
       # ------------------------------------------------------------------
-      - name: Stage binary (Linux)
-        if: runner.os == 'Linux'
+      - name: Stage release payload
+        # Shared with reproducible-build.yml (issue #288) so the packaged
+        # input, the bare-binary asset and the reproducibility fingerprint are
+        # always the same files. This replaced three inline per-OS copies of
+        # the layout below; the platform-qualified copy exists because Linux
+        # and macOS both produce `rivulet-gui`, and the release job downloads
+        # all platform artifacts with `merge-multiple: true`, where identical
+        # names collapse into ONE asset (observed on alpha.138: SHA256SUMS
+        # listed `rivulet-gui` exactly once).
         shell: bash
         run: |
-          mkdir -p staging
-          cp target/${{ inputs.target }}/release/rivulet-gui staging/
-          strip staging/rivulet-gui
-          # Platform-qualified copy for the bare-binary upload: Linux and macOS
-          # would both upload a file named "rivulet-gui", and the release job's
-          # actions/download-artifact (merge-multiple: true) collapses same-
-          # named files from different artifacts into ONE release asset,
-          # silently dropping one platform's binary (observed on alpha.138,
-          # where SHA256SUMS listed "rivulet-gui" exactly once). The packaging
-          # steps below keep reading staging/rivulet-gui; only the upload list
-          # references the qualified copy.
-          cp staging/rivulet-gui staging/rivulet-linux-x86_64-gui
-
-      - name: Stage binary (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          mkdir -p staging
-          cp target/${{ inputs.target }}/release/rivulet-gui staging/
-          strip staging/rivulet-gui
-          # Platform-qualified upload copy (see the Linux stage step for the
-          # merge-multiple collision rationale).
-          cp staging/rivulet-gui staging/rivulet-macos-aarch64-gui
-
-      - name: Stage binary (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path staging | Out-Null
-          Copy-Item "target/${{ inputs.target }}/release/rivulet-gui.exe" staging/rivulet-gui.exe -Force
-          Copy-Item "target/${{ inputs.target }}/release/rivulet-launcher.exe" staging/rivulet.exe -Force
-          Copy-Item "target/${{ inputs.target }}/release/rivulet-updater.exe" staging/rivulet-updater.exe -Force
+          set -euo pipefail
+          bash scripts/stage-release-payload.sh --target "${{ inputs.target }}" --staging staging
 
       - name: Check code signing secrets
         id: signing

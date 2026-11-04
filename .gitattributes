@@ -3,6 +3,16 @@
 # platform checkout. Binary assets are left untouched.
 *.md text eol=lf
 
+# Shell and Python sources are executed on every OS. The Windows runner runs
+# them through Git Bash (e.g. `scripts/stage-release-payload.sh` stages the
+# Windows payload too), and a CRLF checkout makes `set -euo pipefail` a syntax
+# error there. They must therefore be LF in the working copy on every checkout,
+# not only in the repository. The pre-push hook is bash as well, but has no
+# suffix, so it needs its own entry.
+*.sh text eol=lf
+*.py text eol=lf
+.githooks/* text eol=lf
+
 # Windows command wrappers must stay CRLF on every checkout: cmd.exe parses
 # batch files unreliably with LF-only endings (labels, goto, parenthesised
 # blocks). scripts/run.cmd is exercised by rivulet-core/tests/run_cmd.rs on

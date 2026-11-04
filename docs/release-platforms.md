@@ -291,18 +291,128 @@ Rivulet's first release there.
 
 ## Per-channel determinism
 
-Audited for issue [#190](https://github.com/thoser666/Rivulet/issues/190).
-The distinction matters: **bit-reproducible** means rebuilding the same commit
-yields byte-identical output, **content-deterministic** means the *contents* are
-stable while the container bytes are not (timestamps, archive ordering, tool
-metadata).
+Audited for issue [#190](https://github.com/thoser666/Rivulet/issues/190) and
+turned into a gate for issue [#288](https://github.com/thoser666/Rivulet/issues/288).
+
+Two questions that were previously answered by one sentence:
+
+- **Is the shipped payload bit-reproducible?** Rebuilding the same commit must
+  produce byte-identical executables. This is now measured on every release.
+- **Are the container bytes identical?** Mostly not, and it does not weaken
+  integrity: archives and installers embed mtimes, harvested GUIDs and signature
+  timestamps. Those are listed here as documented drift instead of being
+  pretended away.
+
+*Bit-reproducible* means rebuilding the same commit yields byte-identical
+output. *Content-deterministic* means the *contents* are stable while the
+container bytes are not.
+
+### What the rebuild-and-compare job gates
+
+`.github/workflows/reproducible-build.yml` builds the release ref twice per
+platform, on two separate runners, stages both payloads with
+`scripts/stage-release-payload.sh` (the same script the release build uses) and
+compares the fingerprints produced by `scripts/reproducible-build.py`. Three
+buckets decide the verdict:
+
+| Bucket | Files | A difference means |
+| --- | --- | --- |
+| `payload` | bare executables (`rivulet-gui`, `rivulet.exe`, `rivulet-updater.exe`, the platform-qualified copies) | **the gate fails** — the same source produced different bytes |
+| `container` | `.zip`, `.msi`, `.dmg`, `.AppImage`, `.asc` | reported as documented drift, never gated |
+| `metadata` | `LICENSE`, `SHA256SUMS` | reported, never gated |
+
+A file whose kind is not recognised counts as `payload` on purpose: a newly
+shipped file must be compared, not silently excused.
+
+The comparison is **rebuild-a vs rebuild-b**, not rebuild vs the published
+asset. Code signing rewrites the payload once certificates exist
+([#50](https://github.com/thoser666/Rivulet/issues/50)), so gating against the
+published file would start failing for a reason that has nothing to do with
+determinism. Both release runs consume the same recipe
+(`scripts/release-build-env.sh`) and the same staging step, so a reproducible
+rebuild of the same commit implies a reproducible release build.
+
+A pair that cannot be compared is **not comparable**, not a pass: a differing
+target, `rustc`, `cargo`, GStreamer version, commit, `SOURCE_DATE_EPOCH`, remap
+destination or linker argument fails the job and names the field. A different
+compiler legitimately produces different bytes; calling that either
+"reproducible" or "diverged" would both be wrong.
+
+The job runs in parallel to the GitHub release and is deliberately **not** part
+of its `needs`: the alpha channel publishes on every qualifying `develop` push,
+and a divergence must be reported loudly without retroactively blocking a
+release whose artefacts were already built and verified. It still fails the
+workflow run.
+
+### What is normalized
+
+| Input | Normalized to | Why |
+| --- | --- | --- |
+| checkout path | `--remap-path-prefix=<workspace>=/rivulet` | absolute build paths would otherwise land in panic messages and debug info |
+| Cargo home | `--remap-path-prefix=<cargo home>=/cargo` | every dependency source path is recorded with it |
+| timestamps | `SOURCE_DATE_EPOCH` = the commit timestamp | a build script that embeds a date must see a property of the source, not of the runner's clock |
+| Windows PE header | `-C link-arg=/Brepro -C link-arg=/DEBUG:NONE` | MSVC's linker defaults to a wall-clock `TimeDateStamp` and a PDB signature that changes on every link |
+| Windows version resource | `rivulet-gui/build.rs` writes the `.rc` itself, in a fixed field order | `winres::WindowsResource::new()` + `set_icon` keeps the version strings in a `HashMap` and writes them in iteration order, which is randomized per process |
+| Windows path spelling | POSIX paths from Git Bash are translated with `cygpath`, on Windows runners only | rustc embeds the native spelling (`D:\a\...`), so a remap against `/d/a/...` matches nothing and the build silently stays non-reproducible. Gating on the runner OS rather than on `cygpath` existing is load-bearing: Git Bash ships `cygpath` on every Windows runner, and translating the Linux half of the self-test turned `/home/runner/...` into `C:\Program Files\Git\home\...` |
+
+Measured while building this job (Windows workstation, rustc 1.99.1): two builds
+of the same source three seconds apart differ in 21 bytes — the PE
+`TimeDateStamp` and a synthetic PDB entry. `/Brepro` alone still differs,
+because the PDB signature keeps changing; `/Brepro` + `/DEBUG:NONE` produces
+identical files. The release never publishes a PDB, so dropping the reference
+loses nothing.
+
+The same probe exposed a second source that the linker flags cannot fix: with
+both flags in place, two relinks of a crate that embeds its icon through
+`winres` still differed in 115 bytes, and the diff was the `StringFileInfo`
+entry order (`ProductName` first in one build, `FileVersion` first in the other).
+`winres` stores those fields in `HashMap`s and writes them in iteration order.
+Generating the `.rc` in a fixed order and handing it to
+`set_resource_file` makes three consecutive relinks byte-identical.
+
+### Measured rebuild results per channel
+
+`alpha` is the channel the rebuild job runs on today (it fires on every
+qualifying `develop` push). The table is filled from the job summary of the
+first release that ran it; until then the status is `seed` and **no channel may
+be described as bit-reproducible in release notes**.
+
+| Channel | Targets | Payload result | Documented container drift | Last measured |
+| --- | --- | --- | --- | --- |
+| `alpha` | `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, `aarch64-apple-darwin` | `seed` — first measured run pending (the job lands with this change) | ZIP, MSI, AppImage, DMG and `.asc` by construction (see the table below) | — |
+| beta / rc / stable | same three | not measured yet; they reuse the alpha recipe through `build-package.yml` | same | — |
+
+### Where the checks run
+
+`scripts/reproducible-build.py` has three commands:
+
+```
+scripts/reproducible-build.py fingerprint --dir staging --out fingerprint.json
+scripts/reproducible-build.py compare     --left a.json --right b.json --summary summary.md
+scripts/reproducible-build.py --self-test                          # on every push
+```
+
+`compare` exits `0` (reproducible), `1` (payload divergence) or `2` (not
+comparable — including "no payload was staged at all"). Never `0` for "nothing
+was measured".
+
+`scripts/release-build-env.sh` writes the normalized inputs to `$GITHUB_ENV`,
+`scripts/stage-release-payload.sh` produces the payload layout, and a
+`ci_pinning` guard fails if either workflow stops calling them or if the
+`reproducible` job stops being wired into `release.yml`.
+
+### Channel-by-channel limitations
+
+The `payload`/`container` split above is what the gate acts on; this table
+explains *why* each container is allowed to drift.
 
 | Channel | Status | Why |
 | --- | --- | --- |
-| Portable ZIP (Windows) | content-deterministic | `Compress-Archive` stores each file's mtime, and staging comes from a fresh build, so the container differs per run while the payload does not. |
+| Portable ZIP (Windows) | content-deterministic | `Compress-Archive` stores each file's mtime, so the container differs per run while the payload does not. |
 | MSI (Windows) | content-deterministic | WiX harvests the staging tree with `heat.exe`; harvested components get auto-generated GUIDs and the MSI carries creation timestamps. The two hand-pinned component GUIDs in `rivulet.wxs` do not change that. |
 | AppImage (Linux) | content-deterministic | squashfs records source mtimes; same cause as the ZIP. |
 | DMG (macOS) | content-deterministic | the disk image embeds a creation timestamp in its metadata. |
+| `.asc` signatures (Linux) | non-deterministic | OpenPGP signatures embed the signing time. |
 | Flatpak | content-deterministic | sources are pinned (`generate-cargo-sources.sh`) and flatpak-builder itself is version-pinned, but the build runs without `--reproducible`, so no bit-identity is claimed. |
 | Scoop / Chocolatey / WinGet | deterministic *manifests* | the generators take the SHA-256 from the release's `SHA256SUMS`, so the package metadata is a pure function of the release. The binaries they wrap inherit the ZIP/MSI limits above. |
 | AUR | deterministic *recipe* | `packaging/aur/PKGBUILD` pins `sha256sums` that match the release manifest. The resulting package build is `makepkg`'s determinism, not ours. |
@@ -320,7 +430,7 @@ against the `files:` block of both release workflows, so an asset attached
 outside `release-assets/` cannot silently turn every release into a
 false "present but not listed" failure.
 
-### Where the checks run
+### Where the integrity checks run
 
 `scripts/release-manifest.py` has two halves:
 

@@ -287,7 +287,7 @@ resource report for active creator sessions.
 
 ### M7: Automation and Determinism
 
-**Status: Complete (conditional: two assigned follow-ups)** — spec:
+**Status: Complete (conditional: one assigned follow-up)** — spec:
 [`docs/m7-automation.md`](m7-automation.md); workstream issues #186–#192 on the
 M7 milestone (headless CLI, deterministic clock, golden-frame tests, CI
 rendering, reproducible distribution, inspector, scene-item copy/paste) are all
@@ -333,6 +333,15 @@ Per-workstream status:
   honestly — installers are content-deterministic (timestamps, harvested
   MSI GUIDs), not bit-identical, and `docs/release-platforms.md` says which is
   which and why.
+- **#288 (rebuild-and-compare)** — shipped: `reproducible-build.yml` builds the
+  release ref twice per platform on separate runners and compares the staged
+  payload byte for byte (`scripts/reproducible-build.py`). Payload divergence
+  fails the job and names the file; container/signature drift is reported as
+  documented instead of gated; an uncomparable pair is `not comparable`, never a
+  pass. The normalized inputs come from one script
+  (`scripts/release-build-env.sh`) that the release build uses too, and the
+  staging layout from `scripts/stage-release-payload.sh`, so the comparison
+  measures the artefact that ships.
 - **#191 (inspector)** — shipped: `rivulet inspect`/`record --dry-run` print the
   pipeline the engine would build plus a capability report, and a failing run
   appends a machine-readable `failed` object naming the stage
@@ -349,13 +358,13 @@ Per-workstream status:
 Exit evidence recorded by the completion report: the `Render Smoke` CI job runs
 the shipped binary on a clean runner (byte-identity, PNG signature, batch
 summary, real MP4 container), the `Verify published release` job re-downloads and
-verifies the live release, and the schema guards in `ci_pinning` pin the CLI
-status/exit-code contracts. Two Medium findings are assigned rather than
-silently accepted: F-M7-001 (rebuild-and-compare, so bit-reproducible artifacts
-are not yet *measured*, only audited —
-[#288](https://github.com/thoser666/Rivulet/issues/288)) and F-M7-002
-(`rivulet stream` unblocked but unshipped —
-[#289](https://github.com/thoser666/Rivulet/issues/289)).
+verifies the live release, the rebuild-and-compare job proves two independent
+builds of the same ref produce identical payload bytes, and the schema guards in
+`ci_pinning` pin all three contracts. One Medium finding remains assigned rather
+than silently accepted: F-M7-002 (`rivulet stream` unblocked but unshipped —
+[#289](https://github.com/thoser666/Rivulet/issues/289)). F-M7-001
+(rebuild-and-compare — [#288](https://github.com/thoser666/Rivulet/issues/288))
+is closed by that job.
 
 ### M8: Embeddable Engine and API
 

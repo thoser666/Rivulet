@@ -6,7 +6,7 @@
   `f3f6e8a` (#270), `1ea8671` (#226)
 - Review date (UTC): 2026-10-05
 - Reviewers: Rivulet maintainers (automated evidence review; the
-  rebuild-and-compare and live-ingest gaps are noted below)
+  live-ingest gap is noted below)
 - Returned scope: headless CLI (`record`/`render`/`inspect`), deterministic
   pipeline with an injectable clock, CI-friendly rendering, reproducible
   distribution inputs, deterministic test helpers, scene-item copy/paste
@@ -24,10 +24,12 @@ including the `Render Smoke` job, which runs the *shipped* `rivulet` binary
 end-to-end and asserts byte-identity, the PNG signature, the batch summary, and
 a real MP4 container.
 
-Two items do not have automated evidence and are therefore assigned to explicit
-follow-ups rather than silently accepted: release artifacts are **auditable and
-download-verified** but not yet **proven bit-reproducible by rebuild**, and
-streaming over the CLI was a declared non-goal that is now unblocked.
+One item does not have automated evidence and is therefore assigned to an
+explicit follow-up rather than silently accepted: streaming over the CLI was a
+declared non-goal that is now unblocked. Release reproducibility left the list
+when the rebuild-and-compare job landed (F-M7-001, #288): the release ref is now
+built twice per platform on separate runners and the staged payload is compared
+byte for byte, with container drift documented rather than gated.
 
 - Roadmap checkboxes: **7 / 7 checked** in the `README.md` M7 section; the
   milestone is complete at the roadmap level.
@@ -124,7 +126,7 @@ streaming over the CLI was a declared non-goal that is now unblocked.
 | Logs identify pipeline/input/config/stage without leaking secrets | inspector redacts secrets on the same code path a real run takes; `w5_machine_readable_failure_is_pinned` pins the failing-stage object |
 | Golden-frame, timestamp, reproducibility failures show useful diffs | `m7_deterministic_test_helpers_are_pinned` — first differing pixel coordinates, offending timestamp index, per-job batch status |
 | Exit evidence: clean-machine command transcript | `Render Smoke` on a clean CI runner, plus the post-publish `verify_release` job |
-| Exit evidence: reproducibility comparison | `rivulet render --frame` byte-identity inside `Render Smoke`; artifact-level comparison tracked as F-M7-001 |
+| Exit evidence: reproducibility comparison | `rivulet render --frame` byte-identity inside `Render Smoke`, plus the release rebuild-and-compare job (`reproducible-build.yml`, F-M7-001): two independent builds of the same release ref per platform, gated on payload byte-identity |
 | Exit evidence: machine-readable schema validation | `ci_pinning` schema guards (115→116 tests) plus `scripts/release-manifest.py --self-test` run on every push |
 
 ## Findings and explicit follow-ups
@@ -134,7 +136,7 @@ a follow-up and remains visible in the roadmap/documentation.
 
 | ID | Severity | Area | Description | Tracking issue | Retest condition |
 | --- | --- | --- | --- | --- | --- |
-| F-M7-001 | Medium | Release reproducibility | #190 proves that what CI hashed is what a user downloads (manifest generation + post-publish re-download verification). It does **not** prove that two independent builds of the same commit are byte-identical: there is no rebuild-and-compare job. `docs/release-platforms.md` documents which channels are content-deterministic (normalized timestamps, harvested MSI GUIDs) and which are not bit-identical, but that claim is static, not measured. | [#288](https://github.com/thoser666/Rivulet/issues/288) | A CI job rebuilds a channel on a second runner and fails on manifest divergence; `docs/release-platforms.md` carries measured results per channel |
+| F-M7-001 | Medium | Release reproducibility | **Closed by the rebuild-and-compare job.** #190 proved that what CI hashed is what a user downloads (manifest generation + post-publish re-download verification), but not that two independent builds of the same commit are byte-identical. `reproducible-build.yml` now builds the release ref twice per platform on separate runners, stages both payloads with the release's own staging script and compares fingerprints: payload divergence fails the job, container drift (ZIP/MSI/AppImage/DMG/`.asc`) is documented and reported, and an uncomparable pair is `not comparable` rather than a pass. `docs/release-platforms.md` carries the measured per-channel results, seeded by the first run after the job landed. | [#288](https://github.com/thoser666/Rivulet/issues/288) | Retest condition met: a CI job rebuilds the release on second runners and fails on payload divergence; `docs/release-platforms.md` reports the measured result per channel |
 | F-M7-002 | Medium | CLI surface | Streaming over the CLI was a declared M7 non-goal ("a streaming subcommand is a follow-up once the CLI surface is proven"). The CLI surface is now proven (`record`, `render`, `inspect` merged and pinned), so `rivulet stream` is unblocked but unshipped. | [#289](https://github.com/thoser666/Rivulet/issues/289) | `rivulet stream` ships as binary *and* library with the same status-event/exit-code/dry-run contract as `record` |
 
 Signature verification is deliberately *not* listed as a finding: it is not an
@@ -147,15 +149,15 @@ Critical, or open High findings.
 ## Decision
 
 - [ ] M7 gate passed without conditions.
-- [x] Conditional pass; the remaining findings are Medium/evidence items and
-  explicitly assigned to follow-ups.
+- [x] Conditional pass; the remaining finding is a Medium/evidence item and
+  explicitly assigned to a follow-up.
 - [ ] Failed; release-blocking M7 work remains.
 
-M7 is complete for its functional scope. The milestone must not be used to claim
-bit-reproducible release artifacts (F-M7-001) or headless streaming via the CLI
-(F-M7-002); both remain explicit follow-ups, tracked as
-[#288](https://github.com/thoser666/Rivulet/issues/288) (F-M7-001) and
-[#289](https://github.com/thoser666/Rivulet/issues/289) (F-M7-002).
+M7 is complete for its functional scope. Release reproducibility is no longer a
+claim: the rebuild-and-compare job measures it on every release (F-M7-001,
+[#288](https://github.com/thoser666/Rivulet/issues/288)). The one remaining
+follow-up is headless streaming via the CLI (F-M7-002,
+[#289](https://github.com/thoser666/Rivulet/issues/289)).
 The report is linked from the M7 roadmap section in `README.md`, the M7 spec
 (`docs/m7-automation.md`), and the M7 quality gate in
 `docs/milestone-quality-gates.md`; release notes should reference it.

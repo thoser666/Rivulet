@@ -219,9 +219,12 @@ fn windows_release_packages_use_the_pre_rust_launcher() {
         workflow.contains("--package rivulet-launcher"),
         "Windows release builds must compile the pre-Rust launcher"
     );
+    // Since issue #288 the Windows payload is staged by the script the rebuild
+    // job consumes as well, so the launcher is copied there, not inline.
+    let staging = read("scripts/stage-release-payload.sh");
     assert!(
-        workflow.contains("target/${{ inputs.target }}/release/rivulet-launcher.exe"),
-        "Windows staging must include the launcher binary"
+        staging.contains("copy \"$release/rivulet-launcher.exe\" \"$staging/rivulet.exe\""),
+        "Windows staging must ship the launcher as rivulet.exe"
     );
 
     let portable = read("packaging/windows/build-portable.ps1");

@@ -259,6 +259,24 @@ jobs:
     secrets: inherit
 
   ################################################################
+  # REBUILD & COMPARE (issue #288)
+  #
+  # Builds the same release branch a second (and third) time on fresh
+  # runners and compares the staged payload byte for byte. Deliberately NOT
+  # in `github_release`'s `needs`: the alpha channel publishes on every
+  # qualifying develop push, and a brand-new gate must not retroactively
+  # block publishing. A divergence still fails this job, and therefore the
+  # workflow run, and shows up in the job summary with the diverging file.
+  ################################################################
+  reproducible:
+    name: Rebuild & Compare
+    needs: [check, version, build]
+    if: ${{ needs.check.outputs.should_release == 'true' }}
+    uses: ./.github/workflows/reproducible-build.yml
+    with:
+      ref: ${{ needs.version.outputs.release_branch }}
+
+  ################################################################
   # FORMAL GITHUB RELEASE (Alpha)
   ################################################################
   github_release:
