@@ -139,6 +139,16 @@ does not gate — the run records its numbers, says `seed` in the report, and th
 next deliberate run commits the baseline. That is how the first measurement of
 a new runner gets recorded without turning its noise into a red build.
 
+`ci-linux` is measured (2026-11-04, `ubuntu-latest`, release build, seed state
+replaced from the job's own artifact). Its idle CPU, RSS slope and memory growth
+are honestly `0.0`: an idle recorder does nothing, so the absolute targets are
+the bound that matters there, and the `sampler` evidence in each run is what
+keeps that zero honest. The gating numbers on this runner are startup
+(≈0.4 s) and headless p99 frame time (≈84 ms for the 720p workload) — both are
+compared with their own baseline, so a shared-runner outlier within the budget
+is noise rather than a red build, while a real doubling of the render cost fails
+the run and names itself.
+
 A regression names the metric, the baseline and the delta, and the report is
 uploaded as a CI artifact so the trend stays visible: a snapshot with no history
 would let a slow drift pass one run at a time.

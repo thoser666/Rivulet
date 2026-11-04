@@ -1,4 +1,15 @@
 ## [Unreleased]
+- ci(m9): **the `ci-linux` resource baseline is measured now, not a seed.**
+  The seed recorded no numbers, so every run was `blocked` and nothing gated.
+  `scripts/resource-metrics-baseline/ci-linux.json` now carries the numbers from
+  the first green Resource Metrics run on `ubuntu-latest` (release build, 60 s
+  idle, 60 frames of the 720p workload): startup ≈411 ms, p99 frame time
+  ≈84 ms, and genuinely `0.0` idle CPU / RSS slope / memory growth — an idle
+  recorder does nothing, which is why the absolute targets (2 % CPU, 4 MiB/min,
+  64 MiB growth) are the real bound and the report's `sampler` evidence is what
+  keeps that zero honest. From now on a change that makes steady-state
+  footprint or frame cost worse fails the required `CI` check with the metric,
+  baseline, delta and allowance in the log.
 - fix(m9): **the resource report proves the sampler read the measured process,
   and refuses a launcher.** An idle recorder genuinely uses ~0 % CPU and a flat
   RSS, so a sampler that silently stopped reading produces a table of `0.0`s
