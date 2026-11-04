@@ -206,6 +206,38 @@ tree rules, so they are testable without a window:
 | Persistence | Match mode, component toggle and colour filter are saved with the app settings; the query is not. |
 
 
+## Live composition
+
+The active scene is not only an authoring surface: it is composed into the
+frames that reach the encoder, so recording and streaming show what the scene
+dock says is live. The toggle sits next to **Save scene snapshot** in the
+Scenes view and under the picture in the Live workspace; it is on by default
+and persisted with the settings.
+
+`rivulet-core/src/live_compositor.rs` owns the rule, so it is testable without a
+window:
+
+| Concern | Rule |
+|---|---|
+| Canvas | Every composed frame is 1920x1080, the scene editor's coordinate space. Layer transforms therefore mean the same thing the editor shows, and the encoder sees one stable resolution. |
+| Capture layers | `ScreenCapture`, `GameCapture` and `Webcam` layers receive the picture the capture pipeline just produced, whatever its native size. |
+| Browser layers | Receive the newest browser-source frame (`BrowserSource::latest_frame`). |
+| Other kinds | `Image`, `Text`, `Media`, `Color` and `Audio` keep their stable layout tile until their platform renderers exist ([#217](https://github.com/thoser666/Rivulet/issues/217)); they are never silently blanked. |
+| Empty scene | A scene with no visible layer returns `None` and the raw capture frame is recorded unchanged, so a misconfigured scene cannot black out a show. |
+| Cost | Composition runs on the CPU once per captured frame. Unrotated layers — every live capture and browser layer — take a row-wise nearest-neighbour path instead of the rotation math, and an unrotated 1:1 layer copies rows directly. |
+
+Recording resolution follows the canvas while composition is on: a 1440p
+monitor is composed into 1080p. Turn the toggle off to record the capture's
+native resolution.
+
+Tests: `rivulet-core/src/live_compositor.rs` pins the layer-to-frame mapping,
+the empty-scene fallback, the canvas size and the tile fallback for unsupported
+kinds; `rivulet-core/src/scene_snapshot.rs` compares the axis-aligned fast path
+against the general mapping; `rivulet-gui/src/app.rs` covers the toggle, the
+passthrough and the composed output; the `ci_pinning` guard
+`live_scene_composition_reaches_the_output` fails if the capture paths stop
+going through the compositor or the docs lose this section.
+
 ## Migrating an OBS collection
 
 The OBS scene collection JSON stores each scene with an optional group

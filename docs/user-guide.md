@@ -128,6 +128,28 @@ Der vollständige Ablauf steht im Tutorial
 
 **Ctrl+Z** macht unterstützte Szenenänderungen rückgängig; **Ctrl+Y** stellt sie wieder her. Im Studio Mode bearbeitest du die Preview-Szene und überträgst sie mit **Take** in das Program-Bild.
 
+### Szenen-Komposition in Aufnahme und Stream
+
+Die aktive Szene wird in das Bild komponiert, das aufgenommen und gestreamt
+wird — der Record- und der Stream-Tab zeigen damit dieselbe Szene, die du im
+Scenes-Tab baust.
+
+1. Aktiviere in **Scenes** (neben **Szenen-Snapshot speichern**) oder im
+   **Live**-Workspace unter der Vorschau die Option **Aktive Szene in Aufnahme
+   und Stream senden**. Sie ist standardmäßig an.
+2. Wechsle im Szenen-Dock die Szene — das Bild folgt dem Wechsel, ohne dass du
+   die Aufnahme neu starten musst.
+3. Der Record-Tab zeigt dieselbe Komposition in seiner Vorschau; Aufnahme und
+   Stream teilen sich denselben Encoder-Pfad.
+
+Bildschirm-, Spiel-, Webcam- und Browser-Ebenen liefern echte Pixel; Bild-,
+Text-, Media-, Farb- und Audio-Ebenen erscheinen bis zur Renderer-Anbindung als
+Layout-Kachel. Die Komposition rechnet in der Szenenfläche von 1920x1080:
+Solange sie aktiv ist, zeichnet Rivulet in dieser Auflösung auf — für die native
+Capture-Auflösung die Option ausschalten. Eine Szene ohne sichtbare Ebene ändert
+nichts, dann wird weiterhin das rohe Capture-Bild aufgenommen.
+
+
 ## 6. Live-Vorschau
 
 Die Vorschau zeigt vor der Aufnahme das ausgewählte Capture-Ziel und während der Aufnahme den encodergebundenen Frame-Stream. Der Status unterscheidet zwischen:

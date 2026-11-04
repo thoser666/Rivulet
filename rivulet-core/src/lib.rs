@@ -272,6 +272,9 @@ pub use scene_dock::{
 pub mod scene_snapshot;
 pub use scene_snapshot::{SceneSnapshot, SnapshotFrame, SnapshotLayer};
 
+pub mod live_compositor;
+pub use live_compositor::{compose_scene, ComposedFrame, LIVE_CANVAS_HEIGHT, LIVE_CANVAS_WIDTH};
+
 pub mod render;
 pub use render::{
     render_video, CanvasConfig, RenderConfigError, RenderError, RenderLayerConfig,

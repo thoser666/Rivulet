@@ -229,6 +229,14 @@ fn rasterize_frame(
     if x0 >= x1 || y0 >= y1 {
         return;
     }
+    // Unrotated layers — every live capture and browser layer — take the
+    // row-wise path: one source index per column instead of trigonometry per
+    // pixel. It samples exactly like the general path (floor of the inverse
+    // mapping), just without the rotation terms.
+    if t.rotation == 0.0 {
+        rasterize_axis_aligned(canvas_width, pixels, layer, frame, (x0, y0, x1, y1));
+        return;
+    }
     let scale_x = t.width.max(0.0001) / frame.width as f32;
     let scale_y = t.height.max(0.0001) / frame.height as f32;
     let frame_center_x = frame.width as f32 / 2.0;
@@ -258,6 +266,54 @@ fn rasterize_frame(
                 &source_pixel,
                 source_alpha,
             );
+        }
+    }
+}
+
+/// Rasterize an unrotated layer, row by row.
+///
+/// Kept separate from [`rasterize_frame`] because this is the live path: a
+/// 1080p composition calls it once per frame, so the per-column source index is
+/// computed once and rows are copied instead of blended whenever the source is
+/// fully opaque.
+fn rasterize_axis_aligned(
+    canvas_width: u32,
+    pixels: &mut [u8],
+    layer: &SnapshotLayer,
+    frame: &SnapshotFrame,
+    bounds: (u32, u32, u32, u32),
+) {
+    let (x0, y0, x1, y1) = bounds;
+    let t = &layer.transform;
+    let alpha = t.opacity.clamp(0.0, 1.0);
+    let scale_x = t.width.max(0.0001) / frame.width as f32;
+    let scale_y = t.height.max(0.0001) / frame.height as f32;
+    let columns: Vec<Option<usize>> = (x0..x1)
+        .map(|x| {
+            let sx = ((x as f32 - t.x) / scale_x).floor();
+            (sx >= 0.0 && sx < frame.width as f32).then_some(sx as usize)
+        })
+        .collect();
+    for y in y0..y1 {
+        let sy = ((y as f32 - t.y) / scale_y).floor();
+        if sy < 0.0 || sy >= frame.height as f32 {
+            continue;
+        }
+        let src_row = sy as usize * frame.width as usize;
+        let dst_row = y as usize * canvas_width as usize;
+        for (offset, column) in columns.iter().enumerate() {
+            let Some(sx) = *column else {
+                continue;
+            };
+            let src = (src_row + sx) * 4;
+            let dst = (dst_row + x0 as usize + offset) * 4;
+            let source_pixel: [u8; 4] = frame.rgba[src..src + 4].try_into().unwrap_or([0, 0, 0, 0]);
+            if alpha >= 1.0 && source_pixel[3] == 255 {
+                pixels[dst..dst + 4].copy_from_slice(&source_pixel);
+            } else {
+                let source_alpha = source_pixel[3] as f32 / 255.0 * alpha;
+                blend_rgba(&mut pixels[dst..dst + 4], &source_pixel, source_alpha);
+            }
         }
     }
 }
@@ -422,6 +478,72 @@ mod tests {
         let frame = SnapshotFrame::new(2, 1, vec![255, 0, 0, 255, 0, 255, 0, 255]).unwrap();
         snapshot.attach_frames(&|_| Some(frame.clone()));
         assert_eq!(&snapshot.render_rgba()[..4], &[0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn axis_aligned_path_scales_a_frame_across_the_canvas() {
+        let scene = Scene::new("Live".to_string());
+        let mut sources = SourceManager::new();
+        let id = sources.add_source(Source::new("Cam".to_string(), SourceKind::Webcam));
+        sources.bind_source(id, scene.id, None);
+        let mut snapshot = SceneSnapshot::from_scene(&scene, &sources, "Default", "Default");
+        // 2x2 quadrants: red, green / blue, white.
+        let frame = SnapshotFrame::new(
+            2,
+            2,
+            vec![
+                255, 0, 0, 255, 0, 255, 0, 255, //
+                0, 0, 255, 255, 255, 255, 255, 255,
+            ],
+        )
+        .unwrap();
+        snapshot.attach_frames(&|_| Some(frame.clone()));
+        let pixels = snapshot.render_rgba();
+        let at = |x: u32, y: u32| {
+            let offset = ((y * DEFAULT_CANVAS_WIDTH + x) * 4) as usize;
+            [
+                pixels[offset],
+                pixels[offset + 1],
+                pixels[offset + 2],
+                pixels[offset + 3],
+            ]
+        };
+        assert_eq!(at(0, 0), [255, 0, 0, 255]);
+        assert_eq!(at(DEFAULT_CANVAS_WIDTH - 1, 0), [0, 255, 0, 255]);
+        assert_eq!(at(0, DEFAULT_CANVAS_HEIGHT - 1), [0, 0, 255, 255]);
+        assert_eq!(
+            at(DEFAULT_CANVAS_WIDTH - 1, DEFAULT_CANVAS_HEIGHT - 1),
+            [255, 255, 255, 255]
+        );
+    }
+
+    #[test]
+    fn axis_aligned_path_matches_the_general_path_for_scaled_frames() {
+        // A frame whose transform is a 1:1 copy: the fast path must copy rows
+        // exactly, including pixels the general path would sample identically.
+        let scene = Scene::new("Live".to_string());
+        let mut sources = SourceManager::new();
+        let id = sources.add_source(Source::new("Cam".to_string(), SourceKind::Webcam));
+        sources.bind_source(id, scene.id, Some(Transform::new(0.0, 0.0, 4.0, 4.0)));
+        let mut snapshot = SceneSnapshot::from_scene(&scene, &sources, "Default", "Default");
+        let mut rgba = Vec::new();
+        for i in 0..16u8 {
+            rgba.extend_from_slice(&[i, i, i, 255]);
+        }
+        let frame = SnapshotFrame::new(4, 4, rgba).unwrap();
+        snapshot.attach_frames(&|_| Some(frame.clone()));
+        let pixels = snapshot.render_rgba();
+        for row in 0..4u32 {
+            for column in 0..4u32 {
+                let offset = ((row * DEFAULT_CANVAS_WIDTH + column) * 4) as usize;
+                let expected = (row * 4 + column) as u8;
+                assert_eq!(
+                    &pixels[offset..offset + 4],
+                    &[expected, expected, expected, 255],
+                    "pixel ({column}, {row}) must be copied unchanged"
+                );
+            }
+        }
     }
 
     #[test]

@@ -1,4 +1,19 @@
 ## [Unreleased]
+- feat(m2): **the active scene now reaches recording and streaming instead of
+  stopping at the Scenes tab.** Scenes could be built, switched and exported as
+  a PNG, but the encoder only ever saw the raw capture: a scene with a camera
+  PiP, a browser overlay and transforms had no effect on what viewers got, and
+  the Record and Stream views showed a picture unrelated to the scene dock. The
+  new `rivulet-core::live_compositor` composes the active scene into every frame
+  that enters `process_raw_frame`, so recording and streaming share one
+  composition and the Record preview shows it as well. Output is the scene
+  canvas (1920x1080) while the toggle is on — a persisted, default-on option in
+  the Scenes and Live views — and a scene without a visible layer falls back to
+  the raw capture frame instead of a black canvas. Screen, game, webcam and
+  browser layers carry real pixels; the other kinds keep their layout tile until
+  their renderers exist (#217). Because this path runs per frame, the snapshot
+  rasterizer gained an axis-aligned fast path that samples one source index per
+  column and copies opaque rows instead of running the rotation math per pixel.
 - feat(m7): **release builds are now proven bit-reproducible by a second,
   independent rebuild instead of being described as such.** Every release built
   its artifacts exactly once: `SHA256SUMS` (issue #190) proves the files a user
