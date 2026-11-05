@@ -373,13 +373,13 @@ Generating the `.rc` in a fixed order and handing it to
 ### Measured rebuild results per channel
 
 `alpha` is the channel the rebuild job runs on today (it fires on every
-qualifying `develop` push). The table is filled from the job summary of the
-first release that ran it; until then the status is `seed` and **no channel may
-be described as bit-reproducible in release notes**.
+qualifying `develop` push). The table records what the job actually observed,
+taken from the compare step's summary; **no channel may be described as
+bit-reproducible in release notes** unless its row says `reproducible`.
 
 | Channel | Targets | Payload result | Documented container drift | Last measured |
 | --- | --- | --- | --- | --- |
-| `alpha` | `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, `aarch64-apple-darwin` | `seed` — first measured run pending (the job lands with this change) | ZIP, MSI, AppImage, DMG and `.asc` by construction (see the table below) | — |
+| `alpha` | `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`, `aarch64-apple-darwin` | `reproducible` — 2/2 payload files on Linux (`rivulet-gui`, `rivulet-linux-x86_64-gui`), 3/3 on Windows (`rivulet-gui.exe`, `rivulet-updater.exe`, `rivulet.exe`), 2/2 on macOS (`rivulet-gui`, `rivulet-macos-aarch64-gui`); 0 container and 0 metadata files in the compared set | ZIP, MSI, AppImage, DMG and `.asc` by construction (see the table below) — the rebuild job stages payload only, so it reports `0 container file(s)` rather than proving the drift | `v0.65.0-alpha.323`, 2026-11-05 ([run 41982955049](https://github.com/thoser666/Rivulet/actions/runs/41982955049), job `Compare rebuilds`) |
 | beta / rc / stable | same three | not measured yet; they reuse the alpha recipe through `build-package.yml` | same | — |
 
 ### Where the checks run
