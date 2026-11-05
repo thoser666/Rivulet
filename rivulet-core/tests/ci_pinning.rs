@@ -84,20 +84,20 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v3.0.3",
     ),
     (
-        "github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26",
-        "v4.39.2",
+        "github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066",
+        "v4.39.3",
     ),
     (
-        "github/codeql-action/autobuild@1fc58d04a4d4374f921bdac573c3811c240f9c26",
-        "v4.39.2",
+        "github/codeql-action/autobuild@33d7b85da1a04171e211befe2c739303b9a4c066",
+        "v4.39.3",
     ),
     (
-        "github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26",
-        "v4.39.2",
+        "github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066",
+        "v4.39.3",
     ),
     (
-        "github/codeql-action/upload-sarif@1fc58d04a4d4374f921bdac573c3811c240f9c26",
-        "v4.39.2",
+        "github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066",
+        "v4.39.3",
     ),
     (
         "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
@@ -10518,6 +10518,19 @@ fn release_rebuild_and_compare_is_pinned_to_the_release_workflow() {
         !gui_build.contains("set_icon("),
         "rivulet-gui/build.rs must not go back to `set_icon`, which makes the Windows \
          payload differ between two builds of the same commit"
+    );
+
+    // 8c. The recipe exports SOURCE_DATE_EPOCH for every later step, but
+    //     appimagetool always passes `-mkfs-time 0` to mksquashfs, and
+    //     mksquashfs refuses both at once. The first alpha build after #386
+    //     failed exactly there, on Linux only, after the payload had been
+    //     staged successfully.
+    let appimage = read("packaging/linux/build-appimage.sh");
+    assert!(
+        appimage.contains("unset SOURCE_DATE_EPOCH"),
+        "packaging/linux/build-appimage.sh must unset SOURCE_DATE_EPOCH for the \
+         appimagetool call: the tool passes `-mkfs-time 0` and mksquashfs rejects \
+         an epoch from the environment at the same time"
     );
 
     // 9. The Windows runner executes these very scripts through Git Bash; a

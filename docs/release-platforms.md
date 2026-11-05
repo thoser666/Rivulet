@@ -410,7 +410,7 @@ explains *why* each container is allowed to drift.
 | --- | --- | --- |
 | Portable ZIP (Windows) | content-deterministic | `Compress-Archive` stores each file's mtime, so the container differs per run while the payload does not. |
 | MSI (Windows) | content-deterministic | WiX harvests the staging tree with `heat.exe`; harvested components get auto-generated GUIDs and the MSI carries creation timestamps. The two hand-pinned component GUIDs in `rivulet.wxs` do not change that. |
-| AppImage (Linux) | content-deterministic | squashfs records source mtimes; same cause as the ZIP. |
+| AppImage (Linux) | content-deterministic | squashfs records source mtimes; same cause as the ZIP. `packaging/linux/build-appimage.sh` also drops `SOURCE_DATE_EPOCH` for the `appimagetool` call, because the tool always passes `-mkfs-time 0` to `mksquashfs` and `mksquashfs` rejects an epoch from the environment as well. |
 | DMG (macOS) | content-deterministic | the disk image embeds a creation timestamp in its metadata. |
 | `.asc` signatures (Linux) | non-deterministic | OpenPGP signatures embed the signing time. |
 | Flatpak | content-deterministic | sources are pinned (`generate-cargo-sources.sh`) and flatpak-builder itself is version-pinned, but the build runs without `--reproducible`, so no bit-identity is claimed. |

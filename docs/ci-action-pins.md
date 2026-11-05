@@ -31,10 +31,10 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | `actions/download-artifact` | `v8.0.2` | `9000827ccba6bdab643e8b6fd33ac0654aef8333` | ci.yml, release.yml, reproducible-build.yml |
 | `actions/upload-artifact` | `v7.0.2` | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` | build-package.yml, ci.yml, fuzz-deep.yml, obs-upstream.yml, reproducible-build.yml, scorecard.yml, weekly-promotion.yml |
 | `dtolnay/rust-toolchain` | `stable` | `89b12181fb390509a0842a86cc55eeb8eb928c1d` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, reproducible-build.yml, security.yml |
-| `github/codeql-action/analyze` | `v4.39.2` | `1fc58d04a4d4374f921bdac573c3811c240f9c26` | security.yml |
-| `github/codeql-action/autobuild` | `v4.39.2` | `1fc58d04a4d4374f921bdac573c3811c240f9c26` | security.yml |
-| `github/codeql-action/init` | `v4.39.2` | `1fc58d04a4d4374f921bdac573c3811c240f9c26` | security.yml |
-| `github/codeql-action/upload-sarif` | `v4.39.2` | `1fc58d04a4d4374f921bdac573c3811c240f9c26` | scorecard.yml |
+| `github/codeql-action/analyze` | `v4.39.3` | `33d7b85da1a04171e211befe2c739303b9a4c066` | security.yml |
+| `github/codeql-action/autobuild` | `v4.39.3` | `33d7b85da1a04171e211befe2c739303b9a4c066` | security.yml |
+| `github/codeql-action/init` | `v4.39.3` | `33d7b85da1a04171e211befe2c739303b9a4c066` | security.yml |
+| `github/codeql-action/upload-sarif` | `v4.39.3` | `33d7b85da1a04171e211befe2c739303b9a4c066` | scorecard.yml |
 | `ossf/scorecard-action` | `v2.5.0` | `fa7117db83c52d787ae5a89f350999701505d78e` | scorecard.yml |
 | `signpath/github-action-submit-signing-request` | `v3.0` | `f6d04783b4569d051e0c80105fe66e82819d0092` | build-package.yml |
 | `softprops/action-gh-release` | `v3.0.3` | `efb35369e0ad2afab669f228072c1b0d510eae64` | ci.yml, release.yml |
