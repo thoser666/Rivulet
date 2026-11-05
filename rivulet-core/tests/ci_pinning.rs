@@ -10568,6 +10568,28 @@ fn release_rebuild_and_compare_is_pinned_to_the_release_workflow() {
         changelog.contains("reproducible"),
         "CHANGELOG.md must record the rebuild-and-compare delivery"
     );
+
+    // 10b. The measured-results table must not fall back to a placeholder. A
+    //      row that claims `reproducible` is a user-facing statement (release
+    //      notes are allowed to repeat it), so it has to come from a run that
+    //      was actually made and cited — the alpha row was measured on 2026-11-05.
+    let alpha_row = platforms
+        .lines()
+        .find(|line| line.starts_with("| `alpha`"))
+        .expect("docs/release-platforms.md must carry a results row for the alpha channel");
+    assert!(
+        alpha_row.contains("reproducible"),
+        "the alpha row must record the measured payload result, not a placeholder"
+    );
+    assert!(
+        !alpha_row.contains("seed"),
+        "the alpha row must not fall back to the `seed` placeholder: \
+         v0.65.0-alpha.323 measured every platform as reproducible"
+    );
+    assert!(
+        alpha_row.contains("actions/runs/"),
+        "the alpha row must cite the run it was measured on"
+    );
 }
 
 #[test]

@@ -1,4 +1,12 @@
 ## [Unreleased]
+- docs(m7): **the reproducible-build table now carries a measured result
+  instead of a `seed` placeholder.** `docs/release-platforms.md` promised that
+  no channel would be called bit-reproducible before a real release run
+  measured it. `v0.65.0-alpha.323` is that run: both rebuilds on all three
+  platforms produced identical payload bytes (2/2 files on Linux, 3/3 on
+  Windows, 2/2 on macOS), so the `alpha` row reads `reproducible` and cites the
+  run. The rebuild job stages payload only, so its `0 container file(s)` means
+  it did not prove container drift, not that containers are byte-identical.
 - feat(m2): **the active scene now reaches recording and streaming instead of
   stopping at the Scenes tab.** Scenes could be built, switched and exported as
   a PNG, but the encoder only ever saw the raw capture: a scene with a camera
