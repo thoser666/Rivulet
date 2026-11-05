@@ -1,4 +1,16 @@
 ## [Unreleased]
+- docs(m2): **the path from a scene to the recorded and streamed picture is now
+  a tutorial instead of a reference section.** Live scene composition shipped in
+  #387, but the only walkthrough was three steps inside the user guide: how to
+  add a source to a scene, what the composition toggle does to the recording
+  resolution, and why a scene layer is not the same thing as the recording
+  source were never connected. `docs/scene-to-stream-tutorial.md` walks it end to
+  end — scene, source, layout, the "send the active scene to recording and
+  stream" toggle, a test recording, scene switching and Studio Mode `Take` live,
+  what is still a layout tile (#217), and the usual mistakes (black picture,
+  "only" 1080p, locked layers). The scene tutorial, user guide and README link
+  to it, and a `ci_pinning` guard fails if the tutorial, its required topics or
+  those links disappear.
 - docs(m7): **the reproducible-build table now carries a measured result
   instead of a `seed` placeholder.** `docs/release-platforms.md` promised that
   no channel would be called bit-reproducible before a real release run
