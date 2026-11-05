@@ -94,7 +94,22 @@ done
 export ARCH="$APPIMAGE_ARCH"
 # appimagetool itself is an AppImage and needs FUSE; in CI/containers
 # libfuse2 is usually not installed -> always use --appimage-extract-and-run.
-if "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$OUT"; then
+#
+# `SOURCE_DATE_EPOCH` (exported by scripts/release-build-env.sh since issue #288)
+# must be dropped for this call: appimagetool passes `-mkfs-time 0` to mksquashfs
+# unconditionally, and mksquashfs refuses to accept both at once —
+#
+#   FATAL ERROR: SOURCE_DATE_EPOCH and command line options can't be used at the
+#   same time to set timestamp(s)
+#
+# which failed the Linux alpha build while every other platform stayed green.
+# The AppImage is a container, not part of the payload the rebuild gate compares,
+# so it keeps the timestamps from appimagetool's own `-mkfs-time 0` exactly as
+# before the reproducible-build change.
+if (
+  unset SOURCE_DATE_EPOCH
+  "$APPIMAGETOOL" --appimage-extract-and-run "$APPDIR" "$OUT"
+); then
   echo "AppImage created: $OUT"
 else
   echo "appimagetool (extract-and-run) failed." >&2

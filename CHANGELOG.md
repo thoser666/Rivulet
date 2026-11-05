@@ -15,6 +15,16 @@
   their renderers exist (#217). Because this path runs per frame, the snapshot
   rasterizer gained an axis-aligned fast path that samples one source index per
   column and copies opaque rows instead of running the rotation math per pixel.
+- fix(m7): **the Linux alpha build no longer fails when the reproducible-build
+  recipe exports `SOURCE_DATE_EPOCH`.** `packaging/linux/build-appimage.sh`
+  runs `appimagetool`, which passes `-mkfs-time 0` to `mksquashfs`
+  unconditionally, and `mksquashfs` refuses to take a timestamp from the
+  environment and from the command line at once — the first alpha release after
+  the reproducibility work built Windows and macOS fine and died on Linux with
+  `FATAL ERROR: SOURCE_DATE_EPOCH and command line options can't be used at the
+  same time`. The AppImage is a container, not part of the gated payload, so the
+  builder now unsets the variable for that one call and keeps the timestamps
+  `appimagetool` already sets. A `ci_pinning` guard keeps the unset in place.
 - feat(m7): **release builds are now proven bit-reproducible by a second,
   independent rebuild instead of being described as such.** Every release built
   its artifacts exactly once: `SHA256SUMS` (issue #190) proves the files a user

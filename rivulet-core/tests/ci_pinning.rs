@@ -10520,6 +10520,19 @@ fn release_rebuild_and_compare_is_pinned_to_the_release_workflow() {
          payload differ between two builds of the same commit"
     );
 
+    // 8c. The recipe exports SOURCE_DATE_EPOCH for every later step, but
+    //     appimagetool always passes `-mkfs-time 0` to mksquashfs, and
+    //     mksquashfs refuses both at once. The first alpha build after #386
+    //     failed exactly there, on Linux only, after the payload had been
+    //     staged successfully.
+    let appimage = read("packaging/linux/build-appimage.sh");
+    assert!(
+        appimage.contains("unset SOURCE_DATE_EPOCH"),
+        "packaging/linux/build-appimage.sh must unset SOURCE_DATE_EPOCH for the \
+         appimagetool call: the tool passes `-mkfs-time 0` and mksquashfs rejects \
+         an epoch from the environment at the same time"
+    );
+
     // 9. The Windows runner executes these very scripts through Git Bash; a
     //    CRLF checkout turns `set -euo pipefail` into a syntax error, so the
     //    line-ending policy is part of the gate, not a formatting preference.
