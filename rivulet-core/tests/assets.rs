@@ -250,9 +250,16 @@ fn asset_drift_check_is_wired_up() {
         ci.contains("scripts/generate-assets.sh") && ci.contains("scripts/check-assets.py"),
         "CI must regenerate assets and check them against the committed files"
     );
+    // Issue #391: the pin moved into the tool image's Dockerfile, which CI either
+    // pulls (published digest) or builds; either way the base stays pinned.
+    let dockerfile = read("scripts/assets-tool.Dockerfile");
     assert!(
-        ci.contains(IMAGEMAGICK_DIGEST),
-        "the asset check must pin the ImageMagick image by content digest"
+        dockerfile.contains(IMAGEMAGICK_DIGEST),
+        "the assets tool image must pin the ImageMagick base by content digest"
+    );
+    assert!(
+        ci.contains("scripts/assets-tool-image.py"),
+        "CI must resolve the tool image through scripts/assets-tool-image.py"
     );
     assert!(
         ci.contains("safe.directory"),

@@ -318,6 +318,51 @@ Every change to `develop` passes a review before it lands:
    hygiene expectations for both maintainers live in
    [`docs/clean-desk.md`](docs/clean-desk.md).
 
+### Rebase a pull request branch, do not merge `develop` into it
+
+A `git merge develop` inside a pull request adds a merge commit, and the DCO
+check judges **every** commit on the branch: the merge commit carries no
+`Signed-off-by`, so the whole pull request fails DCO even though the real commit
+is signed off. A merge can also drop a file that exists only on the branch: that
+is how the aggregate step once failed with
+
+```
+python3: can't open file '.../scripts/check-ci-jobs.py': [Errno 2] No such file or directory
+```
+
+although the script was part of the commit. Rebase instead
+(`git rebase origin/develop`) and publish with `git push --force-with-lease`.
+
+**The branding-asset check owns its container.** `Lints` regenerates the
+assets inside a pinned ImageMagick image, because text rasterization depends
+on FreeType. Building that image's tool layer from `snapshot.debian.org` on
+every pull request turned a CDN 503 into a red required check before the
+comparison ran (issue #391). The layer lives in
+`scripts/assets-tool.Dockerfile`: publish it once with the `Assets tool image`
+workflow, pin the printed digest in `scripts/assets-tool-image.txt`, and CI
+pulls it instead of building. The local build path retries with
+30s/120s/300s backoff and falls back to `deb.debian.org`;
+`assets_tool_image_is_pinned_and_survives_a_snapshot_mirror_outage` keeps
+both halves honest.
+
+**When `CI` goes red for infrastructure reasons.** The aggregate `CI` job judges
+the whole `needs` context with
+[`scripts/check-ci-jobs.py`](scripts/check-ci-jobs.py), so it picks up every job
+it depends on and names the one that did not succeed. A job that never got a
+runner reports `abandoned` (or `cancelled` when it had started): GitHub stopped
+it while it was queued, which says nothing about the code under test. `CI` still
+fails — an unverified job must not look green — so the recovery is
+`gh run rerun <run-id> --failed`, not a new push. Before that script existed the
+aggregate compared a hand-maintained list of twelve results and silently ignored
+`render_smoke`, and the log line was the opaque
+`A required CI job finished with: abandoned`.
+
+**A job that runs a repository script must check out the repository**
+**first.** The aggregate job once skipped `actions/checkout` and failed after
+three seconds with the `can't open file` line above while all thirteen
+required jobs were green. `ci_aggregate_checks_out_the_repository_before_running_its_script`
+keeps the checkout ordered before the evaluator.
+
 ---
 
 ## Definition of Done (Acceptable Contributions)

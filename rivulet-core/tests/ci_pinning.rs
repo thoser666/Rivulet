@@ -14,6 +14,7 @@ fn read(rel: &str) -> String {
 }
 
 const WORKFLOWS: &[&str] = &[
+    "assets-tool-image.yml",
     "build-package.yml",
     "ci.yml",
     "dependabot-auto-merge.yml",
@@ -2358,10 +2359,10 @@ fn ossf_silver_gap_closures_are_pinned() {
     }
     assert!(
         ci.contains("name: Statement Coverage (rivulet-core >= 80%)")
-            && ci.contains("bash scripts/coverage-gate.sh")
-            && ci.contains("needs.coverage.result"),
-        "ci.yml must run the coverage gate and aggregate it"
+            && ci.contains("bash scripts/coverage-gate.sh"),
+        "ci.yml must run the coverage gate"
     );
+    assert_aggregate_requires(&ci, "coverage");
     // The coverage job must install the same GStreamer *runtime* plugin
     // packages as the test job: the gate runs the real pipeline/e2e tests
     // under llvm-cov, and without x264enc/flvmux/mp4mux/etc. (dev headers
@@ -3429,10 +3430,7 @@ fn obs_websocket_smoke_is_wired_up() {
         workflow.contains("cargo test -p rivulet-obs-websocket --test client_smoke -- --nocapture"),
         "CI must run the real-client smoke test against the server"
     );
-    assert!(
-        workflow.contains("needs.obs_websocket_smoke.result"),
-        "the CI aggregate must require the OBS WebSocket smoke result"
-    );
+    assert_aggregate_requires(&workflow, "obs_websocket_smoke");
     // The smoke must drive the server over a real loopback TCP connection.
     let smoke = read("rivulet-obs-websocket/tests/client_smoke.rs");
     assert!(smoke.contains("real (non-mock) WebSocket client"));
@@ -3489,10 +3487,7 @@ fn m6_remote_companion_is_wired_up_and_pinned() {
             .contains("cargo test -p rivulet-obs-websocket --test companion_smoke -- --nocapture"),
         "CI must run the companion smoke test against the real server"
     );
-    assert!(
-        workflow.contains("needs.remote_companion_smoke.result"),
-        "the CI aggregate must require the Remote Companion smoke result"
-    );
+    assert_aggregate_requires(&workflow, "remote_companion_smoke");
     // The crate must expose the companion surface the GUI wires up: a config,
     // a running handle, and the widened bind + permission options on the obs
     // server.
@@ -4255,11 +4250,10 @@ fn roadmap_sync_check_keeps_docs_and_milestones_aligned() {
         ci.contains("name: Roadmap-Sync Check")
             && ci.contains("scripts/check-roadmap-sync.py --self-test")
             && ci.contains("python3 scripts/check-roadmap-sync.py")
-            && ci.contains("issues: read")
-            && ci.contains("needs.roadmap_sync.result"),
-        "CI must run the roadmap-sync checker with issues read access and \
-         require it in the aggregate"
+            && ci.contains("issues: read"),
+        "CI must run the roadmap-sync checker with issues read access"
     );
+    assert_aggregate_requires(&ci, "roadmap_sync");
 }
 
 #[test]
@@ -7043,14 +7037,15 @@ fn local_pre_push_hook_mirrors_the_ci_lints_job() {
     );
 }
 
-/// The Lints job's "Check generated assets are up to date" step runs the
-/// pinned ImageMagick container, which runs `apt-get update` on every run.
-/// Fresh-runner network flakes made that fail with exit 100 and no output
-/// (observed repeatedly on ubuntu-latest), so the step retries the container
-/// run and gives apt retry/timeout knobs; a future edit that removes the
-/// retry wrapper would reintroduce the flake, so pin the markers here.
+/// The assets comparison runs inside a container because its output depends on
+/// the pinned ImageMagick/FreeType build, so the step must keep regenerating and
+/// comparing in that image.
+///
+/// The image itself is resolved by `scripts/assets-tool-image.py` (issue #391):
+/// that script owns the pinned publish, the pull and the build backoff, so this
+/// guard pins the container run and the two scripts it executes.
 #[test]
-fn lints_assets_step_retries_the_pinned_container() {
+fn lints_assets_step_runs_the_comparison_in_the_tool_image() {
     let ci = read(".github/workflows/ci.yml");
     let step = ci
         .split("Check generated assets are up to date")
@@ -7058,18 +7053,24 @@ fn lints_assets_step_retries_the_pinned_container() {
         .and_then(|s| s.split("Check status color contrast").next())
         .unwrap_or_default();
     for marker in [
-        "for attempt in 1 2 3",
-        "docker build --network host -t rivulet-assets-check",
-        "dpokidov/imagemagick:7.1.2-12",
-        "python3 git",
+        "python3 scripts/assets-tool-image.py --self-test",
+        "python3 scripts/assets-tool-image.py --resolve",
+        "docker login ghcr.io",
+        "docker run --rm",
         "scripts/generate-assets.sh",
         "scripts/check-assets.py",
     ] {
         assert!(
             step.contains(marker),
-            "assets step must keep the retry wrapper and pinned image ({marker})"
+            "the assets step must regenerate and compare inside the tool image ({marker})"
         );
     }
+    let login = step.find("docker login ghcr.io").expect("GHCR login");
+    let resolve = step.find("--resolve").expect("resolver call");
+    assert!(
+        login < resolve,
+        "the pinned image lives in GHCR, so the job must log in before resolving it"
+    );
 }
 
 /// Bash to run the hook syntax check with. On Unix `bash` on PATH is fine
@@ -10196,7 +10197,6 @@ fn resource_metrics_gate_measures_the_binary_and_gates_a_baseline() {
         // wrong reference for every later run.
         "cargo build --locked --release -p rivulet-cli",
         "--binary target/release/rivulet",
-        "${{ needs.resource_metrics.result }}",
         "name: resource-metrics",
     ] {
         assert!(
@@ -10204,6 +10204,7 @@ fn resource_metrics_gate_measures_the_binary_and_gates_a_baseline() {
             "ci.yml must wire the resource metrics job: missing {required}"
         );
     }
+    assert_aggregate_requires(&ci, "resource_metrics");
     assert!(
         harness.contains("fn baseline_refusal") || harness.contains("def baseline_refusal"),
         "a baseline must not be written from a debug binary without an explicit opt-in"
@@ -11069,4 +11070,254 @@ fn scene_to_stream_tutorial_connects_scene_authoring_to_the_output() {
             );
         }
     }
+}
+
+#[test]
+fn ci_aggregate_evaluates_every_required_job() {
+    // `CI` is a required status check on `develop`, so it has to judge the whole
+    // `needs` context. It used to interpolate one `needs.<job>.result` per line:
+    // `render_smoke` was missing from that list (a failing Render Smoke could
+    // not turn `CI` red) and a job cancelled before it started surfaced only as
+    // "A required CI job finished with: abandoned", naming neither the job nor
+    // the recovery.
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("CI_NEEDS_JSON: ${{ toJSON(needs) }}")
+            && ci.contains("python3 scripts/check-ci-jobs.py"),
+        "the CI aggregate job must evaluate the whole needs context"
+    );
+    assert!(
+        !ci.contains("A required CI job finished with")
+            && !ci.contains("${{ needs.lints.result }}"),
+        "the CI aggregate job must not fall back to the hand-maintained result list"
+    );
+    assert!(
+        ci.contains("scripts/check-ci-jobs.py --self-test"),
+        "CI must run the aggregate evaluator self-test"
+    );
+    assert!(
+        ci.contains("render_smoke, resource_metrics"),
+        "`CI` must still depend on render_smoke; the evaluator now covers it"
+    );
+
+    let checker = read("scripts/check-ci-jobs.py");
+    for marker in [
+        "def evaluate",
+        "sorted(needs)",
+        "--self-test",
+        "abandoned",
+        "gh run rerun",
+    ] {
+        assert!(
+            checker.contains(marker),
+            "check-ci-jobs.py must contain {marker}"
+        );
+    }
+}
+/// The jobs the aggregate `CI` job depends on.
+///
+/// The aggregate used to interpolate one `needs.<job>.result` per line, so the
+/// tests asserted on those strings. It now hands the whole `needs` context to
+/// `scripts/check-ci-jobs.py`; what makes a job gate the check is its membership
+/// in `needs`, which is what these helpers read.
+fn aggregate_needs(ci: &str) -> Vec<String> {
+    let job = ci
+        .split("    name: CI\n")
+        .nth(1)
+        .or_else(|| ci.split("    name: CI\r\n").nth(1))
+        .expect("the CI aggregate job must exist");
+    let line = job
+        .lines()
+        .find(|line| line.trim_start().starts_with("needs: ["))
+        .expect("the CI aggregate job must list its needs");
+    line.trim()
+        .trim_start_matches("needs: [")
+        .trim_end_matches(']')
+        .split(',')
+        .map(|entry| entry.trim().to_string())
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
+
+fn assert_aggregate_requires(ci: &str, job: &str) {
+    let needs = aggregate_needs(ci);
+    assert!(
+        needs.iter().any(|entry| entry == job),
+        "the CI aggregate job must require `{job}` in needs (found: {needs:?})"
+    );
+}
+
+/// A workflow that runs a repository script is only as reliable as the file
+/// being in the checkout.
+///
+/// The aggregate once failed with `python3: can't open file
+/// .../scripts/check-ci-jobs.py` although both the step and the script were
+/// part of the branch: a merge of `develop` into the pull request had dropped
+/// the file. The scan below reads every `python3 scripts/<name>` invocation in
+/// the workflow and checks it against the working tree, so a dropped or renamed
+/// script fails here instead of on a 20-minute CI run.
+#[test]
+fn every_script_the_workflow_runs_exists_in_the_repository() {
+    let ci = read(".github/workflows/ci.yml");
+    let mut checked = 0;
+    for line in ci.lines() {
+        let Some(rest) = line.split("python3 scripts/").nth(1) else {
+            continue;
+        };
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_' || *c == '-')
+            .collect();
+        assert!(!name.is_empty(), "unparseable script reference: {line}");
+        let path = format!("scripts/{name}");
+        assert!(
+            repo_file(&path).is_file(),
+            "the workflow runs {path} but the repository does not contain it"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 1,
+        "the scan found no python3 scripts/<name> invocation in ci.yml"
+    );
+    let aggregate = read("scripts/check-ci-jobs.py");
+    assert!(
+        aggregate.contains("def evaluate("),
+        "the aggregate evaluator lost its evaluation function"
+    );
+}
+
+/// The text of the aggregate `CI` job: its `name: CI` line up to the next job
+/// key at the same indentation.
+fn aggregate_job_body(ci: &str) -> String {
+    let normalised = ci.replace("\r\n", "\n");
+    let header = "    name: CI\n";
+    let start = normalised
+        .find(header)
+        .expect("the CI aggregate job must exist")
+        + header.len();
+    let mut body = String::new();
+    for line in normalised[start..].lines() {
+        let is_next_job = line.starts_with("  ")
+            && !line.starts_with("   ")
+            && !line.trim_start().starts_with('#')
+            && line.trim_end().ends_with(':');
+        if is_next_job {
+            break;
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+    body
+}
+
+/// The aggregate job runs a repository script, so it needs the checkout first.
+///
+/// Without it the job finished in three seconds with `python3: can't open file
+/// .../scripts/check-ci-jobs.py` while all thirteen required jobs were green.
+#[test]
+fn ci_aggregate_checks_out_the_repository_before_running_its_script() {
+    let body = aggregate_job_body(&read(".github/workflows/ci.yml"));
+    let checkout = body.find("actions/checkout").unwrap_or_else(|| {
+        panic!("the CI aggregate job must check out the repository; steps were:\n{body}")
+    });
+    let script = body
+        .find("python3 scripts/check-ci-jobs.py")
+        .expect("the CI aggregate job must run the evaluator");
+    assert!(
+        checkout < script,
+        "the CI aggregate job must check out the repository before running the evaluator"
+    );
+}
+
+/// Issue #391: a Debian mirror outage must not fail the required `Lints` job
+/// before the asset comparison runs.
+///
+/// The assets step built its tool image from `snapshot.debian.org` on every pull
+/// request, so a CDN 503 turned `Lints` (and the aggregate `CI`) red on unrelated
+/// PRs while the comparison itself never executed. The image is now published
+/// once and pinned by digest, the local build retries with real backoff, and the
+/// Dockerfile falls back to `deb.debian.org` — the pinned ImageMagick base keeps
+/// the canonical output identical either way.
+#[test]
+fn assets_tool_image_is_pinned_and_survives_a_snapshot_mirror_outage() {
+    let dockerfile = read("scripts/assets-tool.Dockerfile");
+    assert!(
+        dockerfile.contains("dpokidov/imagemagick:7.1.2-12@sha256:"),
+        "the assets tool image must keep its pinned ImageMagick base"
+    );
+    assert!(
+        dockerfile.contains("snapshot.debian.org"),
+        "the tool layer must try the pinned Debian snapshot first"
+    );
+    assert!(
+        dockerfile.contains("deb.debian.org") && dockerfile.contains("falling back"),
+        "the tool layer must fall back to deb.debian.org and log that it did"
+    );
+    assert!(
+        dockerfile.contains("python3") && dockerfile.contains("git"),
+        "check-assets.py needs python3 and git inside the container"
+    );
+
+    for line in read("scripts/assets-tool-image.txt").lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        assert!(
+            line.contains("@sha256:"),
+            "the assets tool image must be pinned by digest: {line}"
+        );
+    }
+
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("python3 scripts/assets-tool-image.py --self-test")
+            && ci.contains("python3 scripts/assets-tool-image.py --resolve"),
+        "the assets step must self-test and resolve its image through the script"
+    );
+    assert!(
+        !ci.contains("assets image build failed (attempt"),
+        "the retry loop moved into scripts/assets-tool-image.py; its backoff is tested there"
+    );
+    assert!(
+        !ci.contains("rivulet-assets.Dockerfile"),
+        "the tool image must be the committed scripts/assets-tool.Dockerfile"
+    );
+
+    let workflow = read(".github/workflows/assets-tool-image.yml");
+    assert!(
+        workflow.contains("workflow_dispatch"),
+        "publishing the tool image must stay a manual workflow"
+    );
+    assert!(
+        workflow.contains("scripts/assets-tool.Dockerfile") && workflow.contains("docker push"),
+        "the workflow must build and push the shared tool image"
+    );
+    assert!(
+        workflow.contains("RepoDigests") && workflow.contains("scripts/assets-tool-image.txt"),
+        "the workflow must print the digest the pin file expects"
+    );
+    let header = workflow.split("jobs:").next().unwrap_or_default();
+    assert!(
+        !header.contains(": write"),
+        "the publish workflow must keep write scopes job-level; Scorecard fails a          workflow-level write permission as Token-Permissions"
+    );
+    assert!(
+        workflow.contains("check action pins") || workflow.contains("actions/checkout@3d3c42e5"),
+        "the publish workflow must use a pinned checkout action"
+    );
+}
+
+/// `docker pull` and `docker build` print progress on stdout, while `ci.yml`
+/// captures `--resolve` with `$(...)`. Letting that progress through produced a
+/// multi-line "reference" and `docker: invalid reference format` (exit 125) on
+/// the first pull of the published tool image.
+#[test]
+fn assets_tool_resolver_keeps_stdout_for_the_image_reference_only() {
+    let resolver = read("scripts/assets-tool-image.py");
+    assert!(
+        resolver.contains("stdout=sys.stderr"),
+        "docker output must go to stderr so `--resolve` prints only the reference"
+    );
 }
