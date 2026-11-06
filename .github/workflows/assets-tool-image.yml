@@ -6,6 +6,10 @@ name: Assets tool image
 # a red required check before the comparison ever ran. Build and publish the
 # image once here, then pin the digest it prints in
 # `scripts/assets-tool-image.txt`; CI pulls instead of building.
+# `workflow_dispatch` only works once this file is on the default branch, so the
+# publish also runs on a push that touches the tool layer itself: that keeps the
+# image (and the digest a pull request can pin) current without anyone having to
+# remember the manual run.
 on:
   workflow_dispatch:
     inputs:
@@ -13,6 +17,10 @@ on:
         description: Image tag to publish (the digest is printed afterwards)
         required: false
         default: v1
+  push:
+    paths:
+      - scripts/assets-tool.Dockerfile
+      - .github/workflows/assets-tool-image.yml
 
 # Scorecard's Token-Permissions check rejects write scopes at workflow level,
 # so the workflow itself is read-only and the publishing job asks for the one
