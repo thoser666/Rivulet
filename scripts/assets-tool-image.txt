@@ -4,7 +4,7 @@
 # Build it once with the `Assets tool image` workflow (workflow_dispatch) and
 # paste the digest it prints below, for example:
 #
-#   ghcr.io/thoser666/rivulet-assets-tool@sha256:<64 hex chars>
+#   ghcr.io/thoser666/rivulet/assets-tool@sha256:<64 hex chars>
 #
 # While this file only holds comments, CI builds
 # `scripts/assets-tool.Dockerfile` locally with the backoff and mirror fallback

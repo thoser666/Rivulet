@@ -24,7 +24,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TAG: ${{ inputs.tag || 'v1' }}
-      IMAGE: ghcr.io/${{ github.repository }}/assets-tool
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,9 +38,12 @@ jobs:
       - name: Build and push the tool image
         run: |
           set -euo pipefail
-          docker build --network host -f scripts/assets-tool.Dockerfile -t "$IMAGE:$TAG" .
-          docker push "$IMAGE:$TAG"
-          digest="$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:$TAG")"
+          # GHCR rejects upper-case repository names, and github.repository keeps
+          # the owner's spelling, so lower-case it explicitly.
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/assets-tool"
+          docker build --network host -f scripts/assets-tool.Dockerfile -t "$image:$TAG" .
+          docker push "$image:$TAG"
+          digest="$(docker inspect --format='{{index .RepoDigests 0}}' "$image:$TAG")"
           echo "Published $digest"
           echo "Pin this reference (digest only, no tag) in scripts/assets-tool-image.txt:"
           echo "  $digest"
