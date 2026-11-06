@@ -37,7 +37,7 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | `github/codeql-action/upload-sarif` | `v4.39.3` | `33d7b85da1a04171e211befe2c739303b9a4c066` | scorecard.yml |
 | `ossf/scorecard-action` | `v2.5.0` | `fa7117db83c52d787ae5a89f350999701505d78e` | scorecard.yml |
 | `signpath/github-action-submit-signing-request` | `v3.0` | `f6d04783b4569d051e0c80105fe66e82819d0092` | build-package.yml |
-| `softprops/action-gh-release` | `v3.0.3` | `efb35369e0ad2afab669f228072c1b0d510eae64` | ci.yml, release.yml |
+| `softprops/action-gh-release` | `v3.0.4` | `8a0cd651e5b2365bd640854a3fa5dfc70e4875f3` | ci.yml, release.yml |
 <!-- action-pins-table:end -->
 
 > `dtolnay/rust-toolchain` is pinned to the `stable` **branch** (not a release
