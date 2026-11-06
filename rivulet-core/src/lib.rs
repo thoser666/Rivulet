@@ -2840,12 +2840,29 @@ impl RivuletEngine {
             anyhow::bail!("Pipeline is not running");
         }
 
-        let appsrc = match track {
-            AudioTrack::System => self.audio_appsrc_sys.as_ref(),
-            AudioTrack::Microphone => self.audio_appsrc_mic.as_ref(),
+        let (appsrc, track_name, track_enabled) = match track {
+            AudioTrack::System => (
+                self.audio_appsrc_sys.as_ref(),
+                "system",
+                self.audio_sys_enabled,
+            ),
+            AudioTrack::Microphone => (
+                self.audio_appsrc_mic.as_ref(),
+                "microphone",
+                self.audio_mic_enabled,
+            ),
         };
-        let Some(appsrc) = appsrc else {
+        // A disabled track has no branch in the recording pipeline, so dropping
+        // its frames is the documented behaviour. An *enabled* track without an
+        // appsrc is a bug: returning Ok there silently lost a whole track from
+        // the recording (nightly 2026-11-02/06 recorded one stream instead of two).
+        if !track_enabled {
             return Ok(());
+        }
+        let Some(appsrc) = appsrc else {
+            anyhow::bail!(
+                "the {track_name} audio track is enabled but its appsrc is not attached; the recording pipeline has no branch for it"
+            );
         };
 
         push_pcm_buffer(appsrc, frame)
@@ -3975,12 +3992,23 @@ mod tests {
 
         let audio = AudioFrame::new(vec![0.0f32; 4800], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
         for _ in 0..12 {
-            let _ = engine.push_audio_track(&audio, AudioTrack::System);
-            let _ = engine.push_audio_track(&audio, AudioTrack::Microphone);
+            engine
+                .push_audio_track(&audio, AudioTrack::System)
+                .expect("the enabled system track must accept frames");
+            engine
+                .push_audio_track(&audio, AudioTrack::Microphone)
+                .expect("the enabled microphone track must accept frames");
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        engine.stop_recording();
+        // Wait for the background teardown instead of guessing a delay: the file
+        // only carries both tracks once EOS ran through the muxer, and a fixed
+        // 100 ms made this test flaky on loaded runners (nightly 2026-11-02 and
+        // 2026-11-06 reported "found: 1" for otherwise unchanged code).
+        let done = engine
+            .stop_recording_background()
+            .expect("a recording session is active");
+        done.recv_timeout(std::time::Duration::from_secs(30))
+            .expect("the recording teardown should finish");
 
         assert!(path.exists(), "output file should exist");
         let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
