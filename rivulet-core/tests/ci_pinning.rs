@@ -7055,6 +7055,7 @@ fn lints_assets_step_runs_the_comparison_in_the_tool_image() {
     for marker in [
         "python3 scripts/assets-tool-image.py --self-test",
         "python3 scripts/assets-tool-image.py --resolve",
+        "docker login ghcr.io",
         "docker run --rm",
         "scripts/generate-assets.sh",
         "scripts/check-assets.py",
@@ -7064,6 +7065,12 @@ fn lints_assets_step_runs_the_comparison_in_the_tool_image() {
             "the assets step must regenerate and compare inside the tool image ({marker})"
         );
     }
+    let login = step.find("docker login ghcr.io").expect("GHCR login");
+    let resolve = step.find("--resolve").expect("resolver call");
+    assert!(
+        login < resolve,
+        "the pinned image lives in GHCR, so the job must log in before resolving it"
+    );
 }
 
 /// Bash to run the hook syntax check with. On Unix `bash` on PATH is fine

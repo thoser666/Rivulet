@@ -953,7 +953,8 @@ image, so the image is multi-arch (amd64/arm64) and the digest pin guards
 against tag mutation. Pull requests do not build that tool layer from `snapshot.debian.org`: the
 `Assets tool image` workflow (`.github/workflows/assets-tool-image.yml`)
 publishes it once, `scripts/assets-tool-image.py` pulls it by the digest
-pinned in `scripts/assets-tool-image.txt`, and only when nothing is pinned
+pinned in `scripts/assets-tool-image.txt` (the job token carries
+`packages: read` for that), and only when the pull fails
 (or the pull fails) does it build `scripts/assets-tool.Dockerfile` — with
 30s/120s/300s backoff and a `deb.debian.org` fallback, so a mirror outage
 cannot fail the asset comparison before it runs (issue #391).

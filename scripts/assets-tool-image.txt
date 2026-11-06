@@ -2,11 +2,10 @@
 # `scripts/assets-tool-image.py` and `.github/workflows/assets-tool-image.yml`).
 #
 # The `Assets tool image` workflow publishes it (workflow_dispatch, and on a push
-# that changes the tool layer); paste the digest it prints below, for example:
+# that changes the tool layer). CI pulls this digest instead of building the tool
+# layer, so the asset check needs no apt traffic at all; when the pull fails it
+# falls back to `scripts/assets-tool.Dockerfile`, which retries with backoff and
+# uses `deb.debian.org` while snapshot.debian.org is unhealthy (issue #391).
 #
-#   ghcr.io/thoser666/rivulet/assets-tool@sha256:<64 hex chars>
-#
-# While this file only holds comments, CI builds
-# `scripts/assets-tool.Dockerfile` locally with the backoff and mirror fallback
-# the script documents: slower, but a pull request never fails because
-# `snapshot.debian.org` is down (issue #391).
+# Re-run the workflow after changing the Dockerfile and replace the digest below.
+ghcr.io/thoser666/rivulet/assets-tool@sha256:23f4db65673c500875c4e0a2b4d093b2fff371a2e846a47e0d909e1f224f33d3

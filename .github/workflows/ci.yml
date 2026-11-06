@@ -72,6 +72,11 @@ jobs:
   lints:
     name: Lints (Fmt & Clippy)
     runs-on: ubuntu-latest
+    # The assets step pulls the pinned tool image from GHCR (issue #391), which
+    # needs the package read scope on the job token.
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -178,9 +183,18 @@ jobs:
         # otherwise builds `scripts/assets-tool.Dockerfile`, which retries with
         # real backoff (30s/120s/300s) and falls back to deb.debian.org while the
         # ImageMagick base stays pinned.
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
           python3 scripts/assets-tool-image.py --self-test
+          # The pinned image inherits the repository's access; `packages: read`
+          # lets the job token pull it. A failed login is not fatal: the resolver
+          # then builds the tool layer locally.
+          if [ -n "${GHCR_TOKEN:-}" ]; then
+            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin               || echo "ghcr login failed; the resolver will build the tool image locally"
+          fi
           image="$(python3 scripts/assets-tool-image.py --resolve)"
           echo "assets tool image: $image"
           docker run --rm -v "$PWD:/work" -w /work --entrypoint bash             "$image"             -c 'git config --global --add safe.directory /work && bash scripts/generate-assets.sh && python3 scripts/check-assets.py'
