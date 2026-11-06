@@ -124,6 +124,8 @@ Rivulet is **not an OBS clone**. It is an **embeddable, deterministic recording 
 
 Der zentrale [Rivulet User Guide](docs/user-guide.md) erklärt Installation, Navigation,
 Aufnahme, Quellen, Live-Vorschau, Szenen, Streaming, Updates und Fehlerdiagnose.
+Der Weg von der ersten Szene bis zum gesendeten Bild steht im Tutorial
+[Von der Szene zu Aufnahme und Stream](docs/scene-to-stream-tutorial.md).
 
 Für den praktischen Einstieg gibt es die [Checkliste für den ersten Twitch-, YouTube-
 oder Kick-Stream](docs/first-stream-checklist.md) sowie die technische [Stream-Setup-
@@ -299,7 +301,7 @@ and multi-view/projectors. Studio Mode is now implemented with separate Preview/
 - [x] **Studio mode (preview/program)** — separate Preview and Program scene roles with a Take action using Cut/Fade transitions; composition edits target Preview while Program remains live
 - [x] **Multi-view & projectors** — optional scene-grid mode and projector-preview lifecycle controls; native fullscreen second-display routing remains a platform follow-up
 - [x] **Scene snapshot** — one-click export of the active scene or Studio Mode Preview as a PNG layout snapshot. Visible layers, scene-local transforms, opacity, visibility, z-order, collection, and profile are captured deterministically; native source-pixel rendering remains a follow-up when platform source renderers are connected. *Done: `rivulet-core/src/scene_snapshot.rs` + localized Scenes-view export button; unit tests cover ordering, visibility, dimensions, and alpha blending.*
-- [x] **Live scene composition** — the active scene is composited into the frames that reach recording and streaming (toggle in the Scenes and Live views, on by default). Screen, game, webcam and browser layers carry real pixels; image/text/media/color/audio layers keep their layout tile until their renderers land (#217). *Done: `rivulet-core/src/live_compositor.rs`, axis-aligned fast path in `scene_snapshot.rs`, `submit_output_frame` in the GUI, DE/EN i18n, docs and a `ci_pinning` guard.*
+- [x] **Live scene composition** — the active scene is composited into the frames that reach recording and streaming (toggle in the Scenes and Live views, on by default). Screen, game, webcam and browser layers carry real pixels; image/text/media/color/audio layers keep their layout tile until their renderers land (#217). *Done: `rivulet-core/src/live_compositor.rs`, axis-aligned fast path in `scene_snapshot.rs`, `submit_output_frame` in the GUI, DE/EN i18n, docs and a `ci_pinning` guard.* Tutorial: [`docs/scene-to-stream-tutorial.md`](docs/scene-to-stream-tutorial.md).
 
 **Goal:** The composable workspace OBS users expect.
 

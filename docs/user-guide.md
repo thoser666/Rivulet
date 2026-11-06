@@ -60,6 +60,11 @@ Bei schmalen Fenstern kann die Sidebar eingeklappt werden. Alle wichtigen Aktion
 8. Kontrolliere Timer, FPS, Encoderlast und Dateigröße im Statusbereich.
 9. Klicke **Stop Recording**. Die MP4-Datei wird am konfigurierten Ausgabeort gespeichert.
 
+Standardmäßig wird nicht das rohe Capture-Bild aufgenommen, sondern die aktive
+Szene — die Komposition ist an, und die Aufnahme läuft deshalb in 1920×1080. Der
+Schalter dazu und der komplette Weg von der Szene bis ins gesendete Bild stehen
+unter [Szenen-Komposition in Aufnahme und Stream](#szenen-komposition-in-aufnahme-und-stream).
+
 ### Aufnahmequellen
 
 - **Monitor:** vollständiger Bildschirm eines ausgewählten Monitors
@@ -132,7 +137,9 @@ Der vollständige Ablauf steht im Tutorial
 
 Die aktive Szene wird in das Bild komponiert, das aufgenommen und gestreamt
 wird — der Record- und der Stream-Tab zeigen damit dieselbe Szene, die du im
-Scenes-Tab baust.
+Scenes-Tab baust. Der vollständige Weg von der leeren Szene bis zum gesendeten
+Bild steht im Tutorial
+[Von der Szene zu Aufnahme und Stream](scene-to-stream-tutorial.md).
 
 1. Aktiviere in **Scenes** (neben **Szenen-Snapshot speichern**) oder im
    **Live**-Workspace unter der Vorschau die Option **Aktive Szene in Aufnahme

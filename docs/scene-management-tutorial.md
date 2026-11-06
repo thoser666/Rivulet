@@ -34,6 +34,9 @@ live; die aktive Szene trägt die Markierung **Aktiv**.
 > **Tipp:** Quellen (Bildschirm, Fenster, Webcam, Browser, Text, …) fügst du
 > innerhalb der Szene hinzu. Eine Szene ist der Container, nicht die Quelle.
 
+Wie eine Szene anschließend in Aufnahme, Live und Stream ankommt, steht im
+Tutorial [Von der Szene zu Aufnahme und Stream](scene-to-stream-tutorial.md).
+
 ## 2. Einen Ordner bauen
 
 Rivulet hat keinen eigenen Knopf „Neuer Ordner". Ein Ordner ist eine ganz
@@ -220,6 +223,8 @@ verschwiegene Lücke:
 
 ## Weiterlesen
 
+- [Von der Szene zu Aufnahme und Stream](scene-to-stream-tutorial.md) — der Weg
+  von der fertigen Szene bis ins gesendete Bild.
 - [scene-management.md](scene-management.md) — Modell, Garantien, Fehlerfälle
   und die Testabdeckung.
 - [user-guide.md](user-guide.md) — die übrigen Arbeitsabläufe der Anwendung.

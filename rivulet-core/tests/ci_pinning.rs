@@ -80,8 +80,8 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "stable",
     ),
     (
-        "softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64",
-        "v3.0.3",
+        "softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3",
+        "v3.0.4",
     ),
     (
         "github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066",
@@ -10931,4 +10931,142 @@ fn live_scene_composition_reaches_the_output() {
     assert!(readme.contains("**Live scene composition**"));
     let changelog = read("CHANGELOG.md");
     assert!(changelog.contains("live_compositor"));
+}
+
+/// GitHub's heading anchor: lowercase, keep letters and digits, turn spaces into
+/// hyphens and drop the rest of the punctuation (`5. Szenen` -> `5-szenen`).
+fn heading_slug(heading: &str) -> String {
+    let mut slug = String::new();
+    for ch in heading.trim().chars() {
+        if ch.is_alphanumeric() || ch == '-' {
+            slug.extend(ch.to_lowercase());
+        } else if ch == ' ' {
+            slug.push('-');
+        }
+    }
+    slug
+}
+
+#[test]
+fn scene_to_stream_tutorial_connects_scene_authoring_to_the_output() {
+    // The user guide documents the composition toggle and the scene tutorial
+    // documents the scene list, but neither explains the path between them:
+    // that a scene layer is not the recording source, what the toggle does to
+    // the recording resolution and what is still a layout tile. The tutorial is
+    // that path, so its sections and its quoted UI labels are pinned here.
+    let tutorial = read("docs/scene-to-stream-tutorial.md");
+
+    for heading in [
+        "## 1. Eine Szene anlegen",
+        "## 2. Eine Quelle hinzufügen",
+        "## 3. Layout: Reihenfolge, Position, Größe, Zuschnitt",
+        "## 4. Der Schalter",
+        "## 5. Im Aufnehmen-Tab prüfen",
+        "## 6. Live und Stream",
+        "## 7. Was heute noch eine Kachel ist",
+    ] {
+        assert!(
+            tutorial.contains(heading),
+            "docs/scene-to-stream-tutorial.md must keep the section `{heading}`: \
+             it is one of the steps that connect a scene to the sent picture"
+        );
+    }
+
+    // A tutorial that invents labels is worse than none, so every quoted label
+    // has to exist in the i18n catalogue the GUI actually renders.
+    let i18n = read("rivulet-core/src/i18n.rs");
+    for (key, german) in [
+        ("scenes_add", "Szene hinzufügen"),
+        ("composition_add_source", "Quelle hinzufügen"),
+        ("composition_layers", "Ebenen"),
+        ("composition_delete_source", "Quelle löschen"),
+        ("scenes_save_snapshot", "Szenen-Snapshot speichern"),
+        (
+            "scene_composition_toggle",
+            "Aktive Szene in Aufnahme und Stream senden",
+        ),
+        ("studio_mode", "Studio-Modus"),
+        ("studio_take", "Take"),
+    ] {
+        let entry = format!("(\"{key}\", \"{german}\")");
+        assert!(
+            i18n.contains(&entry),
+            "the tutorial quotes `{german}`, so rivulet-core/src/i18n.rs must \
+             still carry it as `{entry}`"
+        );
+        assert!(
+            tutorial.contains(german),
+            "docs/scene-to-stream-tutorial.md must name the UI label `{german}` \
+             for the `{key}` control"
+        );
+    }
+
+    // The canvas size in the prose is the one the compositor uses; a change
+    // there has to reach the tutorial instead of leaving a stale number behind.
+    let compositor = read("rivulet-core/src/live_compositor.rs");
+    assert!(compositor.contains("LIVE_CANVAS_WIDTH: u32 = 1920"));
+    assert!(compositor.contains("LIVE_CANVAS_HEIGHT: u32 = 1080"));
+    assert!(
+        tutorial.contains("1920×1080"),
+        "the tutorial must state the 1920×1080 canvas the compositor works in"
+    );
+    assert!(
+        tutorial.contains("issues/217"),
+        "the tutorial must link the still-tiled source kinds to #217"
+    );
+
+    // The tutorial has to be reachable from every entry point a reader starts
+    // at, otherwise it will rot unnoticed.
+    for entry in [
+        "docs/scene-management-tutorial.md",
+        "docs/user-guide.md",
+        "README.md",
+    ] {
+        assert!(
+            read(entry).contains("scene-to-stream-tutorial.md"),
+            "{entry} must link docs/scene-to-stream-tutorial.md"
+        );
+    }
+    assert!(
+        tutorial.contains("scene-management-tutorial.md"),
+        "the tutorial must link back to the scene-management tutorial"
+    );
+    assert!(
+        tutorial.contains("scene-management.md#live-composition"),
+        "the tutorial must link the technical live-composition section"
+    );
+    assert!(
+        read("CHANGELOG.md").contains("scene-to-stream-tutorial.md"),
+        "CHANGELOG.md must record the tutorial delivery"
+    );
+
+    // Its own relative links must resolve, including the anchor, so a renamed
+    // heading cannot silently break the cross-references.
+    for target in tutorial
+        .split("](")
+        .skip(1)
+        .filter_map(|rest| rest.split(')').next())
+    {
+        if target.starts_with("http") {
+            continue;
+        }
+        let (path, anchor) = match target.split_once('#') {
+            Some((path, anchor)) => (path, Some(anchor)),
+            None => (target, None),
+        };
+        let linked = read(&format!("docs/{path}"));
+        if let Some(anchor) = anchor {
+            let wanted = anchor.to_string();
+            let found = linked
+                .lines()
+                .filter_map(|line| line.strip_prefix('#'))
+                .map(|heading| heading_slug(heading.trim_start_matches('#')))
+                .any(|slug| slug == wanted);
+            assert!(
+                found,
+                "docs/scene-to-stream-tutorial.md links `{target}`, but \
+                 docs/{path} has no heading with the anchor `{anchor}`"
+            );
+        }
+    }
 }
