@@ -118,7 +118,12 @@ def resolve(text, run, log_fn, sleep_fn):
 
 
 def docker(args):
-    return subprocess.run(["docker", *args], check=False).returncode
+    # Docker prints its pull/build progress on stdout, and `--resolve` is read
+    # with `$(...)` in ci.yml: stdout must carry the image reference and nothing
+    # else, or docker run fails with "invalid reference format".
+    return subprocess.run(
+        ["docker", *args], check=False, stdout=sys.stderr, stderr=sys.stderr
+    ).returncode
 
 
 def self_test():

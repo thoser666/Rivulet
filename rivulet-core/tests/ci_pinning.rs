@@ -11308,3 +11308,16 @@ fn assets_tool_image_is_pinned_and_survives_a_snapshot_mirror_outage() {
         "the publish workflow must use a pinned checkout action"
     );
 }
+
+/// `docker pull` and `docker build` print progress on stdout, while `ci.yml`
+/// captures `--resolve` with `$(...)`. Letting that progress through produced a
+/// multi-line "reference" and `docker: invalid reference format` (exit 125) on
+/// the first pull of the published tool image.
+#[test]
+fn assets_tool_resolver_keeps_stdout_for_the_image_reference_only() {
+    let resolver = read("scripts/assets-tool-image.py");
+    assert!(
+        resolver.contains("stdout=sys.stderr"),
+        "docker output must go to stderr so `--resolve` prints only the reference"
+    );
+}
