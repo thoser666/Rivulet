@@ -11291,6 +11291,11 @@ fn assets_tool_image_is_pinned_and_survives_a_snapshot_mirror_outage() {
         workflow.contains("RepoDigests") && workflow.contains("scripts/assets-tool-image.txt"),
         "the workflow must print the digest the pin file expects"
     );
+    let header = workflow.split("jobs:").next().unwrap_or_default();
+    assert!(
+        !header.contains(": write"),
+        "the publish workflow must keep write scopes job-level; Scorecard fails a          workflow-level write permission as Token-Permissions"
+    );
     assert!(
         workflow.contains("check action pins") || workflow.contains("actions/checkout@3d3c42e5"),
         "the publish workflow must use a pinned checkout action"

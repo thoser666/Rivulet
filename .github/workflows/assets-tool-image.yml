@@ -14,14 +14,19 @@ on:
         required: false
         default: v1
 
+# Scorecard's Token-Permissions check rejects write scopes at workflow level,
+# so the workflow itself is read-only and the publishing job asks for the one
+# write scope it needs.
 permissions:
   contents: read
-  packages: write
 
 jobs:
   publish:
     name: Publish assets tool image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     env:
       TAG: ${{ inputs.tag || 'v1' }}
     steps:
