@@ -1,0 +1,48 @@
+name: Assets tool image
+
+# Issue #391: the `Lints` job regenerates the branding assets in a container
+# whose tool layer needs python3 and git. Building that layer from
+# snapshot.debian.org on every pull request turned an unrelated CDN outage into
+# a red required check before the comparison ever ran. Build and publish the
+# image once here, then pin the digest it prints in
+# `scripts/assets-tool-image.txt`; CI pulls instead of building.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Image tag to publish (the digest is printed afterwards)
+        required: false
+        default: v1
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish assets tool image
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || 'v1' }}
+      IMAGE: ghcr.io/${{ github.repository }}/assets-tool
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push the tool image
+        run: |
+          set -euo pipefail
+          docker build --network host -f scripts/assets-tool.Dockerfile -t "$IMAGE:$TAG" .
+          docker push "$IMAGE:$TAG"
+          digest="$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:$TAG")"
+          echo "Published $digest"
+          echo "Pin this reference (digest only, no tag) in scripts/assets-tool-image.txt:"
+          echo "  $digest"
+          echo "$digest" >> "$GITHUB_STEP_SUMMARY"

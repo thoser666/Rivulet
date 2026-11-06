@@ -333,6 +333,18 @@ python3: can't open file '.../scripts/check-ci-jobs.py': [Errno 2] No such file 
 although the script was part of the commit. Rebase instead
 (`git rebase origin/develop`) and publish with `git push --force-with-lease`.
 
+**The branding-asset check owns its container.** `Lints` regenerates the
+assets inside a pinned ImageMagick image, because text rasterization depends
+on FreeType. Building that image's tool layer from `snapshot.debian.org` on
+every pull request turned a CDN 503 into a red required check before the
+comparison ran (issue #391). The layer lives in
+`scripts/assets-tool.Dockerfile`: publish it once with the `Assets tool image`
+workflow, pin the printed digest in `scripts/assets-tool-image.txt`, and CI
+pulls it instead of building. The local build path retries with
+30s/120s/300s backoff and falls back to `deb.debian.org`;
+`assets_tool_image_is_pinned_and_survives_a_snapshot_mirror_outage` keeps
+both halves honest.
+
 **When `CI` goes red for infrastructure reasons.** The aggregate `CI` job judges
 the whole `needs` context with
 [`scripts/check-ci-jobs.py`](scripts/check-ci-jobs.py), so it picks up every job

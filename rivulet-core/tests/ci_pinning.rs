@@ -14,6 +14,7 @@ fn read(rel: &str) -> String {
 }
 
 const WORKFLOWS: &[&str] = &[
+    "assets-tool-image.yml",
     "build-package.yml",
     "ci.yml",
     "dependabot-auto-merge.yml",
@@ -7036,14 +7037,15 @@ fn local_pre_push_hook_mirrors_the_ci_lints_job() {
     );
 }
 
-/// The Lints job's "Check generated assets are up to date" step runs the
-/// pinned ImageMagick container, which runs `apt-get update` on every run.
-/// Fresh-runner network flakes made that fail with exit 100 and no output
-/// (observed repeatedly on ubuntu-latest), so the step retries the container
-/// run and gives apt retry/timeout knobs; a future edit that removes the
-/// retry wrapper would reintroduce the flake, so pin the markers here.
+/// The assets comparison runs inside a container because its output depends on
+/// the pinned ImageMagick/FreeType build, so the step must keep regenerating and
+/// comparing in that image.
+///
+/// The image itself is resolved by `scripts/assets-tool-image.py` (issue #391):
+/// that script owns the pinned publish, the pull and the build backoff, so this
+/// guard pins the container run and the two scripts it executes.
 #[test]
-fn lints_assets_step_retries_the_pinned_container() {
+fn lints_assets_step_runs_the_comparison_in_the_tool_image() {
     let ci = read(".github/workflows/ci.yml");
     let step = ci
         .split("Check generated assets are up to date")
@@ -7051,16 +7053,15 @@ fn lints_assets_step_retries_the_pinned_container() {
         .and_then(|s| s.split("Check status color contrast").next())
         .unwrap_or_default();
     for marker in [
-        "for attempt in 1 2 3",
-        "docker build --network host -t rivulet-assets-check",
-        "dpokidov/imagemagick:7.1.2-12",
-        "python3 git",
+        "python3 scripts/assets-tool-image.py --self-test",
+        "python3 scripts/assets-tool-image.py --resolve",
+        "docker run --rm",
         "scripts/generate-assets.sh",
         "scripts/check-assets.py",
     ] {
         assert!(
             step.contains(marker),
-            "assets step must keep the retry wrapper and pinned image ({marker})"
+            "the assets step must regenerate and compare inside the tool image ({marker})"
         );
     }
 }
@@ -11219,5 +11220,79 @@ fn ci_aggregate_checks_out_the_repository_before_running_its_script() {
     assert!(
         checkout < script,
         "the CI aggregate job must check out the repository before running the evaluator"
+    );
+}
+
+/// Issue #391: a Debian mirror outage must not fail the required `Lints` job
+/// before the asset comparison runs.
+///
+/// The assets step built its tool image from `snapshot.debian.org` on every pull
+/// request, so a CDN 503 turned `Lints` (and the aggregate `CI`) red on unrelated
+/// PRs while the comparison itself never executed. The image is now published
+/// once and pinned by digest, the local build retries with real backoff, and the
+/// Dockerfile falls back to `deb.debian.org` — the pinned ImageMagick base keeps
+/// the canonical output identical either way.
+#[test]
+fn assets_tool_image_is_pinned_and_survives_a_snapshot_mirror_outage() {
+    let dockerfile = read("scripts/assets-tool.Dockerfile");
+    assert!(
+        dockerfile.contains("dpokidov/imagemagick:7.1.2-12@sha256:"),
+        "the assets tool image must keep its pinned ImageMagick base"
+    );
+    assert!(
+        dockerfile.contains("snapshot.debian.org"),
+        "the tool layer must try the pinned Debian snapshot first"
+    );
+    assert!(
+        dockerfile.contains("deb.debian.org") && dockerfile.contains("falling back"),
+        "the tool layer must fall back to deb.debian.org and log that it did"
+    );
+    assert!(
+        dockerfile.contains("python3") && dockerfile.contains("git"),
+        "check-assets.py needs python3 and git inside the container"
+    );
+
+    for line in read("scripts/assets-tool-image.txt").lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        assert!(
+            line.contains("@sha256:"),
+            "the assets tool image must be pinned by digest: {line}"
+        );
+    }
+
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("python3 scripts/assets-tool-image.py --self-test")
+            && ci.contains("python3 scripts/assets-tool-image.py --resolve"),
+        "the assets step must self-test and resolve its image through the script"
+    );
+    assert!(
+        !ci.contains("assets image build failed (attempt"),
+        "the retry loop moved into scripts/assets-tool-image.py; its backoff is tested there"
+    );
+    assert!(
+        !ci.contains("rivulet-assets.Dockerfile"),
+        "the tool image must be the committed scripts/assets-tool.Dockerfile"
+    );
+
+    let workflow = read(".github/workflows/assets-tool-image.yml");
+    assert!(
+        workflow.contains("workflow_dispatch"),
+        "publishing the tool image must stay a manual workflow"
+    );
+    assert!(
+        workflow.contains("scripts/assets-tool.Dockerfile") && workflow.contains("docker push"),
+        "the workflow must build and push the shared tool image"
+    );
+    assert!(
+        workflow.contains("RepoDigests") && workflow.contains("scripts/assets-tool-image.txt"),
+        "the workflow must print the digest the pin file expects"
+    );
+    assert!(
+        workflow.contains("check action pins") || workflow.contains("actions/checkout@3d3c42e5"),
+        "the publish workflow must use a pinned checkout action"
     );
 }

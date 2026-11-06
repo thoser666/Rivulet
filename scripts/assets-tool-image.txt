@@ -1,0 +1,12 @@
+# Image that regenerates and checks the branding assets (see
+# `scripts/assets-tool-image.py` and `.github/workflows/assets-tool-image.yml`).
+#
+# Build it once with the `Assets tool image` workflow (workflow_dispatch) and
+# paste the digest it prints below, for example:
+#
+#   ghcr.io/thoser666/rivulet-assets-tool@sha256:<64 hex chars>
+#
+# While this file only holds comments, CI builds
+# `scripts/assets-tool.Dockerfile` locally with the backoff and mirror fallback
+# the script documents: slower, but a pull request never fails because
+# `snapshot.debian.org` is down (issue #391).
