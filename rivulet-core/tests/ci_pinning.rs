@@ -11178,3 +11178,46 @@ fn every_script_the_workflow_runs_exists_in_the_repository() {
         "the aggregate evaluator lost its evaluation function"
     );
 }
+
+/// The text of the aggregate `CI` job: its `name: CI` line up to the next job
+/// key at the same indentation.
+fn aggregate_job_body(ci: &str) -> String {
+    let normalised = ci.replace("\r\n", "\n");
+    let header = "    name: CI\n";
+    let start = normalised
+        .find(header)
+        .expect("the CI aggregate job must exist")
+        + header.len();
+    let mut body = String::new();
+    for line in normalised[start..].lines() {
+        let is_next_job = line.starts_with("  ")
+            && !line.starts_with("   ")
+            && !line.trim_start().starts_with('#')
+            && line.trim_end().ends_with(':');
+        if is_next_job {
+            break;
+        }
+        body.push_str(line);
+        body.push('\n');
+    }
+    body
+}
+
+/// The aggregate job runs a repository script, so it needs the checkout first.
+///
+/// Without it the job finished in three seconds with `python3: can't open file
+/// .../scripts/check-ci-jobs.py` while all thirteen required jobs were green.
+#[test]
+fn ci_aggregate_checks_out_the_repository_before_running_its_script() {
+    let body = aggregate_job_body(&read(".github/workflows/ci.yml"));
+    let checkout = body.find("actions/checkout").unwrap_or_else(|| {
+        panic!("the CI aggregate job must check out the repository; steps were:\n{body}")
+    });
+    let script = body
+        .find("python3 scripts/check-ci-jobs.py")
+        .expect("the CI aggregate job must run the evaluator");
+    assert!(
+        checkout < script,
+        "the CI aggregate job must check out the repository before running the evaluator"
+    );
+}

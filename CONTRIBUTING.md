@@ -345,6 +345,12 @@ aggregate compared a hand-maintained list of twelve results and silently ignored
 `render_smoke`, and the log line was the opaque
 `A required CI job finished with: abandoned`.
 
+**A job that runs a repository script must check out the repository**
+**first.** The aggregate job once skipped `actions/checkout` and failed after
+three seconds with the `can't open file` line above while all thirteen
+required jobs were green. `ci_aggregate_checks_out_the_repository_before_running_its_script`
+keeps the checkout ordered before the evaluator.
+
 ---
 
 ## Definition of Done (Acceptable Contributions)
