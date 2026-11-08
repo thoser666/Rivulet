@@ -194,6 +194,24 @@ def parse_exports(lib: str) -> list[tuple[str, list[str]]]:
     return exports
 
 
+def narrowed_modules(lib: str) -> list[str]:
+    """`pub mod` declarations that carry a reasoned `#[allow(missing_docs)]`.
+
+    The attribute is the narrow option from F-M8-003: the lint stays on for the
+    documented modules, and the remainder is named here instead of nowhere.
+    """
+    names: list[str] = []
+    lines = lib.splitlines()
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith("pub mod "):
+            continue
+        previous = lines[index - 1].strip() if index else ""
+        if previous.startswith("#[allow(missing_docs)]"):
+            names.append(stripped[len("pub mod ") :].rstrip(";"))
+    return sorted(names)
+
+
 def crate_lint_state(lib: str) -> str:
     for line in lib.splitlines():
         stripped = line.strip()
@@ -223,6 +241,7 @@ def build_overview(root: Path) -> str:
     modules.sort()
 
     exports = parse_exports(lib_source)
+    narrowed = narrowed_modules(lib_source)
     exported_modules = {module for module, _ in exports}
     example_names = examples(root)
 
@@ -233,6 +252,8 @@ def build_overview(root: Path) -> str:
         f"- Public modules: **{len(modules)}**",
         f"- Crate-root re-exports: **{len(exports)}** statements",
         f"- `#![warn(missing_docs)]`: **{crate_lint_state(lib_source)}**",
+        f"- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **{len(narrowed)}**"
+        + ((" (" + ", ".join("`" + name + "`" for name in narrowed) + ")") if narrowed else ""),
         f"- Runnable examples: **{len(example_names)}** "
         f"({', '.join(f'`{name}`' for name in example_names)})",
         "",
@@ -454,6 +475,7 @@ def self_test() -> int:
             "`rivulet-core/src/beta.rs:1` — //! Beta module, experimental while the backend lands.",
             "9.9.9-fixture",
             "`demo`",
+            "- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **0**",
         ]:
             assert expected in overview, f"missing from the generated overview: {expected}"
 
@@ -467,6 +489,18 @@ def self_test() -> int:
         )
         overview = build_overview(root)
         assert "| `gamma` | Gamma module. | 1 | no |" in overview, overview
+
+        # A module that silences the lint must be counted, so "the lint is
+        # active" and "the API is documented" cannot be confused for one claim.
+        lib = (root / "rivulet-core" / "src" / "lib.rs").read_text(encoding="utf-8")
+        (root / "rivulet-core" / "src" / "lib.rs").write_text(
+            lib + "#[allow(missing_docs)]\npub mod epsilon;\n", encoding="utf-8"
+        )
+        (root / "rivulet-core" / "src" / "epsilon.rs").write_text(
+            "//! Epsilon module.\npub struct Epsilon;\n", encoding="utf-8"
+        )
+        overview = build_overview(root)
+        assert "**1** (`epsilon`)" in overview, overview
 
         # `--check` must catch a stale document and accept a fresh one.
         (root / "docs" / "api-overview.md").write_text(

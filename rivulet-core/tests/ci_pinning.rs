@@ -6884,6 +6884,141 @@ fn m8_examples_are_run_by_ci_and_linked_from_crate_docs_and_readme() {
     }
 }
 
+/// #342 turns `#![warn(missing_docs)]` from a doc-comment example into a real
+/// crate attribute. That is only worth something while the gap it exposes stays
+/// visible: every module whose item documentation is still missing carries an
+/// explicit `#[allow(missing_docs)]` naming the follow-up and its item count,
+/// and the exact list is pinned here — documenting a module must shorten it,
+/// silencing a new one must never lengthen it unnoticed.
+#[test]
+fn m8_missing_docs_lint_is_active_and_the_allow_list_is_pinned() {
+    // The modules that still lack item documentation, as of the #342 change
+    // (733 public items). Shrinking this list is the remaining work; growing it
+    // needs a deliberate edit here plus a reason.
+    const STILL_UNDOCUMENTED: &[&str] = &[
+        "alerts",
+        "alerts_eventsub",
+        "alerts_ingest",
+        "alerts_webhook",
+        "audio",
+        "audio_source",
+        "benchmark",
+        "browser_source",
+        "camera",
+        "capture_channel",
+        "chat",
+        "cloud",
+        "container",
+        "discord",
+        "encoder",
+        "file_management",
+        "game_capture",
+        "game_detection",
+        "global_hotkey",
+        "live_compositor",
+        "media_source",
+        "midi",
+        "ndi",
+        "opengl_hook",
+        "output",
+        "plugin_manifest",
+        "plugin_registry",
+        "plugin_runtime",
+        "presence",
+        "preset",
+        "reconnect",
+        "recording_config",
+        "render",
+        "replay",
+        "scene",
+        "scene_snapshot",
+        "source",
+        "srt",
+        "stream",
+        "stream_info",
+        "stream_runtime",
+        "telemetry",
+        "test_helpers",
+        "text_source",
+        "transition",
+        "virtual_camera",
+        "vst3",
+        "vulkan_hook",
+        "webcam_source",
+        "youtube_chat",
+    ];
+
+    let lib = read("rivulet-core/src/lib.rs");
+    assert!(
+        lib.lines()
+            .any(|line| line.trim_start().starts_with("#![warn(missing_docs)]")),
+        "lib.rs must carry a real crate attribute, not only the `//!` example"
+    );
+
+    let lines: Vec<&str> = lib.lines().collect();
+    let mut narrowed: Vec<String> = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let Some(rest) = line.trim().strip_prefix("pub mod ") else {
+            continue;
+        };
+        let Some(name) = rest.strip_suffix(';') else {
+            continue;
+        };
+        let previous = index
+            .checked_sub(1)
+            .map(|i| lines[i].trim())
+            .unwrap_or_default();
+        if !previous.starts_with("#[allow(missing_docs)]") {
+            continue;
+        }
+        assert!(
+            previous.contains("F-M8-003") && previous.contains("#342"),
+            "the missing_docs allow on `{name}` must name F-M8-003 and #342: {previous}"
+        );
+        assert!(
+            previous.chars().any(|c| c.is_ascii_digit()),
+            "the missing_docs allow on `{name}` must carry its item count: {previous}"
+        );
+        narrowed.push(name.to_string());
+    }
+    narrowed.sort();
+    let pinned: Vec<String> = STILL_UNDOCUMENTED.iter().map(|s| s.to_string()).collect();
+    assert_eq!(
+        narrowed, pinned,
+        "the pinned missing_docs allow-list drifted from lib.rs: documenting a \
+         module shortens this list, silencing another must not extend it silently"
+    );
+
+    // `docs/api-overview.md` reports the state from the attribute, so the claim
+    // and the reach of the lint stay readable side by side.
+    let overview = read("docs/api-overview.md");
+    assert!(
+        overview.contains("`#![warn(missing_docs)]`: **active**"),
+        "docs/api-overview.md must report the lint as active; regenerate it with \
+         scripts/generate-api-overview.py"
+    );
+    assert!(
+        overview.contains(&format!(
+            "Modules narrowed by a reasoned `#[allow(missing_docs)]`: **{}**",
+            STILL_UNDOCUMENTED.len()
+        )),
+        "docs/api-overview.md must report the {}-module allow-list; regenerate it",
+        STILL_UNDOCUMENTED.len()
+    );
+
+    // The milestone prose must not keep the pre-#342 hedge.
+    let readme = read("README.md");
+    let gates = read("docs/milestone-quality-gates.md");
+    assert!(
+        !readme.contains("not an active lint"),
+        "the README must stop calling the missing_docs lint inactive"
+    );
+    assert!(
+        !gates.contains("was never activated"),
+        "the M8 quality gate must stop saying the lint was never activated"
+    );
+}
+
 /// Milestone prose claims delivery; only the artifact can prove it. Twice the
 /// M8 surfaces claimed things the tree did not do: "`#![warn(missing_docs)]`
 /// arrived with #292" (the line in `lib.rs` is a `//!` doc-comment example,

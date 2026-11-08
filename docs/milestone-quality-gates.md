@@ -399,9 +399,10 @@ Workstream issues:
 
 - [x] [#292](https://github.com/thoser666/Rivulet/issues/292) — stabilized public
   API (crate-style types, semver policy, deprecation path). Covers the first,
-  fourth and part of the second criterion. The promised `missing_docs` lint
-  stayed a doc-comment example in `lib.rs` and was never activated — see the
-  closing note and F-M8-003.
+  fourth and part of the second criterion. The `missing_docs` lint is a real
+  crate attribute now, with an explicit, counted `#[allow(missing_docs)]`
+  allow-list for the modules still missing item docs — see the closing note
+  and F-M8-003.
 - [x] [#293](https://github.com/thoser666/Rivulet/issues/293) — API docs plus a
   `rivulet-core/examples/` crate whose examples are **run**, not just built.
   Covers the GUI-independence criterion and, for the example criterion,
@@ -476,8 +477,8 @@ Workstream issues:
     conditional pass recorded.
 
 The gate closed on the criteria above with four follow-ups named in the report
-rather than absorbed into a "done" verdict: F-M8-003 (`missing_docs` never
-activated, 696 undocumented public items), F-M8-004 (PipeWire/Metal-WGC capture
+rather than absorbed into a "done" verdict: F-M8-003 (`missing_docs` activated with a pinned per-module allow-list, 733 public
+items still undocumented), F-M8-004 (PipeWire/Metal-WGC capture
 paths), F-M8-005 (written deprecation and migration policy, **closed by
 [#344](https://github.com/thoser666/Rivulet/issues/344)** — see
 [`api-migration.md`](api-migration.md)) and F-M8-006 (the stale per-encoder
@@ -493,10 +494,11 @@ As recorded when the milestone opened, `rivulet-core` was `0.65.0-alpha.55`
 `#![warn(missing_docs)]`, no `examples/` crate, and feature detection reachable
 only through log output. The module count is a snapshot and has grown since;
 `docs/api-overview.md` reports the current numbers from the code on every push.
-`#![warn(missing_docs)]` was never activated — the line in `lib.rs` is a
-doc-comment example, not a crate attribute, and turning it on for real reports
-696 undocumented public items (measured 2026-10-13) — so "stabilized public API"
-and "documented public API" are not the same claim, and F-M8-003 keeps them
+`#![warn(missing_docs)]` is a real crate attribute since [#342](https://github.com/thoser666/Rivulet/issues/342):
+`lib.rs`'s own public items and 22 of its modules are documented, and the 50
+modules that still carry a counted `#[allow(missing_docs)]` hold 733 undocumented
+public items (measured 2026-11-08), so "stabilized public API" and "fully
+documented public API" are still not the same claim and F-M8-003 keeps them
 apart.
 
 ### M9: Modern Architecture
