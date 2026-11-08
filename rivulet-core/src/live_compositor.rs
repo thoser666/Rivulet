@@ -19,12 +19,16 @@ use uuid::Uuid;
 /// capture source's native size is; turning composition off restores the raw
 /// capture resolution.
 pub const LIVE_CANVAS_WIDTH: u32 = 1920;
+/// Height of the composed live canvas, the counterpart of
+/// [`LIVE_CANVAS_WIDTH`].
 pub const LIVE_CANVAS_HEIGHT: u32 = 1080;
 
 /// One composed RGBA8 frame, ready for `process_raw_frame`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComposedFrame {
+    /// Canvas width in pixels (the composed picture, not the capture source).
     pub width: u32,
+    /// Canvas height in pixels.
     pub height: u32,
     /// Row-major RGBA8 pixels, `width * height * 4` bytes.
     pub rgba: Vec<u8>,

@@ -49,7 +49,7 @@ re-export that disappeared.
 - Public modules: **73**
 - Crate-root re-exports: **67** statements
 - `#![warn(missing_docs)]`: **active**
-- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **50** (`alerts`, `alerts_eventsub`, `alerts_ingest`, `alerts_webhook`, `audio`, `audio_source`, `benchmark`, `browser_source`, `camera`, `capture_channel`, `chat`, `cloud`, `container`, `discord`, `encoder`, `file_management`, `game_capture`, `game_detection`, `global_hotkey`, `live_compositor`, `media_source`, `midi`, `ndi`, `opengl_hook`, `output`, `plugin_manifest`, `plugin_registry`, `plugin_runtime`, `presence`, `preset`, `reconnect`, `recording_config`, `render`, `replay`, `scene`, `scene_snapshot`, `source`, `srt`, `stream`, `stream_info`, `stream_runtime`, `telemetry`, `test_helpers`, `text_source`, `transition`, `virtual_camera`, `vst3`, `vulkan_hook`, `webcam_source`, `youtube_chat`)
+- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **45** (`alerts`, `alerts_eventsub`, `alerts_ingest`, `audio_source`, `benchmark`, `browser_source`, `camera`, `capture_channel`, `chat`, `cloud`, `container`, `discord`, `encoder`, `file_management`, `game_detection`, `global_hotkey`, `media_source`, `midi`, `opengl_hook`, `output`, `plugin_manifest`, `plugin_registry`, `plugin_runtime`, `presence`, `preset`, `reconnect`, `recording_config`, `render`, `replay`, `scene`, `scene_snapshot`, `source`, `srt`, `stream`, `stream_info`, `stream_runtime`, `telemetry`, `test_helpers`, `text_source`, `transition`, `virtual_camera`, `vst3`, `vulkan_hook`, `webcam_source`, `youtube_chat`)
 - Runnable examples: **7** (`audio_routing`, `dual_output`, `encoder_config`, `engine_lifecycle`, `session_embed`, `simple_record`, `simple_stream`)
 
 ### Public modules

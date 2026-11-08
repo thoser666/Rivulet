@@ -5,8 +5,8 @@
   `//! #![warn(missing_docs)]` — a documentation line that enables no lint —
   so `docs/api-overview.md` reported "not active" on every build while M8
   advertised a documented public API. The attribute is real now, `lib.rs`'s
-  own public items are documented, and the 50 modules whose item docs are
-  still missing (733 public items, measured 2026-11-08) carry an explicit
+  own public items are documented, and the 45 modules whose item docs are
+  still missing (717 public items, measured 2026-11-08) carry an explicit
   `#[allow(missing_docs)]` naming F-M8-003 and its item count, so the
   remainder is visible in the source instead of nowhere. `ci_pinning` pins
   the attribute, the exact allow-list and the `api-overview.md` state, so the

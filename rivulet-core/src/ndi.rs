@@ -35,8 +35,13 @@ impl Default for NdiOutput {
 }
 
 impl NdiOutput {
+    /// Longest accepted NDI source name in characters; [`NdiOutput::validate`]
+    /// rejects anything longer.
     pub const MAX_NAME_LEN: usize = 80;
 
+    /// Creates an NDI output configuration with `name` and its activation state.
+    ///
+    /// No group filter is set; add one with [`NdiOutput::with_group`].
     pub fn new(name: impl Into<String>, active: bool) -> Self {
         Self {
             name: name.into(),
@@ -45,6 +50,10 @@ impl NdiOutput {
         }
     }
 
+    /// Sets the optional NDI group filter and returns the configuration.
+    ///
+    /// Groups restrict which receivers may discover this sender, for example for
+    /// separated workflows inside one network.
     pub fn with_group(mut self, group: impl Into<String>) -> Self {
         self.group = Some(group.into());
         self

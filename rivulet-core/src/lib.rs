@@ -111,7 +111,6 @@ pub use alerts_ingest::{
     AlertEvent, AlertIngest, AlertIngestError, AlertKind, AlertQueueEntry, AlertSource,
     AlertSuppressionNotice, ALERT_SOURCE_WINDOW_CAPACITY, ALERT_SOURCE_WINDOW_SECONDS,
 };
-#[allow(missing_docs)] // F-M8-003 (#342): 3 public items in this module still lack documentation.
 pub mod alerts_webhook;
 pub use alerts_webhook::{
     handle_webhook, AlertsReceiver, AlertsReceiverConfig, WebhookReject, WebhookRequest,
@@ -143,7 +142,6 @@ pub use virtual_camera::{
 };
 
 /// Audio frame and track types shared by the recording and streaming pipelines.
-#[allow(missing_docs)] // F-M8-003 (#342): 4 public items in this module still lack documentation.
 pub mod audio;
 pub use audio::{AudioFrame, AudioTrack, SkippedFilter};
 
@@ -155,7 +153,6 @@ pub use camera::{CameraConfig, CameraDevice, CameraFrame};
 /// Capture backends behind one stable trait (xcap, PipeWire, Metal/WGC).
 pub mod capture_backend;
 /// Game-window capture configuration, frames and the window handle wrapper.
-#[allow(missing_docs)] // F-M8-003 (#342): 3 public items in this module still lack documentation.
 pub mod game_capture;
 #[allow(missing_docs)] // F-M8-003 (#342): 5 public items in this module still lack documentation.
 pub mod game_detection;
@@ -246,7 +243,6 @@ pub use file_management::{
 pub mod metrics;
 pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 3 public items in this module still lack documentation.
 pub mod ndi;
 pub use ndi::NdiOutput;
 
@@ -319,7 +315,6 @@ pub use scene_dock::{
 pub mod scene_snapshot;
 pub use scene_snapshot::{SceneSnapshot, SnapshotFrame, SnapshotLayer};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 3 public items in this module still lack documentation.
 pub mod live_compositor;
 pub use live_compositor::{compose_scene, ComposedFrame, LIVE_CANVAS_HEIGHT, LIVE_CANVAS_WIDTH};
 

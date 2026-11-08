@@ -38,8 +38,11 @@ impl Default for GameCaptureConfig {
 /// A raw frame produced by game capture.
 #[derive(Debug, Clone)]
 pub struct GameCaptureFrame {
+    /// Packed BGRA8 pixels, `width * height * 4` bytes.
     pub data: Vec<u8>,
+    /// Frame width in pixels.
     pub width: u32,
+    /// Frame height in pixels.
     pub height: u32,
 }
 
