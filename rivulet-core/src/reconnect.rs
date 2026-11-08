@@ -6,22 +6,32 @@ use std::time::Duration;
 use crate::stream::StreamTargetState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Event emitted by a stream sink's message bus.
 pub enum SinkBusEvent {
+    /// The sink failed fatally; the target has to be rebuilt.
     Error,
+    /// The sink reached end-of-stream; the session is over.
     Eos,
+    /// The sink announced a state change (for example playing).
     StateChanged,
+    /// A non-fatal warning; the target keeps running.
     Warning,
 }
 impl SinkBusEvent {
+    /// Whether this event ends the current sink session and needs a reconnect.
     pub fn requires_reconnect(self) -> bool {
         matches!(self, Self::Error | Self::Eos)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Bounded exponential backoff for reconnecting a single target.
 pub struct RetryPolicy {
+    /// Failed attempts allowed before the target is given up.
     pub max_attempts: u32,
+    /// Delay before the first retry; clamped to at least 100 ms.
     pub initial_backoff: Duration,
+    /// Upper bound for the exponential growth; never below `initial_backoff`.
     pub max_backoff: Duration,
 }
 impl Default for RetryPolicy {
@@ -38,6 +48,11 @@ impl Default for RetryPolicy {
 /// in a tight loop, burning CPU and flooding the platform with error events.
 const MIN_BACKOFF: Duration = Duration::from_millis(100);
 impl RetryPolicy {
+    /// Build a policy with the delays clamped into a usable range.
+    ///
+    /// A 100 ms floor keeps an immediately failing sink from being retried in a
+    /// tight loop, and the ceiling is raised to the floor so a lower ceiling
+    /// cannot flatten the growth.
     pub fn new(max_attempts: u32, initial_backoff: Duration, max_backoff: Duration) -> Self {
         // Clamp first, then derive the ceiling from the clamped floor: a zero
         // `max_backoff` must never produce a zero backoff, and the ceiling must
@@ -61,14 +76,21 @@ impl RetryPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Reconnect bookkeeping for a single streaming target.
 pub struct TargetReconnectState {
+    /// Target name as configured by the user; the lookup key on the supervisor.
     pub name: String,
+    /// Current lifecycle state of the target.
     pub state: StreamTargetState,
+    /// Consecutive failed attempts since the last successful connection.
     pub attempts: u32,
+    /// Delay computed for the most recent failure.
     pub next_backoff: Duration,
+    /// Time since that failure at which the next retry becomes due, if one is scheduled.
     pub retry_at: Option<Duration>,
 }
 impl TargetReconnectState {
+    /// Create a target in the offline state with no retry scheduled.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -78,17 +100,22 @@ impl TargetReconnectState {
             retry_at: None,
         }
     }
+    /// Mark the target as connecting and clear any scheduled retry.
     pub fn mark_connecting(&mut self) {
         self.state = StreamTargetState::Connecting;
         self.next_backoff = Duration::ZERO;
         self.retry_at = None;
     }
+    /// Mark the target as live and reset the attempt counter.
     pub fn mark_live(&mut self) {
         self.state = StreamTargetState::Live;
         self.attempts = 0;
         self.next_backoff = Duration::ZERO;
         self.retry_at = None;
     }
+    /// Record a failure and schedule the next retry.
+    ///
+    /// Returns whether the policy still allows another attempt.
     pub fn mark_failed(&mut self, policy: &RetryPolicy) -> bool {
         self.attempts = self.attempts.saturating_add(1);
         self.next_backoff = policy.backoff(self.attempts);
@@ -96,29 +123,38 @@ impl TargetReconnectState {
         self.state = StreamTargetState::Failed;
         self.attempts <= policy.max_attempts
     }
+    /// Whether the policy's attempt budget is used up for this target.
     pub fn exhausted(&self, policy: &RetryPolicy) -> bool {
         self.attempts > policy.max_attempts
     }
 }
 
 #[derive(Debug, Clone)]
+/// Per-target reconnect state machine covering every streaming output.
+///
+/// The supervisor owns timing and bookkeeping only; rebuilding a branch stays
+/// with the caller, which can mutate the GStreamer pipeline safely.
 pub struct StreamingReconnectSupervisor {
     policy: RetryPolicy,
     targets: Vec<TargetReconnectState>,
 }
 impl StreamingReconnectSupervisor {
+    /// Create a supervisor tracking one target per given name under `policy`.
     pub fn new(names: impl IntoIterator<Item = String>, policy: RetryPolicy) -> Self {
         Self {
             policy,
             targets: names.into_iter().map(TargetReconnectState::new).collect(),
         }
     }
+    /// Retry policy shared by all tracked targets.
     pub fn policy(&self) -> RetryPolicy {
         self.policy
     }
+    /// Current state of every tracked target, in configuration order.
     pub fn targets(&self) -> &[TargetReconnectState] {
         &self.targets
     }
+    /// Mark `name` as connecting; returns `false` for an unknown target.
     pub fn mark_connecting(&mut self, name: &str) -> bool {
         self.targets
             .iter_mut()
@@ -129,6 +165,7 @@ impl StreamingReconnectSupervisor {
             })
             .unwrap_or(false)
     }
+    /// Mark `name` as live and reset its attempts; returns `false` for an unknown target.
     pub fn mark_live(&mut self, name: &str) -> bool {
         self.targets
             .iter_mut()
@@ -139,12 +176,20 @@ impl StreamingReconnectSupervisor {
             })
             .unwrap_or(false)
     }
+    /// Record a failure for `name`.
+    ///
+    /// Returns whether another retry is allowed, or `None` when the target is unknown.
     pub fn mark_failed(&mut self, name: &str) -> Option<bool> {
         self.targets
             .iter_mut()
             .find(|t| t.name == name)
             .map(|t| t.mark_failed(&self.policy))
     }
+    /// Apply a sink bus event to `name`.
+    ///
+    /// Errors and end-of-stream schedule a retry, a state change confirms the
+    /// target is live, and warnings are ignored. Returns `None` when the event
+    /// changes nothing or the target is unknown.
     pub fn handle_bus_event(&mut self, name: &str, event: SinkBusEvent) -> Option<bool> {
         if event.requires_reconnect() {
             self.mark_failed(name)
@@ -170,6 +215,10 @@ impl StreamingReconnectSupervisor {
             })
     }
 
+    /// Claim every target whose retry delay has elapsed by `elapsed`.
+    ///
+    /// Claimed targets are marked connecting and their names returned, so the
+    /// caller rebuilds exactly those branches.
     pub fn due_retries(&mut self, elapsed: Duration) -> Vec<String> {
         self.targets
             .iter_mut()
@@ -193,6 +242,7 @@ impl StreamingReconnectSupervisor {
             .find(|target| target.name == name)
             .map(|target| target.retry_at.is_some_and(|retry_at| elapsed >= retry_at))
     }
+    /// Names of the targets that are failed and still within the attempt budget.
     pub fn retryable_targets(&self) -> Vec<&str> {
         self.targets
             .iter()
@@ -203,8 +253,11 @@ impl StreamingReconnectSupervisor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Command emitted by a [`ReconnectWorker`] for the pipeline owner.
 pub enum ReconnectCommand {
+    /// Rebuild the branch of the named target.
     RebuildBranch(String),
+    /// Stop the worker without emitting a rebuild.
     Shutdown,
 }
 
@@ -223,6 +276,10 @@ pub struct ReconnectWorker {
     handle: Option<thread::JoinHandle<()>>,
 }
 impl ReconnectWorker {
+    /// Start a worker that requests a branch rebuild for `name` after `delay`.
+    ///
+    /// The rebuild is skipped when [`ReconnectWorker::cancel`] runs, or the
+    /// worker is dropped, before the delay elapses.
     pub fn start(name: impl Into<String>, delay: Duration) -> Self {
         let (tx, rx) = mpsc::channel();
         let (stop_tx, stop_rx) = mpsc::channel();
@@ -238,6 +295,7 @@ impl ReconnectWorker {
             handle: Some(handle),
         }
     }
+    /// Take the next queued command without blocking.
     pub fn try_recv(&self) -> Option<ReconnectCommand> {
         self.commands.try_recv().ok()
     }
@@ -246,6 +304,7 @@ impl ReconnectWorker {
     pub fn drain(&self) -> Vec<ReconnectCommand> {
         self.commands.try_iter().collect()
     }
+    /// Cancel a pending rebuild and join the worker thread.
     pub fn cancel(&mut self) {
         let _ = self.stop.send(ReconnectCommand::Shutdown);
         if let Some(handle) = self.handle.take() {
