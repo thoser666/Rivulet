@@ -30,6 +30,10 @@ pub struct ReplaySegment {
 }
 
 impl ReplaySegment {
+    /// Build one buffered packet from a sample's timestamps and payload.
+    ///
+    /// `keyframe` must be set only for an independently decodable unit; a
+    /// saved clip cannot start anywhere else.
     pub fn new(pts_ns: u64, dts_ns: u64, data: Vec<u8>, keyframe: bool) -> Self {
         Self {
             pts_ns,
@@ -52,13 +56,21 @@ struct ReplayAudioTrack {
 /// Immutable snapshot of the buffered data, taken for saving.
 #[derive(Debug, Clone, Default)]
 pub struct ReplaySnapshot {
+    /// Video packets still inside the retention window, oldest first, already
+    /// trimmed to start at a keyframe.
     pub video: Vec<ReplaySegment>,
+    /// Caps of the buffered video stream, including the encoder's
+    /// `codec_data`, which is what lets a clip start mid-stream.
     pub video_caps: Option<String>,
+    /// One packet list per audio pad, in the same order as [`Self::audio_caps`].
     pub audio_tracks: Vec<Vec<ReplaySegment>>,
+    /// Caps of each audio track; `None` for a track whose first sample was
+    /// never captured.
     pub audio_caps: Vec<Option<String>>,
 }
 
 impl ReplaySnapshot {
+    /// Whether there is anything to save: no video and no audio on any track.
     pub fn is_empty(&self) -> bool {
         self.video.is_empty() && self.audio_tracks.iter().all(Vec::is_empty)
     }
@@ -113,6 +125,8 @@ pub struct ReplayBuffer {
 }
 
 impl ReplayBuffer {
+    /// Create an empty buffer that retains the last `duration`. Nothing is
+    /// evicted until the first packet arrives.
     pub fn new(duration: Duration) -> Self {
         Self {
             duration,
@@ -123,6 +137,7 @@ impl ReplayBuffer {
         }
     }
 
+    /// The current retention window.
     pub fn duration(&self) -> Duration {
         self.duration
     }
@@ -134,10 +149,14 @@ impl ReplayBuffer {
         self.evict();
     }
 
+    /// Whether no packets are buffered at all: no video and every audio track
+    /// empty.
     pub fn is_empty(&self) -> bool {
         self.video.is_empty() && self.audio_tracks.iter().all(|t| t.segments.is_empty())
     }
 
+    /// Drop every buffered packet and the recorded caps. The retention window
+    /// stays as configured.
     pub fn clear(&mut self) {
         self.video.clear();
         self.video_caps = None;
@@ -155,6 +174,9 @@ impl ReplayBuffer {
         }
     }
 
+    /// Record the caps of audio track `track`, captured once from its first
+    /// sample. Later caps for the same track are ignored, and the track is
+    /// created if it does not exist yet.
     pub fn set_audio_caps(&mut self, track: usize, caps: String) {
         self.ensure_track(track);
         if self.audio_tracks[track].caps.is_none() {
@@ -183,6 +205,12 @@ impl ReplayBuffer {
         }
     }
 
+    /// Append one video packet and evict what fell out of the window.
+    ///
+    /// Eviction is driven by the newest *decoding* timestamp, not the
+    /// presentation one: DTS is monotonic in arrival order even when B-frames
+    /// reorder presentation, so a window measured in DTS cannot silently drop
+    /// a frame that is still visible.
     pub fn push_video(&mut self, pts_ns: u64, dts_ns: u64, data: Vec<u8>, keyframe: bool) {
         self.newest_video_dts = Some(match self.newest_video_dts {
             Some(prev) => prev.max(dts_ns),
@@ -193,6 +221,8 @@ impl ReplayBuffer {
         self.evict();
     }
 
+    /// Append one audio packet to `track`, creating it if needed, and evict
+    /// that track by its own newest PTS so each audio pad keeps its own window.
     pub fn push_audio(&mut self, track: usize, pts_ns: u64, dts_ns: u64, data: Vec<u8>) {
         self.ensure_track(track);
         let t = &mut self.audio_tracks[track];
