@@ -96,7 +96,6 @@ pub use youtube_chat::{
 #[allow(missing_docs)] // F-M8-003 (#342): 11 public items in this module still lack documentation.
 pub mod chat;
 pub use chat::{Chat, ChatAccount, ChatConfig, ChatPlatform, ChatTokenStore, MultiChat};
-#[allow(missing_docs)] // F-M8-003 (#342): 12 public items in this module still lack documentation.
 pub mod telemetry;
 pub use telemetry::{
     platform_code, TelemetryBatch, TelemetryErrorKind, TelemetryEvent, TelemetryReporter,
