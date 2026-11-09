@@ -3,6 +3,9 @@ use uuid::Uuid;
 
 /// Virtual canvas used by the scene editor and snapshot export.
 pub const DEFAULT_CANVAS_WIDTH: u32 = 1920;
+/// Virtual canvas height used by the scene editor and snapshot export, the
+/// companion of [`DEFAULT_CANVAS_WIDTH`]. Headless runs override both with
+/// [`SceneSnapshot::with_size`].
 pub const DEFAULT_CANVAS_HEIGHT: u32 = 1080;
 
 /// One RGBA8 pixel buffer produced by a native source renderer.
@@ -11,8 +14,13 @@ pub const DEFAULT_CANVAS_HEIGHT: u32 = 1080;
 /// source content instead of a synthetic color tile.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SnapshotFrame {
+    /// Frame width in pixels.
     pub width: u32,
+    /// Frame height in pixels.
     pub height: u32,
+    /// Pixels in RGBA8 order, row-major: exactly `width * height * 4` bytes.
+    /// [`SnapshotFrame::new`] rejects any other length, so a `SnapshotFrame`
+    /// that exists is always consistent with its dimensions.
     pub rgba: Vec<u8>,
 }
 
@@ -36,11 +44,23 @@ impl SnapshotFrame {
 /// A visible source layer captured in a scene snapshot.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SnapshotLayer {
+    /// Stable id of the source this layer shows; [`SceneSnapshot::attach_frames`]
+    /// looks native frames up by it.
     pub source_id: Uuid,
+    /// Source name captured at snapshot time, so the layout stays readable
+    /// without the source list next to it.
     pub name: String,
+    /// Source kind, which decides the fallback tile colour used when no
+    /// native frame is attached.
     pub kind: SourceKind,
+    /// Position, size, rotation and opacity. The scene binding's effective
+    /// transform wins over the source's own.
     pub transform: Transform,
+    /// Visible region in source pixels, applied to an attached frame before
+    /// it is rasterised.
     pub crop: Crop,
+    /// Paint order. [`SceneSnapshot::from_scene`] sorts layers ascending, so
+    /// larger values land on top.
     pub z_order: i32,
     /// Native source pixels supplied by a renderer, if available.
     pub frame: Option<SnapshotFrame>,
@@ -55,11 +75,22 @@ pub struct SnapshotLayer {
 /// until every source kind has a native renderer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneSnapshot {
+    /// Name of the scene this snapshot was taken from.
     pub scene_name: String,
+    /// Collection the scene belongs to, as passed to
+    /// [`SceneSnapshot::from_scene`].
     pub collection: String,
+    /// Profile the scene belongs to, as passed to
+    /// [`SceneSnapshot::from_scene`].
     pub profile: String,
+    /// Canvas width in pixels: [`DEFAULT_CANVAS_WIDTH`] unless changed by
+    /// [`SceneSnapshot::with_size`].
     pub width: u32,
+    /// Canvas height in pixels: [`DEFAULT_CANVAS_HEIGHT`] unless changed by
+    /// [`SceneSnapshot::with_size`].
     pub height: u32,
+    /// Visible layers in paint order (ascending `z_order`), which is the
+    /// order [`SceneSnapshot::render_rgba`] composites them in.
     pub layers: Vec<SnapshotLayer>,
 }
 

@@ -303,7 +303,6 @@ pub use scene_dock::{
 };
 
 /// Scene rasterization into RGBA frames and layers for preview and export.
-#[allow(missing_docs)] // F-M8-003 (#342): 16 public items in this module still lack documentation.
 pub mod scene_snapshot;
 pub use scene_snapshot::{SceneSnapshot, SnapshotFrame, SnapshotLayer};
 
