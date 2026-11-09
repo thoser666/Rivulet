@@ -367,7 +367,6 @@ pub use audio_source::{
 };
 
 /// Browser sources: backend trait, frames, input events, synthetic reference backend.
-#[allow(missing_docs)] // F-M8-003 (#342): 30 public items in this module still lack documentation.
 pub mod browser_source;
 pub mod ducking;
 pub use browser_source::{
