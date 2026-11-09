@@ -49,7 +49,7 @@ re-export that disappeared.
 - Public modules: **73**
 - Crate-root re-exports: **67** statements
 - `#![warn(missing_docs)]`: **active**
-- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **37** (`alerts`, `alerts_eventsub`, `alerts_ingest`, `benchmark`, `camera`, `capture_channel`, `chat`, `cloud`, `container`, `discord`, `encoder`, `file_management`, `game_detection`, `global_hotkey`, `midi`, `opengl_hook`, `output`, `plugin_manifest`, `plugin_registry`, `plugin_runtime`, `presence`, `preset`, `recording_config`, `render`, `replay`, `scene_snapshot`, `srt`, `stream`, `stream_info`, `stream_runtime`, `telemetry`, `test_helpers`, `transition`, `virtual_camera`, `vst3`, `vulkan_hook`, `youtube_chat`)
+- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **36** (`alerts`, `alerts_eventsub`, `alerts_ingest`, `benchmark`, `camera`, `capture_channel`, `chat`, `cloud`, `container`, `discord`, `encoder`, `file_management`, `game_detection`, `global_hotkey`, `midi`, `opengl_hook`, `output`, `plugin_manifest`, `plugin_registry`, `plugin_runtime`, `presence`, `preset`, `recording_config`, `replay`, `scene_snapshot`, `srt`, `stream`, `stream_info`, `stream_runtime`, `telemetry`, `test_helpers`, `transition`, `virtual_camera`, `vst3`, `vulkan_hook`, `youtube_chat`)
 - Runnable examples: **7** (`audio_routing`, `dual_output`, `encoder_config`, `engine_lifecycle`, `session_embed`, `simple_record`, `simple_stream`)
 
 ### Public modules

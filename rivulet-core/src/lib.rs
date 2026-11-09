@@ -316,7 +316,6 @@ pub use scene_snapshot::{SceneSnapshot, SnapshotFrame, SnapshotLayer};
 pub mod live_compositor;
 pub use live_compositor::{compose_scene, ComposedFrame, LIVE_CANVAS_HEIGHT, LIVE_CANVAS_WIDTH};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 10 public items in this module still lack documentation.
 pub mod render;
 pub use render::{
     render_video, CanvasConfig, RenderConfigError, RenderError, RenderLayerConfig,
