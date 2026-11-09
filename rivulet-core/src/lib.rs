@@ -366,7 +366,6 @@ pub use browser_source::{
     SyntheticBrowserBackend,
 };
 
-#[allow(missing_docs)] // F-M8-003 (#342): 2 public items in this module still lack documentation.
 pub mod alerts;
 pub use alerts::{AlertOverlayError, AlertProvider};
 
