@@ -333,7 +333,7 @@ pub use transition::{SceneTransition, TransitionDefault, TransitionKind};
 pub mod studio;
 pub use studio::StudioMode;
 
-#[allow(missing_docs)] // F-M8-003 (#342): 56 public items in this module still lack documentation.
+/// Sources, scene bindings and the scene-item clipboard.
 pub mod source;
 pub use source::{
     ChromaKey, Crop, SceneItemClipboard, SceneSource, Source, SourceKind, SourceManager, Transform,
