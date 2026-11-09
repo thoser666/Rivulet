@@ -347,7 +347,6 @@ pub mod text_source;
 pub use text_source::{FontWeight, Rgba, ScrollDirection, TextAlign, TextSource};
 
 /// Webcam sources: resolution and pixel format.
-#[allow(missing_docs)] // F-M8-003 (#342): 7 public items in this module still lack documentation.
 pub mod webcam_source;
 pub use webcam_source::{PixelFormat, Resolution, WebcamSource};
 

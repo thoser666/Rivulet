@@ -15,6 +15,7 @@ pub enum PixelFormat {
 }
 
 impl PixelFormat {
+    /// Human-readable format name (`YUYV`, `MJPEG`, `NV12`, `RGB24`) for UI menus.
     pub fn label(&self) -> &'static str {
         match self {
             PixelFormat::Yuyv => "YUYV",
@@ -28,24 +29,30 @@ impl PixelFormat {
 /// A common webcam resolution with a human-readable label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolution {
+    /// Width in pixels.
     pub width: u32,
+    /// Height in pixels.
     pub height: u32,
 }
 
 impl Resolution {
+    /// 1280x720, the default resolution.
     pub const HD: Resolution = Resolution {
         width: 1280,
         height: 720,
     };
+    /// 1920x1080.
     pub const FHD: Resolution = Resolution {
         width: 1920,
         height: 1080,
     };
+    /// 640x480, for cameras or links that cannot carry more.
     pub const VGA: Resolution = Resolution {
         width: 640,
         height: 480,
     };
 
+    /// A resolution from explicit pixel dimensions; nothing is validated or clamped.
     pub fn new(width: u32, height: u32) -> Self {
         Self { width, height }
     }
