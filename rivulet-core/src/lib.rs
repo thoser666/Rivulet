@@ -370,7 +370,6 @@ pub use browser_source::{
 pub mod alerts;
 pub use alerts::{AlertOverlayError, AlertProvider};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 8 public items in this module still lack documentation.
 pub mod benchmark;
 #[allow(missing_docs)] // F-M8-003 (#342): 13 public items in this module still lack documentation.
 pub mod capture_channel;
