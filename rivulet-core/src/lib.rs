@@ -64,7 +64,6 @@ use uuid::Uuid;
 use gst::prelude::*;
 
 /// Recording output targets (`Output`, `OutputSettings`) and their validation.
-#[allow(missing_docs)] // F-M8-003 (#342): 13 public items in this module still lack documentation.
 pub mod output;
 pub use output::{Output, OutputSettings};
 #[allow(missing_docs)] // F-M8-003 (#342): 10 public items in this module still lack documentation.

@@ -5,8 +5,8 @@
   `//! #![warn(missing_docs)]` — a documentation line that enables no lint —
   so `docs/api-overview.md` reported "not active" on every build while M8
   advertised a documented public API. The attribute is real now, `lib.rs`'s
-  own public items are documented, and the 32 modules whose item docs are
-  still missing (471 public items, measured 2026-11-09) carry an explicit
+  own public items are documented, and the 31 modules whose item docs are
+  still missing (458 public items, measured 2026-11-09) carry an explicit
   `#[allow(missing_docs)]` naming F-M8-003 and its item count, so the
   remainder is visible in the source instead of nowhere. `ci_pinning` pins
   the attribute, the exact allow-list and the `api-overview.md` state, so the
@@ -14,8 +14,9 @@
   (56, the largest module off the list so far), `scene` (17),
   `text_source` (15), `webcam_source` (7), `media_source` (2) and
   `browser_source` (30), `audio_source` (19), `render` (10), `transition` (19),
-  `preset` (6), `recording_config` (1) and `camera` (14) are documented and
-  enforced by the attribute again (40 documented modules, 471 items left).
+  `preset` (6), `recording_config` (1), `camera` (14) and `output` (13) are
+  documented and enforced by the attribute again (41 documented modules, 458
+  items left).
 - docs(m2): **the path from a scene to the recorded and streamed picture is now
   a tutorial instead of a reference section.** Live scene composition shipped in
   #387, but the only walkthrough was three steps inside the user guide: how to

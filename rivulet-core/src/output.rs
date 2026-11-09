@@ -13,22 +13,29 @@ pub struct OutputSettings {
 }
 
 impl OutputSettings {
+    /// Width of the encoded video, in pixels.
     pub fn width(&self) -> u32 {
         self.width
     }
+    /// Height of the encoded video, in pixels.
     pub fn height(&self) -> u32 {
         self.height
     }
+    /// Frames per second the output is configured for.
     pub fn fps(&self) -> u32 {
         self.fps
     }
+    /// Target bitrate handed to the encoder. [`OutputSettings::default`] uses
+    /// `5000`, which the built-in H.264 pipeline reads as kbit/s.
     pub fn bitrate(&self) -> u32 {
         self.bitrate
     }
+    /// Encoder identifier as a string; the default is `"h264"`.
     pub fn encoder(&self) -> &str {
         &self.encoder
     }
 
+    /// Build settings from explicit values instead of taking the default.
     pub fn new(
         width: u32,
         height: u32,
@@ -61,9 +68,18 @@ impl Default for OutputSettings {
 /// Trait for all output types (recording, streaming, etc.)
 #[async_trait]
 pub trait Output: Debug + Send + Sync {
+    /// Take the output live. Called once before frames are pushed; an error
+    /// means the output never started and the caller is expected to abort the
+    /// session instead of pushing into it.
     async fn start(&self) -> anyhow::Result<()>;
+    /// Stop the output and release what it holds. An error reports a failed
+    /// shutdown (a file that could not be finalised, a connection that would
+    /// not close), not a refused call.
     async fn stop(&self) -> anyhow::Result<()>;
+    /// Whether the output is currently running, i.e. started and not yet
+    /// stopped.
     fn is_active(&self) -> bool;
+    /// The settings this output was created with.
     fn get_settings(&self) -> &OutputSettings;
 }
 
@@ -76,6 +92,8 @@ pub struct FileOutput {
 }
 
 impl FileOutput {
+    /// Create an inactive output that will write to `file_path` with
+    /// `settings`. Nothing touches the filesystem until [`Output::start`].
     pub fn new(file_path: impl Into<String>, settings: OutputSettings) -> Self {
         Self {
             file_path: file_path.into(),
@@ -84,10 +102,12 @@ impl FileOutput {
         }
     }
 
+    /// The destination path, exactly as handed to [`FileOutput::new`].
     pub fn file_path(&self) -> &str {
         &self.file_path
     }
 
+    /// The settings this output was created with.
     pub fn settings(&self) -> &OutputSettings {
         &self.settings
     }
