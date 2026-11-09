@@ -308,11 +308,11 @@ pub fn detect_container_availability(
     }
 }
 
-/// Machine-readable reason for why a configuration aspect is available,
-/// invalid, or has specific runtime requirements.///
-/// Every variant names the field at fault (`field()`) and carries a
-/// message stating the fix or the availability reason, so an embedding
-/// application can both log it and surface it next to the offending control.
+/// Why a [`RecordingConfig`] was rejected by [`RecordingConfig::validate`].
+///
+/// Every variant names the field at fault ([`RecordingConfigError::field`]) and
+/// carries a message stating the fix, so an embedding application can both log
+/// it and surface it next to the offending control.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordingConfigError {
     /// `width` was 0.
@@ -467,7 +467,11 @@ pub enum RecordingConfigDetect {
     /// The aspect is available on this machine.
     Available,
     /// The aspect is not available; the reason explains why.
-    Unavailable { reason: &'static str },
+    Unavailable {
+        /// The machine-readable reason, e.g. the `why_not` text feature
+        /// detection reports for the missing backend or container.
+        reason: &'static str,
+    },
 }
 
 impl RecordingConfigDetect {
