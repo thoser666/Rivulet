@@ -13,6 +13,7 @@ pub enum MediaType {
 }
 
 impl MediaType {
+    /// Human-readable name (`Video`, `Audio`, `Image`) for UI menus.
     pub fn label(&self) -> &'static str {
         match self {
             MediaType::Video => "Video",
@@ -48,6 +49,7 @@ pub enum PlaybackMode {
 }
 
 impl PlaybackMode {
+    /// Human-readable name (`Once`, `Loop`, `Freeze`) for UI menus.
     pub fn label(&self) -> &'static str {
         match self {
             PlaybackMode::Once => "Once",

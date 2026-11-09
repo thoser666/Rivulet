@@ -355,7 +355,6 @@ pub mod color_source;
 pub use color_source::ColorSource;
 
 /// Media (video/audio) sources and their playback modes.
-#[allow(missing_docs)] // F-M8-003 (#342): 2 public items in this module still lack documentation.
 pub mod media_source;
 pub use media_source::{MediaSource, MediaType, PlaybackMode};
 
