@@ -66,7 +66,6 @@ use gst::prelude::*;
 /// Recording output targets (`Output`, `OutputSettings`) and their validation.
 pub mod output;
 pub use output::{Output, OutputSettings};
-#[allow(missing_docs)] // F-M8-003 (#342): 10 public items in this module still lack documentation.
 pub mod presence;
 pub use presence::{PresenceActivity, PresenceStatus};
 #[allow(missing_docs)] // F-M8-003 (#342): 2 public items in this module still lack documentation.
