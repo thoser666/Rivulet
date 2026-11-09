@@ -323,7 +323,6 @@ pub use render::{
 };
 
 /// Scene transitions: kinds, timing and the per-scene default.
-#[allow(missing_docs)] // F-M8-003 (#342): 19 public items in this module still lack documentation.
 pub mod transition;
 pub use transition::{SceneTransition, TransitionDefault, TransitionKind};
 
