@@ -36,8 +36,11 @@ pub enum SceneKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A scene: the sources and settings that are live together, plus its place in the folder tree.
 pub struct Scene {
+    /// Stable identity; the manager and the source bindings refer to scenes by this id.
     pub id: Uuid,
+    /// Display name in the scene dock; the manager does not enforce uniqueness.
     pub name: String,
     /// Optional parent scene ID for hierarchical folder organization
     pub parent: Option<Uuid>,
@@ -51,6 +54,7 @@ pub struct Scene {
 }
 
 impl Scene {
+    /// A primary scene with a fresh random id, no parent and the default white colour.
     pub fn new(name: String) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -61,6 +65,7 @@ impl Scene {
         }
     }
 
+    /// A primary scene that starts inside the folder `parent`.
     pub fn with_parent(name: String, parent: Uuid) -> Self {
         Self {
             parent: Some(parent),
@@ -68,6 +73,7 @@ impl Scene {
         }
     }
 
+    /// A primary scene carrying a UI colour (ARGB as `u32`, e.g. `0xFF1A73E8` for blue).
     pub fn with_color(name: String, color: u32) -> Self {
         Self {
             color,
@@ -75,6 +81,7 @@ impl Scene {
         }
     }
 
+    /// A primary scene that starts inside `parent` and carries a UI colour.
     pub fn with_parent_and_color(name: String, parent: Uuid, color: u32) -> Self {
         Self {
             parent: Some(parent),
@@ -185,6 +192,7 @@ impl Default for SceneManager {
 }
 
 impl SceneManager {
+    /// An empty manager: no scenes, no active scene, no history and no undo/redo.
     pub fn new() -> Self {
         Self {
             scenes: Vec::new(),
@@ -268,6 +276,8 @@ impl SceneManager {
         id
     }
 
+    /// Removes a scene as **one** undo step.
+    /// An unselected child of a removed folder moves up one level instead of disappearing with its parent, so removing a folder never takes unrelated scenes with it. Returns whether the scene existed.
     pub fn remove(&mut self, id: Uuid) -> bool {
         let before = self.snapshot();
         let removed = self.remove_inner(id);
@@ -602,20 +612,24 @@ impl SceneManager {
         false
     }
 
+    /// Name of the scene collection this manager reads and writes.
     pub fn collection(&self) -> &str {
         &self.collection
     }
 
+    /// Name of the profile the collection belongs to.
     pub fn profile(&self) -> &str {
         &self.profile
     }
 
+    /// Renames the current collection as an undoable change.
     pub fn set_collection(&mut self, name: impl Into<String>) {
         let before = self.snapshot();
         self.collection = name.into();
         self.record_change(before);
     }
 
+    /// Switches the profile name as an undoable change.
     pub fn set_profile(&mut self, name: impl Into<String>) {
         let before = self.snapshot();
         self.profile = name.into();
@@ -651,18 +665,22 @@ impl SceneManager {
         Some(new_id)
     }
 
+    /// Every scene in collection order.
     pub fn scenes(&self) -> &[Scene] {
         &self.scenes
     }
 
+    /// Looks a scene up by id.
     pub fn get(&self, id: Uuid) -> Option<&Scene> {
         self.scenes.iter().find(|s| s.id == id)
     }
 
+    /// Id of the active scene, or `None` before the first `add`.
     pub fn active(&self) -> Option<Uuid> {
         self.active
     }
 
+    /// The active scene itself, or `None` when nothing is active or its id no longer resolves.
     pub fn active_scene(&self) -> Option<&Scene> {
         self.active.and_then(|id| self.get(id))
     }

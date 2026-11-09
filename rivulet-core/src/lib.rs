@@ -298,7 +298,6 @@ pub use preset::RecordingPreset;
 pub mod region;
 pub use region::CaptureRegion;
 
-#[allow(missing_docs)] // F-M8-003 (#342): 17 public items in this module still lack documentation.
 pub mod scene;
 pub use scene::{Scene, SceneHierarchyError, SceneKind, SceneManager};
 

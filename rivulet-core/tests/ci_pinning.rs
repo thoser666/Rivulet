@@ -6893,7 +6893,7 @@ fn m8_examples_are_run_by_ci_and_linked_from_crate_docs_and_readme() {
 #[test]
 fn m8_missing_docs_lint_is_active_and_the_allow_list_is_pinned() {
     // The modules that still lack item documentation, as of the #342 change
-    // (623 public items). Shrinking this list is the remaining work; growing it
+    // (594 public items). Shrinking this list is the remaining work; growing it
     // needs a deliberate edit here plus a reason.
     const STILL_UNDOCUMENTED: &[&str] = &[
         "alerts",
@@ -6924,7 +6924,6 @@ fn m8_missing_docs_lint_is_active_and_the_allow_list_is_pinned() {
         "recording_config",
         "render",
         "replay",
-        "scene",
         "scene_snapshot",
         "srt",
         "stream",
