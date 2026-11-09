@@ -106,7 +106,12 @@ pub const CUSTOM: RecordingPreset = RecordingPreset {
 };
 
 impl RecordingPreset {
+    /// The "Original" preset: source resolution and source frame rate, with
+    /// the bitrate left to the engine. Same value as the module-level
+    /// `ORIGINAL` constant.
     pub const ORIGINAL: RecordingPreset = ORIGINAL;
+    /// 1080p60 - 1920x1080 at 60 fps and 8000 kbit/s, the high-quality
+    /// preset for fast-moving game capture.
     pub const P1080P60: RecordingPreset = RecordingPreset {
         label: "1080p60",
         width: Some(1920),
@@ -114,6 +119,8 @@ impl RecordingPreset {
         fps: Some(60),
         bitrate_kbps: Some(8_000),
     };
+    /// 1080p30 - 1920x1080 at 30 fps and 5000 kbit/s, which is also the
+    /// engine-wide default bitrate when none is configured.
     pub const P1080P30: RecordingPreset = RecordingPreset {
         label: "1080p30",
         width: Some(1920),
@@ -121,6 +128,8 @@ impl RecordingPreset {
         fps: Some(30),
         bitrate_kbps: Some(5_000),
     };
+    /// 720p60 - 1280x720 at 60 fps and 4500 kbit/s: half the pixels of 1080p
+    /// at the same frame rate, for machines that cannot sustain 1080p60.
     pub const P720P60: RecordingPreset = RecordingPreset {
         label: "720p60",
         width: Some(1280),
@@ -128,6 +137,8 @@ impl RecordingPreset {
         fps: Some(60),
         bitrate_kbps: Some(4_500),
     };
+    /// 720p30 - 1280x720 at 30 fps and 2500 kbit/s, the lightweight preset
+    /// for tutorials and slow-moving content.
     pub const P720P30: RecordingPreset = RecordingPreset {
         label: "720p30",
         width: Some(1280),
@@ -135,6 +146,8 @@ impl RecordingPreset {
         fps: Some(30),
         bitrate_kbps: Some(2_500),
     };
+    /// 480p30 - 640x480 at 30 fps and 1500 kbit/s, the fallback for very
+    /// slow connections.
     pub const P480P30: RecordingPreset = RecordingPreset {
         label: "480p30",
         width: Some(640),

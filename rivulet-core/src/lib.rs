@@ -291,7 +291,6 @@ pub use stream::{
 pub mod i18n;
 pub use i18n::Locale;
 
-#[allow(missing_docs)] // F-M8-003 (#342): 6 public items in this module still lack documentation.
 pub mod preset;
 pub use preset::RecordingPreset;
 
