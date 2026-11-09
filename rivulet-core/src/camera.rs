@@ -1,3 +1,17 @@
+//! Camera enumeration and capture across platforms (issue #318).
+//!
+//! `list_cameras()` used to query only the two Linux device providers
+//! (`video4linux2deviceprovider`, `pipewiredeviceprovider`), so on Windows and
+//! macOS — where neither factory exists — it returned an empty list no matter
+//! how many cameras the system saw. Each platform now has its own provider
+//! chain, probed in order; the first provider that actually returns devices
+//! wins (a fallback chain, never a merge — v4l2 and PipeWire describe the same
+//! physical cameras in different path formats and would double them up).
+//!
+//! Capture builds one `parse_launch` pipeline per device and pulls frames as
+//! RGBA through an `appsink` on a dedicated thread; see
+//! [`crate::camera::start_camera_capture`].
+
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
@@ -5,34 +19,57 @@ use std::collections::HashSet;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
-// Camera enumeration across platforms (issue #318).
-//
-// `list_cameras()` used to query only the two Linux device providers
-// (`video4linux2deviceprovider`, `pipewiredeviceprovider`), so on Windows and
-// macOS — where neither factory exists — it returned an empty list no matter
-// how many cameras the system saw. Each platform now has its own provider
-// chain, probed in order; the first provider that actually returns devices
-// wins (a fallback chain, never a merge — v4l2 and PipeWire describe the same
-// physical cameras in different path formats and would double them up).
-
+/// A camera found by a GStreamer device provider.
+///
+/// The three fields describe the same device in three different
+/// vocabularies, and all of them are needed: [`start_camera_capture`] builds
+/// its pipeline from the element factory plus the device path, and the name of
+/// the element property that carries that path comes from
+/// [`device_property_for`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CameraDevice {
+    /// Human-readable name reported by the provider; what a camera picker
+    /// should show.
     pub name: String,
+    /// GStreamer source element that opens the device, e.g. `v4l2src` or
+    /// `mfvideosrc`.
     pub element_factory: String,
+    /// Platform path or identifier the element expects (`/dev/video0`, a
+    /// PipeWire node path, a Media Foundation symbolic link, an AVFoundation
+    /// unique id). Which property carries it depends on the element; see
+    /// [`device_property_for`].
     pub device_path: String,
 }
 
+/// Requested capture geometry for [`start_camera_capture`].
+///
+/// Every field is optional in practice: a value of `0` is left out of the caps
+/// string entirely, so the device negotiates that dimension itself. The
+/// `Default` is therefore "no constraints at all", not a zero-sized frame.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CameraConfig {
+    /// Requested frame width in pixels; `0` leaves it to the device.
     pub width: u32,
+    /// Requested frame height in pixels; `0` leaves it to the device.
     pub height: u32,
+    /// Requested frame rate; `0` leaves it to the device.
     pub fps: u32,
 }
 
+/// One frame pulled off the capture pipeline.
+///
+/// Frames arrive as RGBA because the pipeline converts with `videoconvert` and
+/// fixes the format in a capsfilter. The dimensions are read back from each
+/// sample's caps, so they describe what the camera actually delivered rather
+/// than what [`CameraConfig`] asked for.
 #[derive(Debug, Clone)]
 pub struct CameraFrame {
+    /// The sample's pixels as mapped from the GStreamer buffer, row-major:
+    /// `width * height * 4` bytes of packed RGBA.
     pub data: Vec<u8>,
+    /// Width from the sample's caps, in pixels.
     pub width: u32,
+    /// Height from the sample's caps, in pixels.
     pub height: u32,
 }
 
@@ -181,6 +218,21 @@ fn default_factory_for_provider(provider: &str) -> &'static str {
     }
 }
 
+/// Start capturing from `device` and return the frame receiver plus the handle
+/// that stops the capture when dropped.
+///
+/// The pipeline is `<source> <device-property>="<path>" ! videoconvert !
+/// capsfilter caps="video/x-raw,format=RGBA,..." ! appsink`, run on its own
+/// thread. Only [`CameraConfig`] values above zero are appended to the caps, so
+/// a zero means "let the device decide". The appsink keeps at most one buffer
+/// and drops what the consumer has not collected yet, so a slow consumer
+/// receives the newest frame instead of a growing backlog.
+///
+/// Failures are logged and end the thread: a pipeline that cannot be built (a
+/// wrong device property is a parse error) or cannot reach `Playing` leaves the
+/// returned receiver yielding `None`, and the handle stays harmless to drop.
+/// Samples whose caps carry no usable width or height, or whose buffer is
+/// empty, are skipped, so every [`CameraFrame`] has non-zero dimensions.
 pub fn start_camera_capture(
     device: &CameraDevice,
     config: &CameraConfig,
@@ -281,6 +333,12 @@ pub fn start_camera_capture(
     (rx, handle)
 }
 
+/// Handle that keeps a [`start_camera_capture`] thread running.
+///
+/// Dropping it is the only way to stop the capture — there is no `stop()`
+/// method — and it is enough: the thread notices within one sample timeout
+/// (~33 ms) and returns its pipeline to `Null`. The receiver can be dropped
+/// independently; frames it no longer collects are simply discarded.
 pub struct CameraCaptureHandle {
     stop: Arc<Mutex<bool>>,
 }

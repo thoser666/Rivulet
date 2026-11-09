@@ -49,7 +49,7 @@ re-export that disappeared.
 - Public modules: **73**
 - Crate-root re-exports: **67** statements
 - `#![warn(missing_docs)]`: **active**
-- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **33** (`alerts`, `alerts_eventsub`, `alerts_ingest`, `benchmark`, `camera`, `capture_channel`, `chat`, `cloud`, `container`, `discord`, `encoder`, `file_management`, `game_detection`, `global_hotkey`, `midi`, `opengl_hook`, `output`, `plugin_manifest`, `plugin_registry`, `plugin_runtime`, `presence`, `replay`, `scene_snapshot`, `srt`, `stream`, `stream_info`, `stream_runtime`, `telemetry`, `test_helpers`, `virtual_camera`, `vst3`, `vulkan_hook`, `youtube_chat`)
+- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **32** (`alerts`, `alerts_eventsub`, `alerts_ingest`, `benchmark`, `capture_channel`, `chat`, `cloud`, `container`, `discord`, `encoder`, `file_management`, `game_detection`, `global_hotkey`, `midi`, `opengl_hook`, `output`, `plugin_manifest`, `plugin_registry`, `plugin_runtime`, `presence`, `replay`, `scene_snapshot`, `srt`, `stream`, `stream_info`, `stream_runtime`, `telemetry`, `test_helpers`, `virtual_camera`, `vst3`, `vulkan_hook`, `youtube_chat`)
 - Runnable examples: **7** (`audio_routing`, `dual_output`, `encoder_config`, `engine_lifecycle`, `session_embed`, `simple_record`, `simple_stream`)
 
 ### Public modules
@@ -65,7 +65,7 @@ re-export that disappeared.
 | `autoclip` | Chat-driven auto-clip: save replay-buffer highlights when chat activity | 4 | yes |
 | `benchmark` | G5 – Performance verification: frame-time benchmarking and overhead budget checking. | 6 | yes |
 | `browser_source` | (no module documentation) | 14 | yes |
-| `camera` | (no module documentation) | 12 | yes |
+| `camera` | Camera enumeration and capture across platforms (issue #318). | 12 | yes |
 | `capture_backend` | (no module documentation) | 10 | no |
 | `capture_channel` | Shared-memory capture channel reader for receiving frames from the | 5 | no |
 | `chat` | Unified multi-platform chat facade for the streamer-facing chat dock. | 6 | yes |

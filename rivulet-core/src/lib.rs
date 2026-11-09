@@ -146,7 +146,6 @@ pub mod audio;
 pub use audio::{AudioFrame, AudioTrack, SkippedFilter};
 
 /// USB/webcam capture frames and camera configuration.
-#[allow(missing_docs)] // F-M8-003 (#342): 14 public items in this module still lack documentation.
 pub mod camera;
 pub use camera::{CameraConfig, CameraDevice, CameraFrame};
 
