@@ -477,7 +477,7 @@ Workstream issues:
     conditional pass recorded.
 
 The gate closed on the criteria above with four follow-ups named in the report
-rather than absorbed into a "done" verdict: F-M8-003 (`missing_docs` activated with a pinned per-module allow-list, 540 public
+rather than absorbed into a "done" verdict: F-M8-003 (`missing_docs` activated with a pinned per-module allow-list, 521 public
 items still undocumented), F-M8-004 (PipeWire/Metal-WGC capture
 paths), F-M8-005 (written deprecation and migration policy, **closed by
 [#344](https://github.com/thoser666/Rivulet/issues/344)** — see
@@ -495,8 +495,8 @@ As recorded when the milestone opened, `rivulet-core` was `0.65.0-alpha.55`
 only through log output. The module count is a snapshot and has grown since;
 `docs/api-overview.md` reports the current numbers from the code on every push.
 `#![warn(missing_docs)]` is a real crate attribute since [#342](https://github.com/thoser666/Rivulet/issues/342):
-`lib.rs`'s own public items and 34 of its modules are documented, and the 38
-modules that still carry a counted `#[allow(missing_docs)]` hold 540 undocumented
+`lib.rs`'s own public items and 35 of its modules are documented, and the 37
+modules that still carry a counted `#[allow(missing_docs)]` hold 521 undocumented
 public items (measured 2026-11-08), so "stabilized public API" and "fully
 documented public API" are still not the same claim and F-M8-003 keeps them
 apart.

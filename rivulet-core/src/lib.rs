@@ -358,7 +358,6 @@ pub use color_source::ColorSource;
 pub mod media_source;
 pub use media_source::{MediaSource, MediaType, PlaybackMode};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 19 public items in this module still lack documentation.
 pub mod audio_source;
 pub use audio_source::{
     device_target, migrate_routing_to_tracks, AudioBus, AudioFilterConfig, AudioRouting,

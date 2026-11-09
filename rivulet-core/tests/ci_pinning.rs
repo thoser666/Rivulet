@@ -1036,7 +1036,11 @@ fn m6_audio_engine_surface_is_pinned() {
     for required in [
         "AUDIO_ROUTING_SCHEMA_VERSION: u32 = 1",
         "pub struct AudioRoutingConfig",
-        "UnknownVersion { found: u32, supported: u32 }",
+        // The variant is expanded over several lines so its fields can carry
+        // item docs; the pin still requires the variant and both fields.
+        "UnknownVersion {",
+        "found: u32,",
+        "supported: u32,",
         "pub fn legacy_defaults() -> Self",
         "fn system_default() -> Self",
         "fn microphone_default() -> Self",
@@ -6893,13 +6897,12 @@ fn m8_examples_are_run_by_ci_and_linked_from_crate_docs_and_readme() {
 #[test]
 fn m8_missing_docs_lint_is_active_and_the_allow_list_is_pinned() {
     // The modules that still lack item documentation, as of the #342 change
-    // (540 public items). Shrinking this list is the remaining work; growing it
+    // (521 public items). Shrinking this list is the remaining work; growing it
     // needs a deliberate edit here plus a reason.
     const STILL_UNDOCUMENTED: &[&str] = &[
         "alerts",
         "alerts_eventsub",
         "alerts_ingest",
-        "audio_source",
         "benchmark",
         "camera",
         "capture_channel",
