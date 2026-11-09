@@ -343,7 +343,6 @@ pub mod image_source;
 pub use image_source::{is_image_file, supported_image_extensions, ImageSource};
 
 /// Text sources: alignment, weight, colour and scroll direction.
-#[allow(missing_docs)] // F-M8-003 (#342): 15 public items in this module still lack documentation.
 pub mod text_source;
 pub use text_source::{FontWeight, Rgba, ScrollDirection, TextAlign, TextSource};
 
