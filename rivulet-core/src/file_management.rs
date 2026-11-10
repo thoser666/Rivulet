@@ -273,9 +273,17 @@ pub enum SplitBy {
     #[default]
     None,
     /// Split every N seconds.
-    Duration { seconds: u64 },
+    Duration {
+        /// Seconds per part. The engine closes the current file once the
+        /// elapsed time of that part reaches this value.
+        seconds: u64,
+    },
     /// Split when the output file reaches MiB.
-    Size { megabytes: u64 },
+    Size {
+        /// Size per part in MiB. The comparison runs against the bytes written
+        /// to the part, so a file closes at or just past this threshold.
+        megabytes: u64,
+    },
 }
 
 impl SplitBy {

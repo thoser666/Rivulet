@@ -222,7 +222,6 @@ pub use container::{remux_to_mp4, RecordingContainer, RemuxOutcome, RemuxPlan, R
 pub mod inspect;
 pub use inspect::{CodecFeature, ContainerFeature, ElementFeature, EncoderFeature, FeatureReport};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 2 public items in this module still lack documentation.
 pub mod file_management;
 pub use file_management::{
     FileNamePattern, PatternToken, PatternValues, RecordingFileSettings, RecordingSession, SplitBy,
