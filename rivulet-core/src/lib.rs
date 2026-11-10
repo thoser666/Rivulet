@@ -263,7 +263,6 @@ pub use plugin_runtime::{
 pub mod sdp;
 pub use sdp::SdpOffer;
 
-#[allow(missing_docs)] // F-M8-003 (#342): 18 public items in this module still lack documentation.
 pub mod srt;
 #[allow(missing_docs)] // F-M8-003 (#342): 122 public items in this module still lack documentation.
 pub mod stream;
