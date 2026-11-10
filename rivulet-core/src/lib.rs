@@ -236,7 +236,6 @@ pub use ndi::NdiOutput;
 pub mod cloud;
 pub use cloud::{mask_secret, CloudRecording};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 12 public items in this module still lack documentation.
 pub mod vst3;
 pub use vst3::{discover_in, discover_vst3_plugins, vst3_search_dirs, VstChain, VstPlugin};
 
