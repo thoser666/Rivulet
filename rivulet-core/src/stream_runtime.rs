@@ -9,17 +9,25 @@ use crate::{AdaptiveBitrate, StreamHealthStatus, StreamStats};
 /// test and safe to drive from a GStreamer/GUI scheduler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AdaptiveBitrateController {
+    /// Minimum time between two applied changes, so a shaky connection cannot
+    /// flap the bitrate.
     pub cooldown: Duration,
+    /// Consecutive telemetry samples that must agree before a change is
+    /// applied; [`Self::new`] treats `0` as `1`.
     pub required_samples: u8,
     pending: Option<(StreamHealthStatus, u8)>,
     last_change: Option<Duration>,
     last_change_info: Option<BitrateChange>,
 }
 
+/// One bitrate change the controller applied, kept for diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BitrateChange {
+    /// Bitrate in kbit/s before the change.
     pub from_kbps: u32,
+    /// Bitrate in kbit/s after the change.
     pub to_kbps: u32,
+    /// Health status the change was triggered by.
     pub status: StreamHealthStatus,
 }
 
@@ -36,6 +44,10 @@ impl Default for AdaptiveBitrateController {
 }
 
 impl AdaptiveBitrateController {
+    /// Create a controller with an explicit cooldown and sample requirement.
+    ///
+    /// `required_samples` is clamped to at least 1, so a change can never be
+    /// applied without an observation.
     pub fn new(cooldown: Duration, required_samples: u8) -> Self {
         Self {
             cooldown,
@@ -45,10 +57,15 @@ impl AdaptiveBitrateController {
         }
     }
 
+    /// The most recent applied change, or `None` before the first one.
     pub fn last_change(&self) -> Option<BitrateChange> {
         self.last_change_info
     }
 
+    /// Apply the policy using the health status of one telemetry sample.
+    ///
+    /// A convenience wrapper over [`Self::update`] for callers that already
+    /// hold a [`StreamStats`].
     pub fn update_from_telemetry(
         &mut self,
         policy: AdaptiveBitrate,
@@ -59,6 +76,12 @@ impl AdaptiveBitrateController {
         self.update(policy, current_kbps, telemetry.status, now)
     }
 
+    /// Apply the policy for one observed status.
+    ///
+    /// Only `Poor` and `Good` are acted on, the sample must repeat
+    /// [`AdaptiveBitrateController::required_samples`] times and the cooldown
+    /// must have elapsed; `current_kbps` is updated in place. Returns whether
+    /// the bitrate actually changed.
     pub fn update(
         &mut self,
         policy: AdaptiveBitrate,
@@ -111,6 +134,10 @@ pub struct DelaySupervisor {
 }
 
 impl DelaySupervisor {
+    /// Create a supervisor for a configured delay and a hard buffer bound.
+    ///
+    /// The bound is raised to the configured delay, so a configured delay can
+    /// always be buffered.
     pub fn new(configured: Duration, max_buffer: Duration) -> Self {
         let max_buffer = max_buffer.max(configured);
         Self {
@@ -122,21 +149,27 @@ impl DelaySupervisor {
         }
     }
 
+    /// Configured delay, as passed to [`Self::new`].
     pub fn configured(&self) -> Duration {
         self.configured
     }
+    /// Delay currently buffered.
     pub fn buffered(&self) -> Duration {
         self.buffered
     }
 
+    /// Pushes dropped because the buffer was already at its bound.
     pub fn dropped(&self) -> u64 {
         self.dropped
     }
 
+    /// Consumes that ran dry, including the one [`Self::consume`] records
+    /// before it clamps at zero.
     pub fn underflows(&self) -> u64 {
         self.underflows
     }
 
+    /// Buffer fill relative to the bound, clamped to `0.0..=1.0`.
     pub fn fill_ratio(&self) -> f64 {
         if self.max_buffer.is_zero() {
             0.0
@@ -150,6 +183,7 @@ impl DelaySupervisor {
         self.underflows = self.underflows.saturating_add(1);
     }
 
+    /// Buffer `amount`, counting a drop when that exceeds the bound.
     pub fn push(&mut self, amount: Duration) {
         let next = self.buffered.saturating_add(amount);
         if next > self.max_buffer {
@@ -158,6 +192,7 @@ impl DelaySupervisor {
         self.buffered = next.min(self.max_buffer);
     }
 
+    /// Consume `amount`, counting an underflow when it exceeds the buffer.
     pub fn consume(&mut self, amount: Duration) {
         if amount > self.buffered {
             self.record_underflow();
@@ -165,10 +200,15 @@ impl DelaySupervisor {
         self.buffered = self.buffered.saturating_sub(amount);
     }
 
+    /// Keep the buffered media across a disconnect.
+    ///
+    /// Draining it on reconnect is the point of the supervisor; the buffer is
+    /// left untouched here.
     pub fn on_disconnect(&mut self) {
         // Preserve buffered media; the reconnect path can drain it once live.
     }
 
+    /// Trim the buffer to the configured delay and return what was retained.
     pub fn on_reconnect(&mut self) -> Duration {
         let retained = self.buffered.min(self.configured);
         self.buffered = retained;

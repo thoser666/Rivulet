@@ -156,9 +156,7 @@ pub use replay::{save_replay, ReplayBuffer, ReplaySegment, ReplaySnapshot};
 
 pub mod chat_rooms;
 pub mod reconnect;
-#[allow(missing_docs)] // F-M8-003 (#342): 10 public items in this module still lack documentation.
 pub mod stream_info;
-#[allow(missing_docs)] // F-M8-003 (#342): 20 public items in this module still lack documentation.
 pub mod stream_runtime;
 pub use reconnect::{
     target_index_from_sink_name, ReconnectCommand, ReconnectWorker, RetryPolicy, SinkBusEvent,
