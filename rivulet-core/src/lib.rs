@@ -251,7 +251,6 @@ pub use plugin_registry::{
     PluginRecord,
 };
 
-#[allow(missing_docs)] // F-M8-003 (#342): 5 public items in this module still lack documentation.
 pub mod plugin_runtime;
 pub use plugin_runtime::{
     PluginHandle, PluginLoadResult, PluginState, RuntimeError, SkipReason, WasmPluginRuntime,
