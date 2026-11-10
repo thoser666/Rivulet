@@ -86,7 +86,6 @@ pub use crash_record::{
     read_latest as read_latest_crash_record, write_record as write_crash_record, CrashRecord,
     CrashReportSink, MAX_CRASH_RECORDS,
 };
-#[allow(missing_docs)] // F-M8-003 (#342): 2 public items in this module still lack documentation.
 pub mod youtube_chat;
 pub use youtube_chat::{
     chat_auth_matrix, form_encode_component, youtube_insert_body, youtube_quota_exhausted,

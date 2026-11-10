@@ -93,6 +93,10 @@ pub struct YouTubeSendCredentials {
 }
 
 impl YouTubeSendCredentials {
+    /// Pair the two halves of the official send contract: the Data API key and
+    /// an OAuth token carrying `youtube.force-ssl`. Both are secrets — the
+    /// `Debug` impl reports presence and length only, and neither half reaches
+    /// an error string.
     pub fn new(api_key: String, oauth_token: String) -> Self {
         Self {
             api_key,
@@ -357,6 +361,9 @@ pub enum YouTubeSendOutcome {
 }
 
 impl YouTubeSendOutcome {
+    /// Whether the API accepted the message. `QuotaExhausted` and `Rejected`
+    /// are both failures, but only the first means sending stops until the
+    /// next UTC day.
     pub fn is_sent(self) -> bool {
         matches!(self, Self::Sent)
     }
