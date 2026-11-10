@@ -175,7 +175,6 @@ pub use stream_info::{
 };
 pub use stream_runtime::{AdaptiveBitrateController, BitrateChange, DelaySupervisor};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 36 public items in this module still lack documentation.
 pub mod encoder;
 pub mod recording_config;
 pub use recording_config::{

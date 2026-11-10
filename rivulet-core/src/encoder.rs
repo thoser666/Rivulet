@@ -15,21 +15,54 @@ use std::sync::Mutex;
 /// Feature-detection cache key: (codec, detection kind).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DetectionCacheKey {
+    /// Encoder availability for one codec, as produced by
+    /// [`detect_available_encoders_with_info`].
     Encoders(VideoCodec),
+    /// The encoder fallback decision for one codec, as produced by
+    /// [`encoder_fallback_for_codec`].
+    ///
+    /// Kept separate from [`DetectionCacheKey::Encoders`] rather than derived
+    /// from it: the fallback also probes the skipped candidates' reasons, and a
+    /// caller may ask for either answer without paying for the other.
     Fallback(VideoCodec),
+    /// Encoder *tool* detection for one codec — the encoders' auxiliary tools
+    /// rather than the GStreamer elements themselves.
+    ///
+    /// Reserved: no caller caches a tool payload today, so the variant exists
+    /// only to keep the key space explicit for a probe that does.
     Tools(VideoCodec),
 }
 
 /// Cached detection payload — structured result plus optional reason.
 #[derive(Debug, Clone)]
 pub struct DetectionCacheEntry {
+    /// The cached detection result.
+    ///
+    /// Its variant always matches the [`DetectionCacheKey`] it was stored
+    /// under. A mismatch is a programming error, and the reading function
+    /// panics instead of handing back a foreign payload.
     pub payload: DetectionPayload,
 }
 
+/// One cached feature-detection result.
+///
+/// The variants mirror the detection kinds: encoder availability, an encoder
+/// fallback decision, and the capture-backend candidates. Keeping them in one
+/// map means a single lock and a single invalidation cover every probe — see
+/// [`FEATURE_DETECTION_CACHE`].
 #[derive(Debug, Clone)]
 pub enum DetectionPayload {
+    /// Per-backend availability for one codec, in preference order, with the
+    /// software fallback last. Never empty.
     Encoders(Vec<EncoderInfo>),
+    /// The fallback decision for one codec, including every skipped candidate
+    /// and its reason.
     Fallback(EncoderFallback),
+    /// Platform capture-backend candidates, in preference order.
+    ///
+    /// No key produces this payload yet (see [`DetectionCacheKey::Tools`]); it
+    /// is named here so the cache's value type covers every detection this
+    /// module reports.
     CaptureBackends(Vec<CaptureBackendInfo>),
 }
 
@@ -49,11 +82,26 @@ impl Default for FeatureDetectionCache {
     }
 }
 impl FeatureDetectionCache {
+    /// Create an empty cache.
+    ///
+    /// The cache fills lazily: the first probe for a key runs the detector and
+    /// stores the result, every later probe clones it. Callers should use
+    /// [`FEATURE_DETECTION_CACHE`] instead of building a private cache, so the
+    /// whole process shares one answer per key.
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(HashMap::new()),
         }
     }
+    /// Return the entry stored for `key`, computing it with `compute` on a miss.
+    ///
+    /// `compute` runs **outside** the lock. Filling one entry can re-enter the
+    /// cache for a different key — the fallback probe runs the encoder probe —
+    /// and the mutex is not re-entrant, so holding it across `compute()` would
+    /// deadlock the calling thread. On a cold cache two threads may both
+    /// compute; the first insert wins and the later caller receives that stored
+    /// answer, so the cached result stays stable per key for the life of the
+    /// process.
     pub fn get_or_insert(
         &self,
         key: DetectionCacheKey,
@@ -81,6 +129,11 @@ impl FeatureDetectionCache {
             }
         }
     }
+    /// Drop every cached entry, so the next probe re-runs detection.
+    ///
+    /// Intended for tests that need a cold cache; detection answers are stable
+    /// for a given machine and GStreamer installation, so production code
+    /// should never need to invalidate them.
     pub fn clear_for_test(&self) {
         self.inner.lock().unwrap().clear();
     }
@@ -89,17 +142,35 @@ impl FeatureDetectionCache {
 /// Structured info for a capture backend / audio / video source detection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaptureBackendInfo {
+    /// Stable identifier of the backend — `"xcap"`, `"pipewire"`, `"v4l2"`,
+    /// `"wgc"`, `"avf"`, `"ksvideo"` or `"test-source"`.
+    ///
+    /// Compare against these strings; the human-readable label is not part of
+    /// the contract and may be reworded.
     pub backend: &'static str,
+    /// Whether the backend can be used on this machine.
     pub available: bool,
+    /// Machine-readable, non-localised reason why `available` is `false`.
+    ///
+    /// Empty when the backend is available.
     pub why_not: &'static str,
+    /// Platform the backend belongs to: `"linux"`, `"windows"`, `"macos"`, or
+    /// `"all"` for the headless test source.
     pub platform: &'static str,
 }
 
 /// Structured info for a hardware-decoding / feature-detection result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FeatureInfo {
+    /// Stable identifier of the probed feature — `"nvdec"`, `"vt-decode"`,
+    /// `"d3d11-decode"` and `"vaapi"` for decoding, `"pipewire-audio"`,
+    /// `"pulseaudio"`, `"coreaudio"` and `"wasapi"` for audio capture.
     pub feature: &'static str,
+    /// Whether the feature is usable on this machine.
     pub available: bool,
+    /// Machine-readable, non-localised reason why `available` is `false`.
+    ///
+    /// Empty when the feature is available.
     pub why_not: &'static str,
 }
 
@@ -197,19 +268,40 @@ pub struct RateControl {
 }
 
 impl RateControl {
+    /// The rate-control mode the encoder is asked to use.
     pub fn mode(&self) -> RateControlMode {
         self.mode
     }
+    /// Upper bound for the modes that allow peaks, in kilobits per second.
+    ///
+    /// `0` is the default and means no explicit cap was configured; the
+    /// encoder then only sees the separately supplied target bitrate.
     pub fn max_bitrate_kbps(&self) -> u32 {
         self.max_bitrate_kbps
     }
+    /// Target quality for the quality-driven modes (`Cq`, `CqVbr`).
+    ///
+    /// The value is a quantizer: lower means better. `Cbr` and `Vbr` ignore
+    /// it. Defaults to 23, the x264 CRF default.
     pub fn quality(&self) -> i32 {
         self.quality
     }
+    /// Extra encoder properties, trimmed and appended to the generated fragment.
+    ///
+    /// This is the escape hatch for backend-specific GStreamer properties that
+    /// [`RateControl`] itself does not model; the string is pushed as one group
+    /// after the modelled properties (e.g. `key-int-max=250 bframes=3`). Empty
+    /// by default.
     pub fn custom_options(&self) -> &str {
         &self.custom_options
     }
 
+    /// Build a rate-control configuration.
+    ///
+    /// `custom_options` accepts anything that converts into a `String`, so a
+    /// `&str` literal works without an explicit `.to_string()`. The target
+    /// average bitrate is not part of this struct — it is applied on top, by
+    /// the caller (and adjusted live by the adaptive-bitrate controller).
     pub fn new(
         mode: RateControlMode,
         max_bitrate_kbps: u32,
@@ -823,18 +915,26 @@ pub fn capture_backend_fallback() -> CaptureBackendFallback {
 /// [`EncoderFallback`] for feature-detection consistency (#295).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaptureBackendFallback {
+    /// The backend Rivulet would use: the first available candidate in
+    /// preference order, or `"test-source"` when none of them is available.
     pub chosen: &'static str,
+    /// Every candidate considered, in preference order, with availability and
+    /// the reason when it is unavailable.
     pub candidates: Vec<CaptureBackendInfo>,
+    /// Why that backend was chosen, as one non-localised sentence.
     pub why_chosen: &'static str,
 }
 
 impl CaptureBackendFallback {
+    /// The backend that would be used.
     pub fn chosen(&self) -> &'static str {
         self.chosen
     }
+    /// All candidates in preference order, with their availability and reason.
     pub fn candidates(&self) -> &[CaptureBackendInfo] {
         &self.candidates
     }
+    /// Why the chosen backend was picked (machine-readable, non-localised).
     pub fn why(&self) -> &'static str {
         self.why_chosen
     }
@@ -908,19 +1008,31 @@ pub fn audio_source_fallback() -> AudioSourceFallback {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// The audio-capture source Rivulet would use, plus the candidates behind it.
+///
+/// Mirrors [`CaptureBackendFallback`] for audio, so an embedding application can
+/// explain the choice without parsing log output.
 pub struct AudioSourceFallback {
+    /// The source Rivulet would use: the first available candidate in
+    /// preference order, or `"microphone-v4l2"` when none is available.
     pub chosen: &'static str,
+    /// Every candidate considered, in preference order, with availability and
+    /// the reason when it is unavailable.
     pub candidates: Vec<FeatureInfo>,
+    /// Why that source was chosen, as one non-localised sentence.
     pub why_chosen: &'static str,
 }
 
 impl AudioSourceFallback {
+    /// The audio source that would be used.
     pub fn chosen(&self) -> &'static str {
         self.chosen
     }
+    /// All candidates in preference order, with their availability and reason.
     pub fn candidates(&self) -> &[FeatureInfo] {
         &self.candidates
     }
+    /// Why the chosen source was picked (machine-readable, non-localised).
     pub fn why(&self) -> &'static str {
         self.why_chosen
     }
