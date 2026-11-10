@@ -120,7 +120,6 @@ pub use alerts_eventsub::{
 };
 pub mod rate_limit;
 pub use rate_limit::{RateLimitConfig, RateLimiter};
-#[allow(missing_docs)] // F-M8-003 (#342): 7 public items in this module still lack documentation.
 pub mod global_hotkey;
 pub mod midi;
 pub use global_hotkey::{GlobalBinding, GlobalHotkey, KeyCode, ModMask};
