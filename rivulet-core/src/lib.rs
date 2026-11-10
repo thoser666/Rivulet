@@ -239,7 +239,6 @@ pub use cloud::{mask_secret, CloudRecording};
 pub mod vst3;
 pub use vst3::{discover_in, discover_vst3_plugins, vst3_search_dirs, VstChain, VstPlugin};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 1 public items in this module still lack documentation.
 pub mod plugin_manifest;
 pub use plugin_manifest::{
     parse_manifest, ApiVersion, ManifestError, PluginCapabilities, PluginKind, PluginManifest,

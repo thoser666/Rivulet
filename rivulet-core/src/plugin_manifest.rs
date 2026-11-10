@@ -66,6 +66,11 @@ pub enum PluginKind {
 }
 
 impl PluginKind {
+    /// The `snake_case` identifier of this kind, as written in a manifest and
+    /// in logs.
+    ///
+    /// It is the same spelling `#[serde(rename_all = "snake_case")]` accepts,
+    /// so a manifest can never name a kind the parser would reject.
     pub const fn as_str(self) -> &'static str {
         match self {
             PluginKind::UiPanel => "ui_panel",
