@@ -49,7 +49,7 @@ re-export that disappeared.
 - Public modules: **73**
 - Crate-root re-exports: **67** statements
 - `#![warn(missing_docs)]`: **active**
-- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **7** (`alerts_ingest`, `cloud`, `game_detection`, `opengl_hook`, `stream`, `stream_info`, `stream_runtime`)
+- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **3** (`stream`, `stream_info`, `stream_runtime`)
 - Runnable examples: **7** (`audio_routing`, `dual_output`, `encoder_config`, `engine_lifecycle`, `session_embed`, `simple_record`, `simple_stream`)
 
 ### Public modules

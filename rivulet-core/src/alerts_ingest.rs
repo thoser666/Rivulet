@@ -114,6 +114,7 @@ impl SourceWindow {
 /// the GUI as a dedicated dock line ("… suppressed N further alerts").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlertSuppressionNotice {
+    /// Source whose burst hit the per-source rate limit.
     pub source: AlertSource,
     /// How many events from this source were dropped in the burst.
     pub suppressed: u32,
@@ -123,7 +124,9 @@ pub struct AlertSuppressionNotice {
 /// [`AlertEvent`] or a per-source [`AlertSuppressionNotice`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AlertQueueEntry {
+    /// An accepted event, in the order it was pushed.
     Event(AlertEvent),
+    /// The accumulated suppression notice for one source's burst.
     Suppressed(AlertSuppressionNotice),
 }
 
@@ -177,6 +180,7 @@ impl AlertKind {
 /// dock.
 #[derive(Debug, Clone)]
 pub struct AlertEvent {
+    /// Which engagement event this entry represents; it selects the i18n key.
     pub kind: AlertKind,
     /// Display name of the acting viewer (follower, subscriber, gifter,
     /// raider or donor). `"Anonymous"` for anonymous gifted subs.
@@ -612,6 +616,8 @@ impl AlertIngest {
         self.enabled = enabled;
     }
 
+    /// Whether ingestion currently queues events; while disabled,
+    /// [`Self::push`] and [`Self::push_from`] count skips instead.
     pub fn enabled(&self) -> bool {
         self.enabled
     }
@@ -625,6 +631,7 @@ impl AlertIngest {
         }
     }
 
+    /// Current queue capacity in events.
     pub fn capacity(&self) -> usize {
         self.capacity
     }
@@ -636,6 +643,7 @@ impl AlertIngest {
         self.rate_limit_enabled = enabled;
     }
 
+    /// Whether the per-source burst limit applies to [`Self::push_from`].
     pub fn rate_limit_enabled(&self) -> bool {
         self.rate_limit_enabled
     }
@@ -737,10 +745,12 @@ impl AlertIngest {
         true
     }
 
+    /// Number of queued events; pending suppression notices are not counted.
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    /// Whether no events are queued.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

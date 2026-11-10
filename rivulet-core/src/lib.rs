@@ -98,7 +98,6 @@ pub use telemetry::{
     platform_code, TelemetryBatch, TelemetryErrorKind, TelemetryEvent, TelemetryReporter,
     TelemetrySink,
 };
-#[allow(missing_docs)] // F-M8-003 (#342): 9 public items in this module still lack documentation.
 pub mod alerts_ingest;
 pub use alerts_ingest::{
     parse_streamlabs_webhook, parse_twitch_eventsub_notification, verify_twitch_eventsub_signature,
@@ -143,7 +142,6 @@ pub use camera::{CameraConfig, CameraDevice, CameraFrame};
 pub mod capture_backend;
 /// Game-window capture configuration, frames and the window handle wrapper.
 pub mod game_capture;
-#[allow(missing_docs)] // F-M8-003 (#342): 5 public items in this module still lack documentation.
 pub mod game_detection;
 pub use game_capture::{GameCaptureConfig, GameCaptureFrame, GameWindow};
 pub use game_detection::{
@@ -228,7 +226,6 @@ pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 pub mod ndi;
 pub use ndi::NdiOutput;
 
-#[allow(missing_docs)] // F-M8-003 (#342): 6 public items in this module still lack documentation.
 pub mod cloud;
 pub use cloud::{mask_secret, CloudRecording};
 
@@ -353,7 +350,6 @@ pub use alerts::{AlertOverlayError, AlertProvider};
 
 pub mod benchmark;
 pub mod capture_channel;
-#[allow(missing_docs)] // F-M8-003 (#342): 1 public items in this module still lack documentation.
 pub mod opengl_hook;
 /// Vulkan hook/interposition (G3) used by game capture.
 pub mod vulkan_hook;
