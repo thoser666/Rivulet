@@ -15,20 +15,53 @@ use std::ffi::CString;
 
 use ash::{vk, Device, Entry};
 
+/// Zero-overhead Vulkan capture path: Entry → Instance → Device → Queue →
+/// Swapchain → Capture.
+///
+/// [`new`](Self::new) / [`with_backend`](Self::with_backend) bring up the
+/// instance, pick the best physical device and create the logical device, the
+/// graphics queue and the command resources. The swapchain is attached later by
+/// [`create_swapchain`](Self::create_swapchain), because the surface belongs to
+/// the application being captured. Dropping the hook waits for the device to go
+/// idle and tears down everything the hook created.
 pub struct VulkanHook {
+    /// The Vulkan loader entry point the instance was created from.
     pub entry: Entry,
+    /// Instance created by the hook, with the platform surface extensions and —
+    /// for the layer backend — the capture layer enabled.
     pub instance: ash::Instance,
+    /// Physical device chosen at startup: the preferred discrete GPU the instance
+    /// exposes.
     pub physical_device: vk::PhysicalDevice,
+    /// Logical device created on `physical_device`, with the swapchain extension
+    /// enabled.
     pub device: Device,
+    /// Graphics queue taken from queue family `queue_family_index`.
     pub queue: vk::Queue,
+    /// Index of the family the queue was taken from — the first family with
+    /// `GRAPHICS` support.
     pub queue_family_index: u32,
+    /// `VK_KHR_surface` function table, used for the surface capability, format
+    /// and present-mode queries.
     pub surface_loader: ash::khr::surface::Instance,
+    /// `VK_KHR_swapchain` function table, used to create, query and destroy the
+    /// swapchain.
     pub swapchain_loader: ash::khr::swapchain::Device,
+    /// Current swapchain, or `null` until [`create_swapchain`](Self::create_swapchain)
+    /// succeeds and after [`destroy_swapchain`](Self::destroy_swapchain).
     pub swapchain: vk::SwapchainKHR,
+    /// Images the swapchain presents; [`capture_current_frame`](Self::capture_current_frame)
+    /// indexes into this list.
     pub swapchain_images: Vec<vk::Image>,
+    /// Format of the swapchain images — `UNDEFINED` while no swapchain exists.
     pub swapchain_format: vk::Format,
+    /// Size of the swapchain images in pixels — `0x0` while no swapchain exists.
     pub swapchain_extent: vk::Extent2D,
+    /// Most recent capture, replaced on every successful
+    /// [`capture_current_frame`](Self::capture_current_frame).
     pub captured_frame: Option<CapturedFrame>,
+    /// Whether presentation is intercepted by the Vulkan layer or by an API
+    /// detour.
     pub backend: VulkanHookBackend,
     memory_properties: vk::PhysicalDeviceMemoryProperties,
     command_pool: vk::CommandPool,
@@ -40,15 +73,24 @@ pub struct VulkanHook {
 }
 
 #[derive(Clone, Debug)]
+/// One captured frame: tightly packed RGBA pixels read back from the swapchain
+/// into host memory.
 pub struct CapturedFrame {
+    /// Frame width in pixels.
     pub width: u32,
+    /// Frame height in pixels.
     pub height: u32,
+    /// Row-major RGBA bytes, `width * height * 4` long — no row padding.
     pub pixels: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How the hook intercepts presentation.
 pub enum VulkanHookBackend {
+    /// Through the `VK_LAYER_RIVULET_capture` Vulkan layer, enabled on the
+    /// instance — no code patching.
     Layer,
+    /// Through a detour of the present entry point.
     Detour,
 }
 
@@ -76,10 +118,18 @@ impl std::fmt::Debug for VulkanHook {
 }
 
 impl VulkanHook {
+    /// Create a hook with the default [`VulkanHookBackend::Layer`] backend.
+    ///
+    /// Fails when no Vulkan loader is installed, when no Vulkan-capable GPU is
+    /// exposed, or when no graphics queue family exists.
     pub fn new() -> anyhow::Result<Self> {
         Self::with_backend(VulkanHookBackend::Layer)
     }
 
+    /// Create a hook with an explicit backend.
+    ///
+    /// Device selection does not depend on the backend: discrete GPUs win over
+    /// integrated ones, and every other device type ranks last.
     pub fn with_backend(backend: VulkanHookBackend) -> anyhow::Result<Self> {
         let entry = unsafe { Entry::load()? };
 
@@ -205,10 +255,14 @@ impl VulkanHook {
         })
     }
 
+    /// Whether a swapchain is currently attached — false before the first
+    /// [`create_swapchain`](Self::create_swapchain) and after
+    /// [`destroy_swapchain`](Self::destroy_swapchain).
     pub fn has_swapchain(&self) -> bool {
         self.swapchain != vk::SwapchainKHR::null()
     }
 
+    /// Name of the selected physical device, as reported by the driver.
     pub fn device_name(&self) -> String {
         unsafe {
             let props = self
@@ -224,6 +278,8 @@ impl VulkanHook {
         }
     }
 
+    /// Vulkan `(major, minor, patch)` the selected device supports — what the
+    /// device advertises, not the API version the hook requests.
     pub fn api_version(&self) -> (u32, u32, u32) {
         unsafe {
             let props = self
@@ -237,6 +293,8 @@ impl VulkanHook {
         }
     }
 
+    /// Whether any queue family on the device advertises `TRANSFER`, i.e. whether
+    /// the image-to-buffer copy can be handed to a dedicated transfer queue.
     pub fn queue_family_supports_transfer(&self) -> bool {
         unsafe {
             let queue_families = self
@@ -248,6 +306,8 @@ impl VulkanHook {
         }
     }
 
+    /// Whether the swapchain images are already RGBA, so captured pixels need no
+    /// channel swizzle.
     pub fn image_format_is_rgba(&self) -> bool {
         matches!(
             self.swapchain_format,
@@ -255,6 +315,8 @@ impl VulkanHook {
         )
     }
 
+    /// Whether the swapchain images are BGRA — the common Windows case — so
+    /// consumers must swap red and blue.
     pub fn image_format_is_bgra(&self) -> bool {
         matches!(
             self.swapchain_format,

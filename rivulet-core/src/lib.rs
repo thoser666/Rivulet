@@ -360,7 +360,6 @@ pub mod capture_channel;
 #[allow(missing_docs)] // F-M8-003 (#342): 1 public items in this module still lack documentation.
 pub mod opengl_hook;
 /// Vulkan hook/interposition (G3) used by game capture.
-#[allow(missing_docs)] // F-M8-003 (#342): 30 public items in this module still lack documentation.
 pub mod vulkan_hook;
 pub mod vulkan_layer;
 pub use benchmark::{BenchmarkReport, FramePercentiles, OverheadBudget, OverheadResult, SampleSet};
