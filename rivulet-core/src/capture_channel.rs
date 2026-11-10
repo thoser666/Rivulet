@@ -9,16 +9,35 @@
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct FrameHeader {
+    /// Magic value identifying a Rivulet frame — always [`FrameHeader::MAGIC`].
+    /// [`FrameHeader::from_bytes`] rejects any other value before a single
+    /// other field is trusted.
     pub magic: u32,
+    /// Frame width in pixels. Zero and anything above 16384 are rejected by
+    /// [`FrameHeader::is_plausible`], so a forged header cannot ask the reader
+    /// for an absurd allocation.
     pub width: u32,
+    /// Frame height in pixels, bounded the same way as `width`.
     pub height: u32,
+    /// Pixel format id. The protocol defines exactly one,
+    /// [`FrameHeader::FORMAT_RGBA8`]; any other value is rejected rather than
+    /// guessed, so a format change on the layer side fails loudly here.
     pub format: u32,
+    /// Monotonic frame counter written by the capture layer. Comparing it
+    /// across two reads tells a fresh frame from the one already consumed.
     pub sequence: u64,
+    /// Byte length of the RGBA8 payload following the header. Must equal
+    /// `width * height * 4` — a header whose length disagrees with its
+    /// geometry is corruption, not a smaller frame.
     pub data_size: u32,
 }
 
 impl FrameHeader {
+    /// Size of the header in bytes: the payload starts at this offset, and a
+    /// mapping shorter than it is refused outright.
     pub const SIZE: usize = 32;
+    /// Magic value at offset 0 (`"RVL\0"` little-endian) that marks a region
+    /// as a Rivulet capture channel.
     pub const MAGIC: u32 = 0x004C5652; // "RVL\0"
 
     /// The only pixel format the protocol defines (RGBA8 = 4 bytes/px).
@@ -73,6 +92,11 @@ impl FrameHeader {
         Self::SIZE + self.data_size as usize <= mapped_size
     }
 
+    /// Parses a header from the first [`Self::SIZE`] bytes of shared memory.
+    ///
+    /// Decoding is little-endian and checks the magic only — geometry, format
+    /// and payload length are judged by [`Self::is_plausible`], so a caller
+    /// must run both before reading pixel bytes.
     pub fn from_bytes(buf: &[u8; Self::SIZE]) -> Option<Self> {
         let magic = u32::from_le_bytes(buf[0..4].try_into().ok()?);
         if magic != Self::MAGIC {
@@ -98,9 +122,15 @@ pub const DEFAULT_SHM_SIZE: usize = 32 + 1920 * 1080 * 4;
 /// A captured frame read from shared memory.
 #[derive(Debug, Clone)]
 pub struct CapturedFrame {
+    /// Frame width in pixels, copied from the already validated header.
     pub width: u32,
+    /// Frame height in pixels, copied from the already validated header.
     pub height: u32,
+    /// The writer's frame counter for this snapshot: two reads that agree on
+    /// it saw the same frame, so a poll loop can skip re-processing.
     pub sequence: u64,
+    /// RGBA8 pixels, `width * height * 4` bytes. A private copy taken from
+    /// shared memory, so it stays valid after the mapping closes.
     pub pixels: Vec<u8>,
 }
 
@@ -160,7 +190,6 @@ impl Drop for ShmReader {
     }
 }
 
-/// Platform-specific shared memory opening.
 /// True mapping size of the view at `ptr` (Windows: VirtualQuery region size).
 /// The creator may map fewer bytes than DEFAULT_SHM_SIZE, so readers must
 /// trust the queried size, never the constant, when bounding pixel reads.

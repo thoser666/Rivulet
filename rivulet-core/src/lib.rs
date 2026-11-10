@@ -361,7 +361,6 @@ pub mod alerts;
 pub use alerts::{AlertOverlayError, AlertProvider};
 
 pub mod benchmark;
-#[allow(missing_docs)] // F-M8-003 (#342): 13 public items in this module still lack documentation.
 pub mod capture_channel;
 #[allow(missing_docs)] // F-M8-003 (#342): 1 public items in this module still lack documentation.
 pub mod opengl_hook;
