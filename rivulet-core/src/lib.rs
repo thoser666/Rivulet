@@ -220,7 +220,6 @@ pub use test_helpers::{
 pub mod health;
 pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 1 public items in this module still lack documentation.
 pub mod container;
 pub use container::{remux_to_mp4, RecordingContainer, RemuxOutcome, RemuxPlan, RemuxSettings};
 
