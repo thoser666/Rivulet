@@ -204,7 +204,6 @@ pub use video_effects::VideoEffects;
 pub mod clock;
 pub use clock::{ClockMode, EngineClock, SharedClock, SystemClock, VirtualClock};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 29 public items in this module still lack documentation.
 pub mod test_helpers;
 pub use test_helpers::{
     FrameDiff, GoldenFrame, PixelDifference, SceneState, SceneStateDifference, TimestampViolation,
