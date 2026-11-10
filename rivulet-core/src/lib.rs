@@ -113,7 +113,6 @@ pub use alerts_webhook::{
     handle_webhook, AlertsReceiver, AlertsReceiverConfig, WebhookReject, WebhookRequest,
     DEFAULT_ALERTS_RECEIVER_PORT,
 };
-#[allow(missing_docs)] // F-M8-003 (#342): 5 public items in this module still lack documentation.
 pub mod alerts_eventsub;
 pub use alerts_eventsub::{
     build_subscription_body, build_subscription_body_with_direction, parse_eventsub_ws_message,
