@@ -68,7 +68,6 @@ pub mod output;
 pub use output::{Output, OutputSettings};
 pub mod presence;
 pub use presence::{PresenceActivity, PresenceStatus};
-#[allow(missing_docs)] // F-M8-003 (#342): 2 public items in this module still lack documentation.
 pub mod discord;
 pub use discord::{DiscordPresence, DiscordPresenceConfig};
 pub mod twitch_chat;
