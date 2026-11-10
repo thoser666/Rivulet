@@ -49,7 +49,7 @@ re-export that disappeared.
 - Public modules: **73**
 - Crate-root re-exports: **67** statements
 - `#![warn(missing_docs)]`: **active**
-- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **22** (`alerts_ingest`, `capture_channel`, `chat`, `cloud`, `discord`, `encoder`, `file_management`, `game_detection`, `global_hotkey`, `midi`, `opengl_hook`, `plugin_manifest`, `plugin_registry`, `plugin_runtime`, `srt`, `stream`, `stream_info`, `stream_runtime`, `test_helpers`, `virtual_camera`, `vst3`, `vulkan_hook`)
+- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **21** (`alerts_ingest`, `capture_channel`, `chat`, `cloud`, `discord`, `encoder`, `file_management`, `game_detection`, `global_hotkey`, `opengl_hook`, `plugin_manifest`, `plugin_registry`, `plugin_runtime`, `srt`, `stream`, `stream_info`, `stream_runtime`, `test_helpers`, `virtual_camera`, `vst3`, `vulkan_hook`)
 - Runnable examples: **7** (`audio_routing`, `dual_output`, `encoder_config`, `engine_lifecycle`, `session_embed`, `simple_record`, `simple_stream`)
 
 ### Public modules
