@@ -6492,17 +6492,16 @@ fn m8_closeout_statements_match_across_readme_gate_and_report() {
     // A finding that was fixed after the closeout says so in its own row; the
     // remaining ones are still recorded as open. Naming the IDs rather than
     // counting words keeps the three surfaces tied to the report's table.
-    for finding in ["F-M8-003", "F-M8-004"] {
-        let row = report
-            .lines()
-            .find(|line| line.starts_with(&format!("| {finding} |")))
-            .unwrap_or_else(|| panic!("the M8 completion report must keep the {finding} row"));
-        assert!(
-            row.contains("| open |"),
-            "the still-unfixed {finding} row must be recorded as open, got: {row}"
-        );
-    }
-    for finding in ["F-M8-005", "F-M8-006"] {
+    // F-M8-004 is the one finding still open, so its row must say so.
+    let open_row = report
+        .lines()
+        .find(|line| line.starts_with("| F-M8-004 |"))
+        .unwrap_or_else(|| panic!("the M8 completion report must keep the F-M8-004 row"));
+    assert!(
+        open_row.contains("| open |"),
+        "the still-unfixed F-M8-004 row must be recorded as open, got: {open_row}"
+    );
+    for finding in ["F-M8-003", "F-M8-005", "F-M8-006"] {
         let row = report
             .lines()
             .find(|line| line.starts_with(&format!("| {finding} |")))
@@ -6896,10 +6895,10 @@ fn m8_examples_are_run_by_ci_and_linked_from_crate_docs_and_readme() {
 /// silencing a new one must never lengthen it unnoticed.
 #[test]
 fn m8_missing_docs_lint_is_active_and_the_allow_list_is_pinned() {
-    // The modules that still lack item documentation, as of the #342 change
-    // (122 public items). Shrinking this list is the remaining work; growing it
-    // needs a deliberate edit here plus a reason.
-    const STILL_UNDOCUMENTED: &[&str] = &["stream"];
+    // Every module's item documentation is complete as of the #342 change (0
+    // public items left). Growing this list needs a deliberate edit here plus a
+    // reason.
+    const STILL_UNDOCUMENTED: &[&str] = &[];
 
     let lib = read("rivulet-core/src/lib.rs");
     assert!(

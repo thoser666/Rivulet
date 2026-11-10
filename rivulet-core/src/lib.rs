@@ -45,9 +45,10 @@
 //!
 //! #![warn(missing_docs)]
 // The `//! #![warn(missing_docs)]` line above is documentation, not a lint.
-// The crate attribute below enables it for real. Modules that still miss item
-// documentation carry an explicit, counted `#[allow(missing_docs)]` naming
-// F-M8-003 (#342), so the remaining work is visible here instead of nowhere.
+// The crate attribute below enables it for real. Modules that missed item
+// documentation carried an explicit, counted `#[allow(missing_docs)]` naming
+// F-M8-003 (#342) until that list reached zero; an item without docs now fails
+// the build instead of being counted somewhere.
 #![warn(missing_docs)]
 
 use gstreamer as gst;
@@ -251,7 +252,6 @@ pub mod sdp;
 pub use sdp::SdpOffer;
 
 pub mod srt;
-#[allow(missing_docs)] // F-M8-003 (#342): 122 public items in this module still lack documentation.
 pub mod stream;
 pub use srt::{ContributionProtocol, ContributionSettings};
 pub use stream::{
