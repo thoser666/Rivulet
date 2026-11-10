@@ -91,7 +91,6 @@ pub use youtube_chat::{
     youtube_send_message, ChatCredentialSlot, YouTubeChat, YouTubeChatConfig, YouTubeQuota,
     YouTubeQuotaConfig, YouTubeSendCredentials, YouTubeSendOutcome,
 };
-#[allow(missing_docs)] // F-M8-003 (#342): 11 public items in this module still lack documentation.
 pub mod chat;
 pub use chat::{Chat, ChatAccount, ChatConfig, ChatPlatform, ChatTokenStore, MultiChat};
 pub mod telemetry;
@@ -127,7 +126,6 @@ pub use midi::{
     MidiPresetLibrary,
 };
 /// Cross-platform virtual camera contract: configuration, formats and state.
-#[allow(missing_docs)] // F-M8-003 (#342): 29 public items in this module still lack documentation.
 pub mod virtual_camera;
 pub use virtual_camera::{
     VirtualCamera, VirtualCameraConfig, VirtualCameraError, VirtualCameraFormat, VirtualCameraState,
