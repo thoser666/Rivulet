@@ -245,7 +245,6 @@ pub use plugin_manifest::{
     PluginResources,
 };
 
-#[allow(missing_docs)] // F-M8-003 (#342): 4 public items in this module still lack documentation.
 pub mod plugin_registry;
 pub use plugin_registry::{
     default_install_root, scan_install_root, CapabilityDecision, DiscoveredPlugin, PluginApprovals,

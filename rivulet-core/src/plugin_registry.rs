@@ -38,16 +38,22 @@ pub struct DiscoveredPlugin {
 }
 
 impl DiscoveredPlugin {
-    /// Convenience accessors for the UI list.
+    /// The manifest's reverse-DNS plugin id — the key the approval store and
+    /// the install directory are both keyed by.
     pub fn id(&self) -> &str {
         &self.manifest.plugin.id
     }
+    /// Display name from the manifest, shown in the plugin list.
     pub fn name(&self) -> &str {
         &self.manifest.plugin.name
     }
+    /// The installed plugin's own version from the manifest — not the host API
+    /// version it declares compatibility with.
     pub fn version(&self) -> &str {
         &self.manifest.plugin.version
     }
+    /// The capabilities the manifest requests: what the approval UI lists and
+    /// what [`PluginApprovals::fully_decided`] checks for a decision.
     pub fn capabilities(&self) -> &PluginCapabilities {
         &self.manifest.plugin.capabilities
     }
@@ -136,6 +142,8 @@ impl PluginApprovals {
         self.plugins.entry(plugin_id.to_owned()).or_default()
     }
 
+    /// The stored record for `plugin_id`, or `None` when the user has never
+    /// decided anything for it — the default-denial state, not an error.
     pub fn record(&self, plugin_id: &str) -> Option<&PluginRecord> {
         self.plugins.get(plugin_id)
     }
