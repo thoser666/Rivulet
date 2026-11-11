@@ -60,6 +60,12 @@ once_cell = "1.19.0"
 
 xcap = "=0.9.8"
 libc = "0.2"
+# PipeWire portal screen capture backing `PipeWireBackend` (F-M8-004): ashpd
+# drives the xdg-desktop-portal screencast session, pipewire reads the frames.
+# Both were already in the tree via rivulet-capture/core's audio deps; moving
+# them here adds no new locked crate.
+ashpd = { version = "0.13.10", features = ["tokio", "screencast"] }
+pipewire = { version = "0.10.0", features = ["v0_3_33"] }
 # Native keyring backend (kernel keyutils) so StreamKeyStore/ChatTokenStore
 # work without a secret-service daemon; no extra system packages needed.
 keyring = { version = "3.6", default-features = false, features = ["linux-native"] }
@@ -83,6 +89,9 @@ keyring = { version = "3.6", default-features = false, features = ["windows-nati
 # -  psapi / processthreadsapi: M6 resource report (tests/m6_resource_report.rs —
 #    GetProcessMemoryInfo working-set sampling and GetProcessTimes CPU deltas).
 winapi = { version = "0.3", features = ["memoryapi", "winbase", "winnt", "handleapi", "fileapi", "namedpipeapi", "winuser", "psapi", "processthreadsapi"] }
+# Windows Graphics Capture backing `MetalWgcBackend` (F-M8-004). Same 2.0.0
+# line the GUI already depends on, so nothing new is locked.
+windows-capture = "2.0.0"
 # VST3 host skeleton: LoadLibraryW / FreeLibrary for plugin DLL loading
 # (vst3.rs — only the LibraryLoader feature is enabled, keeping the
 # attack surface minimal).

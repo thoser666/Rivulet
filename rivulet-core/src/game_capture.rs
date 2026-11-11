@@ -150,7 +150,7 @@ pub fn start_game_capture(
     let window_id = window.id;
     let fps = if config.fps > 0 { config.fps } else { 60 };
 
-    let handle = GameCaptureHandle { stop };
+    let handle = GameCaptureHandle::new(stop);
 
     thread::spawn(move || {
         #[cfg(target_os = "linux")]
@@ -198,13 +198,43 @@ pub fn start_game_capture(
 }
 
 /// Handle to a running game capture session. Dropping this stops the capture.
+///
+/// Backends share one stop flag with their capture thread and, when their
+/// engine needs its own teardown (the WGC session's stop flag, the PipeWire
+/// capture handle), attach it as an `on_stop` action that runs on drop.
 pub struct GameCaptureHandle {
     stop: Arc<Mutex<bool>>,
+    on_stop: Option<Box<dyn FnOnce() + Send + 'static>>,
+}
+
+impl GameCaptureHandle {
+    /// A handle that only flips the shared stop flag.
+    pub(crate) fn new(stop: Arc<Mutex<bool>>) -> Self {
+        Self {
+            stop,
+            on_stop: None,
+        }
+    }
+
+    /// A handle that flips the shared stop flag and then runs `on_stop`, for
+    /// engines with their own teardown (F-M8-004).
+    pub(crate) fn with_teardown(
+        stop: Arc<Mutex<bool>>,
+        on_stop: Box<dyn FnOnce() + Send + 'static>,
+    ) -> Self {
+        Self {
+            stop,
+            on_stop: Some(on_stop),
+        }
+    }
 }
 
 impl Drop for GameCaptureHandle {
     fn drop(&mut self) {
         *self.stop.lock().unwrap() = true;
+        if let Some(on_stop) = self.on_stop.take() {
+            on_stop();
+        }
     }
 }
 
@@ -223,7 +253,7 @@ pub fn start_vulkan_layer_capture(
 
     let fps_val = fps;
 
-    let handle = GameCaptureHandle { stop };
+    let handle = GameCaptureHandle::new(stop);
 
     thread::spawn(move || {
         if cfg!(target_os = "windows") {

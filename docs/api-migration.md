@@ -88,8 +88,9 @@ existing caller had to be broken to fix the answer.
 
 - Modules whose own documentation calls them experimental (listed in
   [`api-overview.md`](api-overview.md)) — they may change between alpha
-  increments. `PipeWireBackend` and `MetalWgcBackend` are the current examples
-  (F-M8-004).
+  increments. The capture backends left that set when they started capturing
+  real frames (F-M8-004), so the generated list in `api-overview.md`, not this
+  sentence, names the current examples.
 - Test helpers exported for the regression suite.
 - Behaviour that is already documented as undefined or platform-dependent.
 

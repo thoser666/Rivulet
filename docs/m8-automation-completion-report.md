@@ -53,13 +53,18 @@ below with that verdict:
 
 - **F-M8-003** (Medium, API documentation): **closed.** The lint is a real crate
   attribute, the build is warning-free, and every public item of `lib.rs` and its
-  72 modules is documented; the counted, pinned `#[allow(missing_docs)]` list is
+  74 modules is documented; the counted, pinned `#[allow(missing_docs)]` list is
   empty (the last 122 items were `stream`, measured 2026-11-09). Closed via
   [#342](https://github.com/thoser666/Rivulet/issues/342).
-- **F-M8-004** (Medium, capture backends): `PipeWireBackend` and
-  `MetalWgcBackend` answer `BackendUnavailable` by construction; only
-  `XCapBackend` captures. Tracked as
-  [#343](https://github.com/thoser666/Rivulet/issues/343).
+- **F-M8-004** (Medium, capture backends): **two of three halves delivered.**
+  `PipeWireBackend` drives an xdg-desktop-portal screencast session and reads
+  real PipeWire frames on Linux/Wayland; `MetalWgcBackend` runs a Windows
+  Graphics Capture session and delivers the compositor's frames on Windows. Both
+  answer `BackendUnavailable` only off their own platform, so on a supported
+  platform the typed refusal now means what it says. What remains is the
+  macOS/Metal half — macOS has no default capture backend at all, so it was never
+  a broken promise to a supported platform, but it is still unimplemented.
+  Tracked as [#343](https://github.com/thoser666/Rivulet/issues/343).
 - **F-M8-005** (Low, API policy): the written deprecation and migration policy
   now lives in [`api-migration.md`](api-migration.md) and is enforced by the
   `api_stability` removal, deprecation-note and policy-link guards. Closed by
@@ -74,13 +79,14 @@ below with that verdict:
 - Roadmap checkboxes: **6 / 6 checked** in the `README.md` M8 section; the
   pinned `ci_pinning` guards hold status, gate, report and issue references
   together.
-- Blocker/Critical findings: **0**; open High findings: **0**. Two of the four
-  follow-ups are closed (F-M8-005 by
+- Blocker/Critical findings: **0**; open High findings: **0**. Three of the four
+  follow-ups are closed (F-M8-003 by
+  [#342](https://github.com/thoser666/Rivulet/issues/342), F-M8-005 by
   [#344](https://github.com/thoser666/Rivulet/issues/344), F-M8-006 by
-  [#345](https://github.com/thoser666/Rivulet/issues/345)); the remaining two,
-  F-M8-003 and F-M8-004, are Medium and in the "documentation or implementation
-  of an already-delivered contract" class — neither is a broken promise to a
-  consumer.
+  [#345](https://github.com/thoser666/Rivulet/issues/345)); the remaining one,
+  F-M8-004, is Medium and now only about the macOS/Metal half — the Linux and
+  Windows backends it named capture real frames, so it is no longer a broken
+  promise to a supported platform.
 
 ## Exit evidence (#297)
 
@@ -143,7 +149,8 @@ replaced by the refusal branch unnoticed. Locally, on a checkout whose
   traits — [#296](https://github.com/thoser666/Rivulet/issues/296) —
   `CaptureBackend` trait (`Send+Sync`, lifecycle, typed `CaptureError`),
   stability matrix (`docs/capture-backends.md`), enumeration guard test; the
-  PipeWire and Metal/WGC implementations are still stubs (F-M8-004)
+  PipeWire (Linux/Wayland) and WGC (Windows) backends capture real frames, the
+  macOS/Metal half is still open (F-M8-004)
 - [x] Exit evidence — [#297](https://github.com/thoser666/Rivulet/issues/297) —
   external consumer smoke test in CI against the packaged artifact, warning-free
   `cargo doc`, example run matrix, generated API overview, this report
@@ -186,14 +193,15 @@ folded into a single verdict.
 | 4 | Versioning, deprecation, migration and compatibility policy explicit | **satisfied** | [`api-migration.md`](api-migration.md) names the window, the attribute, the migration table and what counts as a removal; `api_stability` fails on an undocumented removal or a note-less `#[deprecated]` (was F-M8-005) |
 | 5 | Invalid configuration fails early with typed, actionable errors | **satisfied** | `RecordingConfig::validate()` per-parameter, `tests/recording_config.rs`; `RecordingJob::start` validates before GStreamer |
 | 6 | API docs and examples work without depending on GUI-only state | **satisfied** | examples link no `egui`/`eframe`; `RecordingJob` is GUI-free |
-| 7 | Capture backend API coherent and documented | **partial** | `CaptureBackend` trait, stability matrix, 9 regression tests; PipeWire/Metal-WGC implementations are stubs (F-M8-004) |
+| 7 | Capture backend API coherent and documented | **partial** | `CaptureBackend` trait, stability matrix, 15 regression tests; `XCapBackend`, `PipeWireBackend` and `MetalWgcBackend` all capture real frames on their own platform; the macOS/Metal half is unimplemented (F-M8-004) |
 | 8 | Downstream consumer smoke test against the published crate | **satisfied** | external crate built against the `cargo package` artifact, run in CI (was F-M8-001) |
 | 9 | Docs build without warnings | **satisfied** | `-D warnings` doc gate in CI, zero warnings (was F-M8-002) |
 
 There is no Blocker, Critical or open High finding. The milestone is delivered:
 eight criteria are satisfied outright, and the one partial criterion is an
-unfinished *edge* of a delivered contract — two stub implementations behind a
-stable trait. It keeps its own tracking issue and a retest condition, and the
+unfinished *edge* of a delivered contract — one platform half without an
+implementation behind a stable trait. It keeps its own tracking issue and a
+retest condition, and the
 README, the gate and this report name it together rather than one document
 claiming a completion the others hedge.
 
@@ -208,7 +216,7 @@ artifacts that close them, and the four *scope* findings keep their own issues
 | F-M8-001 | Medium | **closed by #297** | Exit evidence | The downstream smoke test used to be a workspace member, so it could not prove the released crate works. Replaced by the external crate `downstream-smoke/`, built by `scripts/run-downstream-smoke.sh` against the unpacked `cargo package` artifact and run in the Build & Test job. | [#297](https://github.com/thoser666/Rivulet/issues/297) | The `Downstream consumer smoke test (M8 #297)` step passes with `RIVULET_DOWNSTREAM_REQUIRE_AUDIO=1` |
 | F-M8-002 | Low | **closed by #297** | Exit evidence | `cargo doc` warnings were only checked by the pre-push hook. The Lints job now runs the doc build with `RUSTDOCFLAGS=-D warnings`, and the 22 broken links it found are fixed. | [#297](https://github.com/thoser666/Rivulet/issues/297) | `Build API docs without warnings (M8 #297)` fails on the first new rustdoc warning |
 | F-M8-003 | Medium | **closed by [#342](https://github.com/thoser666/Rivulet/issues/342)** | API documentation | `#![warn(missing_docs)]` is a real crate attribute and the build is warning-free; every public item of `lib.rs` and its 72 modules is documented and the counted `#[allow(missing_docs)]` list is empty (the last 122 items were `stream`, 2026-11-09). "Stabilized" and "fully documented" are now the same claim for item text. | [#342](https://github.com/thoser666/Rivulet/issues/342) | `docs/api-overview.md` reports `#![warn(missing_docs)]: active`, the build is warning-free with the lint on, **and** the per-module allow-list is empty |
-| F-M8-004 | Medium | open | Capture backends | `PipeWireBackend` and `MetalWgcBackend` answer `BackendUnavailable` by construction; only `XCapBackend` captures real frames. | [#343](https://github.com/thoser666/Rivulet/issues/343) | Each backend captures frames on its platform and no longer answers `BackendUnavailable` there |
+| F-M8-004 | Medium | open | Capture backends | `PipeWireBackend` (Linux/Wayland portal screencast) and `MetalWgcBackend` (Windows Graphics Capture) capture real frames and answer `BackendUnavailable` only off their platform; the macOS/Metal half is still unimplemented, because macOS never had a default capture backend at all. | [#343](https://github.com/thoser666/Rivulet/issues/343) | Every supported platform captures through its backend; for the remaining half, a macOS Metal session delivering frames |
 | F-M8-005 | Low | **closed by #344** | API policy | No written deprecation or migration policy existed next to `docs/m8-api-contract.md`. [`api-migration.md`](api-migration.md) now names the window (at least one minor release), the `#[deprecated]` mechanics, the migration table, and what counts as a removal. | [#344](https://github.com/thoser666/Rivulet/issues/344) | `cargo test -p rivulet-core --test api_stability` fails on a removal that has no migration row and on a note-less `#[deprecated]`; the baseline-update command refuses an undocumented drop |
 | F-M8-006 | Low | **closed by #345** | Feature detection | `detect_encoder_availability(encoder)` ignored its argument and answered `Available`, disagreeing with `detect_available_encoders_with_info()`. The helper is deprecated, delegates to `detect_encoder_availability_for_codec()`, and the agreement is pinned in `tests/recording_config.rs`. | [#345](https://github.com/thoser666/Rivulet/issues/345) | Both APIs agree for every encoder/codec pair, pinned by a test |
 
