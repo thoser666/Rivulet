@@ -791,6 +791,100 @@ struct TsStreamCounts {
     video: usize,
 }
 
+/// Elementary-stream kind of a PMT `stream_type` (ISO 13818-1 + H.222).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TsStreamKind {
+    Audio,
+    Video,
+}
+
+fn classify_stream_type(stream_type: u8) -> Option<TsStreamKind> {
+    match stream_type {
+        // AAC (ADTS/raw), MPEG-1/2 audio, AC-3, DTS, Opus
+        0x0f | 0x11 | 0x03 | 0x04 | 0x81 | 0x82 | 0x85 | 0x90 => Some(TsStreamKind::Audio),
+        // MPEG-1/2 video, H.264, H.265, AV1
+        0x01 | 0x02 | 0x10 | 0x1b | 0x24 | 0x25 => Some(TsStreamKind::Video),
+        _ => None,
+    }
+}
+
+/// Payload bytes a transport stream actually carries per kind (issue #438).
+///
+/// A PMT entry only proves that a stream was *declared*: `mpegtsmux` lists a
+/// track as soon as its pad is configured, while the encoder behind it may
+/// still be priming. A recording that stops inside that window has audio tracks
+/// on paper and none in the file — which is exactly what an `mp4mux` remux then
+/// drops, and what the discoverer reported as "0 audio streams" on macOS.
+///
+/// These counts are the evidence that data reached the file, not just the PMT.
+/// Test-only evidence: the recording tests call it, the recorder does not.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct TsPayloadBytes {
+    pub(crate) audio: usize,
+    pub(crate) video: usize,
+}
+
+/// Counts the payload bytes `path` carries for the audio and video PIDs its PMT
+/// names (issue #438). Best-effort like [`scan_mpegts_stream_kinds`]: an
+/// unreadable or unterminated file yields the bytes counted so far.
+#[cfg(test)]
+pub(crate) fn scan_mpegts_payload_bytes(path: &str) -> TsPayloadBytes {
+    let mut bytes = TsPayloadBytes::default();
+    let Ok(data) = std::fs::read(path) else {
+        return bytes;
+    };
+    let mut audio_pids: Vec<u16> = Vec::new();
+    let mut video_pids: Vec<u16> = Vec::new();
+    for (stream_type, es_pid) in mpegts_pmt_streams(&data).1 {
+        match classify_stream_type(stream_type) {
+            Some(TsStreamKind::Audio) => audio_pids.push(es_pid),
+            Some(TsStreamKind::Video) => video_pids.push(es_pid),
+            None => {}
+        }
+    }
+    if audio_pids.is_empty() && video_pids.is_empty() {
+        return bytes;
+    }
+    let mut offset = 0;
+    while offset + 188 <= data.len() {
+        let pkt = &data[offset..offset + 188];
+        offset += 188;
+        if pkt[0] != 0x47 {
+            continue;
+        }
+        let pid = (u16::from(pkt[1] & 0x1f) << 8) | u16::from(pkt[2]);
+        let is_audio = audio_pids.contains(&pid);
+        let is_video = video_pids.contains(&pid);
+        if !is_audio && !is_video {
+            continue;
+        }
+        // adaptation_field_control: 0b10 = AF only, 0b11 = AF + payload.
+        let has_adaptation = pkt[3] & 0x20 != 0;
+        if pkt[3] & 0x10 == 0 {
+            continue;
+        }
+        let af_len = if has_adaptation {
+            usize::from(pkt[4])
+        } else {
+            0
+        };
+        let start = 4 + if has_adaptation { 1 + af_len } else { 0 };
+        if start >= 188 {
+            continue;
+        }
+        // No pointer_field to skip: that field only precedes PSI sections, and
+        // an elementary-stream PID starts its payload_unit with a PES header.
+        let len = 188 - start;
+        if is_audio {
+            bytes.audio += len;
+        } else {
+            bytes.video += len;
+        }
+    }
+    bytes
+}
+
 /// Scans `path` for the PAT and the (first) PMT and counts the distinct
 /// elementary-stream PIDs by kind. Best-effort: any parse problem yields
 /// the counts found so far (an empty result simply skips pre-claiming).
@@ -802,11 +896,17 @@ struct TsStreamCounts {
 /// H.222 extension): 0x0f/0x11 AAC, 0x1b/0x24 H.264/H.265, 0x02/0x10
 /// MPEG video.
 fn scan_mpegts_stream_kinds(path: &str) -> TsStreamCounts {
-    let mut counts = TsStreamCounts::default();
     let Ok(data) = std::fs::read(path) else {
-        return counts;
+        return TsStreamCounts::default();
     };
+    mpegts_pmt_streams(&data).0
+}
 
+/// Walks the PAT/PMT sections of `data` and returns the per-kind counts plus
+/// the `(stream_type, elementary_PID)` entries of the LAST PMT. The last one is
+/// the complete one: `mpegtsmux` rewrites the PMT as streams materialize, so an
+/// early version may list only the video PID.
+fn mpegts_pmt_streams(data: &[u8]) -> (TsStreamCounts, Vec<(u8, u16)>) {
     // PAT: PID 0x0000 -> program number -> PMT PID.
     let mut pmt_pid: Option<u16> = None;
     let mut pmt: Option<&[u8]> = None;
@@ -869,10 +969,10 @@ fn scan_mpegts_stream_kinds(path: &str) -> TsStreamCounts {
     }
 
     let Some(pmt) = pmt else {
-        return counts;
+        return (TsStreamCounts::default(), Vec::new());
     };
     if pmt.len() < 12 {
-        return counts;
+        return (TsStreamCounts::default(), Vec::new());
     }
     let section_len = (usize::from(pmt[1] & 0x03) << 8) | usize::from(pmt[2]);
     // section_length counts the bytes FOLLOWING the length field itself, so
@@ -884,6 +984,8 @@ fn scan_mpegts_stream_kinds(path: &str) -> TsStreamCounts {
     // program_info_length sits at bytes 10-11; the stream entries follow it.
     let prog_info_len = ((usize::from(pmt[10]) & 0x0f) << 8) | usize::from(pmt[11]);
     let mut i = 12 + prog_info_len;
+    let mut counts = TsStreamCounts::default();
+    let mut streams: Vec<(u8, u16)> = Vec::new();
     let mut seen_pids: Vec<u16> = Vec::new();
     while i + 5 <= end {
         let stream_type = pmt[i];
@@ -891,17 +993,16 @@ fn scan_mpegts_stream_kinds(path: &str) -> TsStreamCounts {
         let es_info_len = ((usize::from(pmt[i + 3]) & 0x0f) << 8) | usize::from(pmt[i + 4]);
         if es_pid != 0 && !seen_pids.contains(&es_pid) {
             seen_pids.push(es_pid);
-            match stream_type {
-                // AAC (ADTS/raw), MPEG-1/2 audio, AC-3, DTS, Opus
-                0x0f | 0x11 | 0x03 | 0x04 | 0x81 | 0x82 | 0x85 | 0x90 => counts.audio += 1,
-                // MPEG-1/2 video, H.264, H.265, AV1
-                0x01 | 0x02 | 0x10 | 0x1b | 0x24 | 0x25 => counts.video += 1,
-                _ => {}
+            streams.push((stream_type, es_pid));
+            match classify_stream_type(stream_type) {
+                Some(TsStreamKind::Audio) => counts.audio += 1,
+                Some(TsStreamKind::Video) => counts.video += 1,
+                None => {}
             }
         }
         i += 5 + es_info_len;
     }
-    counts
+    (counts, streams)
 }
 
 #[cfg(test)]
@@ -1538,6 +1639,94 @@ mod tests {
         let counts = scan_mpegts_stream_kinds(path.to_str().expect("utf-8 temp path"));
         std::fs::remove_file(&path).ok();
         counts
+    }
+
+    /// One elementary-stream packet for `pid`: payload only, no
+    /// payload_unit_start, as a muxer writes the middle of a PES.
+    fn ts_payload_packet(pid: u16, payload: &[u8]) -> Vec<u8> {
+        assert!(payload.len() <= 184, "payload must fit one TS packet");
+        let mut pkt = vec![0u8; 188];
+        pkt[0] = 0x47;
+        pkt[1] = u8::try_from(pid >> 8).unwrap();
+        pkt[2] = pid as u8;
+        pkt[3] = 0x10; // payload only, adaptation_field_control = 01
+        pkt[4..4 + payload.len()].copy_from_slice(payload);
+        pkt
+    }
+
+    /// Payload packet with an adaptation field, the shape `mpegtsmux` writes
+    /// for a payload_unit_start packet (PCR + random access flags).
+    fn ts_af_payload_packet(pid: u16, af_len: u8, payload: &[u8]) -> Vec<u8> {
+        let mut pkt = vec![0u8; 188];
+        pkt[0] = 0x47;
+        pkt[1] = 0x40 | u8::try_from(pid >> 8).unwrap(); // payload_unit_start
+        pkt[2] = pid as u8;
+        pkt[3] = 0x30; // adaptation field + payload
+        pkt[4] = af_len;
+        let start = 5 + usize::from(af_len);
+        pkt[start..start + payload.len()].copy_from_slice(payload);
+        pkt
+    }
+
+    /// Writes `packets` to a temp `.ts` file and returns the payload bytes the
+    /// scanner counts for it.
+    fn scan_payload(packets: &[Vec<u8>]) -> TsPayloadBytes {
+        let mut bytes = Vec::new();
+        for p in packets {
+            bytes.extend_from_slice(p);
+        }
+        let path = std::env::temp_dir().join(format!(
+            "rivulet-payload-scan-{}-{:p}.ts",
+            std::process::id(),
+            &bytes
+        ));
+        std::fs::write(&path, &bytes).expect("synthetic TS written");
+        let counts = scan_mpegts_payload_bytes(path.to_str().expect("utf-8 temp path"));
+        std::fs::remove_file(&path).ok();
+        counts
+    }
+
+    #[test]
+    fn payload_scan_separates_declared_streams_from_delivered_data() {
+        // The PMT lists both AAC tracks but only the video PID carries bytes:
+        // the exact shape of the macOS failure in issue #438, where the tracks
+        // existed in the PMT and the discoverer still counted 0 audio streams.
+        let bytes = scan_payload(&[
+            ts_section_packet(0x0000, &pat_section(0x0100)),
+            ts_section_packet(
+                0x0100,
+                &pmt_section(&[(0x1b, 0x0101), (0x0f, 0x0102), (0x0f, 0x0103)]),
+            ),
+            ts_payload_packet(0x0101, &[0xaa; 100]),
+        ]);
+        assert_eq!(
+            bytes.video, 184,
+            "a payload-only packet carries 188 - 4 header bytes"
+        );
+        assert_eq!(
+            bytes.audio, 0,
+            "a PMT entry without payload bytes must not count as delivered audio"
+        );
+    }
+
+    #[test]
+    fn payload_scan_counts_every_audio_track_and_skips_the_adaptation_field() {
+        let bytes = scan_payload(&[
+            ts_section_packet(0x0000, &pat_section(0x0100)),
+            ts_section_packet(
+                0x0100,
+                &pmt_section(&[(0x1b, 0x0101), (0x0f, 0x0102), (0x0f, 0x0103)]),
+            ),
+            ts_payload_packet(0x0102, &[0x11; 100]),
+            ts_payload_packet(0x0103, &[0x22; 100]),
+            // 4 AF bytes, then 179 payload bytes (188 - 4 header - 1 length - 4).
+            ts_af_payload_packet(0x0101, 4, &[0x33; 179]),
+        ]);
+        assert_eq!(bytes.audio, 368, "both AAC PIDs carry 184 bytes each");
+        assert_eq!(
+            bytes.video, 179,
+            "the adaptation field must be subtracted from the payload"
+        );
     }
 
     #[test]
