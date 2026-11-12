@@ -275,7 +275,9 @@ encoder behind it may still be priming. `scan_mpegts_payload_bytes` counts the
 payload bytes each PMT kind actually carries (pinned by
 `container::tests::payload_scan_*`, same synthetic-stream approach), and the
 audio-track recording test uses it instead of a fixed sleep: it keeps recording
-until both audio and video payload are present and only then stops. That closes
+until **every** audio track the PMT names has carried payload (plus the video
+stream), and only then stops — a per-kind total would also pass with one track
+still priming, and the assertions that follow claim both tracks survive. That closes
 the intermittent macOS failure in
 [#438](https://github.com/thoser666/Rivulet/issues/438) — a session stopped
 during encoder priming left audio tracks that existed in the PMT and nowhere

@@ -6007,7 +6007,13 @@ mod tests {
                     continue;
                 }
                 ts_bytes = crate::container::scan_mpegts_payload_bytes(&ts_path);
-                if frames >= 12 && ts_bytes.audio > 0 && ts_bytes.video > 0 {
+                // Every audio track the PMT names has to carry bytes, not just
+                // some audio: a total above zero would also pass with one track
+                // still priming, and the assertions below claim that both
+                // tracks survive the recording.
+                let audio_ready = ts_bytes.audio_tracks > 0
+                    && ts_bytes.audio_tracks_delivered == ts_bytes.audio_tracks;
+                if frames >= 12 && audio_ready && ts_bytes.video > 0 {
                     break;
                 }
                 if frames >= 120 {
@@ -6019,11 +6025,15 @@ mod tests {
             if wait_for_ts_audio {
                 ts_bytes = crate::container::scan_mpegts_payload_bytes(&ts_path);
                 assert!(
-                    ts_bytes.audio > 0 && ts_bytes.video > 0,
-                    "{}: the recording leg wrote no audio payload in {frames} frames \
+                    ts_bytes.audio_tracks > 0
+                        && ts_bytes.audio_tracks_delivered == ts_bytes.audio_tracks
+                        && ts_bytes.video > 0,
+                    "{}: the recording leg delivered {}/{} audio tracks in {frames} frames \
                      (audio={} video={} bytes); stopping here would hand an empty track \
                      to the remux (issue #438)",
                     container.label(),
+                    ts_bytes.audio_tracks_delivered,
+                    ts_bytes.audio_tracks,
                     ts_bytes.audio,
                     ts_bytes.video
                 );
@@ -6063,8 +6073,11 @@ mod tests {
             // the remux instead of reporting a bare "0".
             let leg = if wait_for_ts_audio {
                 format!(
-                    "; the TS intermediate carried audio={} video={} payload bytes",
-                    ts_bytes.audio, ts_bytes.video
+                    "; the TS intermediate carried audio={} video={} payload bytes across {}/{} audio tracks",
+                    ts_bytes.audio,
+                    ts_bytes.video,
+                    ts_bytes.audio_tracks_delivered,
+                    ts_bytes.audio_tracks
                 )
             } else {
                 String::new()

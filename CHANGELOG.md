@@ -8,9 +8,11 @@
   both audio tracks in the PMT, so the recording handed an empty track to the
   remux, the MP4 folded it away and the discoverer reported "0 audio streams".
   `container::scan_mpegts_payload_bytes` now counts the bytes each PMT kind
-  carries (a PMT entry proves a stream was declared, not delivered), the test
-  keeps recording until both kinds are present, and its failure message names
-  the leg that lost the track along with the payload bytes it saw.
+  carries and how many of the named audio tracks delivered any (a PMT entry
+  proves a stream was declared, not delivered), the test keeps recording until
+  every named audio track and the video stream carry payload, and its failure
+  message names the leg that lost the track along with the payload bytes and
+  the delivered/total track count it saw.
 - fix(gui): **the Windows graphics-capture fallback delivers packed frames.**
   The GUI's own `GraphicsCaptureApiHandler` read every WGC frame through
   `as_raw_buffer()`, which keeps the compositor's row alignment padding, so a

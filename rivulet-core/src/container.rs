@@ -818,11 +818,21 @@ fn classify_stream_type(stream_type: u8) -> Option<TsStreamKind> {
 ///
 /// These counts are the evidence that data reached the file, not just the PMT.
 /// Test-only evidence: the recording tests call it, the recorder does not.
+///
+/// `audio_tracks` and `audio_tracks_delivered` are deliberately per track, not
+/// per kind: a total above zero says *some* audio arrived, which is exactly the
+/// state the macOS failure in issue #438 was stuck in (one buffer on one track,
+/// the other still priming). A test that claims both tracks survive must wait
+/// for every PMT track to deliver.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct TsPayloadBytes {
     pub(crate) audio: usize,
     pub(crate) video: usize,
+    /// Audio PIDs the PMT names.
+    pub(crate) audio_tracks: usize,
+    /// How many of those PIDs actually carried payload bytes.
+    pub(crate) audio_tracks_delivered: usize,
 }
 
 /// Counts the payload bytes `path` carries for the audio and video PIDs its PMT
@@ -846,6 +856,8 @@ pub(crate) fn scan_mpegts_payload_bytes(path: &str) -> TsPayloadBytes {
     if audio_pids.is_empty() && video_pids.is_empty() {
         return bytes;
     }
+    bytes.audio_tracks = audio_pids.len();
+    let mut audio_delivered: Vec<u16> = Vec::new();
     let mut offset = 0;
     while offset + 188 <= data.len() {
         let pkt = &data[offset..offset + 188];
@@ -878,10 +890,14 @@ pub(crate) fn scan_mpegts_payload_bytes(path: &str) -> TsPayloadBytes {
         let len = 188 - start;
         if is_audio {
             bytes.audio += len;
+            if len > 0 && !audio_delivered.contains(&pid) {
+                audio_delivered.push(pid);
+            }
         } else {
             bytes.video += len;
         }
     }
+    bytes.audio_tracks_delivered = audio_delivered.len();
     bytes
 }
 
@@ -1707,6 +1723,11 @@ mod tests {
             bytes.audio, 0,
             "a PMT entry without payload bytes must not count as delivered audio"
         );
+        assert_eq!(bytes.audio_tracks, 2, "the PMT names two audio tracks");
+        assert_eq!(
+            bytes.audio_tracks_delivered, 0,
+            "no audio track delivered bytes, so none may count as delivered"
+        );
     }
 
     #[test]
@@ -1726,6 +1747,36 @@ mod tests {
         assert_eq!(
             bytes.video, 179,
             "the adaptation field must be subtracted from the payload"
+        );
+        assert_eq!(bytes.audio_tracks, 2, "the PMT names two audio tracks");
+        assert_eq!(
+            bytes.audio_tracks_delivered, 2,
+            "both audio tracks delivered payload"
+        );
+    }
+
+    #[test]
+    fn payload_scan_distinguishes_a_half_delivered_audio_track_set() {
+        // One of two audio tracks carries bytes: the state the recording test
+        // must not stop in (issue #438), because the assertions that follow
+        // claim both tracks survive. A per-kind total cannot see this.
+        let bytes = scan_payload(&[
+            ts_section_packet(0x0000, &pat_section(0x0100)),
+            ts_section_packet(
+                0x0100,
+                &pmt_section(&[(0x1b, 0x0101), (0x0f, 0x0102), (0x0f, 0x0103)]),
+            ),
+            ts_payload_packet(0x0101, &[0xaa; 100]),
+            ts_payload_packet(0x0102, &[0x11; 100]),
+        ]);
+        assert_eq!(bytes.audio_tracks, 2, "the PMT names two audio tracks");
+        assert_eq!(
+            bytes.audio_tracks_delivered, 1,
+            "only one of the two audio tracks delivered payload"
+        );
+        assert!(
+            bytes.audio > 0,
+            "the total still looks healthy, which is why the wait cannot use it"
         );
     }
 
