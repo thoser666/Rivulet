@@ -6,10 +6,11 @@
 /// - `list_windows_with_default_backend()` delegates to the default backend.
 /// - All backend names are consistent strings.
 /// - `CaptureError` is `std::error::Error` + `Display`.
-/// - Backend stubs return the expected `BackendUnavailable` error.
+/// - Each backend captures on its own platform and refuses with the typed
+///   `BackendUnavailable` only off that platform (F-M8-004).
 /// - The concrete backends keep their behavioural contract per platform:
-///   `new()` succeeds only where the backend exists, stubs answer with
-///   their exact `BackendUnavailable` message before touching any window,
+///   `new()` succeeds only where the backend exists, a start attempt on the
+///   backend's own platform fails as `CaptureFailed` (never as "unavailable"),
 ///   and the default backend maps Linux → xcap, Windows → metal-wgc,
 ///   everything else → an error plus an empty window list.
 use rivulet_core::capture_backend::{CaptureBackend, CaptureBackendChoice, CaptureError};
@@ -163,25 +164,76 @@ fn dummy_config() -> rivulet_core::game_capture::GameCaptureConfig {
 }
 
 #[test]
-fn pipewire_stub_contract() {
+fn pipewire_backend_contract() {
     let backend = rivulet_core::capture_backend::PipeWireBackend::new()
-        .expect("PipeWireBackend::new() probes nothing yet and must succeed everywhere");
+        .expect("PipeWireBackend::new() probes nothing and must succeed everywhere");
     assert_eq!(backend.name(), "pipewire");
     assert!(
         backend.list_windows().is_empty(),
-        "the PipeWire stub must enumerate no windows"
+        "PipeWire must not fabricate a window list; the portal picks the source"
     );
-    match backend.start_capture(&dummy_window(), &dummy_config()) {
-        Err(CaptureError::BackendUnavailable(msg)) => {
-            assert_eq!(msg, "PipeWire capture not yet implemented");
+    if cfg!(target_os = "linux") {
+        // On its platform the backend must attempt a portal session and must
+        // never answer "not available" (F-M8-004). A live session would show
+        // the compositor's permission dialog, so it is exercised by the
+        // ignored smoke test instead of by the default suite.
+        assert!(
+            rivulet_core::capture_backend::PipeWireBackend::new().is_ok(),
+            "PipeWireBackend must construct on Linux"
+        );
+    } else {
+        match backend.start_capture(&dummy_window(), &dummy_config()) {
+            Err(CaptureError::BackendUnavailable(msg)) => {
+                assert_eq!(msg, "PipeWire backend is Linux-only");
+            }
+            Err(other) => panic!("unexpected error: {other}"),
+            Ok(_) => panic!("the PipeWire backend must refuse outside Linux"),
         }
-        Err(other) => panic!("unexpected error: {other}"),
-        Ok(_) => panic!("the PipeWire stub must not start a capture"),
     }
 }
 
+/// F-M8-004 regression pin: the two refusals that used to answer
+/// `BackendUnavailable` on their own platform must not come back.
 #[test]
-fn metal_wgc_new_is_platform_specific() {
+fn stub_capture_refusals_are_gone() {
+    let source = include_str!("../src/capture_backend.rs");
+    for stub in [
+        "PipeWire capture not yet implemented",
+        "Metal/WGC capture not yet implemented",
+    ] {
+        assert!(
+            !source.contains(stub),
+            "the {stub:?} refusal must not return (F-M8-004)"
+        );
+    }
+}
+
+/// Live PipeWire smoke test: needs a compositor, a portal and a user who can
+/// grant the session. Run with
+/// `cargo test -p rivulet-core --test capture_backend -- --ignored`.
+#[test]
+#[cfg(target_os = "linux")]
+#[ignore = "requires a Wayland/X11 compositor with xdg-desktop-portal"]
+fn pipewire_captures_real_frames_on_linux() {
+    let backend = rivulet_core::capture_backend::PipeWireBackend::new()
+        .expect("PipeWireBackend::new() must succeed on Linux");
+    let (receiver, handle) = backend
+        .start_capture(&dummy_window(), &dummy_config())
+        .expect("the portal session must be granted for this smoke test");
+    let frame = receiver
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("a real PipeWire frame within 10 s");
+    assert!(frame.width > 0 && frame.height > 0, "{frame:?}");
+    assert_eq!(
+        frame.data.len(),
+        (frame.width * frame.height * 4) as usize,
+        "a PipeWire frame must be 4 bytes per pixel"
+    );
+    drop(handle);
+}
+
+#[test]
+fn metal_wgc_contract() {
     #[cfg(target_os = "windows")]
     {
         let backend = rivulet_core::capture_backend::MetalWgcBackend::new()
@@ -189,14 +241,20 @@ fn metal_wgc_new_is_platform_specific() {
         assert_eq!(backend.name(), "metal-wgc");
         assert!(
             backend.list_windows().is_empty(),
-            "Metal/WGC does not enumerate windows the xcap way"
+            "WGC targets the HWND it is given and does not enumerate"
         );
+        // On its own platform the backend must attempt a WGC session, and an
+        // unusable handle must surface as a typed capture failure — not as
+        // "not available" (F-M8-004).
         match backend.start_capture(&dummy_window(), &dummy_config()) {
+            Err(CaptureError::CaptureFailed(msg)) => {
+                assert_eq!(msg, "window handle is not valid");
+            }
             Err(CaptureError::BackendUnavailable(msg)) => {
-                assert_eq!(msg, "Metal/WGC capture not yet implemented");
+                panic!("MetalWgcBackend must not answer BackendUnavailable on Windows, got: {msg}")
             }
             Err(other) => panic!("unexpected error: {other}"),
-            Ok(_) => panic!("the Metal/WGC stub must not start a capture"),
+            Ok(_) => panic!("a zero HWND must not start a WGC session"),
         }
     }
     #[cfg(not(target_os = "windows"))]

@@ -376,10 +376,12 @@ example run matrix, a generated public-API overview, and the
 [M8 completion report](m8-automation-completion-report.md), which records every
 criterion below as satisfied, partial or open. Four follow-ups stay named
 (F-M8-003 to F-M8-006) and are tracked in their own issues — the gate did not
-close by declaring them finished. Two of them are closed since
-(F-M8-005 by [#344](https://github.com/thoser666/Rivulet/issues/344), F-M8-006
-by [#345](https://github.com/thoser666/Rivulet/issues/345)); F-M8-003 and
-F-M8-004 remain open.
+close by declaring them finished. Three of them are closed since
+(F-M8-003 by [#342](https://github.com/thoser666/Rivulet/issues/342), F-M8-005 by
+[#344](https://github.com/thoser666/Rivulet/issues/344), F-M8-006 by
+[#345](https://github.com/thoser666/Rivulet/issues/345)); F-M8-004 stays open for
+the macOS/Metal half only — `PipeWireBackend` (Linux/Wayland) and
+`MetalWgcBackend` (Windows) capture real frames now.
 
 Review the API as a product consumed by another developer:
 
@@ -453,13 +455,14 @@ Workstream issues:
 - [x] [#296](https://github.com/thoser666/Rivulet/issues/296) — capture backends
   behind one stable trait, with explicit lifecycle and thread-safety promises.
   Feeds the first criterion.
-  **DELIVERED — implementations are partial** — the stable `CaptureBackend` trait
-  (`list_windows` / `start_capture` / `name`), the PipeWire and Metal/WGC backend
-  stubs and the `game_capture` refactor onto it are delivered with 9 regression
-  tests in `tests/capture_backend.rs` and the stability matrix in
-  `docs/capture-backends.md`. `XCapBackend` is real; `PipeWireBackend` and
-  `MetalWgcBackend` still answer `BackendUnavailable`, which the trait documents
-  as a typed answer rather than a failure (F-M8-004).
+  **DELIVERED — every supported platform captures** — the stable `CaptureBackend`
+  trait (`list_windows` / `start_capture` / `name`), the three backends and the
+  `game_capture` refactor onto it are delivered with the regression tests in
+  `tests/capture_backend.rs` and the stability matrix in
+  `docs/capture-backends.md`. `XCapBackend` (Linux/X11), `PipeWireBackend`
+  (Linux/Wayland portal screencast) and `MetalWgcBackend` (Windows Graphics
+  Capture) all produce real frames and answer `BackendUnavailable` only off their
+  own platform; the macOS/Metal half is still unimplemented (F-M8-004).
 - [x] [#297](https://github.com/thoser666/Rivulet/issues/297) — exit evidence:
   downstream-consumer smoke test, docs build, example run matrix, public API
   review and the M8 completion report. Started only once #292 was delivered; it
@@ -479,8 +482,8 @@ Workstream issues:
 The gate closed on the criteria above with four follow-ups named in the report
 rather than absorbed into a "done" verdict: F-M8-003 (`missing_docs` activated with a pinned per-module allow-list, **closed by
 [#342](https://github.com/thoser666/Rivulet/issues/342)** once that list reached
-zero), F-M8-004 (PipeWire/Metal-WGC capture
-paths), F-M8-005 (written deprecation and migration policy, **closed by
+zero), F-M8-004 (the macOS/Metal half — PipeWire and WGC
+capture now), F-M8-005 (written deprecation and migration policy, **closed by
 [#344](https://github.com/thoser666/Rivulet/issues/344)** — see
 [`api-migration.md`](api-migration.md)) and F-M8-006 (the stale per-encoder
 availability helper, **closed by [#345](https://github.com/thoser666/Rivulet/issues/345)**).
@@ -496,7 +499,7 @@ As recorded when the milestone opened, `rivulet-core` was `0.65.0-alpha.55`
 only through log output. The module count is a snapshot and has grown since;
 `docs/api-overview.md` reports the current numbers from the code on every push.
 `#![warn(missing_docs)]` is a real crate attribute since [#342](https://github.com/thoser666/Rivulet/issues/342):
-`lib.rs`'s own public items and those of its 72 modules are documented, and the
+`lib.rs`'s own public items and those of its 74 modules are documented, and the
 counted `#[allow(missing_docs)]` list is empty (the last 122 items were `stream`,
 measured 2026-11-09), so "stabilized public API" and "fully documented public
 API" no longer differ by undocumented items and F-M8-003 is closed.

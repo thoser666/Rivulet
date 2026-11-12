@@ -5331,9 +5331,6 @@ name = "rivulet-capture"
 version = "0.65.0-alpha.55"
 dependencies = [
  "anyhow",
- "ashpd",
- "futures-util",
- "pipewire",
  "rivulet-core",
  "tokio",
  "tracing",
@@ -5363,6 +5360,7 @@ version = "0.65.0-alpha.55"
 dependencies = [
  "anyhow",
  "ash",
+ "ashpd",
  "async-trait",
  "base64 0.22.1",
  "chrono",
@@ -5378,6 +5376,7 @@ dependencies = [
  "libc",
  "once_cell",
  "parking_lot",
+ "pipewire",
  "serde",
  "serde_json",
  "sha2",
@@ -5392,6 +5391,7 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "winapi",
+ "windows-capture",
  "windows-sys 0.59.0",
  "winreg",
  "xcap",

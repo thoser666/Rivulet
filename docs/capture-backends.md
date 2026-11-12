@@ -20,18 +20,20 @@ pub trait CaptureBackend: Send + Sync + 'static {
 
 | Backend | Status | Plattform | Hinweis |
 |---|---|---|---|
-| `XCapBackend` | stabil | Linux | `xcap`-Crash; 9 Regressionstests in `tests/capture_backend.rs` |
-| `PipeWireBackend` | experimentell | Linux/Wayland | Stub; `BackendUnavailable`; echte PipeWire-Integration folgt |
-| `MetalWgcBackend` | experimentell | Windows/macOS | Stub; `BackendUnavailable` außerhalb Windows; WGC/Metal-Integration folgt |
+| `XCapBackend` | stabil | Linux/X11 | `xcap`-Aufnahme; Regressionstests in `tests/capture_backend.rs` |
+| `PipeWireBackend` | stabil | Linux/Wayland | xdg-desktop-portal-Screencast + PipeWire-Loop (`rivulet_core::pipewire_capture`); der Portal-Dialog erscheint beim ersten Start; `CaptureFailed` bei Ablehnung, `BackendUnavailable` nur außerhalb Linux |
+| `MetalWgcBackend` | stabil (Windows) | Windows | Windows Graphics Capture (`rivulet_core::wgc_capture`); `fps` begrenzt WGC nicht — der Compositor liefert bei Änderungen; `BackendUnavailable` außerhalb Windows; die macOS/Metal-Hälfte ist noch offen (F-M8-004) |
 
 New backends must implement `CaptureBackend`; the existing enumeration test (`all_registered_backends_implement_trait`) breaks if a backend is added without it.
+
+**Fehlerklassen (F-M8-004):** `BackendUnavailable` heißt ausschließlich „dieses Backend gehört zu einer anderen Plattform" — außerhalb Linux bzw. außerhalb Windows. Auf der eigenen Plattform ist eine abgelehnte Portal-Sitzung oder ein unbrauchbares Fensterhandle ein `CaptureFailed`, damit ein Aufrufer „gibt es hier nicht" von „hat nicht geklappt" unterscheiden kann. `PipeWireBackend` verweigert diesen Weg auf Linux nicht mehr; `tests/capture_backend.rs` pinnt beide Richtungen und hält die alten Stub-Meldungen per Quelltext-Pin draußen.
 
 ## Fensterliste: leer ist gültig
 
 `list_windows()` darf auf jedem Host leer zurückkommen und muss dabei nie panicken — genau das sichern die Enumeration-Tests in `rivulet-core/src/capture_backend.rs` ab:
 
 - **Headless-Hosts (CI):** Auf den GitHub-Runnern läuft kein Display-Server; `xdotool search` findet dort keine Fenster. Eine leere `Vec` ist die korrekte Antwort, kein Fehler — ein `assert!(!windows.is_empty())` macht genau diesen Test auf Ubuntu rot.
-- **Stubs enumerieren nichts:** `PipeWireBackend` und `MetalWgcBackend` liefern immer eine leere Liste und dürfen dort niemals Fenster erfinden.
+- **Keine erfundene Fensterliste:** `PipeWireBackend` (die Quelle wählt das Portal) und `MetalWgcBackend` (WGC zielt auf das übergebene HWND) liefern immer eine leere Liste und dürfen dort niemals Fenster erfinden.
 - **Berichtete Fenster sind vollständig:** Titel nicht leer, Breite/Höhe > 0 (die Heuristik von `list_game_windows()` filtert zusätzlich auf > 640×480 und leeren Titel).
 - **Kein `unwrap()` auf `new()`:** Die Konstruktoren sind plattformgeated — `XCapBackend::new()` verweigert außerhalb Linux, `MetalWgcBackend::new()` außerhalb Windows mit dem typisierten `BackendUnavailable`. Diese Ablehnung ist Teil des Vertrags und wird als `Err`-Fall getestet; ein `unwrap()` macht die Enumeration auf Windows und macOS rot.
 - **Thread-Sicherheit:** `Send + Sync + 'static` wird über `assert_send_sync_static::<…>()` geprüft und kompilierungsseitig durch `Box<dyn CaptureBackend>` erzwungen.

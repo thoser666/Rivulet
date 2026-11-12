@@ -35,7 +35,7 @@ impl std::error::Error for CaptureError {}
 /// - `CaptureError` is fully typed (`WindowNotFound`, `BackendUnavailable(&'static str)`, `CaptureFailed(&'static str)`) — callers must not parse platform strings.
 /// - Backends are enumerable; adding a new backend without implementing this trait breaks the full-enumeration test.
 ///
-/// Stability: `XCapBackend` = stable (Linux); `PipeWireBackend` / `MetalWgcBackend` = experimental (stubs returning `BackendUnavailable`).
+/// Stability: every backend captures real frames on its own platform — `XCapBackend` on Linux/X11, `PipeWireBackend` on Linux/Wayland (xdg-desktop-portal + PipeWire) and `MetalWgcBackend` on Windows (Windows Graphics Capture). Off their platform they answer the typed `BackendUnavailable`, which is the one legitimate reason for that variant.
 pub trait CaptureBackend: Send + Sync + 'static {
     /// List windows that can be captured.
     /// Returns window IDs that are stable for the session.
@@ -114,34 +114,38 @@ impl CaptureBackend for XCapBackend {
     }
 }
 
-/// Stub backend for PipeWire capture (Linux/Wayland).
+/// PipeWire capture backend (Linux/Wayland).
 ///
-/// Not fully implemented yet - see issue #296 for the roadmap.
-/// PipeWire can capture both audio and video from the desktop/stream.
+/// Drives an xdg-desktop-portal screencast session and reads the frames from
+/// the PipeWire stream the compositor hands out (F-M8-004). The portal shows
+/// its permission dialog on first use, so `start_capture` blocks until the
+/// session is granted and answers with a typed `CaptureFailed` when it is
+/// refused — the backend *is* available on Linux, only the attempt failed.
+///
+/// PipeWire does not enumerate windows (the portal picks the source), so
+/// `list_windows` answers with an empty list on purpose.
 pub struct PipeWireBackend;
 
 impl PipeWireBackend {
     /// Create a new PipeWire backend.
+    ///
+    /// Construction touches nothing: whether a compositor and its portal can
+    /// answer is only knowable when a session is requested.
     pub fn new() -> Result<Self, CaptureError> {
-        #[cfg(target_os = "linux")]
-        {
-            // Probe for PipeWire availability - in a full implementation,
-            // this would check for libpipewire and the relevant nodes.
-        }
         Ok(Self {})
     }
 }
 
 impl CaptureBackend for PipeWireBackend {
     fn list_windows(&self) -> Vec<GameWindow> {
-        // PipeWire doesn't enumerate windows; return empty.
+        // The portal selects the source; there is no window list to hand out.
         Vec::new()
     }
 
     fn start_capture(
         &self,
-        _window: &GameWindow,
-        _config: &GameCaptureConfig,
+        window: &GameWindow,
+        config: &GameCaptureConfig,
     ) -> Result<
         (
             std::sync::mpsc::Receiver<GameCaptureFrame>,
@@ -149,9 +153,19 @@ impl CaptureBackend for PipeWireBackend {
         ),
         CaptureError,
     > {
-        Err(CaptureError::BackendUnavailable(
-            "PipeWire capture not yet implemented",
-        ))
+        #[cfg(target_os = "linux")]
+        {
+            // The portal, not the window id, decides what is captured.
+            let _ = (window, config);
+            start_portal_capture()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (window, config);
+            Err(CaptureError::BackendUnavailable(
+                "PipeWire backend is Linux-only",
+            ))
+        }
     }
 
     fn name(&self) -> &str {
@@ -159,45 +173,102 @@ impl CaptureBackend for PipeWireBackend {
     }
 }
 
-/// Stub backend for Metal / WGC (Windows Game Capture) capture.
+/// Request the portal session and pump its frames into a `GameCaptureFrame`
+/// channel.
 ///
-/// Not fully implemented yet - see issue #296 for the roadmap.
-/// Metal on macOS, WGC (Windows Game Capture) on Windows.
+/// The session is requested synchronously so that a refusal reaches the caller
+/// as a typed error instead of an empty channel.
+#[cfg(target_os = "linux")]
+fn start_portal_capture() -> Result<
+    (
+        std::sync::mpsc::Receiver<GameCaptureFrame>,
+        GameCaptureHandle,
+    ),
+    CaptureError,
+> {
+    use std::sync::{mpsc, Arc, Mutex};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| CaptureError::CaptureFailed("failed to start the portal runtime"))?;
+    let (fd, info) = runtime
+        .block_on(crate::pipewire_capture::request_portal_session(false))
+        .map_err(crate::pipewire_capture::map_portal_error)?;
+
+    let (frames, portal_handle) = crate::pipewire_capture::start_pipewire_capture(fd, info.node_id);
+
+    let stop = Arc::new(Mutex::new(false));
+    let stop_for_thread = stop.clone();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for frame in frames {
+            if *stop_for_thread.lock().unwrap() {
+                break;
+            }
+            let out = GameCaptureFrame {
+                data: frame.data,
+                width: frame.width,
+                height: frame.height,
+            };
+            if tx.send(out).is_err() {
+                break;
+            }
+        }
+    });
+
+    Ok((
+        rx,
+        GameCaptureHandle::with_teardown(stop, Box::new(move || drop(portal_handle))),
+    ))
+}
+
+/// Windows Graphics Capture backend (Windows).
+///
+/// Starts a WGC session on the `HWND` the [`GameWindow`] carries and forwards
+/// the compositor's frames as `GameCaptureFrame`s (F-M8-004). WGC is
+/// change-driven, so `GameCaptureConfig::fps` does not rate-limit it — the
+/// compositor delivers a frame whenever the window's content changes.
+///
+/// The macOS/Metal half is still unimplemented; macOS has no default capture
+/// backend at all (`CaptureBackendChoice::default_backend` refuses it), so this
+/// backend's platform contract is Windows, where it now captures.
 pub struct MetalWgcBackend;
 
 impl MetalWgcBackend {
     /// Create a new Metal/WGC backend.
+    ///
+    /// Both platform halves are cfg-gated tail expressions: on Windows the
+    /// probe block yields Ok, elsewhere the guard yields Err. Written as
+    /// statements + trailing `Ok(Self {})` this function made the trailing
+    /// Ok unreachable on non-Windows targets, which `clippy -D warnings`
+    /// (Linux Lints job) rejects.
+    #[cfg(target_os = "windows")]
     pub fn new() -> Result<Self, CaptureError> {
-        // Both platform halves are cfg-gated tail expressions: on Windows the
-        // probe block yields Ok, elsewhere the guard yields Err. Written as
-        // statements + trailing `Ok(Self {})` this function made the trailing
-        // Ok unreachable on non-Windows targets, which `clippy -D warnings`
-        // (Linux Lints job) rejects.
-        #[cfg(target_os = "windows")]
-        {
-            // Probe for Metal or WGC availability - in a full implementation,
-            // this would check for the relevant Windows APIs.
-            Ok(Self {})
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            Err(CaptureError::BackendUnavailable(
-                "Metal/WGC backend is Windows-only",
-            ))
-        }
+        Ok(Self {})
+    }
+
+    /// Create a new Metal/WGC backend (non-Windows: typed refusal).
+    #[cfg(not(target_os = "windows"))]
+    pub fn new() -> Result<Self, CaptureError> {
+        Err(CaptureError::BackendUnavailable(
+            "Metal/WGC backend is Windows-only",
+        ))
     }
 }
 
 impl CaptureBackend for MetalWgcBackend {
     fn list_windows(&self) -> Vec<GameWindow> {
-        // Metal/WGC doesn't enumerate windows in the same way; return empty.
+        // WGC targets the HWND it is given; enumeration belongs to the game
+        // capture picker, which already owns a window list. Fabricating one
+        // here would duplicate it with different filters.
         Vec::new()
     }
 
     fn start_capture(
         &self,
-        _window: &GameWindow,
-        _config: &GameCaptureConfig,
+        window: &GameWindow,
+        config: &GameCaptureConfig,
     ) -> Result<
         (
             std::sync::mpsc::Receiver<GameCaptureFrame>,
@@ -205,9 +276,26 @@ impl CaptureBackend for MetalWgcBackend {
         ),
         CaptureError,
     > {
-        Err(CaptureError::BackendUnavailable(
-            "Metal/WGC capture not yet implemented",
-        ))
+        #[cfg(target_os = "windows")]
+        {
+            let (frames, wgc_stop) = crate::wgc_capture::start_wgc_capture(window.id, config)
+                .map_err(CaptureError::CaptureFailed)?;
+            let stop = std::sync::Arc::new(std::sync::Mutex::new(false));
+            Ok((
+                frames,
+                GameCaptureHandle::with_teardown(
+                    stop,
+                    Box::new(move || wgc_stop.store(true, std::sync::atomic::Ordering::SeqCst)),
+                ),
+            ))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (window, config);
+            Err(CaptureError::BackendUnavailable(
+                "Metal/WGC backend is Windows-only",
+            ))
+        }
     }
 
     fn name(&self) -> &str {
@@ -222,7 +310,7 @@ impl CaptureBackend for MetalWgcBackend {
 pub enum CaptureBackendChoice {
     /// Linux xcap-based window capture.
     XCap,
-    /// PipeWire backend (Linux/Wayland, not yet implemented).
+    /// PipeWire backend (Linux/Wayland, portal screencast).
     PipeWire,
     /// Metal / Windows Game Capture backend.
     MetalWgc,
@@ -323,7 +411,7 @@ mod trait_enumeration_tests {
     ///
     /// Every constructor is platform-gated, so the gate itself must never
     /// `unwrap()` one: on Windows and macOS XCap refuses by design, on Linux
-    /// the Metal/WGC stub does. A refusal that arrives as the typed
+    /// Metal/WGC does. A refusal that arrives as the typed
     /// `BackendUnavailable` variant is a passing result — that is exactly
     /// what the "no platform strings at the caller" guarantee looks like
     /// from outside the library.
@@ -423,10 +511,11 @@ mod trait_enumeration_tests {
                 );
             }
             match name {
-                // The two stub backends document an empty window list.
+                // Neither backend enumerates windows: the portal picks the
+                // source, WGC targets the HWND it is given.
                 "pipewire" | "metal-wgc" => assert!(
                     windows.is_empty(),
-                    "the {name} stub must enumerate no windows, got {}: {windows:?}",
+                    "{name} must enumerate no windows, got {}: {windows:?}",
                     windows.len()
                 ),
                 _ => {}

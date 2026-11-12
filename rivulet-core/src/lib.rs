@@ -144,6 +144,12 @@ pub mod capture_backend;
 /// Game-window capture configuration, frames and the window handle wrapper.
 pub mod game_capture;
 pub mod game_detection;
+/// PipeWire portal screen capture (Linux/Wayland) behind `PipeWireBackend`.
+#[cfg(target_os = "linux")]
+pub mod pipewire_capture;
+/// Windows Graphics Capture session behind `MetalWgcBackend`.
+#[cfg(target_os = "windows")]
+pub mod wgc_capture;
 pub use game_capture::{GameCaptureConfig, GameCaptureFrame, GameWindow};
 pub use game_detection::{
     detect_running_game, list_installed_games, GameIdentity, LauncherKind, RunningGameCandidate,

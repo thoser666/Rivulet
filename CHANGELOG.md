@@ -1,11 +1,25 @@
 ## [Unreleased]
 
+- feat(core): **`PipeWireBackend` and `MetalWgcBackend` capture real frames
+  instead of answering `BackendUnavailable`** (F-M8-004, [#343]). The two
+  backends were stubs by construction while `XCapBackend` was the only source of
+  frames. `PipeWireBackend` now drives an xdg-desktop-portal screencast session
+  and reads the compositor's PipeWire stream on Linux/Wayland — the portal
+  implementation moved into `rivulet_core::pipewire_capture` so the backend that
+  lives in the same crate can reach it, and `rivulet_capture::pipewire_portal`
+  re-exports it unchanged — and `MetalWgcBackend` starts a Windows Graphics
+  Capture session on the `HWND` a `GameWindow` carries and delivers packed BGRA
+  frames on Windows. On the backend's own platform a refusal is now the typed
+  `CaptureFailed`; `BackendUnavailable` is reserved for the other platforms, so an
+  embedder can tell "not available here" from "the attempt failed".
+  `GameCaptureHandle` gained a teardown hook so both engines stop with the
+  handle, and the macOS/Metal half stays open on the tracking issue.
 - docs(core): **the `missing_docs` lint on `rivulet-core` is a real crate
   attribute instead of a doc-comment example.** `lib.rs` carried
   `//! #![warn(missing_docs)]` — a documentation line that enables no lint —
   so `docs/api-overview.md` reported "not active" on every build while M8
   advertised a documented public API. The attribute is real now, and every
-  public item of `lib.rs` and its 72 modules is documented: `stream` (122 items,
+  public item of `lib.rs` and its 74 modules is documented: `stream` (122 items,
   measured 2026-11-09) was the last module behind a counted
   `#[allow(missing_docs)]`, so that allow-list is empty and a new undocumented
   item fails the build instead of hiding behind an attribute. `ci_pinning` pins
@@ -23,7 +37,7 @@
   (29), `virtual_camera` (29), `chat` (11), `cloud` (6), `game_detection` (5),
   `alerts_ingest` (9), `opengl_hook` (1), `stream_info` (10), `stream_runtime`
   (20) and `stream` (122) are documented and enforced by the attribute again
-  (all 72 modules documented, no items left; the running total equals the sum of
+  (all 74 modules documented, no items left; the running total equals the sum of
   the counted allow lines, after the 12-item overcount the earlier totals carried
   was retired).
 - docs(m2): **the path from a scene to the recorded and streamed picture is now
