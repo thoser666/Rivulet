@@ -360,11 +360,12 @@ the shipped binary on a clean runner (byte-identity, PNG signature, batch
 summary, real MP4 container), the `Verify published release` job re-downloads and
 verifies the live release, the rebuild-and-compare job proves two independent
 builds of the same ref produce identical payload bytes, and the schema guards in
-`ci_pinning` pin all three contracts. One Medium finding remains assigned rather
-than silently accepted: F-M7-002 (`rivulet stream` unblocked but unshipped —
-[#289](https://github.com/thoser666/Rivulet/issues/289)). F-M7-001
-(rebuild-and-compare — [#288](https://github.com/thoser666/Rivulet/issues/288))
-is closed by that job.
+`ci_pinning` pin all three contracts. The one finding that was assigned rather
+than silently accepted — F-M7-002, the deferred `rivulet stream`
+([#289](https://github.com/thoser666/Rivulet/issues/289)) — is closed by that
+subcommand shipping as binary and library, gated by a loopback-RTMP end-to-end
+test. F-M7-001 (rebuild-and-compare —
+[#288](https://github.com/thoser666/Rivulet/issues/288)) is closed by that job.
 
 ### M8: Embeddable Engine and API
 

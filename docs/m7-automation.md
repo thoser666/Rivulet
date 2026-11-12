@@ -43,10 +43,13 @@ first-class citizens.
 - Language bindings (JS/Python) — M8 territory.
 - `rivulet-core` API stabilization/semver work — M8.
 - WebGPU/zero-copy rendering — M9.
-- Streaming over the CLI: the first CLI milestone ships `record` (plus inspect
-  and render); a streaming subcommand is a follow-up once the CLI surface is
-  proven. (Surface proven; tracked as
-  [#289](https://github.com/thoser666/Rivulet/issues/289).)
+
+The first CLI milestone deliberately left streaming out of the CLI: a
+streaming subcommand was a non-goal only until the CLI surface was proven. It
+shipped afterwards as `rivulet stream` (issue
+[#289](https://github.com/thoser666/Rivulet/issues/289), finding F-M7-002); the
+CLI surface reference below documents it next to `record`, `inspect` and
+`render`.
 
 ## Platform scope
 
@@ -586,12 +589,8 @@ rivulet inspect --config recording.toml [--json]            (shipped, W5)
 rivulet render --config scene.toml --frame N --png out.png    (shipped, W3)
 rivulet render --config-dir scenes/ --out-dir renders/        (shipped, W3 batch)
 rivulet metrics [--idle-seconds N] [--config scene.toml]      (shipped, M9 #363)
-rivulet stream --config streaming.toml [--json]       (NOT shipped — #289)
+rivulet stream --config streaming.toml [--dry-run] [--json]  (shipped, #289)
 ```
-
-`rivulet stream` is deliberately absent from the shipped set: streaming over the
-CLI was an M7 non-goal, and the surface it would reuse is now proven. It is
-tracked as a follow-up, not advertised as shipped functionality.
 
 Flags override the TOML config (`--output` wins over `output.path`, etc.).
 Without `--config`, flags alone define the run; `output.path` is always
@@ -637,6 +636,64 @@ renderer does. The harness refuses launcher suffixes (`.cmd`, `.bat`, `.sh`,
 `.py`, …) for that reason, and every report carries a `sampler` object (backend,
 sample count, CPU seconds, RSS range) that the schema gate requires before a
 measured report is accepted.
+
+`rivulet stream` publishes instead of writing a file: same status-stream split,
+same exit codes, same graceful SIGINT/SIGTERM stop, same `--dry-run` shape. Two
+things differ because the output is a network endpoint:
+
+- the ingest is probed once (one bounded TCP connect, 3 s) before the first
+  frame, so a broken endpoint fails as `config` (`Rejected`) or `output`
+  (`Unavailable`) instead of surfacing mid-stream after the user believes the
+  stream is live;
+- the status events carry stream telemetry (`kbps`, `bytes_sent`,
+  `dropped_ratio`, `health`) instead of a file size.
+
+```toml
+# streaming.toml — `rivulet stream --config streaming.toml`
+[stream]
+platform = "custom"                          # twitch | youtube | kick | custom
+ingest_url = "rtmp://127.0.0.1:1935/live"    # or rtmps:// for a platform preset
+stream_key = "…"                             # required
+preset = "standard"                          # low | standard | high | custom
+
+[video]                                      # same table as `record`
+width = 1280
+height = 720
+fps = 30
+
+[audio]
+enabled = true
+
+duration_secs = 60
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--platform <name>` | `twitch`, `youtube`, `kick` or `custom` (default) |
+| `--ingest <url>` | ingest URL; required for `custom` and `kick`, optional for the platform presets |
+| `--key <key>` | stream key (required) |
+| `--preset <name>` | `low` (2500 kbit/s), `standard` (4500, default), `high` (6000), `custom` (engine default) |
+| `-d, --duration <secs>` | stop after N seconds |
+| `-w`, `-h`, `-f` | width, height, frame rate (same defaults as `record`) |
+| `-a, --audio` | enable the silent test-audio track |
+| `--dry-run` | probe the ingest, print the plan, publish nothing |
+| `--json` | with `--dry-run`: machine-readable plan |
+
+`kick` and `custom` take their URL from `ingest_url`; `twitch` and `youtube`
+supply their own and require TLS, so an `rtmp://` URL for either is rejected by
+validation rather than by the ingest.
+
+The stream key never reaches stdout or stderr. The `started` event, the dry-run
+plan and a `failed` event carry the masked form (`fi••••`), and the ingest URL
+is reduced to scheme + authority, so a custom or Kick URL that embeds the key
+in its path cannot leak it. `--json` is only valid together with `--dry-run`:
+a real run's status events are always JSON on stdout, so the flag would be
+ambiguous.
+
+The library path is `rivulet_cli::stream::StreamJob` (plus `StreamConfig`,
+`StreamStatusEvent`, `StreamReport` and `parse_stream_args`): `StreamJob::new`
+takes the same validated config the binary loads, `run(|| false)` streams to
+completion, and `dry_run()` produces the plan without publishing.
 
 Inspect JSON schema (shipped in W5) — one object with `pipeline`, the echoed
 `config`, and `features`:
@@ -698,10 +755,13 @@ Failure report schema (shipped in W5) — the last stdout object of a failed run
 | `message` | actionable, secret-free description — names the offending config key where there is one |
 | `pipeline` | the redacted pipeline, when one was built before the failure |
 | `config` | the fully resolved `RecordConfig`, when one was parsed |
+| `stream_config` | the fully resolved `StreamConfig` (redacted), when the failed run was `rivulet stream` |
 
-`pipeline` and `config` are omitted rather than serialized as `null` when the
-failure happened before they existed (a usage error has no config), so a
-consumer can tell "not reached yet" from "empty".
+`pipeline`, `config` and `stream_config` are omitted rather than serialized as
+`null` when the failure happened before they existed (a usage error has no
+config), so a consumer can tell "not reached yet" from "empty". A `stream` run
+reports `stream_config` and never `config`; the two are mutually exclusive so a
+consumer parses one object shape for both subcommands.
 
 | Stage | Exit | Meaning |
 | --- | --- | --- |
@@ -715,6 +775,24 @@ Redaction applies unchanged: the `pipeline` a failure reports is the same
 redacted string `inspect` prints, so a stream key never reaches the report. The
 success and failure schemas are pinned by the `cli_mvp_schema_and_docs_are_pinned`
 and `w5_machine_readable_failure_is_pinned` ci_pinning tests.
+
+**Stream status events (shipped with #289).** `rivulet stream` keeps the same
+`event` discriminator and lifecycle names as `record`, but reports the ingest
+rather than a file:
+
+| Event | Fields |
+| --- | --- |
+| `started` | `width`, `height`, `fps`, `audio`, `platform`, `ingest` (scheme + authority only), `key` (masked), `bitrate_kbps` |
+| `progress` | `seconds`, `frames`, `kbps`, `bytes_sent`, `dropped_ratio`, `health` |
+| `stopped` | `seconds`, `frames`, `bytes_sent`, `kbps`, `dropped_ratio`, `health` |
+
+`health` is the engine's derived stream health, one of `offline`, `connecting`,
+`good`, `warning` or `poor`. `progress` is emitted once per second; `started` and
+`stopped` once each. A failed stream emits the shared `failed` object with
+`stream_config`, so a consumer that already reads the recording stream needs no
+second parser. The schema and the secret-redaction rule are pinned by the
+`cli_stream_surface_is_pinned` ci_pinning test, and the end-to-end publish is
+covered by `rivulet-cli/tests/stream_live.rs` against a loopback RTMP server.
 
 ## Nondeterminism inventory
 

@@ -108,25 +108,7 @@ impl RecordConfig {
                 self.output.container
             ));
         }
-        if !matches!(self.video.source.as_str(), "test") {
-            return Err(format!(
-                "video.source: unsupported source {:?} (headless-capable: \"test\"; capture-backed sources need hardware)",
-                self.video.source
-            ));
-        }
-        if self.video.width == 0 || self.video.height == 0 {
-            return Err("video.width/video.height: must be greater than zero".to_string());
-        }
-        if self.video.fps == 0 {
-            return Err("video.fps: must be greater than zero".to_string());
-        }
-        if self.video.width % 2 != 0 || self.video.height % 2 != 0 {
-            return Err(
-                "video.width/video.height: must be even (H.264 requires even dimensions)"
-                    .to_string(),
-            );
-        }
-        Ok(())
+        validate_video(&self.video)
     }
 
     /// Load from a TOML file.
@@ -136,6 +118,186 @@ impl RecordConfig {
         toml::from_str(&raw)
             .map_err(|e| format!("config file {}: invalid TOML: {e}", path.display()))
     }
+}
+
+/// Video validation shared by [`RecordConfig`] and [`StreamConfig`], so a
+/// recording and a stream reject the same dimensions and sources with the same
+/// message.
+fn validate_video(video: &VideoConfig) -> Result<(), String> {
+    if !matches!(video.source.as_str(), "test") {
+        return Err(format!(
+            "video.source: unsupported source {:?} (headless-capable: \"test\"; capture-backed sources need hardware)",
+            video.source
+        ));
+    }
+    if video.width == 0 || video.height == 0 {
+        return Err("video.width/video.height: must be greater than zero".to_string());
+    }
+    if video.fps == 0 {
+        return Err("video.fps: must be greater than zero".to_string());
+    }
+    if video.width % 2 != 0 || video.height % 2 != 0 {
+        return Err(
+            "video.width/video.height: must be even (H.264 requires even dimensions)".to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Top-level streaming configuration (`rivulet stream --config file.toml`,
+/// issue #289 / finding F-M7-002).
+///
+/// Deliberately the same shape as [`RecordConfig`] — video, audio, duration —
+/// plus a `[stream]` table, because the job that drives it has the same
+/// lifecycle as [`crate::RecordJob`] and differs only in where the frames go.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct StreamConfig {
+    /// Ingest target settings.
+    #[serde(default)]
+    pub stream: StreamOutputConfig,
+    /// Video source and encoding settings.
+    #[serde(default)]
+    pub video: VideoConfig,
+    /// Audio source settings (the stream is video-only when absent).
+    #[serde(default)]
+    pub audio: AudioConfig,
+    /// Stop the stream after this many seconds.
+    #[serde(default)]
+    pub duration_secs: Option<u64>,
+}
+
+/// Ingest target settings (`[stream]` in the TOML file).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StreamOutputConfig {
+    /// Platform preset: `twitch`, `youtube`, `kick` or `custom` (default).
+    ///
+    /// Twitch and YouTube supply their own ingest URL; a platform preset
+    /// requires TLS (`rtmps://`). `kick` and `custom` take the URL from
+    /// `ingest_url`.
+    #[serde(default = "default_platform")]
+    pub platform: String,
+    /// Ingest URL (overrides the platform default when set).
+    #[serde(default)]
+    pub ingest_url: Option<String>,
+    /// The stream key. Required.
+    #[serde(default)]
+    pub stream_key: Option<String>,
+    /// Bitrate preset: `low` (2500 kbit/s), `standard` (4500, default),
+    /// `high` (6000) or `custom` (keep the engine default).
+    #[serde(default)]
+    pub preset: Option<String>,
+}
+
+impl Default for StreamOutputConfig {
+    fn default() -> Self {
+        Self {
+            platform: default_platform(),
+            ingest_url: None,
+            stream_key: None,
+            preset: None,
+        }
+    }
+}
+
+fn default_platform() -> String {
+    "custom".to_string()
+}
+
+impl StreamConfig {
+    /// Validate the configuration, naming the offending key — the same
+    /// contract [`RecordConfig::validate`] follows.
+    pub fn validate(&self) -> Result<(), String> {
+        if !matches!(
+            self.stream.platform.as_str(),
+            "twitch" | "youtube" | "kick" | "custom"
+        ) {
+            return Err(format!(
+                "stream.platform: unknown platform {:?} (expected twitch, youtube, kick, or custom)",
+                self.stream.platform
+            ));
+        }
+        if self
+            .stream
+            .stream_key
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
+        {
+            return Err("stream.stream_key: required (no stream key set)".to_string());
+        }
+        let url = self.stream.ingest_url.as_deref().unwrap_or_default();
+        if url.is_empty() && matches!(self.stream.platform.as_str(), "kick" | "custom") {
+            return Err(format!(
+                "stream.ingest_url: required for platform {:?}",
+                self.stream.platform
+            ));
+        }
+        if !url.is_empty() && !(url.starts_with("rtmp://") || url.starts_with("rtmps://")) {
+            return Err(
+                "stream.ingest_url: must use rtmp:// or rtmps:// (the scheme names the protocol)"
+                    .to_string(),
+            );
+        }
+        if !url.is_empty() && self.stream.platform != "custom" && !url.starts_with("rtmps://") {
+            return Err(format!(
+                "stream.ingest_url: platform {:?} requires TLS (rtmps://)",
+                self.stream.platform
+            ));
+        }
+        if let Some(preset) = self.stream.preset.as_deref() {
+            if !matches!(preset, "low" | "standard" | "high" | "custom") {
+                return Err(format!(
+                    "stream.preset: unknown preset {preset:?} (expected low, standard, high, or custom)"
+                ));
+            }
+        }
+        validate_video(&self.video)
+    }
+
+    /// Load from a TOML file.
+    pub fn load(path: &std::path::Path) -> Result<Self, String> {
+        let raw = std::fs::read_to_string(path)
+            .map_err(|e| format!("config file {}: {e}", path.display()))?;
+        toml::from_str(&raw)
+            .map_err(|e| format!("config file {}: invalid TOML: {e}", path.display()))
+    }
+
+    /// A copy that is safe to leave the process: the stream key is replaced by
+    /// its two-character prefix form, and an ingest URL that embeds the key in
+    /// its path is replaced wholesale.
+    ///
+    /// Every surface that serializes the config — the `failed` event and the
+    /// `stream --dry-run` plan — uses this instead of the live config. The
+    /// masking rule matches [`rivulet_core::StreamSettings::masked_key`].
+    pub fn redacted(&self) -> Self {
+        let mut copy = self.clone();
+        let Some(key) = self.stream.stream_key.as_deref() else {
+            return copy;
+        };
+        copy.stream.stream_key = Some(masked_key(key));
+        if !key.is_empty()
+            && self
+                .stream
+                .ingest_url
+                .as_deref()
+                .is_some_and(|url| url.contains(key))
+        {
+            copy.stream.ingest_url = Some("<redacted stream URL>".to_string());
+        }
+        copy
+    }
+}
+
+/// The two-character prefix form of a stream key (`ab••••`), the deliberate
+/// short form the UI shows. Kept identical to
+/// [`rivulet_core::StreamSettings::masked_key`].
+fn masked_key(key: &str) -> String {
+    if key.is_empty() {
+        return String::new();
+    }
+    let end = key.char_indices().nth(2).map(|(i, _)| i).unwrap_or(0);
+    format!("{}••••", &key[..end])
 }
 
 /// The pipeline stage a run failed in (M7 W5, issue #191).
@@ -152,6 +314,9 @@ pub enum Stage {
     /// The config file or its values were invalid (exit code 2).
     Config,
     /// The output location could not be prepared (exit code 1).
+    ///
+    /// For `rivulet stream` this is the ingest endpoint: an unreachable
+    /// ingest is an output failure, not a mid-stream surprise.
     Output,
     /// The media engine failed while pushing frames or audio (exit code 1).
     Engine,
@@ -240,6 +405,17 @@ pub enum StatusEvent {
         /// The resolved config the run was driven from, when one was parsed.
         #[serde(skip_serializing_if = "Option::is_none")]
         config: Option<RecordConfig>,
+        /// The resolved streaming config, when the failed run was
+        /// `rivulet stream`.
+        ///
+        /// The failure schema is shared by both subcommands so a consumer
+        /// parses one `failed` object shape; exactly one of `config` and
+        /// `stream_config` is present, depending on which job ran.
+        ///
+        /// Boxed to keep this event the same size as the other variants (the
+        /// enum is cloned per emitted event).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stream_config: Option<Box<StreamConfig>>,
     },
 }
 
@@ -460,6 +636,7 @@ mod tests {
             message: "engine error: bus error".to_string(),
             pipeline: Some("videotestsrc ! mp4mux ! filesink".to_string()),
             config: None,
+            stream_config: None,
         };
         let value: serde_json::Value =
             serde_json::from_str(&serde_json::to_string(&failed).unwrap()).unwrap();
@@ -488,6 +665,7 @@ mod tests {
                 message: "m".to_string(),
                 pipeline: None,
                 config: None,
+                stream_config: None,
             };
             let value: serde_json::Value =
                 serde_json::from_str(&serde_json::to_string(&event).unwrap()).unwrap();
@@ -500,6 +678,123 @@ mod tests {
         assert!(
             line.contains("engine"),
             "the human line names the stage: {line}"
+        );
+    }
+
+    // --- `rivulet stream` config (M7 closeout, issue #289) ---
+
+    fn stream_config() -> StreamConfig {
+        StreamConfig {
+            stream: StreamOutputConfig {
+                platform: "custom".to_string(),
+                ingest_url: Some("rtmp://127.0.0.1:1935/live".to_string()),
+                stream_key: Some("fixture_key".to_string()),
+                preset: None,
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_minimal_stream_config_passes() {
+        assert!(stream_config().validate().is_ok());
+    }
+
+    #[test]
+    fn a_missing_stream_key_names_the_key() {
+        let mut cfg = stream_config();
+        cfg.stream.stream_key = None;
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("stream.stream_key"), "error = {err}");
+    }
+
+    #[test]
+    fn an_unknown_platform_names_the_key() {
+        let mut cfg = stream_config();
+        cfg.stream.platform = "owned".to_string();
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("stream.platform"), "error = {err}");
+        assert!(err.contains("owned"), "error names the value: {err}");
+    }
+
+    #[test]
+    fn a_custom_target_without_an_ingest_url_names_the_key() {
+        let mut cfg = stream_config();
+        cfg.stream.ingest_url = None;
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("stream.ingest_url"), "error = {err}");
+        assert!(err.contains("custom"), "error names the platform: {err}");
+    }
+
+    #[test]
+    fn a_platform_preset_requires_tls() {
+        let mut cfg = stream_config();
+        cfg.stream.platform = "twitch".to_string();
+        cfg.stream.ingest_url = Some("rtmp://live.twitch.tv/app".to_string());
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("stream.ingest_url"), "error = {err}");
+        assert!(err.contains("rtmps://"), "error names the fix: {err}");
+    }
+
+    #[test]
+    fn a_platform_preset_may_use_its_default_ingest() {
+        let mut cfg = stream_config();
+        cfg.stream.platform = "youtube".to_string();
+        cfg.stream.ingest_url = None;
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn an_unknown_preset_names_the_key() {
+        let mut cfg = stream_config();
+        cfg.stream.preset = Some("ultra".to_string());
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("stream.preset"), "error = {err}");
+        assert!(err.contains("ultra"), "error names the value: {err}");
+    }
+
+    #[test]
+    fn the_stream_config_reuses_the_video_validation() {
+        let mut cfg = stream_config();
+        cfg.video.width = 641;
+        let err = cfg.validate().unwrap_err();
+        assert!(err.contains("video.width"), "error = {err}");
+    }
+
+    #[test]
+    fn stream_config_toml_roundtrip_preserves_fields() {
+        let mut cfg = stream_config();
+        cfg.stream.preset = Some("high".to_string());
+        cfg.duration_secs = Some(30);
+        cfg.audio.enabled = true;
+        let text = toml::to_string(&cfg).unwrap();
+        let parsed: StreamConfig = toml::from_str(&text).unwrap();
+        assert_eq!(cfg, parsed);
+    }
+
+    #[test]
+    fn a_stream_failure_carries_the_stream_config_not_the_record_config() {
+        let cfg = stream_config();
+        let event = StatusEvent::Failed {
+            stage: Stage::Output,
+            exit_code: 1,
+            message: "ingest unreachable".to_string(),
+            pipeline: None,
+            config: None,
+            stream_config: Some(Box::new(cfg.clone())),
+        };
+        let value: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&event).unwrap()).unwrap();
+        assert_eq!(value["event"], "failed");
+        assert_eq!(value["stage"], "output");
+        assert!(
+            value.get("config").is_none(),
+            "the record config must be omitted for a stream run"
+        );
+        assert_eq!(value["stream_config"]["stream"]["platform"], "custom");
+        assert!(
+            value["stream_config"].get("output").is_none(),
+            "a stream config has no recording output: {value}"
         );
     }
 }

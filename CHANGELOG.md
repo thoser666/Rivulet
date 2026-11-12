@@ -1,5 +1,24 @@
 ## [Unreleased]
 
+- feat(cli): **`rivulet stream` publishes to an RTMP/RTMPS ingest** (F-M7-002,
+  [#289](https://github.com/thoser666/Rivulet/issues/289)). The follow-up the M7
+  non-goal deferred: `rivulet stream --config
+  streaming.toml` ships as binary *and* library (`rivulet_cli::stream`,
+  `StreamJob`) with the contract `rivulet record` established — one JSON status
+  event per line on stdout (`started`, `progress`, `stopped`), human diagnostics
+  on stderr, the documented exit codes, and a graceful SIGINT/SIGTERM stop.
+  `--dry-run` probes the ingest and prints the plan without publishing; the
+  bounded pre-flight TCP connect turns a broken endpoint into a `config`
+  (`Rejected`) or `output` (`Unavailable`) failure instead of a mid-stream
+  surprise. Twitch/YouTube/Kick presets supply their own TLS ingest, `custom`
+  takes `ingest_url`. The stream key never reaches stdout or stderr: the
+  `started` event, the dry-run plan and a `failed` event carry the masked
+  `fi••••` form, and the ingest URL is reduced to scheme + authority so a
+  custom/Kick URL embedding the key in its path cannot leak it (the `failed`
+  object gains an optional `stream_config` for this, mutually exclusive with
+  `config`). `rivulet-cli/tests/stream_live.rs` publishes video and audio to a
+  loopback RTMP server end to end, and `cli_stream_surface_is_pinned` pins the
+  subcommand, its events and the docs.
 - feat(core): **`PipeWireBackend` and `MetalWgcBackend` capture real frames
   instead of answering `BackendUnavailable`** (F-M8-004, [#343]). The two
   backends were stubs by construction while `XCapBackend` was the only source of
