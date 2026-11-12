@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+- fix(gui): **the Windows graphics-capture fallback delivers packed frames.**
+  The GUI's own `GraphicsCaptureApiHandler` read every WGC frame through
+  `as_raw_buffer()`, which keeps the compositor's row alignment padding, so a
+  window whose width is not a multiple of that alignment arrived skewed: the
+  padding bytes were treated as the next row's pixels and the image sheared
+  progressively. It now copies through a scratch `Vec` and
+  `as_nopadding_buffer()`, the same path the core `MetalWgcBackend` already used
+  (F-M8-004).
 - feat(cli): **`rivulet stream` publishes to an RTMP/RTMPS ingest** (F-M7-002,
   [#289](https://github.com/thoser666/Rivulet/issues/289)). The follow-up the M7
   non-goal deferred: `rivulet stream --config

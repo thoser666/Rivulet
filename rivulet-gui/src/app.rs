@@ -754,10 +754,13 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         let height = frame.height();
 
         // Get the frame buffer
-        let mut frame_buffer = frame.buffer()?;
+        let frame_buffer = frame.buffer()?;
 
-        // FIX: access the raw buffer via .as_raw_buffer()
-        let data = frame_buffer.as_raw_buffer().to_vec();
+        // Row padding removed: WGC aligns every row, so the raw buffer of a
+        // window whose width is not a multiple of the alignment would come out
+        // skewed. `packed` is only the destination for the packed copy.
+        let mut packed = Vec::new();
+        let data = frame_buffer.as_nopadding_buffer(&mut packed).to_vec();
 
         let raw_frame = RawFrame {
             data,
