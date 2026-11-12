@@ -101,6 +101,11 @@ fn resolve_dll_path(config: &OpenGLHookConfig) -> Result<PathBuf, OpenGLHookErro
 // SHM frame reader (Windows only — uses Win32 file mapping)
 // ---------------------------------------------------------------------------
 
+/// Read-only view of the shared-memory frame region the injected DLL writes.
+///
+/// The mapping is created through Win32 file mapping and bounded by the region
+/// size the OS reports, so a DLL that maps less than the nominal buffer cannot
+/// make a read run past it. Dropping the reader unmaps the region.
 #[cfg(target_os = "windows")]
 pub struct ShmFrameReader {
     ptr: *const u8,
@@ -197,15 +202,23 @@ impl Drop for ShmFrameReader {
 // Non-Windows stubs
 // ---------------------------------------------------------------------------
 
+/// Non-Windows stand-in for the shared-memory frame reader.
+///
+/// The hook is a Win32 interposition DLL, so on other platforms the type stays
+/// nameable while [`ShmFrameReader::open`] always returns `None`.
 #[cfg(not(target_os = "windows"))]
 pub struct ShmFrameReader;
 
 #[cfg(not(target_os = "windows"))]
 impl ShmFrameReader {
+    /// Always `None`: the hook is a Win32 interposition DLL, so there is no
+    /// shared-memory region to open on this platform.
     pub fn open() -> Option<Self> {
         None
     }
 
+    /// Always `None`: without the DLL nothing writes frames, so there is
+    /// never one to read.
     pub fn read_frame(&self) -> Option<CapturedFrame> {
         None
     }

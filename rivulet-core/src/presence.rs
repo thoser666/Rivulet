@@ -6,11 +6,18 @@
 /// Current high-level activity shown to a presence provider.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresenceActivity {
+    /// Nothing is running: the app is open and ready.
     Idle,
+    /// Recording to a file, without streaming.
     Recording,
+    /// Streaming, without recording to a file.
     Streaming,
+    /// Both at once. A distinct state rather than a flag on either single
+    /// one, so the label can say so.
     RecordingAndStreaming,
+    /// Suspended without being stopped (paused recording or stream).
     Paused,
+    /// A failure the user needs to see; the legend lists this state first.
     Error,
 }
 
@@ -39,6 +46,11 @@ impl PresenceActivity {
         }
     }
 
+    /// English label, identical to [`PresenceActivity::fallback_label`].
+    ///
+    /// Kept as the plain accessor name for callers that do not think in terms
+    /// of locale fallbacks; the localized text comes from
+    /// [`PresenceActivity::i18n_key`].
     pub fn label(self) -> &'static str {
         self.fallback_label()
     }
@@ -74,8 +86,15 @@ impl PresenceActivity {
 /// A privacy-safe activity payload suitable for Discord Rich Presence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PresenceStatus {
+    /// Application name handed to the provider; always `"Rivulet"`.
     pub application: &'static str,
+    /// Composed first card line, e.g. `"Rivulet · Recording"`. The app word
+    /// always leads, so small hover cards that do not render the application
+    /// registration title still read as Rivulet.
     pub details: String,
+    /// Second card line: the selected game name, or empty when there is none.
+    /// The serializer omits an empty `state`, because Discord rejects empty
+    /// strings with a 4000.
     pub state: String,
 }
 

@@ -16,11 +16,21 @@ pub enum BrowserSourceError {
     /// The URL uses an unsupported or malformed scheme.
     InvalidUrl(String),
     /// The viewport dimensions or frame buffer size is invalid.
-    InvalidDimensions { width: u32, height: u32 },
+    InvalidDimensions {
+        /// Viewport width in pixels that was rejected.
+        width: u32,
+        /// Viewport height in pixels that was rejected.
+        height: u32,
+    },
     /// The zoom value is outside the supported range.
     InvalidZoom(f32),
     /// The frame does not contain exactly one RGBA pixel per viewport pixel.
-    InvalidFrameBuffer { expected: usize, actual: usize },
+    InvalidFrameBuffer {
+        /// Bytes required for one RGBA pixel per viewport pixel.
+        expected: usize,
+        /// Bytes actually supplied by the backend.
+        actual: usize,
+    },
 }
 
 impl fmt::Display for BrowserSourceError {
@@ -45,33 +55,58 @@ impl std::error::Error for BrowserSourceError {}
 #[derive(Debug, Clone, PartialEq)]
 pub enum BrowserInput {
     /// Pointer movement in CSS pixels relative to the browser viewport.
-    MouseMove { x: f32, y: f32 },
+    MouseMove {
+        /// Horizontal position in CSS pixels from the viewport's left edge.
+        x: f32,
+        /// Vertical position in CSS pixels from the viewport's top edge.
+        y: f32,
+    },
     /// Pointer button press/release in CSS pixels relative to the viewport.
     MouseButton {
+        /// Horizontal position in CSS pixels from the viewport's left edge.
         x: f32,
+        /// Vertical position in CSS pixels from the viewport's top edge.
         y: f32,
+        /// Which button changed state.
         button: BrowserMouseButton,
+        /// `true` for a press, `false` for a release.
         pressed: bool,
     },
     /// Wheel delta in CSS pixels (positive values scroll up/right).
-    Scroll { x: f32, y: f32 },
+    Scroll {
+        /// Horizontal wheel delta in CSS pixels; positive scrolls right.
+        x: f32,
+        /// Vertical wheel delta in CSS pixels; positive scrolls up.
+        y: f32,
+    },
     /// Keyboard key press/release using the platform-independent key name.
-    Key { key: String, pressed: bool },
+    Key {
+        /// Platform-independent key name (e.g. `Enter`, `a`, `ArrowLeft`).
+        key: String,
+        /// `true` for a key-down, `false` for a key-up.
+        pressed: bool,
+    },
 }
 
 /// Mouse buttons understood by the browser input bridge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrowserMouseButton {
+    /// Primary button.
     Left,
+    /// Middle button, usually a wheel click.
     Middle,
+    /// Secondary button, usually the context menu.
     Right,
 }
 
 /// One RGBA frame produced by a browser renderer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BrowserFrame {
+    /// Frame width in pixels; must match the source viewport.
     pub width: u32,
+    /// Frame height in pixels; must match the source viewport.
     pub height: u32,
+    /// Packed RGBA pixels, four bytes per pixel, row-major.
     pub rgba: Vec<u8>,
     /// Monotonic renderer frame number, if supplied by the backend.
     pub sequence: u64,
@@ -296,15 +331,24 @@ impl BrowserSource {
 /// serializable [`BrowserSource`] configuration, consume input events, and
 /// return RGBA frames that can be uploaded to a GPU texture by the GUI.
 pub trait BrowserSourceBackend {
+    /// Error type the adapter reports for navigation, input and frame failures.
     type Error;
 
+    /// Load `url` in the webview; URLs rejected by [`BrowserSource::validate_url`] never reach it.
     fn navigate(&mut self, url: &str) -> Result<(), Self::Error>;
+    /// Resize the webview viewport to `width` x `height` CSS pixels.
     fn resize(&mut self, width: u32, height: u32) -> Result<(), Self::Error>;
+    /// Turn the surface's alpha channel on or off.
     fn set_transparent(&mut self, transparent: bool) -> Result<(), Self::Error>;
+    /// Allow or block forwarding of pointer and keyboard input.
     fn set_interaction_enabled(&mut self, enabled: bool) -> Result<(), Self::Error>;
+    /// Set the browser zoom factor, `0.25..=5.0`.
     fn set_zoom_level(&mut self, zoom_level: f64) -> Result<(), Self::Error>;
+    /// Run `script` in the page's main world.
     fn evaluate_javascript(&mut self, script: &str) -> Result<(), Self::Error>;
+    /// Deliver one input event to the webview.
     fn send_input(&mut self, input: BrowserInput) -> Result<(), Self::Error>;
+    /// The next rendered frame if the backend has one, otherwise `None` for "no new frame since the last poll".
     fn poll_frame(&mut self) -> Result<Option<BrowserFrame>, Self::Error>;
 }
 
@@ -490,6 +534,7 @@ pub struct BrowserAppliedState {
     pub url: String,
     /// Viewport last sent to the backend.
     pub width: u32,
+    /// Viewport height last sent to the backend.
     pub height: u32,
     /// Transparency last sent to the backend.
     pub transparent: bool,

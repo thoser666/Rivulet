@@ -27,6 +27,10 @@ type HmacSha256 = Hmac<Sha256>;
 /// HTTP Transport abstraction so the SigV4 signature can be tested against AWS
 /// test vectors without a network round-trip.
 pub trait HttpPut {
+    /// Send one `PUT` request with the given headers and body.
+    ///
+    /// Returns the HTTP status code; transport failures come back as `Err`
+    /// with the message of the underlying error.
     fn put(&self, url: &str, headers: &[(&str, String)], body: &[u8]) -> Result<u16, String>;
 }
 
@@ -90,6 +94,10 @@ pub fn mask_secret(value: &str) -> String {
 }
 
 impl CloudRecording {
+    /// Create a disabled destination with no credentials.
+    ///
+    /// Uploads stay off until [`Self::enabled`] is called; the other builder
+    /// methods add credentials, region and prefix.
     pub fn new(endpoint: impl Into<String>, bucket: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),
@@ -98,22 +106,36 @@ impl CloudRecording {
         }
     }
 
+    /// Set the access key id and the secret access key.
+    ///
+    /// Both are masked when the struct is printed through `Debug`.
     pub fn with_credentials(mut self, id: impl Into<String>, secret: impl Into<String>) -> Self {
         self.access_key_id = id.into();
         self.secret_access_key = secret.into();
         self
     }
 
+    /// Set the region used for Signature V4.
+    ///
+    /// Signing falls back to `us-east-1` while this is `None`.
     pub fn with_region(mut self, region: impl Into<String>) -> Self {
         self.region = Some(region.into());
         self
     }
 
+    /// Set the object-key prefix for uploads.
+    ///
+    /// [`Self::upload_key_for`] strips leading and trailing slashes, so
+    /// `recordings/` and `recordings` produce the same keys.
     pub fn with_prefix(mut self, prefix: impl Into<String>) -> Self {
         self.prefix = Some(prefix.into());
         self
     }
 
+    /// Turn uploading on or off.
+    ///
+    /// A disabled destination passes [`Self::validate`] without checking its
+    /// fields, so an empty config never blocks construction.
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self

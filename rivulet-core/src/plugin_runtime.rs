@@ -38,7 +38,14 @@ pub enum RuntimeError {
     /// A plugin export was not found in the WASM module.
     MissingExport(String),
     /// The plugin returned a non-zero error code from a lifecycle function.
-    LifecycleError { function: &'static str, code: i32 },
+    LifecycleError {
+        /// The lifecycle export that reported the failure
+        /// (for example `plugin_activate`).
+        function: &'static str,
+        /// The non-zero code the plugin returned. A negative code from
+        /// `plugin_process` demotes the plugin to [`PluginState::Inactive`].
+        code: i32,
+    },
     /// The plugin exceeded its time limit.
     Timeout(&'static str),
     /// The plugin trapped (crash, unreachable, out-of-bounds).
@@ -116,14 +123,22 @@ pub struct SkippedPlugin {
 }
 
 impl PluginLoadResult {
+    /// Whether loading produced a runnable plugin.
     pub fn is_loaded(&self) -> bool {
         matches!(self, PluginLoadResult::Loaded(_))
     }
 
+    /// Whether the plugin was skipped.
+    ///
+    /// A skip is non-fatal by design: the host logs the reason and carries on
+    /// without the plugin, so the surrounding pipeline is never aborted.
     pub fn is_skipped(&self) -> bool {
         matches!(self, PluginLoadResult::Skipped(_))
     }
 
+    /// One-line outcome for the plugin list and logs: `<name> loaded
+    /// successfully`, or `<name> skipped: <reason>`. The name falls back to
+    /// `unknown` when the manifest itself failed to parse.
     pub fn status_description(&self) -> String {
         match self {
             PluginLoadResult::Loaded(loaded) => {

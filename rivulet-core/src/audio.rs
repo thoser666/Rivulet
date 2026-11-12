@@ -40,12 +40,19 @@ impl AudioTrack {
 /// (`[L, R, L, R, ...]`).
 #[derive(Debug, Clone)]
 pub struct AudioFrame {
+    /// Interleaved `f32` samples in `[-1.0, 1.0]` (`[L, R, L, R, …]`).
     pub data: Vec<f32>,
+    /// Sample rate of `data` in Hz.
     pub sample_rate: u32,
+    /// Channel count `data` is interleaved by (`2` = stereo).
     pub channels: u16,
 }
 
 impl AudioFrame {
+    /// Builds a frame from already-interleaved samples.
+    ///
+    /// `data.len()` must be a multiple of `channels`; nothing is resampled or
+    /// de-interleaved here.
     pub fn new(data: Vec<f32>, sample_rate: u32, channels: u16) -> Self {
         Self {
             data,

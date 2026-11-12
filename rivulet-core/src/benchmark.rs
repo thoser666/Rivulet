@@ -55,6 +55,8 @@ pub struct SampleSet {
 }
 
 impl SampleSet {
+    /// Start an empty run labelled `label` at `refresh_hz`; add measurements
+    /// with [`SampleSet::push`].
     pub fn new(label: impl Into<String>, refresh_hz: u32) -> Self {
         Self {
             label: label.into(),
@@ -63,6 +65,11 @@ impl SampleSet {
         }
     }
 
+    /// Append one frame time in milliseconds.
+    ///
+    /// Samples stay in arrival order and are sorted only when
+    /// [`SampleSet::percentiles`] runs, so a run can collect thousands of
+    /// them without repeated sorting.
     pub fn push(&mut self, delta_ms: f64) {
         self.samples.push(delta_ms);
     }
@@ -100,11 +107,19 @@ impl SampleSet {
 /// Frame-time percentile summary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FramePercentiles {
+    /// Median frame time in milliseconds.
     pub p50: f64,
+    /// 95th percentile frame time in milliseconds: the slow tail that shows
+    /// up as an occasional hitch.
     pub p95: f64,
+    /// 99th percentile frame time in milliseconds. The overhead budget is
+    /// measured against this one, not against the mean.
     pub p99: f64,
+    /// Fastest sampled frame time in milliseconds (`0.0` for an empty set).
     pub min: f64,
+    /// Slowest sampled frame time in milliseconds (`0.0` for an empty set).
     pub max: f64,
+    /// How many samples these percentiles were computed from.
     pub count: usize,
 }
 

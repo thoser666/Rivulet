@@ -687,26 +687,55 @@ pub fn wait_until<T>(
 #[serde(rename_all = "snake_case")]
 pub enum SceneStateDifference {
     /// A different number of sources exists.
-    SourceCount { expected: usize, actual: usize },
+    SourceCount {
+        /// Source count in the reference (expected) state.
+        expected: usize,
+        /// Source count in the state under test (`self`).
+        actual: usize,
+    },
     /// A different number of scene bindings exists.
-    BindingCount { expected: usize, actual: usize },
+    BindingCount {
+        /// Binding count in the reference (expected) state.
+        expected: usize,
+        /// Binding count in the state under test (`self`).
+        actual: usize,
+    },
     /// A source with this id is missing (or unexpectedly present).
-    SourceMissing { source_id: Uuid },
+    SourceMissing {
+        /// Id of the source that exists in only one of the two states.
+        source_id: Uuid,
+    },
     /// A binding for `source_id` in `scene_id` is missing (or present).
-    BindingMissing { source_id: Uuid, scene_id: Uuid },
+    BindingMissing {
+        /// Id of the bound source.
+        source_id: Uuid,
+        /// Id of the scene the binding belongs to.
+        scene_id: Uuid,
+    },
     /// A source exists in both states but a property differs.
     SourceProperty {
+        /// Id of the source whose property differs.
         source_id: Uuid,
+        /// Name of the differing property, as listed by [`SceneState::diff`]:
+        /// `"name"`, `"kind"`, `"visible"`, `"locked"` or `"z_order"`.
         property: &'static str,
+        /// Property value rendered with `Debug` from the reference state.
         expected: String,
+        /// Property value rendered with `Debug` from the state under test.
         actual: String,
     },
     /// A binding exists in both states but a property differs.
     BindingProperty {
+        /// Id of the bound source.
         source_id: Uuid,
+        /// Id of the scene the binding belongs to.
         scene_id: Uuid,
+        /// Name of the differing property, as listed by [`SceneState::diff`]:
+        /// `"transform"`, `"crop"`, `"visible"`, `"locked"` or `"z_order"`.
         property: &'static str,
+        /// Property value rendered with `Debug` from the reference state.
         expected: String,
+        /// Property value rendered with `Debug` from the state under test.
         actual: String,
     },
 }
@@ -786,23 +815,39 @@ pub struct SceneState {
 /// explicitly in [`SceneState::new`] instead of derived here.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SceneItemState {
+    /// Stable source id; also the sort key that makes the snapshot
+    /// order-independent.
     pub id: Uuid,
+    /// Display name of the source.
     pub name: String,
+    /// Which kind of source this is (screen, window, webcam, …).
     pub kind: SourceKind,
+    /// Visibility recorded on the source itself. A binding carries its own
+    /// flag, which is what per-scene rendering honours.
     pub visible: bool,
+    /// Whether the source is locked against interactive edits.
     pub locked: bool,
+    /// Draw order within its scene; lower values render first, back to front.
     pub z_order: i32,
 }
 
 /// One scene binding, flattened the same way.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SceneBindingState {
+    /// Id of the scene this binding belongs to.
     pub scene_id: Uuid,
+    /// Id of the bound source; a source has at most one binding per scene.
     pub source_id: Uuid,
+    /// Per-scene transform that replaces the source's default. `None` inherits
+    /// the source transform, so the two are compared as stored, not applied.
     pub transform_override: Option<Transform>,
+    /// Crop applied to the source in this scene only, in source pixels.
     pub crop: Crop,
+    /// Whether the item is rendered in this scene.
     pub visible: bool,
+    /// Whether the item is locked against interactive edits in this scene.
     pub locked: bool,
+    /// Draw order within the scene; lower values render first, back to front.
     pub z_order: i32,
 }
 

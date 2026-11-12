@@ -41,7 +41,9 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanvasConfig {
+    /// Canvas width in pixels.
     pub width: u32,
+    /// Canvas height in pixels.
     pub height: u32,
 }
 
@@ -99,14 +101,17 @@ pub struct SceneRenderConfig {
     #[serde(default)]
     pub collection: String,
     #[serde(default)]
+    /// Profile label carried into the snapshot, so a report can name where the render came from.
     pub profile: String,
     #[serde(default)]
+    /// Output canvas; defaults to 640x360 so a CI artifact stays small.
     pub canvas: CanvasConfig,
     /// Frame rate. Drives both the virtual clock's cadence and the animated
     /// source content, so the two can never disagree.
     #[serde(default = "default_fps")]
     pub fps: u32,
     #[serde(default)]
+    /// The layers to composite, in config order; z-order then index decide the paint order.
     pub layers: Vec<RenderLayerConfig>,
 }
 
@@ -373,7 +378,9 @@ pub const MAX_LAYERS: usize = 64;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RenderVideoTarget {
+    /// MP4 container, the `rivulet record` default.
     Mp4,
+    /// Matroska container, for codecs MP4 cannot carry.
     Mkv,
 }
 
@@ -395,8 +402,11 @@ pub struct RenderVideoReport {
     /// Container duration in seconds, derived from the frame count and fps
     /// rather than measured from a wall clock.
     pub duration_secs: f64,
+    /// Frames per second driving the virtual clock and the report's duration.
     pub fps: u32,
+    /// Canvas width of the rendered video.
     pub width: u32,
+    /// Canvas height of the rendered video.
     pub height: u32,
     /// Where the container was written.
     pub output: PathBuf,

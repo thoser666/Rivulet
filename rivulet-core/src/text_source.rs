@@ -3,13 +3,19 @@ use std::time::Instant;
 /// RGBA color with values in 0.0 – 1.0.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rgba {
+    /// Red channel, `0.0..=1.0`.
     pub r: f32,
+    /// Green channel, `0.0..=1.0`.
     pub g: f32,
+    /// Blue channel, `0.0..=1.0`.
     pub b: f32,
+    /// Alpha channel, `0.0` fully transparent to `1.0` fully opaque.
     pub a: f32,
 }
 
 impl Rgba {
+    /// A colour from raw channels; every component is clamped to `0.0..=1.0`.
+    /// Clamping here means a hex- or slider-derived value cannot push the renderer out of its valid range.
     pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self {
             r: r.clamp(0.0, 1.0),
@@ -61,14 +67,19 @@ impl Default for Rgba {
 /// Font weight for the text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FontWeight {
+    /// Thin strokes, for small labels and captions.
     Light,
     #[default]
+    /// Regular body text; the default weight.
     Normal,
+    /// Emphasised text, for lower thirds and titles.
     Bold,
+    /// Heaviest weight available, for large headline overlays.
     ExtraBold,
 }
 
 impl FontWeight {
+    /// Human-readable name for UI display.
     pub fn label(&self) -> &'static str {
         match self {
             FontWeight::Light => "Light",
@@ -83,12 +94,16 @@ impl FontWeight {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TextAlign {
     #[default]
+    /// Aligned to the left edge of the text box; the default.
     Left,
+    /// Centred inside the text box.
     Center,
+    /// Aligned to the right edge of the text box.
     Right,
 }
 
 impl TextAlign {
+    /// Human-readable name for UI display.
     pub fn label(&self) -> &'static str {
         match self {
             TextAlign::Left => "Left",
@@ -115,6 +130,7 @@ pub enum ScrollDirection {
 }
 
 impl ScrollDirection {
+    /// Human-readable name for UI display.
     pub fn label(&self) -> &'static str {
         match self {
             ScrollDirection::None => "None",

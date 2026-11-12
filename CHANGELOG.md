@@ -4,13 +4,28 @@
   attribute instead of a doc-comment example.** `lib.rs` carried
   `//! #![warn(missing_docs)]` — a documentation line that enables no lint —
   so `docs/api-overview.md` reported "not active" on every build while M8
-  advertised a documented public API. The attribute is real now, `lib.rs`'s
-  own public items are documented, and the 50 modules whose item docs are
-  still missing (733 public items, measured 2026-11-08) carry an explicit
-  `#[allow(missing_docs)]` naming F-M8-003 and its item count, so the
-  remainder is visible in the source instead of nowhere. `ci_pinning` pins
+  advertised a documented public API. The attribute is real now, and every
+  public item of `lib.rs` and its 72 modules is documented: `stream` (122 items,
+  measured 2026-11-09) was the last module behind a counted
+  `#[allow(missing_docs)]`, so that allow-list is empty and a new undocumented
+  item fails the build instead of hiding behind an attribute. `ci_pinning` pins
   the attribute, the exact allow-list and the `api-overview.md` state, so the
-  list can only shrink deliberately.
+  list can only shrink deliberately. `reconnect` (38 public items), `source`
+  (56, the largest module off the list so far), `scene` (17),
+  `text_source` (15), `webcam_source` (7), `media_source` (2) and
+  `browser_source` (30), `audio_source` (19), `render` (10), `transition` (19),
+  `preset` (6), `recording_config` (1), `camera` (14), `output` (13),
+  `presence` (10), `telemetry` (12), `benchmark` (8), `alerts` (2),
+  `scene_snapshot` (16), `replay` (13), `container` (1),
+  `alerts_eventsub` (5), `youtube_chat` (2), `midi` (5), `global_hotkey` (7),
+  `file_management` (2), `discord` (2), `capture_channel` (13), `srt` (18) and
+  `plugin_runtime` (5), `vulkan_hook` (30), `encoder` (36) and `test_helpers`
+  (29), `virtual_camera` (29), `chat` (11), `cloud` (6), `game_detection` (5),
+  `alerts_ingest` (9), `opengl_hook` (1), `stream_info` (10), `stream_runtime`
+  (20) and `stream` (122) are documented and enforced by the attribute again
+  (all 72 modules documented, no items left; the running total equals the sum of
+  the counted allow lines, after the 12-item overcount the earlier totals carried
+  was retired).
 - docs(m2): **the path from a scene to the recorded and streamed picture is now
   a tutorial instead of a reference section.** Live scene composition shipped in
   #387, but the only walkthrough was three steps inside the user guide: how to

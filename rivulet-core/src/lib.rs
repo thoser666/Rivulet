@@ -45,9 +45,10 @@
 //!
 //! #![warn(missing_docs)]
 // The `//! #![warn(missing_docs)]` line above is documentation, not a lint.
-// The crate attribute below enables it for real. Modules that still miss item
-// documentation carry an explicit, counted `#[allow(missing_docs)]` naming
-// F-M8-003 (#342), so the remaining work is visible here instead of nowhere.
+// The crate attribute below enables it for real. Modules that missed item
+// documentation carried an explicit, counted `#[allow(missing_docs)]` naming
+// F-M8-003 (#342) until that list reached zero; an item without docs now fails
+// the build instead of being counted somewhere.
 #![warn(missing_docs)]
 
 use gstreamer as gst;
@@ -64,13 +65,10 @@ use uuid::Uuid;
 use gst::prelude::*;
 
 /// Recording output targets (`Output`, `OutputSettings`) and their validation.
-#[allow(missing_docs)] // F-M8-003 (#342): 13 public items in this module still lack documentation.
 pub mod output;
 pub use output::{Output, OutputSettings};
-#[allow(missing_docs)] // F-M8-003 (#342): 10 public items in this module still lack documentation.
 pub mod presence;
 pub use presence::{PresenceActivity, PresenceStatus};
-#[allow(missing_docs)] // F-M8-003 (#342): 2 public items in this module still lack documentation.
 pub mod discord;
 pub use discord::{DiscordPresence, DiscordPresenceConfig};
 pub mod twitch_chat;
@@ -88,36 +86,30 @@ pub use crash_record::{
     read_latest as read_latest_crash_record, write_record as write_crash_record, CrashRecord,
     CrashReportSink, MAX_CRASH_RECORDS,
 };
-#[allow(missing_docs)] // F-M8-003 (#342): 2 public items in this module still lack documentation.
 pub mod youtube_chat;
 pub use youtube_chat::{
     chat_auth_matrix, form_encode_component, youtube_insert_body, youtube_quota_exhausted,
     youtube_send_message, ChatCredentialSlot, YouTubeChat, YouTubeChatConfig, YouTubeQuota,
     YouTubeQuotaConfig, YouTubeSendCredentials, YouTubeSendOutcome,
 };
-#[allow(missing_docs)] // F-M8-003 (#342): 11 public items in this module still lack documentation.
 pub mod chat;
 pub use chat::{Chat, ChatAccount, ChatConfig, ChatPlatform, ChatTokenStore, MultiChat};
-#[allow(missing_docs)] // F-M8-003 (#342): 12 public items in this module still lack documentation.
 pub mod telemetry;
 pub use telemetry::{
     platform_code, TelemetryBatch, TelemetryErrorKind, TelemetryEvent, TelemetryReporter,
     TelemetrySink,
 };
-#[allow(missing_docs)] // F-M8-003 (#342): 9 public items in this module still lack documentation.
 pub mod alerts_ingest;
 pub use alerts_ingest::{
     parse_streamlabs_webhook, parse_twitch_eventsub_notification, verify_twitch_eventsub_signature,
     AlertEvent, AlertIngest, AlertIngestError, AlertKind, AlertQueueEntry, AlertSource,
     AlertSuppressionNotice, ALERT_SOURCE_WINDOW_CAPACITY, ALERT_SOURCE_WINDOW_SECONDS,
 };
-#[allow(missing_docs)] // F-M8-003 (#342): 3 public items in this module still lack documentation.
 pub mod alerts_webhook;
 pub use alerts_webhook::{
     handle_webhook, AlertsReceiver, AlertsReceiverConfig, WebhookReject, WebhookRequest,
     DEFAULT_ALERTS_RECEIVER_PORT,
 };
-#[allow(missing_docs)] // F-M8-003 (#342): 5 public items in this module still lack documentation.
 pub mod alerts_eventsub;
 pub use alerts_eventsub::{
     build_subscription_body, build_subscription_body_with_direction, parse_eventsub_ws_message,
@@ -126,9 +118,7 @@ pub use alerts_eventsub::{
 };
 pub mod rate_limit;
 pub use rate_limit::{RateLimitConfig, RateLimiter};
-#[allow(missing_docs)] // F-M8-003 (#342): 7 public items in this module still lack documentation.
 pub mod global_hotkey;
-#[allow(missing_docs)] // F-M8-003 (#342): 5 public items in this module still lack documentation.
 pub mod midi;
 pub use global_hotkey::{GlobalBinding, GlobalHotkey, KeyCode, ModMask};
 pub use midi::{
@@ -136,28 +126,23 @@ pub use midi::{
     MidiPresetLibrary,
 };
 /// Cross-platform virtual camera contract: configuration, formats and state.
-#[allow(missing_docs)] // F-M8-003 (#342): 29 public items in this module still lack documentation.
 pub mod virtual_camera;
 pub use virtual_camera::{
     VirtualCamera, VirtualCameraConfig, VirtualCameraError, VirtualCameraFormat, VirtualCameraState,
 };
 
 /// Audio frame and track types shared by the recording and streaming pipelines.
-#[allow(missing_docs)] // F-M8-003 (#342): 4 public items in this module still lack documentation.
 pub mod audio;
 pub use audio::{AudioFrame, AudioTrack, SkippedFilter};
 
 /// USB/webcam capture frames and camera configuration.
-#[allow(missing_docs)] // F-M8-003 (#342): 14 public items in this module still lack documentation.
 pub mod camera;
 pub use camera::{CameraConfig, CameraDevice, CameraFrame};
 
 /// Capture backends behind one stable trait (xcap, PipeWire, Metal/WGC).
 pub mod capture_backend;
 /// Game-window capture configuration, frames and the window handle wrapper.
-#[allow(missing_docs)] // F-M8-003 (#342): 3 public items in this module still lack documentation.
 pub mod game_capture;
-#[allow(missing_docs)] // F-M8-003 (#342): 5 public items in this module still lack documentation.
 pub mod game_detection;
 pub use game_capture::{GameCaptureConfig, GameCaptureFrame, GameWindow};
 pub use game_detection::{
@@ -167,16 +152,12 @@ pub use game_detection::{
 
 pub mod autoclip;
 pub use autoclip::{AutoClipConfig, SpikeDetector};
-#[allow(missing_docs)] // F-M8-003 (#342): 13 public items in this module still lack documentation.
 pub mod replay;
 pub use replay::{save_replay, ReplayBuffer, ReplaySegment, ReplaySnapshot};
 
 pub mod chat_rooms;
-#[allow(missing_docs)] // F-M8-003 (#342): 38 public items in this module still lack documentation.
 pub mod reconnect;
-#[allow(missing_docs)] // F-M8-003 (#342): 10 public items in this module still lack documentation.
 pub mod stream_info;
-#[allow(missing_docs)] // F-M8-003 (#342): 20 public items in this module still lack documentation.
 pub mod stream_runtime;
 pub use reconnect::{
     target_index_from_sink_name, ReconnectCommand, ReconnectWorker, RetryPolicy, SinkBusEvent,
@@ -189,9 +170,7 @@ pub use stream_info::{
 };
 pub use stream_runtime::{AdaptiveBitrateController, BitrateChange, DelaySupervisor};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 36 public items in this module still lack documentation.
 pub mod encoder;
-#[allow(missing_docs)] // F-M8-003 (#342): 1 public items in this module still lack documentation.
 pub mod recording_config;
 pub use recording_config::{
     detect_container_availability, detect_encoder_availability_for_codec, RecordingConfig,
@@ -220,7 +199,6 @@ pub use video_effects::VideoEffects;
 pub mod clock;
 pub use clock::{ClockMode, EngineClock, SharedClock, SystemClock, VirtualClock};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 29 public items in this module still lack documentation.
 pub mod test_helpers;
 pub use test_helpers::{
     FrameDiff, GoldenFrame, PixelDifference, SceneState, SceneStateDifference, TimestampViolation,
@@ -230,14 +208,12 @@ pub use test_helpers::{
 pub mod health;
 pub use health::{StreamHealthMonitor, StreamHealthStatus, StreamStats};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 1 public items in this module still lack documentation.
 pub mod container;
 pub use container::{remux_to_mp4, RecordingContainer, RemuxOutcome, RemuxPlan, RemuxSettings};
 
 pub mod inspect;
 pub use inspect::{CodecFeature, ContainerFeature, ElementFeature, EncoderFeature, FeatureReport};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 2 public items in this module still lack documentation.
 pub mod file_management;
 pub use file_management::{
     FileNamePattern, PatternToken, PatternValues, RecordingFileSettings, RecordingSession, SplitBy,
@@ -246,33 +222,27 @@ pub use file_management::{
 pub mod metrics;
 pub use metrics::{RecordingMetrics, RecordingStatsMonitor};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 3 public items in this module still lack documentation.
 pub mod ndi;
 pub use ndi::NdiOutput;
 
-#[allow(missing_docs)] // F-M8-003 (#342): 6 public items in this module still lack documentation.
 pub mod cloud;
 pub use cloud::{mask_secret, CloudRecording};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 12 public items in this module still lack documentation.
 pub mod vst3;
 pub use vst3::{discover_in, discover_vst3_plugins, vst3_search_dirs, VstChain, VstPlugin};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 1 public items in this module still lack documentation.
 pub mod plugin_manifest;
 pub use plugin_manifest::{
     parse_manifest, ApiVersion, ManifestError, PluginCapabilities, PluginKind, PluginManifest,
     PluginResources,
 };
 
-#[allow(missing_docs)] // F-M8-003 (#342): 4 public items in this module still lack documentation.
 pub mod plugin_registry;
 pub use plugin_registry::{
     default_install_root, scan_install_root, CapabilityDecision, DiscoveredPlugin, PluginApprovals,
     PluginRecord,
 };
 
-#[allow(missing_docs)] // F-M8-003 (#342): 5 public items in this module still lack documentation.
 pub mod plugin_runtime;
 pub use plugin_runtime::{
     PluginHandle, PluginLoadResult, PluginState, RuntimeError, SkipReason, WasmPluginRuntime,
@@ -281,9 +251,7 @@ pub use plugin_runtime::{
 pub mod sdp;
 pub use sdp::SdpOffer;
 
-#[allow(missing_docs)] // F-M8-003 (#342): 18 public items in this module still lack documentation.
 pub mod srt;
-#[allow(missing_docs)] // F-M8-003 (#342): 122 public items in this module still lack documentation.
 pub mod stream;
 pub use srt::{ContributionProtocol, ContributionSettings};
 pub use stream::{
@@ -296,14 +264,12 @@ pub use stream::{
 pub mod i18n;
 pub use i18n::Locale;
 
-#[allow(missing_docs)] // F-M8-003 (#342): 6 public items in this module still lack documentation.
 pub mod preset;
 pub use preset::RecordingPreset;
 
 pub mod region;
 pub use region::CaptureRegion;
 
-#[allow(missing_docs)] // F-M8-003 (#342): 17 public items in this module still lack documentation.
 pub mod scene;
 pub use scene::{Scene, SceneHierarchyError, SceneKind, SceneManager};
 
@@ -315,15 +281,12 @@ pub use scene_dock::{
 };
 
 /// Scene rasterization into RGBA frames and layers for preview and export.
-#[allow(missing_docs)] // F-M8-003 (#342): 16 public items in this module still lack documentation.
 pub mod scene_snapshot;
 pub use scene_snapshot::{SceneSnapshot, SnapshotFrame, SnapshotLayer};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 3 public items in this module still lack documentation.
 pub mod live_compositor;
 pub use live_compositor::{compose_scene, ComposedFrame, LIVE_CANVAS_HEIGHT, LIVE_CANVAS_WIDTH};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 10 public items in this module still lack documentation.
 pub mod render;
 pub use render::{
     render_video, CanvasConfig, RenderConfigError, RenderError, RenderLayerConfig,
@@ -331,7 +294,6 @@ pub use render::{
 };
 
 /// Scene transitions: kinds, timing and the per-scene default.
-#[allow(missing_docs)] // F-M8-003 (#342): 19 public items in this module still lack documentation.
 pub mod transition;
 pub use transition::{SceneTransition, TransitionDefault, TransitionKind};
 
@@ -339,7 +301,7 @@ pub use transition::{SceneTransition, TransitionDefault, TransitionKind};
 pub mod studio;
 pub use studio::StudioMode;
 
-#[allow(missing_docs)] // F-M8-003 (#342): 56 public items in this module still lack documentation.
+/// Sources, scene bindings and the scene-item clipboard.
 pub mod source;
 pub use source::{
     ChromaKey, Crop, SceneItemClipboard, SceneSource, Source, SourceKind, SourceManager, Transform,
@@ -350,12 +312,10 @@ pub mod image_source;
 pub use image_source::{is_image_file, supported_image_extensions, ImageSource};
 
 /// Text sources: alignment, weight, colour and scroll direction.
-#[allow(missing_docs)] // F-M8-003 (#342): 15 public items in this module still lack documentation.
 pub mod text_source;
 pub use text_source::{FontWeight, Rgba, ScrollDirection, TextAlign, TextSource};
 
 /// Webcam sources: resolution and pixel format.
-#[allow(missing_docs)] // F-M8-003 (#342): 7 public items in this module still lack documentation.
 pub mod webcam_source;
 pub use webcam_source::{PixelFormat, Resolution, WebcamSource};
 
@@ -364,11 +324,9 @@ pub mod color_source;
 pub use color_source::ColorSource;
 
 /// Media (video/audio) sources and their playback modes.
-#[allow(missing_docs)] // F-M8-003 (#342): 2 public items in this module still lack documentation.
 pub mod media_source;
 pub use media_source::{MediaSource, MediaType, PlaybackMode};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 19 public items in this module still lack documentation.
 pub mod audio_source;
 pub use audio_source::{
     device_target, migrate_routing_to_tracks, AudioBus, AudioFilterConfig, AudioRouting,
@@ -377,7 +335,6 @@ pub use audio_source::{
 };
 
 /// Browser sources: backend trait, frames, input events, synthetic reference backend.
-#[allow(missing_docs)] // F-M8-003 (#342): 30 public items in this module still lack documentation.
 pub mod browser_source;
 pub mod ducking;
 pub use browser_source::{
@@ -386,18 +343,13 @@ pub use browser_source::{
     SyntheticBrowserBackend,
 };
 
-#[allow(missing_docs)] // F-M8-003 (#342): 2 public items in this module still lack documentation.
 pub mod alerts;
 pub use alerts::{AlertOverlayError, AlertProvider};
 
-#[allow(missing_docs)] // F-M8-003 (#342): 8 public items in this module still lack documentation.
 pub mod benchmark;
-#[allow(missing_docs)] // F-M8-003 (#342): 13 public items in this module still lack documentation.
 pub mod capture_channel;
-#[allow(missing_docs)] // F-M8-003 (#342): 1 public items in this module still lack documentation.
 pub mod opengl_hook;
 /// Vulkan hook/interposition (G3) used by game capture.
-#[allow(missing_docs)] // F-M8-003 (#342): 30 public items in this module still lack documentation.
 pub mod vulkan_hook;
 pub mod vulkan_layer;
 pub use benchmark::{BenchmarkReport, FramePercentiles, OverheadBudget, OverheadResult, SampleSet};

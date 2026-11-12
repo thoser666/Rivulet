@@ -200,8 +200,14 @@ pub enum EventsubWsMessage {
     /// `session_welcome` — the session is connected and carries a session ID
     /// the subscriptions must be (re)created against.
     Welcome {
+        /// Session ID every alert subscription must be created against. A new
+        /// ID means the session was replaced, so the subscriptions are re-sent.
         session_id: String,
+        /// Seconds the server promised between keepalives. The worker gives the
+        /// session up once this plus a small grace period passes without a
+        /// frame; a payload without the field means 10.
         keepalive_timeout_seconds: u64,
+        /// Reconnect URL the server offered in the welcome itself, if any.
         reconnect_url: Option<String>,
     },
     /// `session_keepalive` — application-level heartbeat resetting the
@@ -210,10 +216,19 @@ pub enum EventsubWsMessage {
     Keepalive,
     /// `session_reconnect` — the server asks the client to reconnect to the
     /// given URL (the old session is dropped after reconnecting).
-    Reconnect { reconnect_url: String },
+    Reconnect {
+        /// URL of the replacement session. It has to be dialed before the old
+        /// session closes, which is why the worker reconnects promptly here
+        /// instead of backing off.
+        reconnect_url: String,
+    },
     /// `revocation` — Twitch revoked one of our subscriptions (scope or
     /// permission change); recorded through counters.
-    Revoked { subscription_type: String },
+    Revoked {
+        /// Subscription type Twitch revoked, e.g. `channel.follow` — kept for
+        /// the diagnostic log, so a lost scope is not just a counter bump.
+        subscription_type: String,
+    },
     /// `notification` — one of our subscriptions fired; parsed into an
     /// [`AlertEvent`] via the existing webhook parser (the WS `payload`
     /// object reuses the `subscription` + `event` shape).

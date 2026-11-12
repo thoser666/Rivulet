@@ -25,15 +25,20 @@ pub struct KeyCode(pub u32);
 pub struct ModMask(pub u8);
 
 impl ModMask {
+    /// Whether the Ctrl bit (bit 0) is set.
     pub fn ctrl(self) -> bool {
         self.0 & 0b0001 != 0
     }
+    /// Whether the Alt bit (bit 1) is set.
     pub fn alt(self) -> bool {
         self.0 & 0b0010 != 0
     }
+    /// Whether the Shift bit (bit 2) is set.
     pub fn shift(self) -> bool {
         self.0 & 0b0100 != 0
     }
+    /// Whether the Super/Windows bit (bit 3) is set — the flag the Windows
+    /// backend maps to `MOD_WIN`.
     pub fn super_(self) -> bool {
         self.0 & 0b1000 != 0
     }
@@ -42,8 +47,12 @@ impl ModMask {
 /// One registered binding: an action name plus its key/modifiers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobalBinding {
+    /// Action name handed back by [`GlobalHotkey::try_recv`] when the hotkey
+    /// fires; the GUI maps it back to the command it triggers.
     pub action: String,
+    /// Virtual-key code to match, in the OS's own numbering (Windows VK codes).
     pub key: KeyCode,
+    /// Modifier mask that must be held together with the key.
     pub mods: ModMask,
 }
 

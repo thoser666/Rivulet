@@ -45,16 +45,17 @@ here rather than carried forward:
   broken intra-doc links it found on the way are fixed (no `-A`/`--cap-lints`
   suppression was added).
 
-Two follow-ups remain and are **not** silently accepted as completion. Each
-was found while producing the exit evidence, and each names the criterion it
-sits under, its tracking issue and its retest condition. Two further findings
-(F-M8-005, F-M8-006) have since been closed by their own pull requests and are
-still listed below with that verdict:
+One follow-up remains and is **not** silently accepted as completion. It was
+found while producing the exit evidence, and it names the criterion it sits
+under, its tracking issue and its retest condition. Three further findings
+(F-M8-003, F-M8-005, F-M8-006) have since been closed and are still listed
+below with that verdict:
 
-- **F-M8-003** (Medium, API documentation): the lint is a real crate attribute
-  and the build is warning-free, but 733 public items in 50 modules are still
-  undocumented behind a counted, pinned `#[allow(missing_docs)]` list (measured
-  2026-11-08). Tracked as [#342](https://github.com/thoser666/Rivulet/issues/342).
+- **F-M8-003** (Medium, API documentation): **closed.** The lint is a real crate
+  attribute, the build is warning-free, and every public item of `lib.rs` and its
+  72 modules is documented; the counted, pinned `#[allow(missing_docs)]` list is
+  empty (the last 122 items were `stream`, measured 2026-11-09). Closed via
+  [#342](https://github.com/thoser666/Rivulet/issues/342).
 - **F-M8-004** (Medium, capture backends): `PipeWireBackend` and
   `MetalWgcBackend` answer `BackendUnavailable` by construction; only
   `XCapBackend` captures. Tracked as
@@ -179,7 +180,7 @@ folded into a single verdict.
 
 | # | Criterion | Status | Evidence / gap |
 | --- | --- | --- | --- |
-| 1 | Public names, defaults, error types, lifecycle and thread-safety guarantees coherent and documented | **partial** | `api_stability` guard, typed `RecordingConfigError`/`JobError`; the `missing_docs` lint is active and `lib.rs` is clean, but 733 public items still sit behind a pinned per-module allow-list (F-M8-003) |
+| 1 | Public names, defaults, error types, lifecycle and thread-safety guarantees coherent and documented | **satisfied** | `api_stability` guard, typed `RecordingConfigError`/`JobError`; the `missing_docs` lint is active, `lib.rs` and all 72 modules are documented and the pinned allow-list is empty (was F-M8-003) |
 | 2 | Examples compile and cover recording, streaming, dual output, encoders, frame delivery | **satisfied** | all seven examples run on three platforms in CI; `session_embed` covers frame delivery |
 | 3 | Feature detection and fallback available without parsing logs | **satisfied** | `detect_available_encoders_with_info`, `encoder_fallback_for_codec` with `why_chosen`/`why_not`; `detect_encoder_availability` is deprecated and delegates to the codec-aware helper (was F-M8-006) |
 | 4 | Versioning, deprecation, migration and compatibility policy explicit | **satisfied** | [`api-migration.md`](api-migration.md) names the window, the attribute, the migration table and what counts as a removal; `api_stability` fails on an undocumented removal or a note-less `#[deprecated]` (was F-M8-005) |
@@ -190,24 +191,23 @@ folded into a single verdict.
 | 9 | Docs build without warnings | **satisfied** | `-D warnings` doc gate in CI, zero warnings (was F-M8-002) |
 
 There is no Blocker, Critical or open High finding. The milestone is delivered:
-seven criteria are satisfied outright, and the two partial ones are each an
-unfinished *edge* of a delivered contract — a lint that is not switched on and
-two stub implementations behind a stable trait. Each of those two has its own
-tracking issue and a retest condition, and the README, the gate and this report
-name them together rather than one document claiming a completion the others
-hedge.
+eight criteria are satisfied outright, and the one partial criterion is an
+unfinished *edge* of a delivered contract — two stub implementations behind a
+stable trait. It keeps its own tracking issue and a retest condition, and the
+README, the gate and this report name it together rather than one document
+claiming a completion the others hedge.
 
 ## Findings and explicit follow-ups
 
 The two *evidence* findings from the first conditional pass are closed with the
-artifacts that close them, and the four *scope* findings stay open with their
-own issues. Nothing is dropped between the two tables.
+artifacts that close them, and the four *scope* findings keep their own issues
+(three of them closed since). Nothing is dropped between the two tables.
 
 | ID | Severity | Status | Area | Description | Tracking issue | Retest condition |
 | --- | --- | --- | --- | --- | --- | --- |
 | F-M8-001 | Medium | **closed by #297** | Exit evidence | The downstream smoke test used to be a workspace member, so it could not prove the released crate works. Replaced by the external crate `downstream-smoke/`, built by `scripts/run-downstream-smoke.sh` against the unpacked `cargo package` artifact and run in the Build & Test job. | [#297](https://github.com/thoser666/Rivulet/issues/297) | The `Downstream consumer smoke test (M8 #297)` step passes with `RIVULET_DOWNSTREAM_REQUIRE_AUDIO=1` |
 | F-M8-002 | Low | **closed by #297** | Exit evidence | `cargo doc` warnings were only checked by the pre-push hook. The Lints job now runs the doc build with `RUSTDOCFLAGS=-D warnings`, and the 22 broken links it found are fixed. | [#297](https://github.com/thoser666/Rivulet/issues/297) | `Build API docs without warnings (M8 #297)` fails on the first new rustdoc warning |
-| F-M8-003 | Medium | open | API documentation | `#![warn(missing_docs)]` is a real crate attribute and the build is warning-free; 733 public items are still undocumented behind a counted `#[allow(missing_docs)]` per module (2026-11-08). "Stabilized" and "fully documented" are not the same claim yet; the lint itself is activated and only the item text is missing. | [#342](https://github.com/thoser666/Rivulet/issues/342) | `docs/api-overview.md` reports `#![warn(missing_docs)]: active`, the build is warning-free with the lint on, **and** the per-module allow-list is empty |
+| F-M8-003 | Medium | **closed by [#342](https://github.com/thoser666/Rivulet/issues/342)** | API documentation | `#![warn(missing_docs)]` is a real crate attribute and the build is warning-free; every public item of `lib.rs` and its 72 modules is documented and the counted `#[allow(missing_docs)]` list is empty (the last 122 items were `stream`, 2026-11-09). "Stabilized" and "fully documented" are now the same claim for item text. | [#342](https://github.com/thoser666/Rivulet/issues/342) | `docs/api-overview.md` reports `#![warn(missing_docs)]: active`, the build is warning-free with the lint on, **and** the per-module allow-list is empty |
 | F-M8-004 | Medium | open | Capture backends | `PipeWireBackend` and `MetalWgcBackend` answer `BackendUnavailable` by construction; only `XCapBackend` captures real frames. | [#343](https://github.com/thoser666/Rivulet/issues/343) | Each backend captures frames on its platform and no longer answers `BackendUnavailable` there |
 | F-M8-005 | Low | **closed by #344** | API policy | No written deprecation or migration policy existed next to `docs/m8-api-contract.md`. [`api-migration.md`](api-migration.md) now names the window (at least one minor release), the `#[deprecated]` mechanics, the migration table, and what counts as a removal. | [#344](https://github.com/thoser666/Rivulet/issues/344) | `cargo test -p rivulet-core --test api_stability` fails on a removal that has no migration row and on a note-less `#[deprecated]`; the baseline-update command refuses an undocumented drop |
 | F-M8-006 | Low | **closed by #345** | Feature detection | `detect_encoder_availability(encoder)` ignored its argument and answered `Available`, disagreeing with `detect_available_encoders_with_info()`. The helper is deprecated, delegates to `detect_encoder_availability_for_codec()`, and the agreement is pinned in `tests/recording_config.rs`. | [#345](https://github.com/thoser666/Rivulet/issues/345) | Both APIs agree for every encoder/codec pair, pinned by a test |
@@ -216,7 +216,7 @@ own issues. Nothing is dropped between the two tables.
 
 - [ ] M8 gate passed without conditions.
 - [x] M8 delivered: six workstreams, nine criteria recorded individually
-  (seven satisfied, two partial), four follow-ups named in the table above and
+  (eight satisfied, one partial), four follow-ups named in the table above and
   tracked in their own issues. The two evidence gaps of the first conditional
   pass (F-M8-001, F-M8-002) are closed by this workstream, not deferred.
 - [ ] Failed; release-blocking M8 work remains.

@@ -25,12 +25,16 @@ use serde_json::{json, Value};
 /// The three platforms the combined dock configures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InfoPlatform {
+    /// Twitch, updated through Helix `PATCH /helix/channels`.
     Twitch,
+    /// Kick, updated through the public API's channel `PATCH`.
     Kick,
+    /// YouTube, updated through the Data API's `videos.update`.
     YouTube,
 }
 
 impl InfoPlatform {
+    /// Every platform in dock order, the order [`Self::index`] indexes into.
     pub const ALL: [InfoPlatform; 3] = [Self::Twitch, Self::Kick, Self::YouTube];
 
     /// Human-readable platform name (matches the chat dock labels).
@@ -88,6 +92,10 @@ pub struct StreamInfoUpdate {
 }
 
 impl StreamInfoUpdate {
+    /// Whether the update carries at least one non-blank title or game.
+    ///
+    /// Blank strings count as "leave it alone", which is why an update with
+    /// only whitespace is rejected before any request is built.
     pub fn has_changes(&self) -> bool {
         self.title.as_deref().is_some_and(|t| !t.trim().is_empty())
             || self.game.as_deref().is_some_and(|g| !g.trim().is_empty())
@@ -141,8 +149,12 @@ impl std::fmt::Debug for InfoCredentials {
 /// Overridable endpoints (production defaults; tests point at a puppet).
 #[derive(Debug, Clone)]
 pub struct InfoEndpoints {
+    /// Base URL of the Twitch Helix API.
     pub twitch_api_base: String,
+    /// Base URL of the Kick public API v1; the v2 category lookup is derived
+    /// from it by replacing the trailing version segment.
     pub kick_api_base: String,
+    /// Base URL of the YouTube Data API v3.
     pub youtube_api_base: String,
 }
 
@@ -222,12 +234,14 @@ impl Http for UreqHttp {
 /// no URLs with credentials).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InfoUpdateOutcome {
+    /// The platform accepted the change.
     Updated,
     /// Transport/HTTP failure; the message names the platform and stage.
     Failed(String),
 }
 
 impl InfoUpdateOutcome {
+    /// Whether the platform accepted the change.
     pub fn is_ok(&self) -> bool {
         matches!(self, Self::Updated)
     }

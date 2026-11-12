@@ -20,12 +20,14 @@ impl Default for StreamKeyStore {
 }
 
 impl StreamKeyStore {
+    /// Create a store backed by the OS credential vault, namespaced under `service`.
     pub fn new(service: impl Into<String>) -> Self {
         Self {
             service: service.into(),
         }
     }
 
+    /// Store `key` for `account`, replacing any existing entry.
     pub fn save(&self, account: &str, key: &str) -> Result<(), String> {
         keyring::Entry::new(&self.service, account)
             .map_err(|error| error.to_string())?
@@ -33,6 +35,7 @@ impl StreamKeyStore {
             .map_err(|error| error.to_string())
     }
 
+    /// Read the key for `account`; `Ok(None)` means nothing is stored yet.
     pub fn load(&self, account: &str) -> Result<Option<String>, String> {
         match keyring::Entry::new(&self.service, account)
             .map_err(|error| error.to_string())?
@@ -44,6 +47,7 @@ impl StreamKeyStore {
         }
     }
 
+    /// Remove the key for `account`; a missing entry is not an error.
     pub fn delete(&self, account: &str) -> Result<(), String> {
         match keyring::Entry::new(&self.service, account)
             .map_err(|error| error.to_string())?
@@ -58,13 +62,19 @@ impl StreamKeyStore {
 /// Deterministic state machine for a bounded private test stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrivateTestStreamState {
+    /// Nothing has been started.
     Idle,
+    /// `start` was called and the countdown is running.
     Countdown,
+    /// The bounded test stream is live until `max_duration` elapses.
     Running,
+    /// Stopped manually or timed out; terminal state.
     Completed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A bounded private test stream: a countdown that turns into a self-terminating
+/// live phase.
 pub struct PrivateTestStream {
     state: PrivateTestStreamState,
     countdown_secs: u32,
@@ -73,6 +83,7 @@ pub struct PrivateTestStream {
 }
 
 impl PrivateTestStream {
+    /// Create an idle stream; `max_duration` is clamped to at least one second.
     pub fn new(countdown_secs: u32, max_duration: Duration) -> Self {
         Self {
             state: PrivateTestStreamState::Idle,
@@ -81,12 +92,19 @@ impl PrivateTestStream {
             elapsed: Duration::ZERO,
         }
     }
+    /// Begin the countdown.
     pub fn start(&mut self) {
         self.state = PrivateTestStreamState::Countdown;
     }
+    /// Current state of the test stream.
     pub fn state(&self) -> PrivateTestStreamState {
         self.state
     }
+    /// Advance the clock by `elapsed`.
+    ///
+    /// Ignored while idle or completed. An elapsed countdown switches to
+    /// `Running` and resets the timer; a running stream completes once
+    /// `max_duration` has passed.
     pub fn tick(&mut self, elapsed: Duration) {
         if matches!(
             self.state,
@@ -105,6 +123,7 @@ impl PrivateTestStream {
             self.state = PrivateTestStreamState::Completed;
         }
     }
+    /// Stop immediately, marking the stream completed; idempotent.
     pub fn stop(&mut self) {
         self.state = PrivateTestStreamState::Completed;
     }
@@ -113,12 +132,16 @@ impl PrivateTestStream {
 /// Result of a safe, short platform connection probe.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamProbeResult {
+    /// DNS resolved and a TCP connection to the ingest port succeeded.
     Reachable,
+    /// The ingest URL failed validation; nothing was probed.
     Rejected(String),
+    /// The probe ran, but DNS or the TCP connect failed.
     Unavailable(String),
 }
 
 impl StreamProbeResult {
+    /// Whether the probe reached the endpoint.
     pub fn is_reachable(&self) -> bool {
         matches!(self, Self::Reachable)
     }
@@ -177,13 +200,18 @@ pub fn probe_ingest_reachability(url: &str, timeout: Duration) -> StreamProbeRes
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Outcome of a stream connection attempt, deliberately separate from the probe.
 pub enum StreamConnectionResult {
+    /// Configuration is valid and the transport reported no error.
     Connected,
+    /// Configuration validation failed; nothing was attempted.
     Rejected(String),
+    /// The transport reported an error.
     Failed(String),
 }
 
 impl StreamConnectionResult {
+    /// Whether the attempt counts as a successful connection.
     pub fn is_success(&self) -> bool {
         matches!(self, Self::Connected)
     }
@@ -229,8 +257,10 @@ impl std::fmt::Debug for WhipSettings {
 }
 
 impl WhipSettings {
+    /// Media type of the SDP offer and answer bodies.
     pub const SDP_CONTENT_TYPE: &'static str = "application/sdp";
 
+    /// Create settings for `endpoint` with no token, a 10 s timeout and no trickle ICE.
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),
@@ -240,34 +270,42 @@ impl WhipSettings {
         }
     }
 
+    /// The configured WHIP endpoint.
     pub fn endpoint(&self) -> &str {
         &self.endpoint
     }
+    /// The configured bearer token, if any.
     pub fn bearer_token(&self) -> Option<&str> {
         self.bearer_token.as_deref()
     }
+    /// Timeout of the offer/answer exchange.
     pub fn connect_timeout(&self) -> Duration {
         self.connect_timeout
     }
+    /// Whether trickle ICE is enabled.
     pub fn trickle_ice(&self) -> bool {
         self.trickle_ice
     }
 
+    /// Set (or replace) the bearer token.
     pub fn with_bearer_token(mut self, token: impl Into<String>) -> Self {
         self.bearer_token = Some(token.into());
         self
     }
 
+    /// Set the exchange timeout, clamped to 2..=60 seconds.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.connect_timeout = timeout.clamp(Duration::from_secs(2), Duration::from_secs(60));
         self
     }
 
+    /// Enable or disable trickle ICE.
     pub fn with_trickle_ice(mut self, enabled: bool) -> Self {
         self.trickle_ice = enabled;
         self
     }
 
+    /// Check the scheme and timeout without any network access.
     pub fn validate(&self) -> Result<(), &'static str> {
         let loopback = self.endpoint.starts_with("http://127.0.0.1")
             || self.endpoint.starts_with("http://localhost")
@@ -286,6 +324,11 @@ impl WhipSettings {
         Ok(())
     }
 
+    /// The endpoint, safe to log.
+    ///
+    /// The token travels in its own header and is never part of the URL, so the
+    /// endpoint itself needs no masking; `bearer_token` is the field that is
+    /// redacted.
     pub fn redacted_endpoint(&self) -> String {
         self.endpoint.clone()
     }
@@ -328,6 +371,7 @@ impl WhipSettings {
         Ok(pipeline)
     }
 
+    /// Whether a non-empty bearer token is configured.
     pub fn has_token(&self) -> bool {
         self.bearer_token
             .as_deref()
@@ -388,10 +432,12 @@ pub struct WhipSession {
 }
 
 impl WhipSession {
+    /// Resource URL the server returned for `DELETE` cleanup, when it sent `Location`.
     pub fn resource_url(&self) -> Option<&str> {
         self.resource_url.as_deref()
     }
 
+    /// The SDP answer returned by the server.
     pub fn answer_sdp(&self) -> &str {
         &self.answer_sdp
     }
@@ -425,9 +471,13 @@ impl WhipSession {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WhipMediaState {
+    /// No exchange has started.
     Idle,
+    /// `negotiate` is running.
     Negotiating,
+    /// An answer was applied and the session is live.
     Live,
+    /// The exchange failed; the payload is the error message.
     Failed(String),
 }
 
@@ -446,15 +496,19 @@ pub struct WhipMediaSession {
 }
 
 impl WhipMediaSession {
+    /// The settings this session was created with.
     pub fn settings(&self) -> &WhipSettings {
         &self.settings
     }
+    /// Current lifecycle state.
     pub fn state(&self) -> WhipMediaState {
         self.state.clone()
     }
+    /// The negotiated answer, once one was applied.
     pub fn answer_sdp(&self) -> Option<&str> {
         self.answer_sdp.as_deref()
     }
+    /// The server-provided resource URL, once negotiated.
     pub fn resource_url(&self) -> Option<&str> {
         self.resource_url.as_deref()
     }
@@ -562,14 +616,20 @@ pub fn parse_whip_response(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// A streaming destination preset.
 pub enum StreamPlatform {
+    /// Twitch, whose ingest is `rtmps://live.twitch.tv/app`.
     Twitch,
+    /// Kick, whose ingest URL must come from the Creator Dashboard.
     Kick,
+    /// YouTube, whose ingest is `rtmps://a.rtmp.youtube.com/live2`.
     YouTube,
+    /// Any other RTMP or RTMPS endpoint.
     Custom,
 }
 
 impl StreamPlatform {
+    /// Display name used by the UI.
     pub fn label(&self) -> &'static str {
         match self {
             Self::Twitch => "Twitch",
@@ -589,19 +649,26 @@ impl StreamPlatform {
         }
     }
 
+    /// Whether the user has to supply the ingest URL (Kick and custom targets).
     pub fn requires_manual_ingest_url(self) -> bool {
         matches!(self, Self::Kick | Self::Custom)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A named bitrate preset for the encoder.
 pub enum StreamPreset {
+    /// 2500 kbit/s.
     Low,
+    /// 4500 kbit/s, the default for `StreamSettings::new`.
     Standard,
+    /// 6000 kbit/s.
     High,
+    /// No preset bitrate; the configured bitrate is used.
     Custom,
 }
 impl StreamPreset {
+    /// Display name used by the UI.
     pub fn label(self) -> &'static str {
         match self {
             Self::Low => "Low",
@@ -610,6 +677,7 @@ impl StreamPreset {
             Self::Custom => "Custom",
         }
     }
+    /// The preset's bitrate, or `None` for a custom preset.
     pub fn bitrate_kbps(self) -> Option<u32> {
         match self {
             Self::Low => Some(2500),
@@ -618,16 +686,22 @@ impl StreamPreset {
             Self::Custom => None,
         }
     }
+    /// Every preset in UI order.
     pub fn all() -> &'static [Self] {
         &[Self::Low, Self::Standard, Self::High, Self::Custom]
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Bounded adaptive-bitrate policy for a live encoder.
 pub struct AdaptiveBitrate {
+    /// Whether the policy moves the bitrate at all.
     pub enabled: bool,
+    /// Floor the policy never goes below.
     pub minimum_kbps: u32,
+    /// Ceiling the policy never exceeds.
     pub maximum_kbps: u32,
+    /// Amount a single applied change moves.
     pub step_kbps: u32,
 }
 impl Default for AdaptiveBitrate {
@@ -641,6 +715,10 @@ impl Default for AdaptiveBitrate {
     }
 }
 impl AdaptiveBitrate {
+    /// Create an enabled policy with clamped bounds.
+    ///
+    /// `minimum_kbps` is at least 250, `maximum_kbps` at least the minimum, and
+    /// `step_kbps` at least 50.
     pub fn new(minimum_kbps: u32, maximum_kbps: u32, step_kbps: u32) -> Self {
         let minimum_kbps = minimum_kbps.max(250);
         let maximum_kbps = maximum_kbps.max(minimum_kbps);
@@ -663,6 +741,11 @@ impl AdaptiveBitrate {
         changed
     }
 
+    /// The bitrate the policy picks for `current_kbps` at `status`.
+    ///
+    /// `Poor` steps down and `Good` steps up, both inside the bounds; every
+    /// other status keeps the current value, clamped into the bounds. A
+    /// disabled policy returns `current_kbps` unchanged.
     pub fn next_bitrate(self, current_kbps: u32, status: crate::StreamHealthStatus) -> u32 {
         if !self.enabled {
             return current_kbps;
@@ -682,7 +765,9 @@ impl AdaptiveBitrate {
 /// A bounded delay applied before packets enter the network sink.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StreamDelay {
+    /// Whether a delay is applied.
     pub enabled: bool,
+    /// Requested delay; `StreamDelay::new` caps it at 300 seconds.
     pub duration: Duration,
 }
 impl Default for StreamDelay {
@@ -694,6 +779,8 @@ impl Default for StreamDelay {
     }
 }
 impl StreamDelay {
+    /// Create a delay policy: zero disables it, anything else enables it up to 300
+    /// seconds.
     pub fn new(duration: Duration) -> Self {
         let duration = duration.min(Duration::from_secs(300));
         Self {
@@ -710,6 +797,7 @@ impl StreamDelay {
         }
     }
 
+    /// The delay in milliseconds, `0` while disabled.
     pub fn latency_ms(self) -> u64 {
         if self.enabled {
             self.duration.as_millis() as u64
@@ -722,7 +810,9 @@ impl StreamDelay {
 /// Additional encoded video representations for adaptive/multitrack delivery.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MultitrackVideo {
+    /// Whether more than one video track is emitted.
     pub enabled: bool,
+    /// Configured track count.
     pub tracks: u8,
 }
 impl Default for MultitrackVideo {
@@ -734,12 +824,15 @@ impl Default for MultitrackVideo {
     }
 }
 impl MultitrackVideo {
+    /// Create a multitrack policy; `tracks` is clamped to 1..=4 and more than one
+    /// enables it.
     pub fn new(tracks: u8) -> Self {
         Self {
             enabled: tracks > 1,
             tracks: tracks.clamp(1, 4),
         }
     }
+    /// Number of video tracks the pipeline should produce.
     pub fn effective_tracks(self) -> u8 {
         if self.enabled {
             self.tracks.max(2)
@@ -752,7 +845,9 @@ impl MultitrackVideo {
 /// A separately monitored RTMP/RTMPS output target for multistreaming.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamTarget {
+    /// Stable name that identifies the target and carries its retry status.
     pub name: String,
+    /// Ingest configuration of this target.
     pub settings: StreamSettings,
     /// Optional contribution transport. `None` preserves RTMP/RTMPS behavior.
     pub contribution: Option<crate::ContributionSettings>,
@@ -761,6 +856,7 @@ pub struct StreamTarget {
 }
 
 impl StreamTarget {
+    /// Create an RTMP/RTMPS target with no contribution transport.
     pub fn new(name: impl Into<String>, settings: StreamSettings) -> Self {
         Self {
             name: name.into(),
@@ -770,12 +866,14 @@ impl StreamTarget {
         }
     }
 
+    /// Attach an SRT contribution transport; the plugin status starts as unavailable.
     pub fn with_contribution(mut self, contribution: crate::ContributionSettings) -> Self {
         self.plugin_status = TargetPluginStatus::Unavailable;
         self.contribution = Some(contribution);
         self
     }
 
+    /// Re-check the sink plugin required by the attached contribution transport.
     pub fn refresh_plugin_status(&mut self) {
         self.plugin_status = self
             .contribution
@@ -790,6 +888,7 @@ impl StreamTarget {
             .unwrap_or(TargetPluginStatus::NotApplicable);
     }
 
+    /// Validate the name, the ingest settings and, when set, the contribution transport.
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.name.trim().is_empty() {
             return Err("stream target name is empty");
@@ -801,6 +900,7 @@ impl StreamTarget {
         Ok(())
     }
 
+    /// The masked stream key of this target's settings.
     pub fn masked_key(&self) -> String {
         self.settings.masked_key()
     }
@@ -809,28 +909,38 @@ impl StreamTarget {
 /// Availability of the sink plugin required by a target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetPluginStatus {
+    /// The target streams over plain RTMP/RTMPS.
     NotApplicable,
+    /// The contribution sink plugin was found.
     Available,
+    /// The contribution sink plugin is missing.
     Unavailable,
 }
 
 /// Independent lifecycle state for one multistream output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamTargetState {
+    /// Not connected.
     Offline,
+    /// A connection attempt is in flight.
     Connecting,
+    /// The target is publishing.
     Live,
+    /// Publishing, but losing data; retryable.
     Degraded,
+    /// The target dropped; retryable.
     Failed,
 }
 
 /// Configuration and deterministic state for multiple independent targets.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MultistreamSettings {
+    /// Configured targets, at most `MAX_TARGETS`.
     pub targets: Vec<StreamTarget>,
 }
 
 impl MultistreamSettings {
+    /// Maximum number of simultaneous targets.
     pub const MAX_TARGETS: usize = 4;
 
     /// Build one independent sink description per configured target.
@@ -869,6 +979,10 @@ impl MultistreamSettings {
             .collect()
     }
 
+    /// Add a validated target.
+    ///
+    /// Fails when the target is invalid, when its name is taken, or when the
+    /// limit is reached.
     pub fn add_target(&mut self, target: StreamTarget) -> Result<(), &'static str> {
         target.validate()?;
         if self.targets.len() >= Self::MAX_TARGETS {
@@ -885,6 +999,7 @@ impl MultistreamSettings {
         Ok(())
     }
 
+    /// Remove the target called `name`, returning it when it existed.
     pub fn remove_target(&mut self, name: &str) -> Option<StreamTarget> {
         self.targets
             .iter()
@@ -892,6 +1007,7 @@ impl MultistreamSettings {
             .map(|index| self.targets.remove(index))
     }
 
+    /// Validate that at least one target exists and that every target is valid.
     pub fn validate_all(&self) -> Result<(), &'static str> {
         if self.targets.is_empty() {
             return Err("at least one stream target is required");
@@ -899,6 +1015,7 @@ impl MultistreamSettings {
         self.targets.iter().try_for_each(StreamTarget::validate)
     }
 
+    /// Names of the configured targets, in configuration order.
     pub fn target_names(&self) -> Vec<&str> {
         self.targets
             .iter()
@@ -917,6 +1034,7 @@ impl MultistreamSettings {
 /// silently leak into the live stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct VodTrack {
+    /// Whether a VOD track is produced at all.
     pub enabled: bool,
     /// Record the VOD track into the local recording file while streaming. When
     /// disabled the track is not emitted at all, which prevents accidental
@@ -924,6 +1042,8 @@ pub struct VodTrack {
     pub recorded: bool,
 }
 impl VodTrack {
+    /// Create the config with the track enabled or disabled; `recorded` follows
+    /// `enabled`.
     pub const fn new(enabled: bool) -> Self {
         Self {
             enabled,
@@ -970,14 +1090,23 @@ impl VodTrack {
 }
 
 #[derive(Clone, PartialEq, Eq)]
+/// Everything needed to publish one stream target.
 pub struct StreamSettings {
+    /// Destination preset these settings were built for.
     pub platform: StreamPlatform,
+    /// RTMP or RTMPS ingest URL; custom and Kick URLs can carry the key in their path.
     pub ingest_url: String,
+    /// The stream key; redacted together with the URL in `Debug`.
     pub stream_key: String,
+    /// Bitrate preset.
     pub preset: StreamPreset,
+    /// Adaptive-bitrate policy.
     pub adaptive_bitrate: AdaptiveBitrate,
+    /// Delay applied before packets reach the network sink.
     pub delay: StreamDelay,
+    /// Additional video tracks for multitrack delivery.
     pub multitrack_video: MultitrackVideo,
+    /// VOD audio-track configuration.
     pub vod_track: VodTrack,
 }
 
@@ -1004,6 +1133,8 @@ impl std::fmt::Debug for StreamSettings {
 }
 
 impl StreamSettings {
+    /// Create settings with the `Standard` preset and every optional feature at its
+    /// default.
     pub fn new(
         platform: StreamPlatform,
         ingest_url: impl Into<String>,
@@ -1020,9 +1151,11 @@ impl StreamSettings {
             vod_track: VodTrack::default(),
         }
     }
+    /// Settings for Twitch's `rtmps://live.twitch.tv/app` ingest.
     pub fn twitch(key: impl Into<String>) -> Self {
         Self::new(StreamPlatform::Twitch, "rtmps://live.twitch.tv/app", key)
     }
+    /// Settings for YouTube's `rtmps://a.rtmp.youtube.com/live2` ingest.
     pub fn youtube(key: impl Into<String>) -> Self {
         Self::new(
             StreamPlatform::YouTube,
@@ -1035,33 +1168,44 @@ impl StreamSettings {
         Self::new(StreamPlatform::Kick, url, key)
     }
 
+    /// Settings for a private test stream on `platform`.
+    ///
+    /// Uses the platform's default ingest URL, which stays empty for Kick and is
+    /// then rejected by `validate`.
     pub fn for_test_stream(platform: StreamPlatform, key: impl Into<String>) -> Self {
         let url = platform.default_ingest_url().unwrap_or_default();
         Self::new(platform, url, key)
     }
+    /// Settings for an arbitrary RTMP or RTMPS endpoint.
     pub fn custom(url: impl Into<String>, key: impl Into<String>) -> Self {
         Self::new(StreamPlatform::Custom, url, key)
     }
+    /// Set the bitrate preset.
     pub fn with_preset(mut self, preset: StreamPreset) -> Self {
         self.preset = preset;
         self
     }
+    /// Set the adaptive-bitrate policy.
     pub fn with_adaptive_bitrate(mut self, policy: AdaptiveBitrate) -> Self {
         self.adaptive_bitrate = policy;
         self
     }
+    /// Set the delay policy.
     pub fn with_delay(mut self, delay: StreamDelay) -> Self {
         self.delay = delay;
         self
     }
+    /// Set the multitrack video policy.
     pub fn with_multitrack_video(mut self, video: MultitrackVideo) -> Self {
         self.multitrack_video = video;
         self
     }
+    /// Set the VOD track configuration.
     pub fn with_vod_track(mut self, vod_track: VodTrack) -> Self {
         self.vod_track = vod_track;
         self
     }
+    /// The stream key shortened to a two-character prefix, or `Not configured`.
     pub fn masked_key(&self) -> String {
         if self.stream_key.is_empty() {
             "Not configured".into()
@@ -1075,6 +1219,9 @@ impl StreamSettings {
             format!("{}••••", &self.stream_key[..end])
         }
     }
+    /// Check the key, the URL scheme and the TLS requirement of platform presets.
+    ///
+    /// A `Custom` target may use `rtmp://`; a platform preset may not.
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.stream_key.trim().is_empty() {
             return Err("stream key is empty");
@@ -1087,6 +1234,7 @@ impl StreamSettings {
         }
         Ok(())
     }
+    /// The full sink location: ingest URL plus stream key.
     pub fn location(&self) -> String {
         let base = self.ingest_url.trim_end_matches('/');
         if self.stream_key.is_empty() {
@@ -1095,6 +1243,7 @@ impl StreamSettings {
             format!("{base}/{}", self.stream_key)
         }
     }
+    /// Whether the ingest URL uses RTMPS.
     pub fn is_rtmps(&self) -> bool {
         self.ingest_url.starts_with("rtmps://")
     }
@@ -1112,6 +1261,10 @@ impl StreamSettings {
         probe_ingest_reachability(&self.ingest_url, timeout)
     }
 
+    /// Classify a connection attempt from the transport's outcome.
+    ///
+    /// Validation failure wins over the transport error; otherwise an empty
+    /// transport error means the connection succeeded.
     pub fn connection_result(&self, transport_error: Option<&str>) -> StreamConnectionResult {
         if let Err(error) = self.validate() {
             return StreamConnectionResult::Rejected(error.to_owned());

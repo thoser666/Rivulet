@@ -94,7 +94,12 @@ pub enum AlertOverlayError {
     NotHttps(String),
     /// The token looks structurally wrong for the selected provider.
     MalformedToken {
+        /// The provider whose token syntax was expected. Never `Custom`: a
+        /// custom overlay has no token and is rejected as
+        /// [`AlertOverlayError::MissingUrl`] first.
         provider: AlertProvider,
+        /// The rejected token, already trimmed, so the message can echo what
+        /// was actually wrong with it.
         token: String,
     },
     /// A custom URL was requested without a URL.

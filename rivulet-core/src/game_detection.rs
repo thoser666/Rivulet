@@ -57,13 +57,18 @@ use std::path::{Path, PathBuf};
 /// Serde derives support the GUI's persisted app state (eframe storage).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum LauncherKind {
+    /// Valve's Steam: the Windows registry, or the XDG Steam roots elsewhere.
     Steam,
+    /// The Epic Games Launcher, read from its Windows registry entry.
     Epic,
+    /// GOG Galaxy, read from its Windows registry entry.
     Gog,
+    /// The legacy Origin client, read from its Windows registry entry.
     Origin,
     /// EA app (the successor of Origin); kept separate so a migrated
     /// library keeps its own `game:eaapp:` device-id namespace.
     EaApp,
+    /// Blizzard Battle.net, read from its Windows registry entry.
     BattleNet,
     /// The size/title window heuristic (lowest confidence).
     Heuristic,

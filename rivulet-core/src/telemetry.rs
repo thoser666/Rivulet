@@ -22,11 +22,19 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TelemetryErrorKind {
+    /// The media engine failed: pipeline construction, an element or an
+    /// encoder.
     Engine,
+    /// A capture backend failed: screen, window or camera.
     Capture,
+    /// Writing the result failed: a file output or a stream.
     Output,
+    /// A filesystem or network operation failed.
     Io,
+    /// The OS denied access (capture or filesystem permission).
     Permission,
+    /// No category was available. This is the `Default`, so an error the app
+    /// cannot classify still has a value to report.
     #[default]
     Unknown,
 }
@@ -37,13 +45,26 @@ pub enum TelemetryEvent {
     /// Fresh application start (reported once per session, only when opted in).
     Startup,
     /// A recording session ended normally (`healthy`) or with an error.
-    RecordingStop { duration_secs: u32, healthy: bool },
+    RecordingStop {
+        /// Length of the recorded session, in whole seconds.
+        duration_secs: u32,
+        /// `true` when the session ended normally, `false` when it ended with
+        /// an error that also produced a [`TelemetryEvent::RecordingError`].
+        healthy: bool,
+    },
     /// A recording failed to start or ended with a captured error category.
-    RecordingError { error: TelemetryErrorKind },
+    RecordingError {
+        /// The failure category; the only detail this event carries, because
+        /// free-form error text would not be identifier-free.
+        error: TelemetryErrorKind,
+    },
     /// The streamer switched the active scene.
     SceneSwitch,
     /// A chat connection attempt ended in the given state.
-    ChatConnect { ok: bool },
+    ChatConnect {
+        /// Whether the connection attempt succeeded.
+        ok: bool,
+    },
 }
 
 /// One flushed batch handed to a [`TelemetrySink`]. Contains only bounded,
@@ -62,6 +83,10 @@ pub struct TelemetryBatch {
 /// Receives flushed telemetry batches. The shipped build installs no sender;
 /// a future, separately-reviewed transport can be plugged in here.
 pub trait TelemetrySink {
+    /// Receive one flushed batch. Called synchronously from
+    /// [`TelemetryReporter::flush`] on the thread that flushes, so an
+    /// implementation should hand the batch off instead of blocking that
+    /// thread on network I/O.
     fn submit(&mut self, batch: &TelemetryBatch);
 }
 
@@ -105,6 +130,8 @@ impl Default for TelemetryReporter {
 }
 
 impl TelemetryReporter {
+    /// A disabled reporter with no sink and [`DEFAULT_AUTO_FLUSH_AT`] as its
+    /// threshold; identical to [`TelemetryReporter::default`].
     pub fn new() -> Self {
         Self::default()
     }

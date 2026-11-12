@@ -104,11 +104,14 @@ impl Default for AlertsReceiverConfig {
 /// HTTP method + path + header map used by the pure request handler.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebhookRequest<'a> {
+    /// HTTP method of the request; only `POST` reaches the handler.
     pub method: &'a str,
+    /// Request path the receiver routes on (see [`handle_webhook`]).
     pub path: &'a str,
     /// Header names lowercased (Twitch header lookup is case-insensitive
     /// per HTTP).
     pub headers: HashMap<String, String>,
+    /// Raw request body, rejected above [`MAX_WEBHOOK_BODY_BYTES`].
     pub body: &'a [u8],
 }
 

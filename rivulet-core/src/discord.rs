@@ -148,7 +148,13 @@ pub enum PayloadIssue {
     /// `state` or `details` exceeds Discord's 128-character limit. The
     /// serializer truncates silently, so this flags the condition before the
     /// truncation hides it (e.g. in Settings previews).
-    FieldTooLong { field: &'static str, len: usize },
+    FieldTooLong {
+        /// Which field is too long (`state` or `details`), so a warning can
+        /// name the one to shorten.
+        field: &'static str,
+        /// Its length in bytes, measured against Discord's 128-char limit.
+        len: usize,
+    },
     /// The configured `large_image` asset key is not a plausible Discord art
     /// asset key (non-empty, letters/digits/underscore only, ≤ 64 chars).
     /// Unlike truncation, an invalid key is sent **verbatim** and Discord

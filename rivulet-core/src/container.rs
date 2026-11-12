@@ -218,7 +218,11 @@ impl RemuxSettings {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemuxOutcome {
     /// The remux succeeded; the MP4 file exists at the target path.
-    Success { output_path: String },
+    Success {
+        /// Path of the written MP4 file: the plan's `output_path`, reported
+        /// back so the caller does not have to rebuild it from the source path.
+        output_path: String,
+    },
     /// The remux was skipped because a required GStreamer element is missing.
     Skipped(String),
 }

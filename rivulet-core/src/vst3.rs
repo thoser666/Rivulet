@@ -75,10 +75,15 @@ impl VstPlugin {
 /// \"no VST processing\".
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VstChain {
+    /// Plugins in processing order: the first entry is the first processor in
+    /// the chain. Order is kept exactly as configured, and duplicates are not
+    /// collapsed — the same plugin can legitimately appear twice.
     pub plugins: Vec<VstPlugin>,
 }
 
 impl VstChain {
+    /// Whether no plugin is configured — `true` means the track passes
+    /// through untouched and no host work is needed.
     pub fn is_empty(&self) -> bool {
         self.plugins.is_empty()
     }
@@ -113,6 +118,8 @@ pub enum HostStage {
 }
 
 impl HostStage {
+    /// Lowercase label for log lines (`resolving bundle`, ...), stable enough
+    /// to grep for a stage in a session log.
     pub fn description(&self) -> &str {
         match self {
             Self::BundleResolve => "resolving bundle",
@@ -126,15 +133,22 @@ impl HostStage {
 /// A failed stage with context for logging.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StageFailure {
+    /// The lifecycle stage that rejected the plugin — the same stage named in
+    /// the skip log line.
     pub stage: HostStage,
+    /// Why that stage failed, as a non-fatal [`SkipReason`].
     pub reason: SkipReason,
 }
 
 impl StageFailure {
+    /// Pairs the failing stage with its reason, the unit every skip path in
+    /// [`WindowsVstHost`] is built from.
     pub fn new(stage: HostStage, reason: SkipReason) -> Self {
         Self { stage, reason }
     }
 
+    /// `"<stage>: <reason>"` for a single log line; the reason half is
+    /// [`SkipReason::description`], so both agree on wording.
     pub fn description(&self) -> String {
         format!(
             "{}: {}",
@@ -366,7 +380,11 @@ pub enum HostLoadResult {
     /// The plugin was skipped because its bundle is missing, corrupt, or
     /// otherwise unusable. The pipeline continues without this plugin.
     Skipped {
+        /// The plugin that was skipped, carried along so the caller can name
+        /// it in a log line or the UI without re-deriving it.
         plugin: VstPlugin,
+        /// Why it was skipped. Non-fatal by contract: the rest of the chain
+        /// still loads.
         reason: SkipReason,
     },
 }
@@ -420,6 +438,9 @@ pub enum SkipReason {
 }
 
 impl SkipReason {
+    /// Human-readable text for logs and the UI. The four fixed variants answer
+    /// a short phrase; [`SkipReason::HostError`] returns its own message
+    /// verbatim, so that text may name a file path but never a secret.
     pub fn description(&self) -> &str {
         match self {
             Self::BundleNotFound => "bundle not found on disk",
@@ -441,10 +462,15 @@ pub struct HostHandle {
 }
 
 impl HostHandle {
+    /// Wraps the opaque instance id handed over by the host runtime. Callers
+    /// treat it as an identity token only — the real pointer never crosses
+    /// this boundary.
     pub fn new(id: u64) -> Self {
         Self { id }
     }
 
+    /// The opaque id itself, for equality checks, test assertions and log
+    /// lines that need to tell two instances apart.
     pub fn id(&self) -> u64 {
         self.id
     }

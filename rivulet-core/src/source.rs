@@ -99,10 +99,15 @@ impl TestVideoSource {
 /// Chroma-key settings for removing a target color from a video source.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ChromaKey {
+    /// Whether the key is applied at all; a disabled key contributes no pipeline fragment.
     pub enabled: bool,
+    /// RGB key colour that is removed from the picture.
     pub color: [u8; 3],
+    /// How close a pixel must be to `color` to be keyed out, `0.0..=1.0`.
     pub similarity: f32,
+    /// Width of the transition between keyed and kept pixels, `0.0..=1.0`.
     pub smoothness: f32,
+    /// How strongly colour spill on kept pixels is desaturated, `0.0..=1.0`.
     pub spill_reduction: f32,
 }
 
@@ -119,6 +124,8 @@ impl Default for ChromaKey {
 }
 
 impl ChromaKey {
+    /// How the key is inserted into a pipeline, or an empty string while the key is disabled.
+    /// The three thresholds are clamped to `0.0..=1.0`, so an out-of-range value from a config file cannot produce a property GStreamer rejects.
     pub fn pipeline_fragment(self) -> String {
         if !self.enabled {
             return String::new();
@@ -133,14 +140,23 @@ impl ChromaKey {
 /// The kind of source (determines what data it carries and how it renders).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SourceKind {
+    /// A still image loaded from disk ([`crate::image_source::ImageSource`]).
     Image,
+    /// A text overlay with its own font and scroll settings ([`crate::text_source::TextSource`]).
     Text,
+    /// A camera captured through the webcam backend ([`crate::webcam_source::WebcamSource`]).
     Webcam,
+    /// A browser surface rendered into frames ([`crate::browser_source::BrowserSource`]).
     Browser,
+    /// A video or audio file played by the media source ([`crate::media_source::MediaSource`]).
     Media,
+    /// A flat solid colour ([`crate::color_source::ColorSource`]).
     Color,
+    /// A game window captured in-process through the graphics hook.
     GameCapture,
+    /// A monitor or window captured by the operating system's compositor.
     ScreenCapture,
+    /// An audio input or bus; it carries no picture.
     Audio,
 }
 
@@ -185,12 +201,18 @@ impl SourceKind {
 /// transparent) to 1.0 (fully opaque).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transform {
+    /// Horizontal offset of the item's top-left corner, in scene pixels.
     pub x: f32,
+    /// Vertical offset of the item's top-left corner, in scene pixels.
     pub y: f32,
+    /// Rendered width in scene pixels, before rotation.
     pub width: f32,
+    /// Rendered height in scene pixels, before rotation.
     pub height: f32,
+    /// Clockwise rotation in degrees; [`Transform::normalize_rotation`] reduces it to `0.0..360.0`.
     pub rotation: f32, // degrees, clockwise
-    pub opacity: f32,  // 0.0 – 1.0
+    /// Blend factor, `0.0` fully transparent to `1.0` fully opaque; clamped by [`Transform::clamp_opacity`].
+    pub opacity: f32, // 0.0 – 1.0
 }
 
 impl Default for Transform {
@@ -207,6 +229,7 @@ impl Default for Transform {
 }
 
 impl Transform {
+    /// A transform at `(x, y)` sized `width` x `height`, unrotated and fully opaque.
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self {
             x,
@@ -238,13 +261,18 @@ impl Transform {
 /// a default name, and per-source metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Source {
+    /// Stable identity: scene bindings and the clipboard refer to sources by this id.
     pub id: Uuid,
+    /// Display name; the manager does not enforce uniqueness.
     pub name: String,
+    /// Which renderer draws the source and which payload it carries.
     pub kind: SourceKind,
     /// Default transform (used when the source is added to a scene
     /// without an explicit override).
     pub transform: Transform,
+    /// Default visibility, used where a scene binding has no override.
     pub visible: bool,
+    /// Default lock flag; the UI must not move or transform a locked source.
     pub locked: bool,
     /// Z-order for rendering within a scene (higher = on top).
     pub z_order: i32,
@@ -259,6 +287,7 @@ pub struct Source {
 }
 
 impl Source {
+    /// A visible, unlocked source with a fresh random id, the default transform and no chroma key or device.
     pub fn new(name: String, kind: SourceKind) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -273,26 +302,31 @@ impl Source {
         }
     }
 
+    /// Sets the default transform, used where a scene has no explicit override.
     pub fn with_transform(mut self, transform: Transform) -> Self {
         self.transform = transform;
         self
     }
 
+    /// Sets the source's default z-order (higher renders on top).
     pub fn with_z_order(mut self, z_order: i32) -> Self {
         self.z_order = z_order;
         self
     }
 
+    /// Sets the default visibility applied when the source is bound to a scene.
     pub fn visible(mut self, visible: bool) -> Self {
         self.visible = visible;
         self
     }
 
+    /// Sets the default lock flag; locked sources are excluded from interactive edits.
     pub fn locked(mut self, locked: bool) -> Self {
         self.locked = locked;
         self
     }
 
+    /// Sets the device id the renderer should capture from (monitor, window or camera).
     pub fn with_device_id(mut self, device_id: impl Into<String>) -> Self {
         self.device_id = device_id.into();
         self
@@ -315,25 +349,37 @@ impl Source {
 /// used.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SceneSource {
+    /// The bound source.
     pub source_id: Uuid,
+    /// The scene this binding belongs to; a source has at most one binding per scene.
     pub scene_id: Uuid,
+    /// Per-scene transform that replaces the source's default (see [`SceneSource::effective_transform`]).
     pub transform_override: Option<Transform>,
+    /// Crop applied to the source in this scene only.
     pub crop: Crop,
+    /// Whether the item is rendered in this scene.
     pub visible: bool,
+    /// Whether the item is locked against interactive edits in this scene.
     pub locked: bool,
+    /// Draw order within the scene; lower values render first, back to front.
     pub z_order: i32,
 }
 
 /// Per-scene crop rectangle in source pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Crop {
+    /// Pixels trimmed from the left edge.
     pub left: u32,
+    /// Pixels trimmed from the top edge.
     pub top: u32,
+    /// Pixels trimmed from the right edge.
     pub right: u32,
+    /// Pixels trimmed from the bottom edge.
     pub bottom: u32,
 }
 
 impl Crop {
+    /// A crop rectangle trimming `left`, `top`, `right` and `bottom` source pixels.
     pub fn new(left: u32, top: u32, right: u32, bottom: u32) -> Self {
         Self {
             left,
@@ -345,6 +391,8 @@ impl Crop {
 }
 
 impl SceneSource {
+    /// An unbound-by-default binding: no override, no crop, visible, unlocked, z-order `0`.
+    /// [`SourceManager::bind_source`] instead assigns the scene's next free z-order.
     pub fn new(source_id: Uuid, scene_id: Uuid) -> Self {
         Self {
             source_id,
@@ -373,7 +421,9 @@ impl SceneSource {
 /// semantics, never a move.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SceneItemClipboard {
+    /// The source as it was at copy time; paste clones it under a new identity.
     pub source: Source,
+    /// The scene binding as it was at copy time (transform override, crop, visibility, lock, z-order).
     pub binding: SceneSource,
 }
 
@@ -429,6 +479,7 @@ struct SourceCollectionSnapshot {
 }
 
 impl SourceManager {
+    /// An empty manager: no sources, no bindings and no paste history.
     pub fn new() -> Self {
         Self::default()
     }
@@ -606,14 +657,17 @@ impl SourceManager {
         Some(source)
     }
 
+    /// Looks a source up by id.
     pub fn get_source(&self, id: Uuid) -> Option<&Source> {
         self.sources.iter().find(|s| s.id == id)
     }
 
+    /// Mutable lookup for editing a source's own properties, not its scene bindings.
     pub fn get_source_mut(&mut self, id: Uuid) -> Option<&mut Source> {
         self.sources.iter_mut().find(|s| s.id == id)
     }
 
+    /// Every source in insertion order.
     pub fn sources(&self) -> &[Source] {
         &self.sources
     }
@@ -640,6 +694,7 @@ impl SourceManager {
         true
     }
 
+    /// Every source of `kind`, in insertion order.
     pub fn sources_by_kind(&self, kind: &SourceKind) -> Vec<&Source> {
         self.sources.iter().filter(|s| s.kind == *kind).collect()
     }
@@ -718,6 +773,7 @@ impl SourceManager {
         }
     }
 
+    /// Shows or hides the item in one scene; `false` when the binding does not exist.
     pub fn set_visibility(&mut self, source_id: Uuid, scene_id: Uuid, visible: bool) -> bool {
         if let Some(binding) = self
             .bindings
@@ -731,6 +787,7 @@ impl SourceManager {
         }
     }
 
+    /// Locks or unlocks the item in one scene; `false` when the binding does not exist.
     pub fn set_locked(&mut self, source_id: Uuid, scene_id: Uuid, locked: bool) -> bool {
         if let Some(binding) = self
             .bindings
@@ -744,6 +801,7 @@ impl SourceManager {
         }
     }
 
+    /// Replaces the item's per-scene transform override; `false` when the binding does not exist.
     pub fn set_transform(&mut self, source_id: Uuid, scene_id: Uuid, transform: Transform) -> bool {
         if let Some(binding) = self
             .bindings

@@ -47,6 +47,8 @@ impl MidiKind {
 pub struct MidiMessage {
     /// MIDI channel 0..15 (as sent; the GUI shows 1-based numbers).
     pub channel: u8,
+    /// Normalized message kind: a Note On with velocity 0 arrives as Note Off,
+    /// so a binding never has to re-check the velocity.
     pub kind: MidiKind,
     /// Note number or CC number (data byte 1).
     pub number: u8,
@@ -122,9 +124,13 @@ impl MidiAction {
 pub struct MidiBinding {
     /// MIDI channel 0..15.
     pub channel: u8,
+    /// Message kind this binding listens for; a note binding never fires for
+    /// the opposite edge, because the parser already split them.
     pub kind: MidiKind,
     /// Note number or CC number.
     pub number: u8,
+    /// Action dispatched when a message matches. `SwitchScene` carries the
+    /// scene id, so renaming a scene leaves the binding intact.
     pub action: MidiAction,
 }
 
@@ -148,6 +154,8 @@ impl MidiBinding {
 /// The full set of user-configured MIDI bindings.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MidiMapping {
+    /// All user-configured bindings, in insertion order. `dispatch` returns
+    /// every match, so two bindings on one message both fire.
     pub bindings: Vec<MidiBinding>,
 }
 
@@ -188,6 +196,8 @@ pub struct MidiPreset {
 /// deterministic (insertion order) and tests can compare round-trips exactly.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MidiPresetLibrary {
+    /// Presets in insertion order — serialization stays deterministic and
+    /// `names_for` keeps the GUI dropdown stable across a reload.
     pub presets: Vec<MidiPreset>,
 }
 

@@ -80,7 +80,9 @@ impl Default for NoiseGateConfig {
 /// Expander (gentle downward expansion below a mid threshold).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ExpanderConfig {
+    /// Threshold in the 0.0-1.0 sample range below which expansion starts.
     pub threshold: f32,
+    /// Expansion ratio; `1.5` is a gentle downward expansion.
     pub ratio: f32,
 }
 
@@ -96,7 +98,9 @@ impl Default for ExpanderConfig {
 /// Compressor (dynamic range compression).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CompressorConfig {
+    /// Threshold in the 0.0-1.0 sample range above which the signal is compressed.
     pub threshold: f32,
+    /// Compression ratio applied above the threshold.
     pub ratio: f32,
 }
 
@@ -112,7 +116,9 @@ impl Default for CompressorConfig {
 /// Hard limiter (prevents clipping).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LimiterConfig {
+    /// Ceiling in the 0.0-1.0 sample range; `0.95` leaves headroom before clipping.
     pub threshold: f32,
+    /// Limiter ratio; `20.0` behaves like a hard ceiling.
     pub ratio: f32,
 }
 
@@ -148,13 +154,18 @@ impl Default for EqConfig {
 /// cycles), so the two implementations must stay in sync by review.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AudioFilterConfig {
+    /// Downward expansion that closes fully below its threshold.
     pub noise_gate: Option<NoiseGateConfig>,
+    /// Gentle downward expansion, applied before the compressor.
     pub expander: Option<ExpanderConfig>,
+    /// Dynamic range compression for loud material.
     pub compressor: Option<CompressorConfig>,
+    /// Final stage that prevents clipping.
     pub limiter: Option<LimiterConfig>,
     /// Makeup gain in decibels (`-30..=+30`); `0.0` (±0.1 tolerance)
     /// disables the `audioamplify` stage.
     pub gain_db: f64,
+    /// 10-band equaliser; a band list whose gains all stay below 0.5 dB is skipped.
     pub eq: Option<EqConfig>,
 }
 
@@ -368,6 +379,7 @@ pub enum AudioSourceKind {
 }
 
 impl AudioSourceKind {
+    /// Human-readable name (`Application`, `Input Device`, `Output Device`, `Mixed`) for UI menus.
     pub fn label(&self) -> &'static str {
         match self {
             AudioSourceKind::Application => "Application",
@@ -564,7 +576,9 @@ pub const AUDIO_ROUTING_SCHEMA_VERSION: u32 = 1;
 /// stream keys are never stored here.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AudioRoutingConfig {
+    /// Schema version; `from_json` rejects anything but [`AUDIO_ROUTING_SCHEMA_VERSION`].
     pub version: u32,
+    /// The configured sources, in mixer order.
     pub sources: Vec<AudioSource>,
 }
 
@@ -574,7 +588,12 @@ pub enum AudioRoutingConfigError {
     /// The JSON could not be parsed.
     Parse(serde_json::Error),
     /// The document declares a schema version this build does not understand.
-    UnknownVersion { found: u32, supported: u32 },
+    UnknownVersion {
+        /// Version declared by the document.
+        found: u32,
+        /// Version this build reads.
+        supported: u32,
+    },
 }
 
 impl std::fmt::Display for AudioRoutingConfigError {
@@ -694,6 +713,7 @@ impl AudioBus {
 /// carries the bus list and the streaming send-bus selection.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AudioTrackConfig {
+    /// Schema version; `from_json` rejects anything but [`AUDIO_TRACK_SCHEMA_VERSION`].
     pub version: u32,
     /// The mixing buses in track order (track 1 is `tracks[0]`).
     pub tracks: Vec<AudioBus>,
@@ -708,7 +728,12 @@ pub enum AudioTrackConfigError {
     /// The JSON could not be parsed.
     Parse(serde_json::Error),
     /// The document declares a schema version this build does not understand.
-    UnknownVersion { found: u32, supported: u32 },
+    UnknownVersion {
+        /// Version declared by the document.
+        found: u32,
+        /// Version this build reads.
+        supported: u32,
+    },
 }
 
 impl std::fmt::Display for AudioTrackConfigError {

@@ -23,9 +23,12 @@ use crate::youtube_chat::{
 /// Supported chat platforms of the dock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum ChatPlatform {
+    /// Twitch over IRC, the `#channel` of the configured account.
     #[default]
     Twitch,
+    /// Kick over its Pusher WebSocket, plus the Kick API for sending.
     Kick,
+    /// YouTube live chat over the Innertube polling endpoint.
     YouTube,
 }
 
@@ -54,6 +57,8 @@ impl ChatPlatform {
 /// listeners); the GUI only sets `platform`, `channel` and `token`.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ChatConfig {
+    /// Which platform this config connects to. It selects the worker, and only
+    /// that worker reads the endpoint fields for its own platform.
     pub platform: ChatPlatform,
     /// Twitch IRC endpoint (`host:port`). Empty → default.
     pub twitch_endpoint: String,
@@ -85,6 +90,12 @@ pub struct ChatConfig {
 }
 
 impl ChatConfig {
+    /// A config for `platform` pointed at the real public endpoints.
+    ///
+    /// Every endpoint field starts empty, which the worker resolves to its
+    /// platform default; only `channel` and `token` are filled in, which is
+    /// everything the GUI sets. Tests override the endpoints with local
+    /// listeners afterwards.
     pub fn new(platform: ChatPlatform, channel: String, token: String) -> Self {
         Self {
             platform,
@@ -144,12 +155,16 @@ impl std::fmt::Debug for ChatConfig {
 /// the config file ever holds a token.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatAccount {
+    /// Platform this account belongs to. A [`MultiChat`] keeps one account per
+    /// platform (the first wins), so this plus `channel` identifies it.
     pub platform: ChatPlatform,
     /// Twitch channel / Kick slug / YouTube video id.
     pub channel: String,
 }
 
 impl ChatAccount {
+    /// An account for `platform` and `channel` (Twitch channel, Kick slug or
+    /// YouTube video id). Deliberately token-free — see the struct docs.
     pub fn new(platform: ChatPlatform, channel: String) -> Self {
         Self { platform, channel }
     }
@@ -170,6 +185,8 @@ impl Default for ChatTokenStore {
 }
 
 impl ChatTokenStore {
+    /// A store whose entries live in the OS vault under the service name
+    /// `service`; the app uses `"Rivulet"` (see the `Default` impl).
     pub fn new(service: impl Into<String>) -> Self {
         Self {
             service: service.into(),
@@ -190,6 +207,10 @@ impl ChatTokenStore {
         format!("chat-api-key/{}/{}", platform.label(), channel.trim())
     }
 
+    /// Store the account's OAuth/session token, replacing any previous value.
+    ///
+    /// Errors are the vault's own message; the token is never part of the app
+    /// config or of the diagnostics.
     pub fn save(&self, platform: ChatPlatform, channel: &str, token: &str) -> Result<(), String> {
         keyring::Entry::new(&self.service, &Self::key(platform, channel))
             .map_err(|error| error.to_string())?
@@ -197,6 +218,10 @@ impl ChatTokenStore {
             .map_err(|error| error.to_string())
     }
 
+    /// Read the account's token back.
+    ///
+    /// `Ok(None)` means no token was stored for this account; `Err` is a vault
+    /// failure and is not the same thing as "not configured".
     pub fn load(&self, platform: ChatPlatform, channel: &str) -> Result<Option<String>, String> {
         match keyring::Entry::new(&self.service, &Self::key(platform, channel))
             .map_err(|error| error.to_string())?
@@ -237,6 +262,9 @@ impl ChatTokenStore {
         }
     }
 
+    /// Remove the account's token. Deleting twice is fine: a missing entry is
+    /// not an error. Only the token slot is touched — the YouTube API key, when
+    /// one was stored, lives in its own vault entry.
     pub fn delete(&self, platform: ChatPlatform, channel: &str) -> Result<(), String> {
         match keyring::Entry::new(&self.service, &Self::key(platform, channel))
             .map_err(|error| error.to_string())?

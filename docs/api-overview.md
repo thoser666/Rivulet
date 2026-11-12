@@ -49,7 +49,7 @@ re-export that disappeared.
 - Public modules: **73**
 - Crate-root re-exports: **67** statements
 - `#![warn(missing_docs)]`: **active**
-- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **50** (`alerts`, `alerts_eventsub`, `alerts_ingest`, `alerts_webhook`, `audio`, `audio_source`, `benchmark`, `browser_source`, `camera`, `capture_channel`, `chat`, `cloud`, `container`, `discord`, `encoder`, `file_management`, `game_capture`, `game_detection`, `global_hotkey`, `live_compositor`, `media_source`, `midi`, `ndi`, `opengl_hook`, `output`, `plugin_manifest`, `plugin_registry`, `plugin_runtime`, `presence`, `preset`, `reconnect`, `recording_config`, `render`, `replay`, `scene`, `scene_snapshot`, `source`, `srt`, `stream`, `stream_info`, `stream_runtime`, `telemetry`, `test_helpers`, `text_source`, `transition`, `virtual_camera`, `vst3`, `vulkan_hook`, `webcam_source`, `youtube_chat`)
+- Modules narrowed by a reasoned `#[allow(missing_docs)]`: **0**
 - Runnable examples: **7** (`audio_routing`, `dual_output`, `encoder_config`, `engine_lifecycle`, `session_embed`, `simple_record`, `simple_stream`)
 
 ### Public modules
@@ -65,7 +65,7 @@ re-export that disappeared.
 | `autoclip` | Chat-driven auto-clip: save replay-buffer highlights when chat activity | 4 | yes |
 | `benchmark` | G5 – Performance verification: frame-time benchmarking and overhead budget checking. | 6 | yes |
 | `browser_source` | (no module documentation) | 14 | yes |
-| `camera` | (no module documentation) | 12 | yes |
+| `camera` | Camera enumeration and capture across platforms (issue #318). | 12 | yes |
 | `capture_backend` | (no module documentation) | 10 | no |
 | `capture_channel` | Shared-memory capture channel reader for receiving frames from the | 5 | no |
 | `chat` | Unified multi-platform chat facade for the streamer-facing chat dock. | 6 | yes |
