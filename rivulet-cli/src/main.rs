@@ -22,6 +22,8 @@ USAGE:
     rivulet record --config <file.toml> [flags]
     rivulet record --output <file.mp4> [flags]   # minimal inline config
     rivulet inspect --config <file.toml> [--json] # print the pipeline, don't record
+    rivulet stream --config <streaming.toml> [flags]   # publish to an ingest
+    rivulet stream --ingest <url> --key <key> [flags]  # minimal inline config
     rivulet render --config <scene.toml> --frame <n> --png <out.png>
     rivulet render --config-dir <scenes/> --out-dir <renders/>   # batch
     rivulet metrics [--idle-seconds <n>] [--config <scene.toml>]  # measure phases
@@ -37,6 +39,20 @@ FLAGS (record):
     -a, --audio               enable the silent test-audio track
         --container <fmt>     mp4 | mkv | mov | mpegts (default mp4)
         --dry-run             print the pipeline and exit without recording
+
+FLAGS (stream):
+    -c, --config <file>       TOML config file
+        --platform <name>     twitch | youtube | kick | custom (default custom)
+        --ingest <url>        ingest URL (overrides stream.ingest_url)
+        --key <key>           stream key (overrides stream.stream_key)
+        --preset <name>       low | standard | high | custom (default standard)
+    -d, --duration <secs>     stop after N seconds (overrides config)
+    -w, --width <px>          video width (default 640)
+    -h, --height <px>         video height (default 360)
+    -f, --fps <n>             video frame rate (default 30)
+    -a, --audio               enable the silent test-audio track
+        --dry-run             probe the ingest, print the plan and exit
+        --json                with --dry-run: machine-readable plan
 
 FLAGS (inspect):
     -c, --config <file>       TOML config file
@@ -85,6 +101,7 @@ record/inspect failures end with a machine-readable object naming the stage:
 enum Command {
     Record,
     Inspect,
+    Stream,
     Render,
     /// `rivulet metrics`: phase timings for the M9 resource harness (#363).
     Metrics,
@@ -99,6 +116,9 @@ struct RecordArgs {
     /// `record --dry-run`: build the pipeline and stop.
     dry_run: bool,
     show_help: bool,
+    /// `stream`: its own flags. Publishing configures an ingest rather than a
+    /// recording output, so its vocabulary does not overlap with `record`'s.
+    stream: rivulet_cli::stream::StreamArgs,
     /// `render`: its own flags. Rendering configures a composition rather than
     /// a recording, so its vocabulary does not overlap with `record`'s.
     render: rivulet_cli::render::RenderArgs,
@@ -119,6 +139,10 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
                 command = Command::Inspect;
                 rest = &args[1..];
             }
+            "stream" => {
+                command = Command::Stream;
+                rest = &args[1..];
+            }
             "render" => {
                 command = Command::Render;
                 rest = &args[1..];
@@ -135,13 +159,14 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
                     json: false,
                     dry_run: false,
                     show_help: true,
+                    stream: rivulet_cli::stream::StreamArgs::default(),
                     render: rivulet_cli::render::RenderArgs::default(),
                     metrics: rivulet_cli::metrics::MetricsArgs::default(),
                 })
             }
             other => {
                 return Err(format!(
-                    "unknown command {other:?} (expected \"record\", \"inspect\", \"render\" or \"metrics\")"
+                    "unknown command {other:?} (expected \"record\", \"inspect\", \"stream\", \"render\" or \"metrics\")"
                 ))
             }
         }
@@ -154,12 +179,21 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
         json: false,
         dry_run: false,
         show_help: false,
+        stream: rivulet_cli::stream::StreamArgs::default(),
         render: rivulet_cli::render::RenderArgs::default(),
         metrics: rivulet_cli::metrics::MetricsArgs::default(),
     };
 
-    // `render` and `metrics` have their own flag vocabularies, so they are
-    // parsed by their own parsers and never see the recording flags below.
+    // `stream`, `render` and `metrics` have their own flag vocabularies, so
+    // they are parsed by their own parsers and never see the recording flags
+    // below.
+    if command == Command::Stream {
+        parsed.stream = rivulet_cli::stream::parse_stream_args(rest)?;
+        if parsed.stream.show_help {
+            parsed.show_help = true;
+        }
+        return Ok(parsed);
+    }
     if command == Command::Render {
         if rest.iter().any(|arg| arg == "--help" || arg == "-h") {
             parsed.show_help = true;
@@ -249,13 +283,12 @@ fn main() {
     std::process::exit(code);
 }
 
-/// Emit a failure the documented way (M7 W5): the machine-readable `failed`
-/// object on stdout, appended to the JSON status stream, plus the human line on
-/// stderr. The two streams never mix.
+/// Emit a failure the documented way: the machine-readable `failed` object on
+/// stdout, the human line on stderr. Thin wrapper over
+/// [`rivulet_cli::report_failure`], kept so the binary's failure path is a
+/// named function the pinning tests can see.
 fn report_failure(failure: &RunFailure) -> i32 {
-    println!("{}", failure.to_json());
-    eprintln!("{}", failure.describe());
-    failure.exit_code()
+    rivulet_cli::report_failure(failure)
 }
 
 fn run() -> i32 {
@@ -276,11 +309,20 @@ fn run() -> i32 {
             print!("{}", rivulet_cli::render::USAGE);
         } else if parsed.command == Command::Metrics {
             print!("{}", rivulet_cli::metrics::USAGE);
+        } else if parsed.command == Command::Stream {
+            print!("{}", rivulet_cli::stream::USAGE);
         } else {
             print!("{USAGE}");
         }
         let _ = std::io::stdout().flush();
         return exit_code::OK;
+    }
+
+    if parsed.command == Command::Stream {
+        // Streaming configures an ingest rather than a recording output, so it
+        // must not go through the recording config path (and its
+        // `output.path` requirement).
+        return rivulet_cli::stream::run_stream(&parsed.stream);
     }
 
     if parsed.command == Command::Render {

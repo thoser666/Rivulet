@@ -19,10 +19,10 @@
 //! which the core redacts before handing it out, and this module does no
 //! un-redacting.
 
-use crate::config::{RecordConfig, Stage, StatusEvent};
+use crate::config::{RecordConfig, Stage, StatusEvent, StreamConfig};
 use crate::exit_code;
 
-/// A failed `record`, `inspect`, or argument parse.
+/// A failed `record`, `stream`, `inspect`, or argument parse.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunFailure {
     stage: Stage,
@@ -31,6 +31,10 @@ pub struct RunFailure {
     /// Boxed so the error type stays small: `run`/`inspect` return it by value
     /// and clippy's `result_large_err` fires on an inline `RecordConfig`.
     config: Option<Box<RecordConfig>>,
+    /// The same, for a failed `rivulet stream` run. Exactly one of `config`
+    /// and `stream_config` is set by a given job; the failure event carries
+    /// the one that describes the run.
+    stream_config: Option<Box<StreamConfig>>,
 }
 
 impl RunFailure {
@@ -41,6 +45,7 @@ impl RunFailure {
             message: message.into(),
             pipeline: None,
             config: None,
+            stream_config: None,
         }
     }
 
@@ -81,6 +86,12 @@ impl RunFailure {
         self
     }
 
+    /// Attach the resolved streaming config the run was driven from.
+    pub fn with_stream_config(mut self, config: StreamConfig) -> Self {
+        self.stream_config = Some(Box::new(config));
+        self
+    }
+
     /// The stage the run failed in.
     pub fn stage(&self) -> Stage {
         self.stage
@@ -101,6 +112,11 @@ impl RunFailure {
         self.config.as_deref()
     }
 
+    /// The resolved streaming config, if the failed run was `rivulet stream`.
+    pub fn resolved_stream_config(&self) -> Option<&StreamConfig> {
+        self.stream_config.as_deref()
+    }
+
     /// The process exit code for this failure (spec § CLI surface reference):
     /// usage/config errors are `2`, runtime failures are `1`.
     pub fn exit_code(&self) -> i32 {
@@ -118,6 +134,7 @@ impl RunFailure {
             message: self.message.clone(),
             pipeline: self.pipeline.clone(),
             config: self.config.as_deref().cloned(),
+            stream_config: self.stream_config.clone(),
         }
     }
 
@@ -241,5 +258,21 @@ mod tests {
         assert_eq!(failure.pipeline(), Some("pipeline"));
         assert_eq!(failure.resolved_config(), Some(&sample_config()));
         assert_eq!(failure.message(), "recording produced no output file");
+    }
+
+    #[test]
+    fn a_stream_failure_reports_the_stream_config_instead_of_a_record_config() {
+        let stream = crate::config::StreamConfig::default();
+        let failure = RunFailure::output("ingest unreachable").with_stream_config(stream.clone());
+        assert_eq!(failure.stage(), Stage::Output);
+        assert_eq!(failure.exit_code(), exit_code::RUNTIME);
+        assert_eq!(failure.resolved_stream_config(), Some(&stream));
+        assert!(
+            failure.resolved_config().is_none(),
+            "a stream failure carries no recording config"
+        );
+        let value: serde_json::Value = serde_json::from_str(&failure.to_json()).unwrap();
+        assert!(value.get("config").is_none(), "{value}");
+        assert!(value.get("stream_config").is_some(), "{value}");
     }
 }

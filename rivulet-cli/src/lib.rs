@@ -16,6 +16,7 @@ pub mod inspect;
 pub mod metrics;
 pub mod render;
 pub mod source;
+pub mod stream;
 
 pub use config::{
     describe, AudioConfig, OutputConfig, RecordConfig, Stage, StatusEvent, VideoConfig,
@@ -23,6 +24,10 @@ pub use config::{
 pub use failure::RunFailure;
 pub use inspect::{inspect, inspect_json, inspect_with_features, InspectReport};
 pub use source::{silence_frame, SilenceSource, TestVideoSource};
+pub use stream::{
+    parse_stream_args, run_stream, StreamArgs, StreamDryRunReport, StreamJob, StreamOverrides,
+    StreamReport, StreamStatusEvent,
+};
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -369,6 +374,17 @@ pub fn record(config: RecordConfig) -> std::result::Result<PathBuf, RunFailure> 
         .with_event_sink(events)
         .with_diagnostic_sink(diags)
         .run(|| false)
+}
+
+/// Emit a [`RunFailure`] the documented way: the `failed` object on stdout,
+/// the human line on stderr, and the exit code its stage maps to.
+///
+/// Shared by `record`, `inspect` and `stream`, so no subcommand can drift into
+/// a different failure format.
+pub fn report_failure(failure: &RunFailure) -> i32 {
+    println!("{}", failure.to_json());
+    eprintln!("{}", failure.describe());
+    failure.exit_code()
 }
 
 #[cfg(test)]

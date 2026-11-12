@@ -8360,6 +8360,175 @@ fn cli_inspect_surface_is_pinned() {
 }
 
 #[test]
+fn cli_stream_surface_is_pinned() {
+    // Issue #289 (M7 closeout, finding F-M7-002): `rivulet stream` is the CLI
+    // deliverable the M7 non-goal deferred. Pin the surface a consumer depends
+    // on - binary and library entry points, the status-event schema, the
+    // dry-run path, the secret-redaction rule and the docs - so a refactor
+    // cannot drop one and leave the spec advertising something unshipped.
+
+    let stream = read("rivulet-cli/src/stream.rs");
+    for needle in [
+        "pub struct StreamJob",
+        "pub fn new(config: StreamConfig)",
+        "pub fn run(",
+        "pub fn dry_run(",
+        "pub enum StreamStatusEvent",
+        "pub const USAGE",
+        "pub const PROBE_TIMEOUT",
+        "pub fn parse_stream_args",
+        "pub fn run_stream",
+        "pub fn stdout_stderr_sinks",
+        "tag = \"event\"",
+        "rename_all = \"snake_case\"",
+    ] {
+        assert!(
+            stream.contains(needle),
+            "rivulet-cli/src/stream.rs must pin {needle}"
+        );
+    }
+
+    // The dry run and the real run share one plan builder: a plan that could
+    // drift from the session would make `--dry-run` a lie.
+    assert!(
+        stream.contains("fn plan(&self)"),
+        "the stream job must have one plan builder"
+    );
+    assert_eq!(
+        stream.matches("self.plan()?").count(),
+        2,
+        "run() and dry_run() must both go through plan()"
+    );
+    assert!(
+        stream.contains("pub fn probe(") || stream.contains("fn probe("),
+        "the pre-flight ingest probe must stay part of the job"
+    );
+    assert!(
+        stream.contains("RunFailure::output("),
+        "an unreachable ingest must stay an `output` failure"
+    );
+
+    // Secrets: every serialized surface carries the redacted config, and the
+    // ingest URL is reduced to scheme + authority before it is reported.
+    assert!(
+        stream.contains("with_stream_config(self.config.redacted())"),
+        "failures must carry the redacted stream config"
+    );
+    assert!(
+        !stream.contains("with_stream_config(self.config.clone())"),
+        "a failure must never carry the live stream config (it holds the key)"
+    );
+    assert!(
+        stream.contains("fn redacted_ingest"),
+        "the ingest URL must be reduced before it is reported"
+    );
+
+    // The config model lives beside the record config and mirrors its shape.
+    let config = read("rivulet-cli/src/config.rs");
+    for needle in [
+        "pub struct StreamConfig",
+        "pub struct StreamOutputConfig",
+        "pub fn redacted",
+        "stream_config: Option<Box<StreamConfig>>",
+    ] {
+        assert!(config.contains(needle), "config.rs must pin {needle}");
+    }
+
+    // Library and binary entry points: the subcommand ships as both, like
+    // `rivulet record`.
+    let lib = read("rivulet-cli/src/lib.rs");
+    for needle in [
+        "pub mod stream;",
+        "run_stream",
+        "parse_stream_args",
+        "StreamJob",
+    ] {
+        assert!(
+            lib.contains(needle),
+            "lib.rs must re-export the stream surface: {needle}"
+        );
+    }
+    let main = read("rivulet-cli/src/main.rs");
+    for fragment in [
+        "rivulet stream",
+        "Command::Stream",
+        "--ingest",
+        "--key",
+        "run_stream",
+    ] {
+        assert!(
+            main.contains(fragment),
+            "the binary must document and dispatch `rivulet stream`: {fragment}"
+        );
+    }
+
+    // The end-to-end test is the only proof the frames leave the process.
+    let live = read("rivulet-cli/tests/stream_live.rs");
+    for needle in [
+        "fn a_stream_run_publishes_video_and_audio_to_a_local_ingest",
+        "stats.video_msgs > 0",
+        "stats.audio_msgs > 0",
+    ] {
+        assert!(
+            live.contains(needle),
+            "rivulet-cli/tests/stream_live.rs must keep the end-to-end publish: {needle}"
+        );
+    }
+
+    // Spec: the surface reference must document the subcommand as shipped, the
+    // stream event schema, and the failure's `stream_config`.
+    let spec = read("docs/m7-automation.md");
+    for fragment in [
+        "rivulet stream --config streaming.toml",
+        "shipped, #289",
+        "stream_config",
+        "dropped_ratio",
+        "--dry-run",
+    ] {
+        assert!(
+            spec.contains(fragment),
+            "m7 spec must document the stream surface: {fragment}"
+        );
+    }
+    assert!(
+        !spec.contains("NOT shipped"),
+        "the spec must not advertise `rivulet stream` as unshipped"
+    );
+    assert!(
+        !spec.contains("a streaming subcommand is a follow-up"),
+        "the non-goal note must record the shipped follow-up, not defer it again"
+    );
+
+    // The completion report and the quality gate must stop calling it unshipped.
+    for (name, doc) in [
+        (
+            "docs/m7-automation-completion-report.md",
+            read("docs/m7-automation-completion-report.md"),
+        ),
+        (
+            "docs/milestone-quality-gates.md",
+            read("docs/milestone-quality-gates.md"),
+        ),
+    ] {
+        assert!(
+            doc.contains("#289"),
+            "{name} must keep the F-M7-002 tracking issue"
+        );
+        assert!(
+            !doc.contains("unblocked but unshipped"),
+            "{name} must not describe `rivulet stream` as unshipped"
+        );
+    }
+
+    // CHANGELOG: a user-visible surface is documented where users look first.
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        changelog.contains("rivulet stream"),
+        "CHANGELOG must record the `rivulet stream` subcommand"
+    );
+}
+
+#[test]
 fn w5_machine_readable_failure_is_pinned() {
     // Issue #191 (M7 W5) acceptance criterion: "a failing run names the failing
     // stage in the machine-readable report". The stage taxonomy and the `failed`

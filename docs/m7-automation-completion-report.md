@@ -122,8 +122,8 @@ byte for byte, with container drift documented rather than gated.
 | CLI help, examples, config errors, exit codes are actionable | `cli_mvp_schema_and_docs_are_pinned` (exit-code table, `usage`/`config` key names, CLI reference in the spec) |
 | Clean invocation is deterministic **or reports every nondeterminism source** | `m7_reproducible_run_report_surface_is_pinned` — `reproducible` and `byte_reproducible` are separate flags, so a non-reproducible run says so instead of claiming parity |
 | Progress/cancellation work headless | `--duration`/`--max-bytes`, graceful SIGINT/SIGTERM finalize, exit code 0 on finalize; `Render Smoke` drives the binary non-interactively |
-| JSON/status output stable, documented, separated from diagnostics | strict stdout/stderr split pinned for `record`, `render`, and `inspect` |
-| Logs identify pipeline/input/config/stage without leaking secrets | inspector redacts secrets on the same code path a real run takes; `w5_machine_readable_failure_is_pinned` pins the failing-stage object |
+| JSON/status output stable, documented, separated from diagnostics | strict stdout/stderr split pinned for `record`, `render`, `inspect` and `stream` |
+| Logs identify pipeline/input/config/stage without leaking secrets | inspector redacts secrets on the same code path a real run takes; `w5_machine_readable_failure_is_pinned` pins the failing-stage object; `rivulet stream` masks the key and reduces the ingest URL to scheme + authority in every serialized surface |
 | Golden-frame, timestamp, reproducibility failures show useful diffs | `m7_deterministic_test_helpers_are_pinned` — first differing pixel coordinates, offending timestamp index, per-job batch status |
 | Exit evidence: clean-machine command transcript | `Render Smoke` on a clean CI runner, plus the post-publish `verify_release` job |
 | Exit evidence: reproducibility comparison | `rivulet render --frame` byte-identity inside `Render Smoke`, plus the release rebuild-and-compare job (`reproducible-build.yml`, F-M7-001): two independent builds of the same release ref per platform, gated on payload byte-identity |
@@ -137,7 +137,7 @@ a follow-up and remains visible in the roadmap/documentation.
 | ID | Severity | Area | Description | Tracking issue | Retest condition |
 | --- | --- | --- | --- | --- | --- |
 | F-M7-001 | Medium | Release reproducibility | **Closed by the rebuild-and-compare job.** #190 proved that what CI hashed is what a user downloads (manifest generation + post-publish re-download verification), but not that two independent builds of the same commit are byte-identical. `reproducible-build.yml` now builds the release ref twice per platform on separate runners, stages both payloads with the release's own staging script and compares fingerprints: payload divergence fails the job, container drift (ZIP/MSI/AppImage/DMG/`.asc`) is documented and reported, and an uncomparable pair is `not comparable` rather than a pass. `docs/release-platforms.md` carries the measured per-channel results, seeded by the first run after the job landed. | [#288](https://github.com/thoser666/Rivulet/issues/288) | Retest condition met: a CI job rebuilds the release on second runners and fails on payload divergence; `docs/release-platforms.md` reports the measured result per channel |
-| F-M7-002 | Medium | CLI surface | Streaming over the CLI was a declared M7 non-goal ("a streaming subcommand is a follow-up once the CLI surface is proven"). The CLI surface is now proven (`record`, `render`, `inspect` merged and pinned), so `rivulet stream` is unblocked but unshipped. | [#289](https://github.com/thoser666/Rivulet/issues/289) | `rivulet stream` ships as binary *and* library with the same status-event/exit-code/dry-run contract as `record` |
+| F-M7-002 | Medium | CLI surface | **Closed by `rivulet stream`.** Streaming over the CLI was a declared M7 non-goal ("a streaming subcommand is a follow-up once the CLI surface is proven"). The surface was proven by `record`, `render` and `inspect`; the follow-up now ships as binary *and* library with the same contract: JSON status events on stdout, diagnostics on stderr, the documented exit codes, graceful SIGINT/SIGTERM, and a `--dry-run` that probes the ingest and prints the plan without publishing. The pre-flight probe makes a broken ingest a `config`/`output` failure instead of a mid-stream surprise, and every serialized surface carries the masked key. | [#289](https://github.com/thoser666/Rivulet/issues/289) | Retest condition met: `rivulet stream` ships as binary *and* library with the same status-event/exit-code/dry-run contract as `record` (`rivulet-cli/tests/stream_live.rs`, `cli_stream_surface_is_pinned`) |
 
 Signature verification is deliberately *not* listed as a finding: it is not an
 ungoverned gap. The post-publish job checks detached signatures wherever they
@@ -155,9 +155,11 @@ Critical, or open High findings.
 
 M7 is complete for its functional scope. Release reproducibility is no longer a
 claim: the rebuild-and-compare job measures it on every release (F-M7-001,
-[#288](https://github.com/thoser666/Rivulet/issues/288)). The one remaining
-follow-up is headless streaming via the CLI (F-M7-002,
-[#289](https://github.com/thoser666/Rivulet/issues/289)).
+[#288](https://github.com/thoser666/Rivulet/issues/288)), and headless streaming
+via the CLI now ships as `rivulet stream` (F-M7-002,
+[#289](https://github.com/thoser666/Rivulet/issues/289)). Both findings that the
+conditional pass named are closed; the conditional pass stands as the record of
+how M7 was closed, not as an open risk.
 The report is linked from the M7 roadmap section in `README.md`, the M7 spec
 (`docs/m7-automation.md`), and the M7 quality gate in
 `docs/milestone-quality-gates.md`; release notes should reference it.
