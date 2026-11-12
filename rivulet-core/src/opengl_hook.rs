@@ -211,10 +211,14 @@ pub struct ShmFrameReader;
 
 #[cfg(not(target_os = "windows"))]
 impl ShmFrameReader {
+    /// Always `None`: the hook is a Win32 interposition DLL, so there is no
+    /// shared-memory region to open on this platform.
     pub fn open() -> Option<Self> {
         None
     }
 
+    /// Always `None`: without the DLL nothing writes frames, so there is
+    /// never one to read.
     pub fn read_frame(&self) -> Option<CapturedFrame> {
         None
     }
