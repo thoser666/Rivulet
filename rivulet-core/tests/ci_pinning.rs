@@ -6710,29 +6710,22 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
             && overview_step.contains("generate-api-overview.py --check"),
         "the overview step must both self-test and check the document, got:\n{overview_step}"
     );
-    assert!(
-        ci.contains("RUSTDOCFLAGS: -D warnings")
-            && ci.contains("cargo doc -p rivulet-core --no-deps"),
-        "the Lints job must build the crate docs with warnings denied (F-M8-002)"
-    );
 
-    // F-M8-004: a doc build only sees the `cfg` branches that compile on the
-    // runner it runs on, so the warning-denied build has to happen on every
-    // matrix platform. A source-scanning script used to stand in for that; it
-    // had to model `cfg` by hand and could drift from rustdoc, so the matrix
-    // now runs rustdoc itself on Windows, Linux and macOS.
+    // M8 #297 / F-M8-004: a doc build only sees the `cfg` branches that compile
+    // on the runner it runs on, so the warning-denied build runs on every matrix
+    // platform — and only there. A second copy in the Lints job would rebuild
+    // the same Linux docs and could drift from the matrix one.
     let (_, matrix_job) = ci
         .split_once("build_and_test:")
         .expect("ci.yml must keep the Build & Test matrix job");
-    let doc_marker = "Build API docs without warnings on every platform (F-M8-004)";
-    let doc_offset = matrix_job.find(doc_marker).unwrap_or_else(|| {
-        panic!("the Build & Test matrix must run the doc build on every platform (F-M8-004)")
-    });
+    let doc_marker = "Build API docs without warnings on every platform (M8 #297, F-M8-004)";
+    let doc_offset = matrix_job
+        .find(doc_marker)
+        .expect("the Build & Test matrix must build the docs on every platform");
     for os in ["ubuntu-latest", "windows-latest", "macos-latest"] {
-        let matrix_head = &matrix_job[..doc_offset];
         assert!(
-            matrix_head.contains(os),
-            "the doc build's matrix must keep {os}, or that platform's gated items go unchecked"
+            matrix_job[..doc_offset].contains(os),
+            "the matrix that builds the docs must keep {os}, or that platform's gated items go unchecked"
         );
     }
     let platform_doc_step = matrix_job[doc_offset..]
@@ -6745,12 +6738,14 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
     ] {
         assert!(
             platform_doc_step.contains(marker),
-            "the platform doc step must keep {marker}, got:\n{platform_doc_step}"
+            "the platform doc step must keep {marker}, got:
+{platform_doc_step}"
         );
     }
-    assert!(
-        !repo_file("scripts/check-platform-docs.py").exists(),
-        "the platform-doc gap is closed by rustdoc on every platform"
+    assert_eq!(
+        ci.matches("cargo doc -p rivulet-core --no-deps").count(),
+        1,
+        "the doc build belongs in the Build & Test matrix only, not in the Lints job too"
     );
 }
 
