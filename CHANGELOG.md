@@ -1,5 +1,26 @@
 ## [Unreleased]
 
+- test(core): **the multi-track recording test stops a transport-stream session
+  only once audio payload is actually in the file**
+  ([#438](https://github.com/thoser666/Rivulet/issues/438)). It stopped after a
+  fixed 12 frames plus 100 ms, which on a loaded macOS runner can land before
+  the AAC encoder produced its first buffer — and `mpegtsmux` had already listed
+  both audio tracks in the PMT, so the recording handed an empty track to the
+  remux, the MP4 folded it away and the discoverer reported "0 audio streams".
+  `container::scan_mpegts_payload_bytes` now counts the bytes each PMT kind
+  carries and how many of the named audio tracks delivered any (a PMT entry
+  proves a stream was declared, not delivered), the test keeps recording until
+  every named audio track and the video stream carry payload, and its failure
+  message names the leg that lost the track along with the payload bytes and
+  the delivered/total track count it saw.
+- fix(gui): **the Windows graphics-capture fallback delivers packed frames.**
+  The GUI's own `GraphicsCaptureApiHandler` read every WGC frame through
+  `as_raw_buffer()`, which keeps the compositor's row alignment padding, so a
+  window whose width is not a multiple of that alignment arrived skewed: the
+  padding bytes were treated as the next row's pixels and the image sheared
+  progressively. It now copies through a scratch `Vec` and
+  `as_nopadding_buffer()`, the same path the core `MetalWgcBackend` already used
+  (F-M8-004).
 - feat(cli): **`rivulet stream` publishes to an RTMP/RTMPS ingest** (F-M7-002,
   [#289](https://github.com/thoser666/Rivulet/issues/289)). The follow-up the M7
   non-goal deferred: `rivulet stream --config

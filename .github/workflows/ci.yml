@@ -243,6 +243,17 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc -p rivulet-core --no-deps
 
+      # F-M8-004: `cargo doc` only sees the `cfg` branches that compile on the
+      # runner. This job runs on Linux, so a Windows-only item is checked only
+      # when somebody happens to run the doc build on Windows, and vice versa —
+      # `ShmFrameReader`'s non-Windows stub methods stayed undocumented through
+      # #342/#433 for exactly that reason. The guard reads the sources instead
+      # and reports the gate that hides each undocumented item.
+      - name: Check platform-gated public items are documented (F-M8-004)
+        run: |
+          python3 scripts/check-platform-docs.py --self-test
+          python3 scripts/check-platform-docs.py
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 

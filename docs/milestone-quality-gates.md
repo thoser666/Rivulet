@@ -475,10 +475,14 @@ Workstream issues:
     `cargo publish` would upload, on Linux in the Build & Test job with
     `RIVULET_DOWNSTREAM_REQUIRE_AUDIO=1`. `cargo doc -p rivulet-core --no-deps`
     runs with `RUSTDOCFLAGS=-D warnings` in the Lints job and is at zero
-    warnings, from 22 broken intra-doc links. `docs/api-overview.md` is generated
+    warnings,     from 22 broken intra-doc links. `docs/api-overview.md` is generated
     from `lib.rs` by `scripts/generate-api-overview.py` and checked on every
-    push. This closes F-M8-001 and F-M8-002, the two evidence gaps the first
-    conditional pass recorded.
+    push. `cargo doc` only sees the `cfg` branches that compile on the runner,
+    so `scripts/check-platform-docs.py` reads the sources and reports the gate
+    that hides an undocumented item, in the same job — the gap it closes left
+    `ShmFrameReader`'s non-Windows stub methods undocumented until #436 changed
+    Linux code (F-M8-004). This closes F-M8-001 and F-M8-002, the two evidence
+    gaps the first conditional pass recorded.
 
 The gate closed on the criteria above with four follow-ups named in the report
 rather than absorbed into a "done" verdict: F-M8-003 (`missing_docs` activated with a pinned per-module allow-list, **closed by
