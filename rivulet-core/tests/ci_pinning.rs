@@ -6677,7 +6677,7 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
     }
 
     // --- CI wiring --------------------------------------------------------
-    let ci = read(".github/workflows/ci.yml");
+    let ci = read(".github/workflows/ci.yml").replace('\r', "");
     let smoke_step = ci
         .split("Downstream consumer smoke test (M8 #297)")
         .nth(1)
@@ -6711,47 +6711,45 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
         "the overview step must both self-test and check the document, got:\n{overview_step}"
     );
 
-    // M8 #297 / F-M8-004: a doc build only sees the `cfg` branches that compile
-    // on the runner it runs on, so the warning-denied build runs on every matrix
-    // platform — and only there. A second copy in the Lints job would rebuild
-    // the same Linux docs and could drift from the matrix one.
-    let (_, matrix_job) = ci
-        .split_once("build_and_test:")
+    // M8 #297 / F-M8-004: rustdoc only sees the `cfg` branches that compile on
+    // the runner it runs on, so the warning-denied doc build runs on every
+    // matrix platform and nowhere else — a second copy in the Lints job would
+    // rebuild the same Linux docs and could drift from this one.
+    let job = ci
+        .split("\n  build_and_test:\n")
+        .nth(1)
         .expect("ci.yml must keep the Build & Test matrix job");
-    let doc_marker = "Build API docs without warnings on every platform (M8 #297, F-M8-004)";
-    let doc_offset = matrix_job
-        .find(doc_marker)
+    let (matrix_head, job_steps) = job
+        .split_once("      - name:")
+        .expect("the Build & Test matrix job must keep its steps");
+    let missing: Vec<_> = ["ubuntu-latest", "windows-latest", "macos-latest"]
+        .into_iter()
+        .filter(|os| !matrix_head.contains(os))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the matrix that builds the docs lost {missing:?}; those platforms' gated items go unchecked"
+    );
+    let doc_step = job_steps
+        .split("      - name:")
+        .find(|step| step.trim_start().starts_with("Build API docs"))
         .expect("the Build & Test matrix must build the docs on every platform");
-    for os in ["ubuntu-latest", "windows-latest", "macos-latest"] {
-        assert!(
-            matrix_job[..doc_offset].contains(os),
-            "the matrix that builds the docs must keep {os}, or that platform's gated items go unchecked"
-        );
-    }
-    let platform_doc_step = matrix_job[doc_offset..]
-        .split("- name:")
-        .next()
-        .expect("the platform doc step must have a body");
     for marker in [
+        "(M8 #297, F-M8-004)",
         "RUSTDOCFLAGS: -D warnings",
         "cargo doc -p rivulet-core --no-deps",
     ] {
         assert!(
-            platform_doc_step.contains(marker),
-            "the platform doc step must keep {marker}, got:
-{platform_doc_step}"
+            doc_step.contains(marker),
+            "the platform doc step must keep {marker}, got:\n{doc_step}"
         );
     }
-    // Counted over the steps alone: a YAML comment that merely mentions the
-    // command (`# cargo doc …`) is documentation, not a second build, and must
-    // not turn this red.
-    let doc_builds = ci
-        .lines()
-        .filter(|line| !line.trim_start().starts_with('#'))
-        .filter(|line| line.contains("cargo doc -p rivulet-core --no-deps"))
-        .count();
     assert_eq!(
-        doc_builds, 1,
+        ci.lines()
+            .filter(|line| !line.trim_start().starts_with('#'))
+            .filter(|line| line.contains("cargo doc -p rivulet-core --no-deps"))
+            .count(),
+        1,
         "the doc build belongs in the Build & Test matrix only, not in the Lints job too"
     );
 }
