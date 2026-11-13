@@ -269,6 +269,21 @@ trailing CRC32) — using `section_len` directly ends three bytes early and skip
 the final stream entry; and mpegtsmux rewrites the PMT as streams materialize,
 so the **last** PMT version wins rather than the first.
 
+A PMT entry is not evidence that a track reached the file, only that it was
+declared: `mpegtsmux` lists a stream as soon as its pad is configured, while the
+encoder behind it may still be priming. `scan_mpegts_payload_bytes` counts the
+payload bytes each PMT kind actually carries (pinned by
+`container::tests::payload_scan_*`, same synthetic-stream approach), and the
+audio-track recording test uses it instead of a fixed sleep: it keeps recording
+until **every** audio track the PMT names has carried payload (plus the video
+stream), and only then stops — a per-kind total would also pass with one track
+still priming, and the assertions that follow claim both tracks survive. That closes
+the intermittent macOS failure in
+[#438](https://github.com/thoser666/Rivulet/issues/438) — a session stopped
+during encoder priming left audio tracks that existed in the PMT and nowhere
+else, and the assertion now names the leg (recording or remux) and the payload
+bytes it saw instead of reporting a bare "0".
+
 ### Settings
 
 - Persisted in `eframe::Storage` under a versioned JSON schema:

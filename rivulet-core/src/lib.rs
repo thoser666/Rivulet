@@ -5985,19 +5985,66 @@ mod tests {
             // rejects during remux, which no real session would produce.
             let mut video = vec![0u8; (width * height * 4) as usize];
             let audio = AudioFrame::new(vec![0.0f32; 4800], AUDIO_SAMPLE_RATE, AUDIO_CHANNELS);
-            for i in 0..12 {
+            // A TS session is stopped only once its payload carries audio, not
+            // just its PMT: `mpegtsmux` lists a track as soon as the pad is
+            // configured, so a fixed sleep can stop the session while the AAC
+            // encoder is still priming. The MP4 remux then folds the empty
+            // track away and the discoverer reports 0 audio streams — the
+            // intermittent macOS failure in issue #438. The other containers
+            // are inspected as written and keep the fixed frame budget.
+            let ts_path = path.display().to_string();
+            let wait_for_ts_audio = container == RecordingContainer::MpegTs;
+            let mut ts_bytes = crate::container::TsPayloadBytes::default();
+            let mut frames = 0u32;
+            loop {
+                frames += 1;
                 for (p, b) in video.iter_mut().enumerate() {
-                    *b = ((p / 97 + i * 7) % 256) as u8;
+                    *b = ((p / 97 + frames as usize * 7) % 256) as u8;
                 }
                 engine.process_raw_frame(&video, width, height);
-                if i % 3 == 0 {
+                if frames % 3 == 1 {
                     let _ = engine.push_audio_source(game, &audio);
                     let _ = engine.push_audio_source(music, &audio);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(33));
+                if !wait_for_ts_audio {
+                    if frames >= 12 {
+                        break;
+                    }
+                    continue;
+                }
+                ts_bytes = crate::container::scan_mpegts_payload_bytes(&ts_path);
+                // Every audio track the PMT names has to carry bytes, not just
+                // some audio: a total above zero would also pass with one track
+                // still priming, and the assertions below claim that both
+                // tracks survive the recording.
+                let audio_ready = ts_bytes.audio_tracks > 0
+                    && ts_bytes.audio_tracks_delivered == ts_bytes.audio_tracks;
+                if frames >= 12 && audio_ready && ts_bytes.video > 0 {
+                    break;
+                }
+                if frames >= 120 {
+                    break;
+                }
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
             engine.stop_recording();
+            if wait_for_ts_audio {
+                ts_bytes = crate::container::scan_mpegts_payload_bytes(&ts_path);
+                assert!(
+                    ts_bytes.audio_tracks > 0
+                        && ts_bytes.audio_tracks_delivered == ts_bytes.audio_tracks
+                        && ts_bytes.video > 0,
+                    "{}: the recording leg delivered {}/{} audio tracks in {frames} frames \
+                     (audio={} video={} bytes); stopping here would hand an empty track \
+                     to the remux (issue #438)",
+                    container.label(),
+                    ts_bytes.audio_tracks_delivered,
+                    ts_bytes.audio_tracks,
+                    ts_bytes.audio,
+                    ts_bytes.video
+                );
+            }
 
             // Crash-safe intermediates are remuxed to a sibling MP4 through
             // the same `remux_to_mp4` path the auto-remux uses.
@@ -6027,10 +6074,31 @@ mod tests {
             let info = discoverer
                 .discover_uri(&file_uri(&inspect))
                 .unwrap_or_else(|e| panic!("{}: file should be readable: {e}", container.label()));
+            // Say which leg lost what: the video and audio counts are asserted
+            // separately, and the TS intermediate's payload counts ride along so
+            // a future failure on macOS (issue #438) names the recording leg or
+            // the remux instead of reporting a bare "0".
+            let leg = if wait_for_ts_audio {
+                format!(
+                    "; the TS intermediate carried audio={} video={} payload bytes across {}/{} audio tracks",
+                    ts_bytes.audio,
+                    ts_bytes.video,
+                    ts_bytes.audio_tracks_delivered,
+                    ts_bytes.audio_tracks
+                )
+            } else {
+                String::new()
+            };
+            assert_eq!(
+                info.video_streams().len(),
+                1,
+                "{}: the video track must survive recording (+ remux){leg}",
+                container.label()
+            );
             assert_eq!(
                 info.audio_streams().len(),
                 2,
-                "{}: both bus tracks must survive recording (+ remux)",
+                "{}: both bus tracks must survive recording (+ remux){leg}",
                 container.label()
             );
 
