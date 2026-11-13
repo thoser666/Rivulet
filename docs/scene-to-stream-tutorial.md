@@ -173,8 +173,10 @@ Typische Stolpersteine:
 
 - Native Renderer für Image-, Text-, Media- und Color-Ebenen
   ([#217](https://github.com/thoser666/Rivulet/issues/217)).
-- Import einer OBS-Szenensammlung
-  ([#367](https://github.com/thoser666/Rivulet/issues/367)).
+- Der GUI-Menüpunkt für den Import einer OBS-Szenensammlung
+  ([#367](https://github.com/thoser666/Rivulet/issues/367)); die
+  Kommandozeile (`rivulet import-obs`) liest sie bereits ein, siehe
+  [Szenen verwalten](scene-management-tutorial.md#13-obs-sammlung-importieren).
 
 ## Weiterlesen
 

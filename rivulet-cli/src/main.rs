@@ -27,6 +27,8 @@ USAGE:
     rivulet render --config <scene.toml> --frame <n> --png <out.png>
     rivulet render --config-dir <scenes/> --out-dir <renders/>   # batch
     rivulet metrics [--idle-seconds <n>] [--config <scene.toml>]  # measure phases
+    rivulet import-obs <collection.json> --dry-run [--json]       # OBS migration
+    rivulet import-obs <collection.json> --out <scenes.json>
     rivulet help                                 # show this help
 
 FLAGS (record):
@@ -83,6 +85,11 @@ FLAGS (metrics):
         --fps <n>             synthetic capture frame rate (default 30)
         --no-engine           skip the GStreamer engine bootstrap
 
+FLAGS (import-obs):
+        --dry-run             print the import report, write nothing
+        --out <file>          write the imported scene collection (SceneManager JSON)
+        --json                print the report as JSON
+
 STREAMS:
     stdout  JSON status events (started/progress/stopped, or failed on error)
     stderr  human-readable diagnostics
@@ -105,6 +112,8 @@ enum Command {
     Render,
     /// `rivulet metrics`: phase timings for the M9 resource harness (#363).
     Metrics,
+    /// `rivulet import-obs`: map an OBS scene collection (#367).
+    ImportObs,
 }
 
 struct RecordArgs {
@@ -124,6 +133,9 @@ struct RecordArgs {
     render: rivulet_cli::render::RenderArgs,
     /// `metrics`: its own flags for the same reason.
     metrics: rivulet_cli::metrics::MetricsArgs,
+    /// `import-obs`: its own flags; it reads an OBS collection, not a recording
+    /// config.
+    import: rivulet_cli::import::ImportArgs,
 }
 
 fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
@@ -151,6 +163,10 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
                 command = Command::Metrics;
                 rest = &args[1..];
             }
+            "import-obs" => {
+                command = Command::ImportObs;
+                rest = &args[1..];
+            }
             "help" | "--help" | "-h" => {
                 return Ok(RecordArgs {
                     command,
@@ -162,11 +178,12 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
                     stream: rivulet_cli::stream::StreamArgs::default(),
                     render: rivulet_cli::render::RenderArgs::default(),
                     metrics: rivulet_cli::metrics::MetricsArgs::default(),
+                    import: rivulet_cli::import::ImportArgs::default(),
                 })
             }
             other => {
                 return Err(format!(
-                    "unknown command {other:?} (expected \"record\", \"inspect\", \"stream\", \"render\" or \"metrics\")"
+                    "unknown command {other:?} (expected \"record\", \"inspect\", \"stream\", \"render\", \"metrics\" or \"import-obs\")"
                 ))
             }
         }
@@ -182,11 +199,12 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
         stream: rivulet_cli::stream::StreamArgs::default(),
         render: rivulet_cli::render::RenderArgs::default(),
         metrics: rivulet_cli::metrics::MetricsArgs::default(),
+        import: rivulet_cli::import::ImportArgs::default(),
     };
 
-    // `stream`, `render` and `metrics` have their own flag vocabularies, so
-    // they are parsed by their own parsers and never see the recording flags
-    // below.
+    // `stream`, `render`, `metrics` and `import-obs` have their own flag
+    // vocabularies, so they are parsed by their own parsers and never see the
+    // recording flags below.
     if command == Command::Stream {
         parsed.stream = rivulet_cli::stream::parse_stream_args(rest)?;
         if parsed.stream.show_help {
@@ -208,6 +226,14 @@ fn parse_args(args: &[String]) -> Result<RecordArgs, String> {
             return Ok(parsed);
         }
         parsed.metrics = rivulet_cli::metrics::parse_metrics_args(rest)?;
+        return Ok(parsed);
+    }
+    if command == Command::ImportObs {
+        if rest.iter().any(|arg| arg == "--help" || arg == "-h") {
+            parsed.show_help = true;
+            return Ok(parsed);
+        }
+        parsed.import = rivulet_cli::import::parse_import_args(rest)?;
         return Ok(parsed);
     }
     let mut i = 0;
@@ -311,6 +337,8 @@ fn run() -> i32 {
             print!("{}", rivulet_cli::metrics::USAGE);
         } else if parsed.command == Command::Stream {
             print!("{}", rivulet_cli::stream::USAGE);
+        } else if parsed.command == Command::ImportObs {
+            print!("{}", rivulet_cli::import::USAGE);
         } else {
             print!("{USAGE}");
         }
@@ -335,6 +363,12 @@ fn run() -> i32 {
         // A metrics run measures phases; it never records to a config's
         // output path, so it skips the recording config path entirely.
         return rivulet_cli::metrics::run_metrics(&parsed.metrics);
+    }
+
+    if parsed.command == Command::ImportObs {
+        // An import reads an OBS collection rather than a recording config and
+        // never records, so it skips the config pipeline entirely.
+        return rivulet_cli::import::run_import(&parsed.import);
     }
 
     // Load config file, then apply flag overrides (flags win).

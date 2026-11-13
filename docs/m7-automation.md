@@ -590,6 +590,8 @@ rivulet render --config scene.toml --frame N --png out.png    (shipped, W3)
 rivulet render --config-dir scenes/ --out-dir renders/        (shipped, W3 batch)
 rivulet metrics [--idle-seconds N] [--config scene.toml]      (shipped, M9 #363)
 rivulet stream --config streaming.toml [--dry-run] [--json]  (shipped, #289)
+rivulet import-obs obs.json --dry-run [--json]               (shipped, #367)
+rivulet import-obs obs.json --out rivulet-scenes.json        (shipped, #367)
 ```
 
 Flags override the TOML config (`--output` wins over `output.path`, etc.).
@@ -636,6 +638,16 @@ renderer does. The harness refuses launcher suffixes (`.cmd`, `.bat`, `.sh`,
 `.py`, …) for that reason, and every report carries a `sampler` object (backend,
 sample count, CPU seconds, RSS range) that the schema gate requires before a
 measured report is accepted.
+
+`rivulet import-obs` maps an OBS Studio scene collection and never touches the
+engine, the output path or the status stream: `--dry-run` prints the report and
+writes nothing, `--out <file>` writes the scene tree in the GUI's
+scene-collection format through a sibling `.tmp` file and a rename. The report
+is prose, or JSON with `--json`. An input problem (missing file, invalid JSON,
+no scenes) exits `2` because the collection file is the command's configuration;
+an unwritable `--out` path exits `1`. The mapping and every reported difference
+are documented in
+[`scene-management.md`](scene-management.md#migrating-an-obs-collection).
 
 `rivulet stream` publishes instead of writing a file: same status-stream split,
 same exit codes, same graceful SIGINT/SIGTERM stop, same `--dry-run` shape. Two

@@ -313,6 +313,13 @@ pub use source::{
     ChromaKey, Crop, SceneItemClipboard, SceneSource, Source, SourceKind, SourceManager, Transform,
 };
 
+/// Import an OBS Studio scene collection into the scene and source model.
+pub mod obs_import;
+pub use obs_import::{
+    import_collection, import_file, source_kind, ObsImport, ObsImportError, ObsImportNote,
+    ObsImportReport,
+};
+
 /// Image sources: supported formats and file detection.
 pub mod image_source;
 pub use image_source::{is_image_file, supported_image_extensions, ImageSource};

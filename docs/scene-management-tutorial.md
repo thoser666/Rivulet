@@ -211,15 +211,36 @@ Mehrere Szenen gleichzeitig bearbeiten statt eine nach der anderen:
   werden in der Statuszeile mitgezählt und wirken bei Sammelaktionen mit — nur
   **Strg/Cmd+A** meint ausschließlich, was du siehst.
 
-## 13. Was (noch) nicht geht
+## 13. OBS-Sammlung importieren
 
-Dieser Punkt ist ein eigenes Vorhaben und als Issue hinterlegt, nicht
-verschwiegene Lücke:
+Eine OBS-Sammlung liest `rivulet import-obs` ein
+([#367](https://github.com/thoser666/Rivulet/issues/367)) — Szenen, Ordner,
+verschachtelte Gruppen, Quellen mit Transform, Crop, Sichtbarkeit und Sperre:
 
-- **OBS-Sammlung importieren** — das Mapping ist dokumentiert (siehe
-  [scene-management.md](scene-management.md#migrating-an-obs-collection)), der
-  Importer ist ein eigenes Vorhaben
-  ([#367](https://github.com/thoser666/Rivulet/issues/367)).
+```bash
+# Bericht lesen, nichts schreiben
+rivulet import-obs ~/.config/obs-studio/basic/scenes/Stream.json --dry-run
+
+# Szenenbaum schreiben, den die GUI importieren kann
+rivulet import-obs Stream.json --out rivulet-scenes.json
+```
+
+- `--dry-run` nennt jede Abweichung: Quellen-Payloads wie `url` oder `file`,
+  OBS-Quellentypen ohne Rivulet-Gegenstück, die globale Transition der
+  Sammlung und OBS-`scale` ohne `bounds` (die Sammlung enthält die native
+  Quellgröße nicht). Nichts wird stillschweigend verworfen.
+- `--out` schreibt den Szenenbaum atomar im Format, das die GUI unter
+  *Szenen → Szenensammlung importieren* liest. Quell-Bindungen stehen im
+  Bericht und im Modell; die GUI-Szenensammlung speichert bisher nur Szenen,
+  und der Befehl sagt das auf stderr.
+- Das vollständige Mapping und die Grenzen stehen in
+  [scene-management.md](scene-management.md#migrating-an-obs-collection).
+
+Noch offen und weiter in
+[#367](https://github.com/thoser666/Rivulet/issues/367) verfolgt: der
+GUI-Menüpunkt *OBS-Sammlung importieren…* mit demselben Bericht vor dem
+Anwenden, Chroma-Key-Filtereinstellungen sowie Lautstärke/Stumm der
+OBS-Quellen.
 
 ## Weiterlesen
 

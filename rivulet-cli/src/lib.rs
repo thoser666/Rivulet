@@ -12,6 +12,7 @@
 
 pub mod config;
 pub mod failure;
+pub mod import;
 pub mod inspect;
 pub mod metrics;
 pub mod render;
@@ -22,6 +23,7 @@ pub use config::{
     describe, AudioConfig, OutputConfig, RecordConfig, Stage, StatusEvent, VideoConfig,
 };
 pub use failure::RunFailure;
+pub use import::{parse_import_args, run_import, ImportArgs};
 pub use inspect::{inspect, inspect_json, inspect_with_features, InspectReport};
 pub use source::{silence_frame, SilenceSource, TestVideoSource};
 pub use stream::{
