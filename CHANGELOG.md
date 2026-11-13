@@ -1,5 +1,28 @@
 ## [Unreleased]
 
+- feat(core): **an OBS Studio scene collection imports into Rivulet scenes and
+  sources, and every difference is reported** (M9,
+  [#367](https://github.com/thoser666/Rivulet/issues/367)).
+  `rivulet_core::obs_import` reads the JSON OBS writes to
+  `basic/scenes/<collection>.json`: scenes, groups and nested groups become
+  `Scene`s linked through `parent`, scene and group items become `SourceManager`
+  bindings, `pos`/`alignment` become a `Transform` (the anchor is converted to a
+  top-left corner), `bounds` becomes width/height, `crop_*` becomes `Crop`, and
+  `visible`/`locked` land on the binding; `device_id`, `window` and `monitor`
+  feed `Source::device_id`. The first item in an OBS scene's list is drawn on
+  top, so the item order is reversed to match Rivulet's z-order. Anything
+  without a counterpart lands in a typed `ObsImportReport` instead of
+  vanishing: unsupported OBS source types (skipped - a placeholder would need a
+  breaking `SourceKind` variant), payload keys such as `url` and `file`,
+  `scale` without `bounds`, the collection's global transition (Rivulet
+  overrides per folder), a derived scene order, an unknown `current_scene`,
+  dangling items and groups, and group cycles. `rivulet import-obs <collection.json>
+  --dry-run [--json]` prints the report and writes nothing; `--out <file>`
+  writes the scene tree atomically in the format the GUI's "Import scene
+  collection" reads (scenes only - the command says so on stderr when it mapped
+  sources). An invalid collection exits 2; an unwritable `--out` path exits 1.
+  Tests: `rivulet-core/tests/obs_import.rs` and `rivulet-cli/src/import.rs`.
+  Spec: [`docs/scene-management.md#migrating-an-obs-collection`](docs/scene-management.md#migrating-an-obs-collection).
 - feat(cli): **`rivulet stream` publishes to an RTMP/RTMPS ingest** (F-M7-002,
   [#289](https://github.com/thoser666/Rivulet/issues/289)). The follow-up the M7
   non-goal deferred: `rivulet stream --config

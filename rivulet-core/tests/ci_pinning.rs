@@ -8529,6 +8529,161 @@ fn cli_stream_surface_is_pinned() {
 }
 
 #[test]
+fn obs_import_surface_is_pinned() {
+    // Issue #367 (M9): migrating an OBS collection is the entry point for users
+    // coming from OBS. Pin the mapper's public surface, the report's honesty
+    // rule, the CLI flags and the docs, so neither the "every difference is
+    // reported" promise nor the mapping table can quietly disappear.
+
+    let mapper = read("rivulet-core/src/obs_import.rs");
+    for needle in [
+        "pub struct ObsImport {",
+        "pub struct ObsImportReport {",
+        "pub enum ObsImportNote {",
+        "pub enum ObsImportError {",
+        "pub fn import_file(",
+        "pub fn import_collection(",
+        "pub fn source_kind(",
+        "pub fn describe(",
+        "pub fn has_notes(",
+    ] {
+        assert!(
+            mapper.contains(needle),
+            "rivulet-core/src/obs_import.rs must pin {needle}"
+        );
+    }
+
+    // Every lossy case is a typed note, so the report cannot degrade into a
+    // free-form string that silently forgets a case.
+    for variant in [
+        "UnsupportedSource",
+        "PayloadNotCarried",
+        "ScaleNotConverted",
+        "SceneOrderDerived",
+        "ActiveSceneUnknown",
+        "DanglingItem",
+        "DanglingGroup",
+        "GroupCycle",
+        "TransitionNotCarried",
+    ] {
+        assert!(
+            mapper.contains(variant),
+            "ObsImportNote must keep the {variant} case"
+        );
+    }
+
+    // A source type that was already reported as unsupported must not also be
+    // reported as a dangling item: two notes for one object read as a broken
+    // collection rather than an unsupported plugin.
+    assert!(
+        mapper.contains("skipped.contains(&item.name)"),
+        "a skipped source must not be reported twice"
+    );
+    // The first OBS list item is drawn on top, so importing it as the
+    // front-most item requires reversing the list.
+    assert!(
+        mapper.contains(".items.iter().rev()"),
+        "the item order must stay reversed to match OBS's z-order"
+    );
+    // `bounds` is the only absolute size OBS stores; `scale` alone cannot be
+    // converted, which is what `ScaleNotConverted` reports.
+    assert!(
+        mapper.contains("bounds_type != 0"),
+        "the importer must prefer absolute bounds over relative scale"
+    );
+
+    let core_lib = read("rivulet-core/src/lib.rs");
+    for needle in ["pub mod obs_import;", "ObsImportNote", "import_collection"] {
+        assert!(
+            core_lib.contains(needle),
+            "lib.rs must expose the OBS importer: {needle}"
+        );
+    }
+
+    // Binary and library entry points, like every other subcommand.
+    let cli = read("rivulet-cli/src/import.rs");
+    for needle in [
+        "pub const USAGE",
+        "pub struct ImportArgs",
+        "pub fn parse_import_args",
+        "pub fn run_import",
+        "--dry-run and --out are mutually exclusive",
+        "fn write_atomically",
+    ] {
+        assert!(
+            cli.contains(needle),
+            "rivulet-cli/src/import.rs must pin {needle}"
+        );
+    }
+    let cli_lib = read("rivulet-cli/src/lib.rs");
+    for needle in ["pub mod import;", "run_import", "ImportArgs"] {
+        assert!(
+            cli_lib.contains(needle),
+            "lib.rs must re-export the import surface: {needle}"
+        );
+    }
+    let main = read("rivulet-cli/src/main.rs");
+    for fragment in [
+        "rivulet import-obs",
+        "Command::ImportObs",
+        "rivulet_cli::import::run_import",
+    ] {
+        assert!(
+            main.contains(fragment),
+            "the binary must document and dispatch `rivulet import-obs`: {fragment}"
+        );
+    }
+
+    // The tests that prove the mapping and the command still exist.
+    let core_tests = read("rivulet-core/tests/obs_import.rs");
+    for needle in [
+        "fn the_first_item_in_the_obs_list_is_the_front_most_item",
+        "fn unsupported_obs_sources_are_skipped_and_reported",
+        "fn a_group_that_contains_itself_is_cut_off_and_reported",
+    ] {
+        assert!(
+            core_tests.contains(needle),
+            "rivulet-core/tests/obs_import.rs must keep {needle}"
+        );
+    }
+    assert!(
+        cli.contains("fn out_writes_a_collection_the_gui_can_load"),
+        "the CLI test must keep proving that `--out` is GUI-loadable"
+    );
+
+    // Docs: the mapping and its limits, the surface reference, the roadmap and
+    // the changelog entry users read first.
+    let spec = read("docs/scene-management.md");
+    for fragment in [
+        "## Migrating an OBS collection",
+        "rivulet import-obs",
+        "ObsImportNote",
+        "front-most",
+        "atomic",
+    ] {
+        assert!(
+            spec.contains(fragment),
+            "scene-management.md must document the OBS import: {fragment}"
+        );
+    }
+    let m7 = read("docs/m7-automation.md");
+    assert!(
+        m7.contains("rivulet import-obs obs.json"),
+        "the CLI surface reference must list `rivulet import-obs`"
+    );
+    let readme = read("README.md");
+    assert!(
+        readme.contains("[x] OBS scene-collection importer"),
+        "the M9 roadmap must show the importer as delivered"
+    );
+    let changelog = read("CHANGELOG.md");
+    assert!(
+        changelog.contains("#367"),
+        "CHANGELOG must record the OBS import"
+    );
+}
+
+#[test]
 fn w5_machine_readable_failure_is_pinned() {
     // Issue #191 (M7 W5) acceptance criterion: "a failing run names the failing
     // stage in the machine-readable report". The stage taxonomy and the `failed`

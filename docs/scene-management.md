@@ -240,19 +240,75 @@ going through the compositor or the docs lose this section.
 
 ## Migrating an OBS collection
 
-The OBS scene collection JSON stores each scene with an optional group
-association (`group` / `id` pair on the OBS side). Migration maps:
+`rivulet import-obs` maps an OBS Studio scene collection onto this model;
+`rivulet_core::obs_import` is the same mapper as a library
+([#367](https://github.com/thoser666/Rivulet/issues/367)). An OBS collection
+lives in `basic/scenes/<collection>.json`.
+
+```bash
+# Show every difference, write nothing
+rivulet import-obs Stream.json --dry-run
+rivulet import-obs Stream.json --dry-run --json   # same report as JSON
+
+# Write a collection the GUI's "Import scene collection" accepts
+rivulet import-obs Stream.json --out rivulet-scenes.json
+```
+
+The importer maps:
 
 | OBS | Rivulet |
 |---|---|
-| Scene | `Scene` with `kind = Primary` |
-| Group | `Scene` whose children point at it via `parent` |
-| Nested group | `parent` points at the enclosing group's scene |
-| Scene without a group | `parent = None` |
+| Source with `"id": "scene"` | `Scene` with `kind = Primary` |
+| Group source plus its `groups[]` entry | Folder `Scene`; its members become bindings in it |
+| Group inside a group | `parent` of the inner folder points at the outer folder |
+| Display order (`scene_order`) | Collection order; a scene inside a group follows its folder |
+| Scene item in `settings.items` | Source plus a binding in that scene |
+| `pos` and `alignment` | `Transform::x` / `y`, with the anchor converted to a top-left corner |
+| `bounds` when `bounds_type` is set | `Transform::width` / `height` |
+| `rot` | `Transform::rotation` |
+| `crop_left` / `crop_top` / `crop_right` / `crop_bottom` | `Crop` on the binding |
+| `visible` / `locked` on the item | Binding visibility and lock |
+| `device_id`, `video_device_id`, `device`, `window`, `monitor` | `Source::device_id`, in OBS's own vocabulary |
+| `current_scene` | The active scene |
 
-The importer is not part of this package; the mapping is documented here so the
-GUI work and any future importer agree on one shape. The importer itself is
-[#367](https://github.com/thoser666/Rivulet/issues/367).
+The first item in an OBS scene's list is drawn last, on top; Rivulet's z-order
+runs the other way, so the import reverses the item list. The first OBS item
+ends up front-most.
+
+Everything that has no one-to-one counterpart is reported as an
+`ObsImportNote` rather than dropped quietly:
+
+- **Source payloads.** `url`, `file`, `local_file`, `input_file` and `text`
+  have no field on `Source`; the payload lives in the per-kind source modules.
+  The source and its binding are still imported, and the report names the key
+  that was not carried.
+- **Unsupported source types.** An OBS plugin source with no Rivulet
+  counterpart is skipped and reported with its OBS type. Importing it as a
+  placeholder would need a new `SourceKind` variant, which is a breaking change
+  under [`api-migration.md`](api-migration.md) - not something an importer may
+  decide on its own.
+- **`scale` without `bounds`.** OBS stores scale relative to the source's native
+  size, which the collection file does not contain. Such an item keeps the
+  default frame size and is listed in the report.
+- **The collection's global transition.** Rivulet overrides transitions per
+  folder ([#368](https://github.com/thoser666/Rivulet/issues/368)), so a
+  collection-wide transition has no destination. Name and duration are
+  reported.
+- **Broken input.** A missing `scene_order` derives the order from the source
+  list (creation order) and says so; an unknown `current_scene` leaves the first
+  scene active; an item naming a source the collection does not define is
+  reported as dangling; a `groups` entry without a group source keeps its
+  members at the top level and is reported; a group that (directly or
+  indirectly) contains itself is cut off at the cycle and reported once.
+
+The importer reads the collection file and nothing else - no OBS install, no
+capture hardware. `--out` writes the scene tree only (the `SceneManager` JSON
+the GUI's "Import scene collection" button reads), atomically through a sibling
+`.tmp` file and a rename. Source bindings are in the in-memory model and in the
+report, but the GUI's collection file does not persist sources yet; the command
+says so on stderr when it imported any. Input problems (unreadable file,
+invalid JSON, no scenes or groups) exit `2`, because the collection file is the
+command's configuration; an unwritable `--out` path exits `1`.
 
 ## Delivery packages
 
@@ -263,6 +319,7 @@ GUI work and any future importer agree on one shape. The importer itself is
 | **C. Scene dock** | Tree with indentation, collapse state per collection, colour swatch and picker, drag & drop to re-parent, component toggle | done ([#350](https://github.com/thoser666/Rivulet/issues/350)) |
 | **D. Search and filter** | Real-time search with "match anywhere"/"starts with", auto-expand of matches, component filter, persisted collapse state | done ([#351](https://github.com/thoser666/Rivulet/issues/351)) |
 | **E. Multi-select and bulk actions** | Selection with click/toggle/range over the drawn rows, atomic bulk move, bulk colour, kind and delete as single undo steps, sticky filter semantics | done ([#366](https://github.com/thoser666/Rivulet/issues/366)) |
+| **F. OBS import** | `obs_import` mapper (scenes, folders, nesting, bindings, transform, crop, visibility, lock), typed difference report, `rivulet import-obs` with `--dry-run`/`--out`/`--json` | done ([#367](https://github.com/thoser666/Rivulet/issues/367)) |
 
 Packages C and D were tracked as separate issues
 ([#350](https://github.com/thoser666/Rivulet/issues/350),
@@ -307,6 +364,20 @@ delete, and unknown IDs being skipped.
   inside a folded folder (with the fold state asserted unchanged afterwards),
   a matched folder opening its subtree, the component and colour filters, the
   explicit no-match state, `first_match` order and the persisted match mode.
+
+`rivulet-core/tests/obs_import.rs` pins the OBS mapping above against trimmed
+copies of real collection documents: scene order and the active scene, a
+group's members and their bindings, nested groups and a self-containing group
+that is cut off, transform/crop/visibility/lock, every alignment anchor, the
+reversed item order (first OBS item front-most), unsupported plugin sources,
+payload keys, device ids, the global transition, a dangling item, an unknown
+`current_scene`, a missing `scene_order`, the JSON report shape, and the typed
+errors for invalid JSON, an empty collection and a missing file.
+
+`rivulet-cli/src/import.rs` tests the command surface: flag validation (missing
+mode, `--dry-run` with `--out`, unknown flag, extra files), a dry run writing
+nothing, `--out` producing a file `SceneManager::import_json` can load and
+replacing an existing one, and the failure exit codes and messages.
 
 No GStreamer, hardware or filesystem access is involved; the suites run in
 milliseconds.

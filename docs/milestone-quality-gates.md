@@ -575,8 +575,11 @@ delivered: resolution, undo, prune-on-delete and the studio `Take` are pinned by
 `rivulet-core/tests/folder_transition.rs`. Multi-select and bulk move
 ([#366](https://github.com/thoser666/Rivulet/issues/366)) are delivered too and
 pinned by `rivulet-core/tests/scene_selection.rs` (atomic batch moves, one undo
-step per group action, documented sticky-filter semantics). Still open is the
-OBS collection importer ([#367](https://github.com/thoser666/Rivulet/issues/367)).
+step per group action, documented sticky-filter semantics). The OBS collection
+import ([#367](https://github.com/thoser666/Rivulet/issues/367)) ships its core
+mapper and `rivulet import-obs`, pinned by `rivulet-core/tests/obs_import.rs`,
+`rivulet-cli/src/import.rs` and the `obs_import_surface_is_pinned` guard; the
+GUI entry point is still open.
 
 ### M10: AI Chat Assistant
 
