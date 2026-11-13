@@ -6742,9 +6742,16 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
 {platform_doc_step}"
         );
     }
+    // Counted over the steps alone: a YAML comment that merely mentions the
+    // command (`# cargo doc …`) is documentation, not a second build, and must
+    // not turn this red.
+    let doc_builds = ci
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .filter(|line| line.contains("cargo doc -p rivulet-core --no-deps"))
+        .count();
     assert_eq!(
-        ci.matches("cargo doc -p rivulet-core --no-deps").count(),
-        1,
+        doc_builds, 1,
         "the doc build belongs in the Build & Test matrix only, not in the Lints job too"
     );
 }
