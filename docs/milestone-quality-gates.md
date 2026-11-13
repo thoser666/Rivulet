@@ -477,11 +477,10 @@ Workstream issues:
     runs with `RUSTDOCFLAGS=-D warnings` in the Lints job and is at zero
     warnings,     from 22 broken intra-doc links. `docs/api-overview.md` is generated
     from `lib.rs` by `scripts/generate-api-overview.py` and checked on every
-    push. `cargo doc` only sees the `cfg` branches that compile on the runner,
-    so `scripts/check-platform-docs.py` reads the sources and reports the gate
-    that hides an undocumented item, in the same job — the gap it closes left
-    `ShmFrameReader`'s non-Windows stub methods undocumented until #436 changed
-    Linux code (F-M8-004). This closes F-M8-001 and F-M8-002, the two evidence
+    push. `cargo doc` only sees the `cfg` branches that compile on the runner, so
+    the same warning-denied build runs on all three platforms of the Build &
+    Test matrix — the gap it closes left `ShmFrameReader`'s non-Windows stub
+    methods undocumented until #436 changed Linux code (F-M8-004). This closes F-M8-001 and F-M8-002, the two evidence
     gaps the first conditional pass recorded.
 
 The gate closed on the criteria above with four follow-ups named in the report

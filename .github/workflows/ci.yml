@@ -243,17 +243,6 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc -p rivulet-core --no-deps
 
-      # F-M8-004: `cargo doc` only sees the `cfg` branches that compile on the
-      # runner. This job runs on Linux, so a Windows-only item is checked only
-      # when somebody happens to run the doc build on Windows, and vice versa —
-      # `ShmFrameReader`'s non-Windows stub methods stayed undocumented through
-      # #342/#433 for exactly that reason. The guard reads the sources instead
-      # and reports the gate that hides each undocumented item.
-      - name: Check platform-gated public items are documented (F-M8-004)
-        run: |
-          python3 scripts/check-platform-docs.py --self-test
-          python3 scripts/check-platform-docs.py
-
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -833,6 +822,19 @@ jobs:
 
       - name: Build
         run: cargo build --workspace --verbose
+
+      # F-M8-004: `cargo doc` only sees the `cfg` branches that compile on the
+      # runner, and the Lints job is Linux-only — a Windows-only public item was
+      # checked only when somebody happened to run the doc build on Windows,
+      # which is how `ShmFrameReader`'s non-Windows stub methods stayed
+      # undocumented through #342/#433 until #436 changed Linux code. Running the
+      # doc build on all three platforms closes that gap with rustdoc itself:
+      # the platform's own toolchain decides which `cfg` branches exist, so no
+      # source-scanning script has to model them.
+      - name: Build API docs without warnings on every platform (F-M8-004)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc -p rivulet-core --no-deps
 
       # M8 #293: an example that only compiles is not delivered. These six
       # examples are the documented embedding path (recording, streaming,
