@@ -254,6 +254,25 @@ self-tests (`generate-action-pins.py --check`, parity-checklist/release-
 notes/theme-contrast/apt-parity checks, `generate-release-notes.sh
 --self-test`).
 
+`scripts/check-platform-docs.py` runs in the Lints job but not in the hook yet,
+so run it yourself before you touch a `cfg`-gated public item:
+
+```bash
+python3 scripts/check-platform-docs.py --self-test
+python3 scripts/check-platform-docs.py
+```
+
+`cargo doc` with `-D warnings` only sees the `cfg` branches that compile on the
+machine running it, and the Lints job runs on Linux: a Windows-only item is
+checked only when somebody happens to run the doc build on Windows. That is how
+`ShmFrameReader`'s non-Windows stub methods stayed undocumented through
+#342/#433 until a Linux-only change made CI look at them. The guard reads the
+module tree reachable from `lib.rs`, follows the `#[cfg(...)]` gates on items
+and on the blocks that enclose them, and prints every undocumented public item
+with the gate that hides it; the last line reports how many public items and
+platform-gated items it checked. It exits non-zero on a finding, so it drops
+straight into a local loop.
+
 If `actionlint` is installed, the hook also lints every workflow; with
 `shellcheck` on `PATH` as well, it checks the `run:` blocks too — the same
 check the CI Lints job performs, and the only one that catches a shell mistake
