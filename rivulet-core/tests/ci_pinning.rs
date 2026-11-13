@@ -6712,38 +6712,27 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
     );
 
     // M8 #297 / F-M8-004: rustdoc only sees the `cfg` branches that compile on
-    // the runner it runs on, so the warning-denied doc build runs on every
-    // matrix platform and nowhere else — a second copy in the Lints job would
-    // rebuild the same Linux docs and could drift from this one.
-    let job = ci
+    // the runner it runs on, so the warning-denied doc build runs on every matrix
+    // platform and nowhere else; a second copy would rebuild the same Linux docs.
+    const DOC_STEP: &str = "Build API docs without warnings on every platform (M8 #297, F-M8-004)";
+    let (matrix_head, job_steps) = ci
         .split("\n  build_and_test:\n")
         .nth(1)
-        .expect("ci.yml must keep the Build & Test matrix job");
-    let (matrix_head, job_steps) = job
+        .expect("ci.yml must keep the Build & Test matrix job")
         .split_once("      - name:")
         .expect("the Build & Test matrix job must keep its steps");
-    let missing: Vec<_> = ["ubuntu-latest", "windows-latest", "macos-latest"]
-        .into_iter()
-        .filter(|os| !matrix_head.contains(os))
-        .collect();
-    assert!(
-        missing.is_empty(),
-        "the matrix that builds the docs lost {missing:?}; those platforms' gated items go unchecked"
-    );
+    for os in ["ubuntu-latest", "windows-latest", "macos-latest"] {
+        assert!(matrix_head.contains(os), "the doc build's matrix lost {os}");
+    }
     let doc_step = job_steps
         .split("      - name:")
-        .find(|step| step.trim_start().starts_with("Build API docs"))
-        .expect("the Build & Test matrix must build the docs on every platform");
-    for marker in [
-        "(M8 #297, F-M8-004)",
-        "RUSTDOCFLAGS: -D warnings",
-        "cargo doc -p rivulet-core --no-deps",
-    ] {
-        assert!(
-            doc_step.contains(marker),
-            "the platform doc step must keep {marker}, got:\n{doc_step}"
-        );
-    }
+        .find(|step| step.trim_start().starts_with(DOC_STEP))
+        .unwrap_or_else(|| panic!("the Build & Test matrix must run `{DOC_STEP}`"));
+    assert!(
+        doc_step.contains("RUSTDOCFLAGS: -D warnings")
+            && doc_step.contains("cargo doc -p rivulet-core --no-deps"),
+        "the doc step must deny warnings and run `cargo doc -p rivulet-core --no-deps`, got:\n{doc_step}"
+    );
     assert_eq!(
         ci.lines()
             .filter(|line| !line.trim_start().starts_with('#'))
