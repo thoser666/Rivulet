@@ -474,12 +474,12 @@ Workstream issues:
     against the unpacked `cargo package` artifact, i.e. the file set
     `cargo publish` would upload, on Linux in the Build & Test job with
     `RIVULET_DOWNSTREAM_REQUIRE_AUDIO=1`. `cargo doc -p rivulet-core --no-deps`
-    runs with `RUSTDOCFLAGS=-D warnings` in the Lints job and is at zero
-    warnings,     from 22 broken intra-doc links. `docs/api-overview.md` is generated
-    from `lib.rs` by `scripts/generate-api-overview.py` and checked on every
-    push. `cargo doc` only sees the `cfg` branches that compile on the runner,
-    so `scripts/check-platform-docs.py` reads the sources and reports the gate
-    that hides an undocumented item, in the same job — the gap it closes left
+    runs with `RUSTDOCFLAGS=-D warnings` on all three platforms of the Build &
+    Test matrix and is at zero warnings, from 22 broken intra-doc links.
+    `docs/api-overview.md` is generated from `lib.rs` by
+    `scripts/generate-api-overview.py` and checked on every push. Running the
+    doc build on every platform is what makes it cover `cfg`-gated items: rustdoc
+    only sees the branches that compile on the runner, and that gap left
     `ShmFrameReader`'s non-Windows stub methods undocumented until #436 changed
     Linux code (F-M8-004). This closes F-M8-001 and F-M8-002, the two evidence
     gaps the first conditional pass recorded.

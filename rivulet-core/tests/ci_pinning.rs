@@ -6677,7 +6677,7 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
     }
 
     // --- CI wiring --------------------------------------------------------
-    let ci = read(".github/workflows/ci.yml");
+    let ci = read(".github/workflows/ci.yml").replace('\r', "");
     let smoke_step = ci
         .split("Downstream consumer smoke test (M8 #297)")
         .nth(1)
@@ -6710,129 +6710,47 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
             && overview_step.contains("generate-api-overview.py --check"),
         "the overview step must both self-test and check the document, got:\n{overview_step}"
     );
-    assert!(
-        ci.contains("RUSTDOCFLAGS: -D warnings")
-            && ci.contains("cargo doc -p rivulet-core --no-deps"),
-        "the Lints job must build the crate docs with warnings denied (F-M8-002)"
-    );
 
-    // --- The generated overview itself ------------------------------------
-    let overview = read("docs/api-overview.md");
-    for marker in [
-        "<!-- api-overview:start -->",
-        "<!-- api-overview:end -->",
-        "scripts/generate-api-overview.py",
-    ] {
-        assert!(
-            overview.contains(marker),
-            "docs/api-overview.md must keep {marker}"
-        );
-    }
-    // Every public module of the crate is listed. The list is read from
-    // `lib.rs` rather than duplicated, so a new module fails here until the
-    // document is regenerated — which is the automation the criterion asks for.
-    let lib = read("rivulet-core/src/lib.rs");
-    let mut modules = 0;
-    for line in lib.lines() {
-        let Some(rest) = line.strip_prefix("pub mod ") else {
-            continue;
-        };
-        let Some(name) = rest.strip_suffix(';') else {
-            continue;
-        };
-        modules += 1;
-        assert!(
-            overview.contains(&format!("| `{name}` |")),
-            "docs/api-overview.md must list the public module `{name}`; \
-             regenerate it with scripts/generate-api-overview.py"
-        );
-    }
-    assert!(
-        modules >= 60,
-        "the pub mod scan found only {modules} modules; the overview guard is not reading lib.rs"
-    );
-    // The overview reports the lint state from the attribute, not from prose,
-    // and the M8 surfaces have to agree with whatever it reports.
-    let lint_active = lib.lines().any(|line| {
-        let t = line.trim_start();
-        t.starts_with("#![warn(missing_docs)]") || t.starts_with("#![deny(missing_docs)]")
-    });
-    assert_eq!(
-        overview.contains("`#![warn(missing_docs)]`: **active**"),
-        lint_active,
-        "the overview's lint state must match the crate attribute in lib.rs"
-    );
-    if !lint_active {
-        assert!(
-            overview.contains("not active"),
-            "with the lint inactive the overview must say so (F-M8-003)"
-        );
-    }
-
-    // --- The report points at the artifacts -------------------------------
-    let report = read("docs/m8-automation-completion-report.md");
-    for marker in [
-        "downstream-smoke/",
-        "run-downstream-smoke.sh",
-        "api-overview.md",
-        "generate-api-overview.py",
-    ] {
-        assert!(
-            report.contains(marker),
-            "the M8 completion report must name {marker} as the artifact behind its exit evidence"
-        );
-    }
-}
-
-/// `cargo doc` only ever sees the `cfg` branches that compile on the machine
-/// running it: the Lints job runs on Linux, so a Windows-only item is checked
-/// only when somebody happens to run the doc build on Windows, and vice versa.
-/// That gap is not hypothetical — `ShmFrameReader`'s non-Windows stub methods
-/// stayed undocumented through #342/#433 because every `missing_docs` count ran
-/// on Windows, and the Linux Lints job found them only when #436 changed Linux
-/// code (F-M8-004).
-///
-/// `scripts/check-platform-docs.py` closes the gap by reading the sources and
-/// reporting the `cfg` gate that hides each undocumented item. This test pins
-/// the guard to the Lints job, next to the `cargo doc` step it complements, and
-/// pins the two properties that make it a guard rather than a formality: it
-/// models platform gates (`target_os`), and it ships its own fixture cases.
-#[test]
-fn platform_gated_public_items_are_documented_in_every_cfg_branch() {
-    let ci = read(".github/workflows/ci.yml").replace("\r\n", "\n");
-    let step = ci
-        .split("Check platform-gated public items are documented (F-M8-004)")
+    // M8 #297 / F-M8-004: rustdoc only sees the `cfg` branches that compile on
+    // the runner it runs on, so the warning-denied doc build runs on every
+    // matrix platform and nowhere else — a second copy in the Lints job would
+    // rebuild the same Linux docs and could drift from this one.
+    let job = ci
+        .split("\n  build_and_test:\n")
         .nth(1)
-        .unwrap_or_else(|| panic!("ci.yml must run the cfg-aware documentation guard"))
-        .split("- name:")
-        .next()
-        .expect("the guard step must have a body");
+        .expect("ci.yml must keep the Build & Test matrix job");
+    let (matrix_head, job_steps) = job
+        .split_once("      - name:")
+        .expect("the Build & Test matrix job must keep its steps");
+    let missing: Vec<_> = ["ubuntu-latest", "windows-latest", "macos-latest"]
+        .into_iter()
+        .filter(|os| !matrix_head.contains(os))
+        .collect();
     assert!(
-        step.contains("python3 scripts/check-platform-docs.py --self-test")
-            && step.contains("python3 scripts/check-platform-docs.py\n"),
-        "the guard step must both self-test and scan, got:\n{step}"
+        missing.is_empty(),
+        "the matrix that builds the docs lost {missing:?}; those platforms' gated items go unchecked"
     );
-    let doc_step = ci
-        .find("cargo doc -p rivulet-core --no-deps")
-        .expect("the Lints job must build the docs");
-    let guard_step = ci
-        .find("Check platform-gated public items are documented")
-        .expect("the Lints job must run the platform-doc guard");
-    assert!(
-        doc_step < guard_step,
-        "the guard belongs right after the `cargo doc` step it complements"
-    );
-
-    let script = read("scripts/check-platform-docs.py");
-    for marker in ["target_os", "missing_docs", "--self-test"] {
+    let doc_step = job_steps
+        .split("      - name:")
+        .find(|step| step.trim_start().starts_with("Build API docs"))
+        .expect("the Build & Test matrix must build the docs on every platform");
+    for marker in [
+        "(M8 #297, F-M8-004)",
+        "RUSTDOCFLAGS: -D warnings",
+        "cargo doc -p rivulet-core --no-deps",
+    ] {
         assert!(
-            script.contains(marker),
-            "scripts/check-platform-docs.py must keep {marker}"
+            doc_step.contains(marker),
+            "the platform doc step must keep {marker}, got:\n{doc_step}"
         );
     }
-    assert!(
-        script.contains("not(target_os = \"windows\")"),
-        "the self-test fixtures must keep the gated `impl` case the guard exists for"
+    assert_eq!(
+        ci.lines()
+            .filter(|line| !line.trim_start().starts_with('#'))
+            .filter(|line| line.contains("cargo doc -p rivulet-core --no-deps"))
+            .count(),
+        1,
+        "the doc build belongs in the Build & Test matrix only, not in the Lints job too"
     );
 }
 

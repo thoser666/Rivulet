@@ -232,28 +232,6 @@ jobs:
       - name: Self-test the dismissed-alert register checker
         run: python3 scripts/check-dismissed-alerts.py --self-test
 
-      # M8 #297 exit evidence: `cargo doc` without warnings. The flags are the
-      # point — a plain `cargo doc` only *prints* broken intra-doc links and
-      # bare URLs, and 22 of them had accumulated before this step existed. If
-      # rustdoc ever fails with "invalid template: ... src-files.js", delete
-      # `target/doc` and rerun: that is a stale rustdoc artifact, not a code
-      # defect.
-      - name: Build API docs without warnings (M8 #297)
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc -p rivulet-core --no-deps
-
-      # F-M8-004: `cargo doc` only sees the `cfg` branches that compile on the
-      # runner. This job runs on Linux, so a Windows-only item is checked only
-      # when somebody happens to run the doc build on Windows, and vice versa —
-      # `ShmFrameReader`'s non-Windows stub methods stayed undocumented through
-      # #342/#433 for exactly that reason. The guard reads the sources instead
-      # and reports the gate that hides each undocumented item.
-      - name: Check platform-gated public items are documented (F-M8-004)
-        run: |
-          python3 scripts/check-platform-docs.py --self-test
-          python3 scripts/check-platform-docs.py
-
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -833,6 +811,19 @@ jobs:
 
       - name: Build
         run: cargo build --workspace --verbose
+
+      # M8 #297 / F-M8-004: `cargo doc` without warnings, on every platform. The
+      # flags are the point — a plain `cargo doc` only *prints* broken intra-doc
+      # links, and 22 had accumulated before this step existed. The platform is
+      # the other half: rustdoc only sees the `cfg` branches that compile on its
+      # runner, which is how `ShmFrameReader`'s non-Windows stubs stayed
+      # undocumented through #342/#433. This is the only doc build in CI; the
+      # Lints job's copy was the same Linux build twice. If rustdoc fails with
+      # "invalid template: ... src-files.js", delete `target/doc`: stale artifact.
+      - name: Build API docs without warnings on every platform (M8 #297, F-M8-004)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc -p rivulet-core --no-deps
 
       # M8 #293: an example that only compiles is not delivered. These six
       # examples are the documented embedding path (recording, streaming,
