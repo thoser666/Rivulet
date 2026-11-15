@@ -15,5 +15,3 @@ libloading = "0.9"
 libc = "0.2"
 walkdir = "2.4"
 
-[build-dependencies]
-cc = "1.0"

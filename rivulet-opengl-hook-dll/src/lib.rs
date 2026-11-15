@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! G4 – OpenGL wglSwapBuffers hook DLL.
 //!
 //! This crate is compiled as a cdylib (`.dll`) and injected into an OpenGL

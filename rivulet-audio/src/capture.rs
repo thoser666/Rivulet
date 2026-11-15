@@ -130,6 +130,7 @@ impl AudioCapture {
         self.inner.stop()
     }
 
+    /// Whether the capture pipeline is currently running.
     pub fn is_running(&self) -> bool {
         self.inner.is_running()
     }

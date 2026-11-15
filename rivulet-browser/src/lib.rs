@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! Native browser-source backend for Rivulet.
 //!
 //! **Status: spike / proof of concept (M6.9, issue #215).** This crate

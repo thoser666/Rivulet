@@ -7056,6 +7056,66 @@ fn tri_not(value: Tri) -> Tri {
     }
 }
 
+/// `#![warn(missing_docs)]` is what makes "documented" enforceable: without it
+/// a new public item arrives without documentation and the workspace doc gate
+/// stays green, because rustdoc has nothing to report. Every lib crate carries
+/// the attribute; the crates still owing documentation are listed in `PENDING`,
+/// and that list is checked in both directions — a crate cannot drop the lint
+/// silently, and an entry cannot rot there after the crate was documented.
+#[test]
+fn every_lib_crate_enables_the_missing_docs_lint() {
+    // Undocumented when the lint was turned on; each entry disappears in the
+    // same change that documents the crate (capture 27, cli 39,
+    // obs-websocket 85 items at the time of writing).
+    const PENDING: &[&str] = &["rivulet-capture", "rivulet-cli", "rivulet-obs-websocket"];
+
+    let mut libs = Vec::new();
+    for entry in fs::read_dir(repo_file("")).expect("read the repository root") {
+        let dir = entry.expect("read_dir entry").path();
+        if dir.join("src").join("lib.rs").is_file() {
+            libs.push(dir);
+        }
+    }
+    libs.sort();
+
+    let mut missing = Vec::new();
+    let mut stale = Vec::new();
+    for dir in &libs {
+        let name = dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let source = read(&format!("{name}/src/lib.rs"));
+        let documented = source
+            .lines()
+            .any(|line| line.trim() == "#![warn(missing_docs)]");
+        let pending = PENDING.contains(&name.as_str());
+        if documented && pending {
+            stale.push(name);
+        } else if !documented && !pending {
+            missing.push(name);
+        }
+    }
+
+    assert!(
+        libs.len() >= 10,
+        "found only {} lib crates, so this scan is not covering the workspace",
+        libs.len()
+    );
+    assert!(
+        missing.is_empty(),
+        "these lib crates must enable `#![warn(missing_docs)]` (add one to PENDING only \
+         while it still owes documentation):\n  {}",
+        missing.join("\n  ")
+    );
+    assert!(
+        stale.is_empty(),
+        "these crates enable the lint, so PENDING is stale:\n  {}",
+        stale.join("\n  ")
+    );
+}
+
 /// #293's acceptance criteria say an example that only compiles but never
 /// runs counts as *not delivered*. That claim is only as good as the check
 /// behind it, so three surfaces are pinned together:

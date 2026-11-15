@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! Update checking and installation for Rivulet.
 //!
 //! The updater queries the GitHub Releases API for the newest Rivulet release,
@@ -19,8 +20,11 @@ use sha2::{Digest, Sha256};
 /// Repository the updates are fetched from.
 #[derive(Debug, Clone)]
 pub struct UpdateSource {
+    /// GitHub organisation or user that publishes the releases.
     pub owner: String,
+    /// Repository name inside `owner`.
     pub repo: String,
+    /// Base URL of the GitHub API, normally `https://api.github.com`.
     pub api_base: String,
 }
 
@@ -46,8 +50,11 @@ impl UpdateSource {
 /// A downloadable release asset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Asset {
+    /// File name of the asset as the release publishes it.
     pub name: String,
+    /// Download URL of the asset.
     pub url: String,
+    /// Size in bytes, used to reject a truncated download.
     pub size: u64,
 }
 
