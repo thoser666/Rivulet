@@ -1045,7 +1045,7 @@ pub struct RivuletApp {
     #[serde(skip)]
     motion_applied: Option<bool>,
     /// Cached result of the OS reduce-motion probe (refreshed at most every
-    /// [`OS_MOTION_PROBE_INTERVAL`]; the platform queries spawn a subprocess
+    /// [`RivuletApp::OS_MOTION_PROBE_INTERVAL`]; the platform queries spawn a subprocess
     /// on macOS/Linux and must never run per frame). Not persisted.
     #[serde(skip)]
     os_reduced_motion: Option<bool>,
@@ -3449,7 +3449,7 @@ impl RivuletApp {
 
     /// Live-refresh the game-window list while the picker is open, re-using the
     /// current selection (by window id) whenever the window still exists and
-    /// re-targeting the preview to it. Unlike [`refresh_game_windows`] it does
+    /// re-targeting the preview to it. Unlike [`Self::refresh_game_windows`] it does
     /// not clear the selection, so an auto-refresh never silently deselects the
     /// window the user is about to record.
     fn refresh_game_windows_live(&mut self) {

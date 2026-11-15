@@ -337,7 +337,7 @@ pub fn windows_installer_exit_success(code: i32) -> bool {
 /// installer replaces the running files) and `Ok(false)` when it can stay open
 /// (the macOS DMG is only opened).
 ///
-/// On Windows this launches the [`rivulet-updater`] watchdog binary detached.
+/// On Windows this launches the `rivulet-updater` watchdog binary detached.
 /// The watchdog waits for the watched process ids (the running GUI and its
 /// launcher) to fully terminate, then runs `msiexec` to completion. Because
 /// the executing files are locked by Windows while they run, installation must

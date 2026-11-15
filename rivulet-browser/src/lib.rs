@@ -2,8 +2,8 @@
 //!
 //! **Status: spike / proof of concept (M6.9, issue #215).** This crate
 //! evaluates embedding a real platform webview ([`wry`])
-//! as a [`BrowserSourceBackend`], replacing the deterministic
-//! [`SyntheticBrowserBackend`] from `rivulet-core` where real pixels are
+//! as a [`BrowserSourceBackend`](rivulet_core::browser_source::BrowserSourceBackend), replacing the deterministic
+//! [`SyntheticBrowserBackend`](rivulet_core::browser_source::SyntheticBrowserBackend) from `rivulet-core` where real pixels are
 //! needed.
 //!
 //! The spike targets Windows (WebView2) first; on other platforms the native

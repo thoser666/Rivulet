@@ -6716,7 +6716,8 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
     // M8 #297 / F-M8-004: rustdoc only sees the `cfg` branches that compile on
     // the runner it runs on, so the warning-denied doc build runs on every matrix
     // platform and nowhere else; a second copy would rebuild the same Linux docs.
-    const DOC_STEP: &str = "Build API docs without warnings on every platform (M8 #297, F-M8-004)";
+    const DOC_STEP: &str =
+        "Build workspace API docs without warnings on every platform (M8 #297, F-M8-004)";
     let (matrix_head, job_steps) = ci
         .split("\n  build_and_test:\n")
         .nth(1)
@@ -6732,8 +6733,8 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
         .unwrap_or_else(|| panic!("the Build & Test matrix must run `{DOC_STEP}`"));
     assert!(
         doc_step.contains("RUSTDOCFLAGS: -D warnings")
-            && doc_step.contains("cargo doc -p rivulet-core --no-deps"),
-        "the doc step must deny warnings and run `cargo doc -p rivulet-core --no-deps`, got:\n{doc_step}"
+            && doc_step.contains("cargo doc --workspace --no-deps"),
+        "the doc step must deny warnings and run `cargo doc --workspace --no-deps`, got:\n{doc_step}"
     );
     // The step is found by the assertions above even if it never runs: `if:`
     // skips a runner, `continue-on-error` swallows the failure.
@@ -6757,10 +6758,10 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
     assert_eq!(
         ci.lines()
             .filter(|line| !line.trim_start().starts_with('#'))
-            .filter(|line| line.contains("cargo doc -p rivulet-core --no-deps"))
+            .filter(|line| line.contains("cargo doc --workspace --no-deps"))
             .count(),
         1,
-        "the doc build belongs in the Build & Test matrix only, not in the Lints job too"
+        "the workspace doc build belongs in the Build & Test matrix only"
     );
 }
 
@@ -7081,7 +7082,7 @@ fn local_pre_push_hook_mirrors_the_ci_lints_job() {
         "RIVULET_SKIP_PRE_PUSH",
         "RIVULET_PRE_PUSH_FAST_TESTS",
         "cargo test -p rivulet-core --test ci_pinning",
-        "RUSTDOCFLAGS=\"-D warnings\" cargo doc -p rivulet-core --no-deps",
+        "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps",
         "generate-action-pins.py --check",
         "check-parity-checklist.py --self-test",
         "check-release-notes.py --self-test",

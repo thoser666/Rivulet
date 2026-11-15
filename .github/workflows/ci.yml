@@ -823,12 +823,14 @@ jobs:
       # piled up before this step); the platform matters too, because rustdoc
       # sees only the `cfg` branches that compile on its runner, which is how
       # `ShmFrameReader`'s non-Windows stubs stayed undocumented through
-      # #342/#433. The only doc build in CI. On "invalid template: ...
+      # #342/#433. Every crate is documented, not just the published one, so a
+      # broken link in the GUI or a hook DLL fails here too. The only doc build
+      # in CI. On "invalid template: ...
       # src-files.js", delete `target/doc`: a stale rustdoc artifact.
-      - name: Build API docs without warnings on every platform (M8 #297, F-M8-004)
+      - name: Build workspace API docs without warnings on every platform (M8 #297, F-M8-004)
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc -p rivulet-core --no-deps
+        run: cargo doc --workspace --no-deps
 
       # M8 #293: an example that only compiles is not delivered. These six
       # examples are the documented embedding path (recording, streaming,

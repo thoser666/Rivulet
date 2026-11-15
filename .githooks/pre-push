@@ -42,8 +42,8 @@ if [[ "${RIVULET_PRE_PUSH_FAST_TESTS:-}" != "0" ]]; then
   echo "pre-push: cargo test -p rivulet-core --test ci_pinning"
   cargo test -p rivulet-core --test ci_pinning
 
-  echo "pre-push: RUSTDOCFLAGS=-D warnings cargo doc -p rivulet-core --no-deps"
-  RUSTDOCFLAGS="-D warnings" cargo doc -p rivulet-core --no-deps
+  echo "pre-push: RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps"
+  RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
   if command -v python >/dev/null 2>&1; then
     echo "pre-push: python scripts/generate-action-pins.py --check"
