@@ -6765,6 +6765,297 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
     );
 }
 
+/// A `#[cfg(...)]` over `target_os` that no CI runner satisfies is dead code:
+/// `vst3.rs` names `freebsd` today only *alongside* `linux`, so it compiles, but
+/// a future `#[cfg(target_os = "android")]` would sit in the tree forever with
+/// no build ever touching it. The Build & Test matrix is the only place such a
+/// branch could be seen, so every `target_os` predicate has to be satisfiable by
+/// one of its runners.
+///
+/// Predicates are evaluated once per runner with three-valued logic: an atom
+/// this test cannot decide (`unix`, `test`, `feature = "…"`) evaluates to
+/// `unknown`, so only a predicate that is *false on every runner* fails here.
+/// That keeps `cfg(any(target_os = "linux", target_os = "freebsd"))` green while
+/// flagging a platform the matrix never builds.
+#[test]
+fn every_target_os_cfg_is_built_by_a_ci_runner() {
+    let ci = read(".github/workflows/ci.yml").replace('\r', "");
+    let matrix = ci
+        .split("\n  build_and_test:\n")
+        .nth(1)
+        .and_then(|job| {
+            job.lines()
+                .find(|line| line.trim_start().starts_with("os: ["))
+        })
+        .expect("the Build & Test job must keep its matrix `os:` list");
+    let platforms: Vec<&str> = matrix
+        .split_once('[')
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map(|(list, _)| {
+            list.split(',')
+                .map(str::trim)
+                .filter(|runner| !runner.is_empty())
+                .map(|runner| {
+                    if runner.starts_with("ubuntu") {
+                        "linux"
+                    } else if runner.starts_with("macos") {
+                        "macos"
+                    } else if runner.starts_with("windows") {
+                        "windows"
+                    } else {
+                        panic!(
+                            "`{runner}` is a runner this test cannot map to a `target_os`; add it"
+                        )
+                    }
+                })
+                .collect()
+        })
+        .expect("the matrix `os:` list must be bracketed");
+
+    let mut sources = Vec::new();
+    collect_rust_sources(&repo_file("rivulet-core/src"), &mut sources);
+
+    let mut checked = 0;
+    let mut dead = Vec::new();
+    for path in &sources {
+        let source = fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        for (line, predicate) in cfgscan_predicates(&source) {
+            if !predicate.contains("target_os") {
+                continue;
+            }
+            checked += 1;
+            let tokens = cfgscan_tokens(&predicate);
+            if platforms
+                .iter()
+                .all(|os| cfgscan_eval(&tokens, os) == Tri::False)
+            {
+                let rel = path
+                    .strip_prefix(repo_file("rivulet-core"))
+                    .map(|rel| {
+                        format!(
+                            "rivulet-core/{}",
+                            rel.display().to_string().replace('\\', "/")
+                        )
+                    })
+                    .unwrap_or_else(|_| path.display().to_string());
+                dead.push(format!("{rel}:{line}: #[cfg({predicate})]"));
+            }
+        }
+    }
+
+    assert!(
+        checked >= 10,
+        "the scan found only {checked} `target_os` predicates in rivulet-core/src; \
+         it must still cover the crate"
+    );
+    assert!(
+        dead.is_empty(),
+        "these cfg branches are compiled on none of the CI runners ({}), so no build \
+         would ever see them:\n  {}\n\
+         Either add a runner for the platform to the Build & Test matrix or drop the cfg.",
+        platforms.join(", "),
+        dead.join("\n  ")
+    );
+}
+
+fn collect_rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
+    let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()));
+    for entry in entries {
+        let path = entry.expect("read_dir entry").path();
+        if path.is_dir() {
+            collect_rust_sources(&path, out);
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            out.push(path);
+        }
+    }
+}
+
+/// Every `cfg(<predicate>)` in `source`, as (1-based line, predicate text).
+fn cfgscan_predicates(source: &str) -> Vec<(usize, String)> {
+    let bytes = source.as_bytes();
+    let mut found = Vec::new();
+    let mut from = 0;
+    while let Some(offset) = source[from..].find("cfg(") {
+        let start = from + offset;
+        let glued =
+            start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_');
+        // `#[cfg(...)]` shown inside a comment is documentation, not a branch.
+        let line_head = &source[source[..start].rfind('\n').map_or(0, |nl| nl + 1)..start];
+        if glued || line_head.contains("//") {
+            from = start + 4;
+            continue;
+        }
+        let mut depth = 0usize;
+        let mut index = start + 3;
+        let mut in_string = false;
+        while index < bytes.len() {
+            let byte = bytes[index];
+            if in_string {
+                if byte == b'"' {
+                    in_string = false;
+                }
+            } else if byte == b'"' {
+                in_string = true;
+            } else if byte == b'(' {
+                depth += 1;
+            } else if byte == b')' {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            index += 1;
+        }
+        if depth != 0 || index >= bytes.len() {
+            from = start + 4;
+            continue;
+        }
+        let line = source[..start].lines().count();
+        found.push((line, source[start + 4..index].trim().to_owned()));
+        from = index + 1;
+    }
+    found
+}
+
+/// Split a predicate into words and the `( ) , =` punctuation.
+fn cfgscan_tokens(predicate: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut chars = predicate.chars().peekable();
+    while let Some(&ch) = chars.peek() {
+        if ch.is_whitespace() {
+            chars.next();
+        } else if "(),=".contains(ch) {
+            chars.next();
+            tokens.push(ch.to_string());
+        } else if ch == '"' {
+            chars.next();
+            let mut text = String::new();
+            for inner in chars.by_ref() {
+                if inner == '"' {
+                    break;
+                }
+                text.push(inner);
+            }
+            tokens.push(text);
+        } else {
+            let mut word = String::new();
+            while let Some(&inner) = chars.peek() {
+                if inner.is_whitespace() || "(),=".contains(inner) {
+                    break;
+                }
+                chars.next();
+                word.push(inner);
+            }
+            tokens.push(word);
+        }
+    }
+    tokens
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Tri {
+    True,
+    False,
+    Unknown,
+}
+
+fn cfgscan_eval(tokens: &[String], os: &str) -> Tri {
+    let mut pos = 0;
+    let value = cfgscan_predicate(tokens, &mut pos, os);
+    if pos == tokens.len() {
+        value
+    } else {
+        Tri::Unknown
+    }
+}
+
+fn cfgscan_predicate(tokens: &[String], pos: &mut usize, os: &str) -> Tri {
+    let name = match tokens.get(*pos) {
+        Some(name) => name.as_str(),
+        None => return Tri::Unknown,
+    };
+    match name {
+        "any" | "all" => {
+            let is_any = name == "any";
+            *pos += 1;
+            if tokens.get(*pos).map(String::as_str) != Some("(") {
+                return Tri::Unknown;
+            }
+            *pos += 1;
+            let mut result = if is_any { Tri::False } else { Tri::True };
+            loop {
+                let value = cfgscan_predicate(tokens, pos, os);
+                result = if is_any {
+                    tri_any(result, value)
+                } else {
+                    tri_all(result, value)
+                };
+                match tokens.get(*pos).map(String::as_str) {
+                    Some(",") => *pos += 1,
+                    Some(")") => {
+                        *pos += 1;
+                        return result;
+                    }
+                    _ => return Tri::Unknown,
+                }
+            }
+        }
+        "not" => {
+            *pos += 1;
+            if tokens.get(*pos).map(String::as_str) != Some("(") {
+                return Tri::Unknown;
+            }
+            *pos += 1;
+            let value = cfgscan_predicate(tokens, pos, os);
+            if tokens.get(*pos).map(String::as_str) != Some(")") {
+                return Tri::Unknown;
+            }
+            *pos += 1;
+            tri_not(value)
+        }
+        _ => {
+            *pos += 1;
+            if tokens.get(*pos).map(String::as_str) == Some("=") {
+                *pos += 1;
+                let value = match tokens.get(*pos) {
+                    Some(value) => value.as_str(),
+                    None => return Tri::Unknown,
+                };
+                *pos += 1;
+                if name == "target_os" {
+                    return if value == os { Tri::True } else { Tri::False };
+                }
+            }
+            Tri::Unknown
+        }
+    }
+}
+
+fn tri_any(left: Tri, right: Tri) -> Tri {
+    match (left, right) {
+        (Tri::True, _) | (_, Tri::True) => Tri::True,
+        (Tri::Unknown, _) | (_, Tri::Unknown) => Tri::Unknown,
+        _ => Tri::False,
+    }
+}
+
+fn tri_all(left: Tri, right: Tri) -> Tri {
+    match (left, right) {
+        (Tri::False, _) | (_, Tri::False) => Tri::False,
+        (Tri::Unknown, _) | (_, Tri::Unknown) => Tri::Unknown,
+        _ => Tri::True,
+    }
+}
+
+fn tri_not(value: Tri) -> Tri {
+    match value {
+        Tri::True => Tri::False,
+        Tri::False => Tri::True,
+        Tri::Unknown => Tri::Unknown,
+    }
+}
+
 /// #293's acceptance criteria say an example that only compiles but never
 /// runs counts as *not delivered*. That claim is only as good as the check
 /// behind it, so three surfaces are pinned together:
