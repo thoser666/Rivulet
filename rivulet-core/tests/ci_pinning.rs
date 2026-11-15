@@ -6619,7 +6619,9 @@ fn m8_closeout_statements_match_across_readme_gate_and_report() {
 ///   `RIVULET_DOWNSTREAM_REQUIRE_AUDIO`, hides the positive audio evidence,
 /// * an `api-overview.md` nobody regenerates drifts from `lib.rs` within a
 ///   release, and a `cargo doc` without `-D warnings` prints the same broken
-///   links it did before #297.
+///   links it did before #297,
+/// * a doc step with an `if:`, a `continue-on-error` or a job-level
+///   `RUSTDOCFLAGS` is still *found* above, yet never runs the gate.
 #[test]
 fn m8_exit_evidence_is_wired_into_ci_and_docs() {
     // --- The external consumer crate --------------------------------------
@@ -6732,6 +6734,25 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
         doc_step.contains("RUSTDOCFLAGS: -D warnings")
             && doc_step.contains("cargo doc -p rivulet-core --no-deps"),
         "the doc step must deny warnings and run `cargo doc -p rivulet-core --no-deps`, got:\n{doc_step}"
+    );
+    // The step is found by the assertions above even if it never runs: `if:`
+    // skips a runner, `continue-on-error` swallows the failure.
+    for banned in ["if:", "continue-on-error"] {
+        assert!(
+            !doc_step
+                .lines()
+                .map(str::trim_start)
+                .any(|line| line.starts_with(banned)),
+            "the doc step must run unconditionally, so it must not carry `{banned}`, got:\n{doc_step}"
+        );
+    }
+    // The step env outranks the job's; a job-level flag would be a second
+    // owner that takes over if the step env is ever edited.
+    assert!(
+        !matrix_head
+            .lines()
+            .any(|line| line.trim_start().starts_with("RUSTDOCFLAGS")),
+        "`RUSTDOCFLAGS` belongs to the doc step alone, got:\n{matrix_head}"
     );
     assert_eq!(
         ci.lines()
@@ -7060,6 +7081,7 @@ fn local_pre_push_hook_mirrors_the_ci_lints_job() {
         "RIVULET_SKIP_PRE_PUSH",
         "RIVULET_PRE_PUSH_FAST_TESTS",
         "cargo test -p rivulet-core --test ci_pinning",
+        "RUSTDOCFLAGS=\"-D warnings\" cargo doc -p rivulet-core --no-deps",
         "generate-action-pins.py --check",
         "check-parity-checklist.py --self-test",
         "check-release-notes.py --self-test",
