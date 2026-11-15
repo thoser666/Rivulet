@@ -6767,78 +6767,45 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
 
 /// A `#[cfg(...)]` over `target_os` that no CI runner satisfies is dead code:
 /// `vst3.rs` names `freebsd` today only *alongside* `linux`, so it compiles, but
-/// a future `#[cfg(target_os = "android")]` would sit in the tree forever with
-/// no build ever touching it. The Build & Test matrix is the only place such a
-/// branch could be seen, so every `target_os` predicate has to be satisfiable by
-/// one of its runners.
+/// a future `#[cfg(target_os = "android")]` would sit in the tree with no build
+/// ever touching it. The Build & Test matrix is the only place such a branch
+/// could be seen, so every `target_os` predicate has to be satisfiable by one of
+/// its runners.
 ///
 /// Predicates are evaluated once per runner with three-valued logic: an atom
-/// this test cannot decide (`unix`, `test`, `feature = "…"`) evaluates to
-/// `unknown`, so only a predicate that is *false on every runner* fails here.
-/// That keeps `cfg(any(target_os = "linux", target_os = "freebsd"))` green while
-/// flagging a platform the matrix never builds.
+/// this test cannot decide (`unix`, `test`, `feature = "…"`) is `unknown`, so
+/// only a predicate that is *false on every runner* fails here. A predicate
+/// that names no platform outside the matrix - typically
+/// `not(any(…every runner…))` as an "any other platform" fallback - claims no
+/// platform of its own and is skipped.
 #[test]
 fn every_target_os_cfg_is_built_by_a_ci_runner() {
-    let ci = read(".github/workflows/ci.yml").replace('\r', "");
-    let matrix = ci
-        .split("\n  build_and_test:\n")
-        .nth(1)
-        .and_then(|job| {
-            job.lines()
-                .find(|line| line.trim_start().starts_with("os: ["))
-        })
-        .expect("the Build & Test job must keep its matrix `os:` list");
-    let platforms: Vec<&str> = matrix
-        .split_once('[')
-        .and_then(|(_, rest)| rest.split_once(']'))
-        .map(|(list, _)| {
-            list.split(',')
-                .map(str::trim)
-                .filter(|runner| !runner.is_empty())
-                .map(|runner| {
-                    if runner.starts_with("ubuntu") {
-                        "linux"
-                    } else if runner.starts_with("macos") {
-                        "macos"
-                    } else if runner.starts_with("windows") {
-                        "windows"
-                    } else {
-                        panic!(
-                            "`{runner}` is a runner this test cannot map to a `target_os`; add it"
-                        )
-                    }
-                })
-                .collect()
-        })
-        .expect("the matrix `os:` list must be bracketed");
-
-    let mut sources = Vec::new();
-    collect_rust_sources(&repo_file("rivulet-core/src"), &mut sources);
-
+    let platforms = ci_matrix_target_os();
     let mut checked = 0;
     let mut dead = Vec::new();
-    for path in &sources {
-        let source = fs::read_to_string(path)
+    for path in rust_sources() {
+        let source = fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-        for (line, predicate) in cfgscan_predicates(&source) {
+        for (line, predicate) in cfg_predicates(&source) {
             if !predicate.contains("target_os") {
                 continue;
             }
             checked += 1;
-            let tokens = cfgscan_tokens(&predicate);
+            let tokens = cfg_tokens(&predicate);
+            let named = cfg_named_target_os(&tokens);
+            if !named.iter().any(|os| !platforms.contains(os)) {
+                continue;
+            }
             if platforms
                 .iter()
-                .all(|os| cfgscan_eval(&tokens, os) == Tri::False)
+                .all(|os| cfg_eval(&tokens, os) == Tri::False)
             {
                 let rel = path
-                    .strip_prefix(repo_file("rivulet-core"))
-                    .map(|rel| {
-                        format!(
-                            "rivulet-core/{}",
-                            rel.display().to_string().replace('\\', "/")
-                        )
-                    })
-                    .unwrap_or_else(|_| path.display().to_string());
+                    .strip_prefix(repo_file(""))
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string()
+                    .replace('\\', "/");
                 dead.push(format!("{rel}:{line}: #[cfg({predicate})]"));
             }
         }
@@ -6846,17 +6813,54 @@ fn every_target_os_cfg_is_built_by_a_ci_runner() {
 
     assert!(
         checked >= 10,
-        "the scan found only {checked} `target_os` predicates in rivulet-core/src; \
-         it must still cover the crate"
+        "the scan found only {checked} `target_os` predicates; it must still cover the workspace"
     );
     assert!(
         dead.is_empty(),
-        "these cfg branches are compiled on none of the CI runners ({}), so no build \
-         would ever see them:\n  {}\n\
+        "these cfg branches are compiled on none of the CI runners ({}), so no build would \
+         ever see them:\n  {}\n\
          Either add a runner for the platform to the Build & Test matrix or drop the cfg.",
         platforms.join(", "),
         dead.join("\n  ")
     );
+}
+
+/// The `target_os` of every Build & Test matrix runner.
+fn ci_matrix_target_os() -> Vec<&'static str> {
+    let ci = read(".github/workflows/ci.yml").replace('\r', "");
+    ci.split("\n  build_and_test:\n")
+        .nth(1)
+        .and_then(|job| {
+            job.lines()
+                .find(|line| line.trim_start().starts_with("os: ["))
+        })
+        .and_then(|line| line.split_once('['))
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .expect("the Build & Test job must keep a bracketed `os:` matrix list")
+        .0
+        .split(',')
+        .map(str::trim)
+        .filter(|runner| !runner.is_empty())
+        .map(|runner| match runner {
+            runner if runner.starts_with("ubuntu") => "linux",
+            runner if runner.starts_with("macos") => "macos",
+            runner if runner.starts_with("windows") => "windows",
+            other => panic!("`{other}` is a runner this test cannot map to a `target_os`"),
+        })
+        .collect()
+}
+
+/// Every `.rs` file under a workspace crate's `src/`.
+fn rust_sources() -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(repo_file("")).expect("read the repository root") {
+        let crate_dir = entry.expect("read_dir entry").path();
+        let src = crate_dir.join("src");
+        if src.is_dir() {
+            collect_rust_sources(&src, &mut files);
+        }
+    }
+    files
 }
 
 fn collect_rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -6871,86 +6875,69 @@ fn collect_rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Every `cfg(<predicate>)` in `source`, as (1-based line, predicate text).
-fn cfgscan_predicates(source: &str) -> Vec<(usize, String)> {
-    let bytes = source.as_bytes();
+/// Every `#[cfg(<predicate>)]` in `source`, as (1-based line, predicate). An
+/// attribute may span lines, but always closes with `)]`.
+fn cfg_predicates(source: &str) -> Vec<(usize, String)> {
     let mut found = Vec::new();
     let mut from = 0;
-    while let Some(offset) = source[from..].find("cfg(") {
+    while let Some(offset) = source[from..].find("#[cfg(") {
         let start = from + offset;
-        let glued =
-            start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_');
-        // `#[cfg(...)]` shown inside a comment is documentation, not a branch.
-        let line_head = &source[source[..start].rfind('\n').map_or(0, |nl| nl + 1)..start];
-        if glued || line_head.contains("//") {
-            from = start + 4;
+        // `#[cfg(...)]` quoted inside a comment is documentation, not a branch.
+        let line_start = source[..start].rfind('\n').map_or(0, |nl| nl + 1);
+        if source[line_start..start].contains("//") {
+            from = start + 6;
             continue;
         }
-        let mut depth = 0usize;
-        let mut index = start + 3;
-        let mut in_string = false;
-        while index < bytes.len() {
-            let byte = bytes[index];
-            if in_string {
-                if byte == b'"' {
-                    in_string = false;
-                }
-            } else if byte == b'"' {
-                in_string = true;
-            } else if byte == b'(' {
-                depth += 1;
-            } else if byte == b')' {
-                depth -= 1;
-                if depth == 0 {
-                    break;
-                }
-            }
-            index += 1;
-        }
-        if depth != 0 || index >= bytes.len() {
-            from = start + 4;
-            continue;
-        }
-        let line = source[..start].lines().count();
-        found.push((line, source[start + 4..index].trim().to_owned()));
-        from = index + 1;
+        let Some(closing) = source[start + 6..].find(")]") else {
+            break;
+        };
+        let end = start + 6 + closing;
+        found.push((
+            source[..start].lines().count(),
+            source[start + 6..end].trim().to_owned(),
+        ));
+        from = end + 2;
     }
     found
 }
 
-/// Split a predicate into words and the `( ) , =` punctuation.
-fn cfgscan_tokens(predicate: &str) -> Vec<String> {
+/// Split a predicate into words and the `( ) , =` punctuation; strings lose
+/// their quotes.
+fn cfg_tokens(predicate: &str) -> Vec<&str> {
     let mut tokens = Vec::new();
-    let mut chars = predicate.chars().peekable();
-    while let Some(&ch) = chars.peek() {
-        if ch.is_whitespace() {
-            chars.next();
-        } else if "(),=".contains(ch) {
-            chars.next();
-            tokens.push(ch.to_string());
-        } else if ch == '"' {
-            chars.next();
-            let mut text = String::new();
-            for inner in chars.by_ref() {
-                if inner == '"' {
-                    break;
-                }
-                text.push(inner);
-            }
-            tokens.push(text);
+    let mut rest = predicate;
+    while let Some(first) = rest.chars().next() {
+        let step = first.len_utf8();
+        if first.is_whitespace() {
+            rest = &rest[step..];
+        } else if first == '"' {
+            let body = &rest[1..];
+            let end = body
+                .find('"')
+                .expect("unterminated string in a cfg predicate");
+            tokens.push(&body[..end]);
+            rest = &body[end + 1..];
+        } else if "(),=".contains(first) {
+            tokens.push(&rest[..step]);
+            rest = &rest[step..];
         } else {
-            let mut word = String::new();
-            while let Some(&inner) = chars.peek() {
-                if inner.is_whitespace() || "(),=".contains(inner) {
-                    break;
-                }
-                chars.next();
-                word.push(inner);
-            }
-            tokens.push(word);
+            let end = rest
+                .find(|c: char| c.is_whitespace() || "(),=".contains(c))
+                .unwrap_or(rest.len());
+            tokens.push(&rest[..end]);
+            rest = &rest[end..];
         }
     }
     tokens
+}
+
+/// The `target_os` values a token list names.
+fn cfg_named_target_os<'a>(tokens: &[&'a str]) -> Vec<&'a str> {
+    tokens
+        .windows(3)
+        .filter(|window| window[0] == "target_os" && window[1] == "=")
+        .map(|window| window[2])
+        .collect()
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -6960,9 +6947,35 @@ enum Tri {
     Unknown,
 }
 
-fn cfgscan_eval(tokens: &[String], os: &str) -> Tri {
+impl Tri {
+    fn all(self, other: Tri) -> Tri {
+        match (self, other) {
+            (Tri::False, _) | (_, Tri::False) => Tri::False,
+            (Tri::True, Tri::True) => Tri::True,
+            _ => Tri::Unknown,
+        }
+    }
+
+    fn any(self, other: Tri) -> Tri {
+        match (self, other) {
+            (Tri::True, _) | (_, Tri::True) => Tri::True,
+            (Tri::False, Tri::False) => Tri::False,
+            _ => Tri::Unknown,
+        }
+    }
+
+    fn not(self) -> Tri {
+        match self {
+            Tri::True => Tri::False,
+            Tri::False => Tri::True,
+            Tri::Unknown => Tri::Unknown,
+        }
+    }
+}
+
+fn cfg_eval(tokens: &[&str], os: &str) -> Tri {
     let mut pos = 0;
-    let value = cfgscan_predicate(tokens, &mut pos, os);
+    let value = cfg_predicate(tokens, &mut pos, os);
     if pos == tokens.len() {
         value
     } else {
@@ -6970,28 +6983,25 @@ fn cfgscan_eval(tokens: &[String], os: &str) -> Tri {
     }
 }
 
-fn cfgscan_predicate(tokens: &[String], pos: &mut usize, os: &str) -> Tri {
-    let name = match tokens.get(*pos) {
-        Some(name) => name.as_str(),
-        None => return Tri::Unknown,
+/// Evaluate one predicate for one `target_os`; `unix`, `test`, `feature = "…"`
+/// and anything else this test cannot decide stays `Unknown`.
+fn cfg_predicate(tokens: &[&str], pos: &mut usize, os: &str) -> Tri {
+    let Some(&name) = tokens.get(*pos) else {
+        return Tri::Unknown;
     };
     match name {
         "any" | "all" => {
             let is_any = name == "any";
-            *pos += 1;
-            if tokens.get(*pos).map(String::as_str) != Some("(") {
-                return Tri::Unknown;
-            }
-            *pos += 1;
+            *pos += 2;
             let mut result = if is_any { Tri::False } else { Tri::True };
             loop {
-                let value = cfgscan_predicate(tokens, pos, os);
+                let value = cfg_predicate(tokens, pos, os);
                 result = if is_any {
-                    tri_any(result, value)
+                    result.any(value)
                 } else {
-                    tri_all(result, value)
+                    result.all(value)
                 };
-                match tokens.get(*pos).map(String::as_str) {
+                match tokens.get(*pos).copied() {
                     Some(",") => *pos += 1,
                     Some(")") => {
                         *pos += 1;
@@ -7002,57 +7012,26 @@ fn cfgscan_predicate(tokens: &[String], pos: &mut usize, os: &str) -> Tri {
             }
         }
         "not" => {
+            *pos += 2;
+            let value = cfg_predicate(tokens, pos, os);
             *pos += 1;
-            if tokens.get(*pos).map(String::as_str) != Some("(") {
-                return Tri::Unknown;
-            }
-            *pos += 1;
-            let value = cfgscan_predicate(tokens, pos, os);
-            if tokens.get(*pos).map(String::as_str) != Some(")") {
-                return Tri::Unknown;
-            }
-            *pos += 1;
-            tri_not(value)
+            value.not()
         }
         _ => {
             *pos += 1;
-            if tokens.get(*pos).map(String::as_str) == Some("=") {
-                *pos += 1;
-                let value = match tokens.get(*pos) {
-                    Some(value) => value.as_str(),
-                    None => return Tri::Unknown,
-                };
-                *pos += 1;
+            if tokens.get(*pos).copied() == Some("=") {
+                let value = tokens.get(*pos + 1).copied();
+                *pos += 2;
                 if name == "target_os" {
-                    return if value == os { Tri::True } else { Tri::False };
+                    return if value == Some(os) {
+                        Tri::True
+                    } else {
+                        Tri::False
+                    };
                 }
             }
             Tri::Unknown
         }
-    }
-}
-
-fn tri_any(left: Tri, right: Tri) -> Tri {
-    match (left, right) {
-        (Tri::True, _) | (_, Tri::True) => Tri::True,
-        (Tri::Unknown, _) | (_, Tri::Unknown) => Tri::Unknown,
-        _ => Tri::False,
-    }
-}
-
-fn tri_all(left: Tri, right: Tri) -> Tri {
-    match (left, right) {
-        (Tri::False, _) | (_, Tri::False) => Tri::False,
-        (Tri::Unknown, _) | (_, Tri::Unknown) => Tri::Unknown,
-        _ => Tri::True,
-    }
-}
-
-fn tri_not(value: Tri) -> Tri {
-    match value {
-        Tri::True => Tri::False,
-        Tri::False => Tri::True,
-        Tri::Unknown => Tri::Unknown,
     }
 }
 
