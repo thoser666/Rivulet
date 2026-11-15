@@ -14,9 +14,10 @@
 # Skip for an individual push:
 #   RIVULET_SKIP_PRE_PUSH=1 git push        # or: git push --no-verify
 #
-# The fast-guard stage (optional, default on) runs the CI pinning tests and
-# the Lints-job script self-tests so the repo-internal guards pass before
-# the push; disable just that stage with:
+# The fast-guard stage (optional, default on) runs the CI pinning tests, the
+# warning-denied doc build of `rivulet-core` and the Lints-job script
+# self-tests so the repo-internal guards pass before the push; disable that
+# stage alone with:
 #   RIVULET_PRE_PUSH_FAST_TESTS=0 git push
 set -euo pipefail
 
@@ -40,6 +41,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 if [[ "${RIVULET_PRE_PUSH_FAST_TESTS:-}" != "0" ]]; then
   echo "pre-push: cargo test -p rivulet-core --test ci_pinning"
   cargo test -p rivulet-core --test ci_pinning
+
+  echo "pre-push: RUSTDOCFLAGS=-D warnings cargo doc -p rivulet-core --no-deps"
+  RUSTDOCFLAGS="-D warnings" cargo doc -p rivulet-core --no-deps
 
   if command -v python >/dev/null 2>&1; then
     echo "pre-push: python scripts/generate-action-pins.py --check"
