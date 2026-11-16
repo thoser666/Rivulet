@@ -6781,19 +6781,18 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
 #[test]
 fn every_target_os_cfg_is_built_by_a_ci_runner() {
     let platforms = ci_matrix_target_os();
-    let mut checked = 0;
+    let mut cfgs = 0;
     let mut dead = Vec::new();
     for path in rust_sources() {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
         for (line, predicate) in cfg_predicates(&source) {
-            if !predicate.contains("target_os") {
-                continue;
-            }
-            checked += 1;
-            let tokens = cfg_tokens(&predicate);
-            let named = cfg_named_target_os(&tokens);
-            if !named.iter().any(|os| !platforms.contains(os)) {
+            cfgs += 1;
+            let tokens = cfg_tokens(predicate);
+            let names_unbuilt = tokens
+                .windows(3)
+                .any(|w| w[0] == "target_os" && w[1] == "=" && !platforms.contains(&w[2]));
+            if !names_unbuilt {
                 continue;
             }
             if platforms
@@ -6812,8 +6811,8 @@ fn every_target_os_cfg_is_built_by_a_ci_runner() {
     }
 
     assert!(
-        checked >= 10,
-        "the scan found only {checked} `target_os` predicates; it must still cover the workspace"
+        cfgs >= 100,
+        "the scan found only {cfgs} `#[cfg(...)]` attributes; it must still cover the workspace"
     );
     assert!(
         dead.is_empty(),
@@ -6832,52 +6831,51 @@ fn ci_matrix_target_os() -> Vec<&'static str> {
         .nth(1)
         .and_then(|job| {
             job.lines()
-                .find(|line| line.trim_start().starts_with("os: ["))
+                .find_map(|line| line.trim().strip_prefix("os: ["))
         })
-        .and_then(|line| line.split_once('['))
-        .and_then(|(_, rest)| rest.split_once(']'))
+        .and_then(|list| list.split(']').next())
         .expect("the Build & Test job must keep a bracketed `os:` matrix list")
-        .0
         .split(',')
         .map(str::trim)
         .filter(|runner| !runner.is_empty())
-        .map(|runner| match runner {
-            runner if runner.starts_with("ubuntu") => "linux",
-            runner if runner.starts_with("macos") => "macos",
-            runner if runner.starts_with("windows") => "windows",
-            other => panic!("`{other}` is a runner this test cannot map to a `target_os`"),
-        })
+        .map(
+            |runner| match runner.split('-').next().unwrap_or_default() {
+                "ubuntu" => "linux",
+                "macos" => "macos",
+                "windows" => "windows",
+                other => panic!("`{other}` is a runner this test cannot map to a `target_os`"),
+            },
+        )
         .collect()
 }
 
-/// Every `.rs` file under a workspace crate's `src/`.
+/// Every `.rs` file under a workspace crate's `src/`, in a stable order.
 fn rust_sources() -> Vec<PathBuf> {
     let mut files = Vec::new();
-    for entry in fs::read_dir(repo_file("")).expect("read the repository root") {
-        let crate_dir = entry.expect("read_dir entry").path();
-        let src = crate_dir.join("src");
-        if src.is_dir() {
-            collect_rust_sources(&src, &mut files);
+    let mut dirs: Vec<PathBuf> = fs::read_dir(repo_file(""))
+        .expect("read the repository root")
+        .map(|entry| entry.expect("read_dir entry").path().join("src"))
+        .filter(|src| src.is_dir())
+        .collect();
+    while let Some(dir) = dirs.pop() {
+        let entries =
+            fs::read_dir(&dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()));
+        for entry in entries {
+            let path = entry.expect("read_dir entry").path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                files.push(path);
+            }
         }
     }
+    files.sort();
     files
-}
-
-fn collect_rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = fs::read_dir(dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()));
-    for entry in entries {
-        let path = entry.expect("read_dir entry").path();
-        if path.is_dir() {
-            collect_rust_sources(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "rs") {
-            out.push(path);
-        }
-    }
 }
 
 /// Every `#[cfg(<predicate>)]` in `source`, as (1-based line, predicate). An
 /// attribute may span lines, but always closes with `)]`.
-fn cfg_predicates(source: &str) -> Vec<(usize, String)> {
+fn cfg_predicates(source: &str) -> Vec<(usize, &str)> {
     let mut found = Vec::new();
     let mut from = 0;
     while let Some(offset) = source[from..].find("#[cfg(") {
@@ -6894,7 +6892,7 @@ fn cfg_predicates(source: &str) -> Vec<(usize, String)> {
         let end = start + 6 + closing;
         found.push((
             source[..start].lines().count(),
-            source[start + 6..end].trim().to_owned(),
+            source[start + 6..end].trim(),
         ));
         from = end + 2;
     }
@@ -6929,15 +6927,6 @@ fn cfg_tokens(predicate: &str) -> Vec<&str> {
         }
     }
     tokens
-}
-
-/// The `target_os` values a token list names.
-fn cfg_named_target_os<'a>(tokens: &[&'a str]) -> Vec<&'a str> {
-    tokens
-        .windows(3)
-        .filter(|window| window[0] == "target_os" && window[1] == "=")
-        .map(|window| window[2])
-        .collect()
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -7039,7 +7028,7 @@ fn cfg_predicate(tokens: &[&str], pos: &mut usize, os: &str) -> Tri {
 /// a new public item arrives without documentation and the workspace doc gate
 /// stays green, because rustdoc has nothing to report. Every lib crate carries
 /// the attribute; the crates still owing documentation are listed in `PENDING`,
-/// and that list is checked in both directions — a crate cannot drop the lint
+/// and that list is checked in both directions - a crate cannot drop the lint
 /// silently, and an entry cannot rot there after the crate was documented.
 #[test]
 fn every_lib_crate_enables_the_missing_docs_lint() {
@@ -7048,39 +7037,41 @@ fn every_lib_crate_enables_the_missing_docs_lint() {
     // obs-websocket 85 items at the time of writing).
     const PENDING: &[&str] = &["rivulet-capture", "rivulet-cli", "rivulet-obs-websocket"];
 
-    let mut libs = Vec::new();
+    let mut crates = Vec::new();
     for entry in fs::read_dir(repo_file("")).expect("read the repository root") {
         let dir = entry.expect("read_dir entry").path();
-        if dir.join("src").join("lib.rs").is_file() {
-            libs.push(dir);
+        let lib = dir.join("src").join("lib.rs");
+        if !lib.is_file() {
+            continue;
         }
-    }
-    libs.sort();
-
-    let mut missing = Vec::new();
-    let mut stale = Vec::new();
-    for dir in &libs {
+        let source = fs::read_to_string(&lib)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", lib.display()));
+        let lint = source
+            .lines()
+            .any(|line| line.trim() == "#![warn(missing_docs)]");
         let name = dir
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
-        let source = read(&format!("{name}/src/lib.rs"));
-        let documented = source
-            .lines()
-            .any(|line| line.trim() == "#![warn(missing_docs)]");
-        let pending = PENDING.contains(&name.as_str());
-        if documented && pending {
-            stale.push(name);
-        } else if !documented && !pending {
-            missing.push(name);
+        crates.push((name, lint));
+    }
+    crates.sort();
+
+    let mut missing = Vec::new();
+    let mut stale = Vec::new();
+    for (name, lint) in &crates {
+        match (lint, PENDING.contains(&name.as_str())) {
+            (false, false) => missing.push(name.as_str()),
+            (true, true) => stale.push(name.as_str()),
+            _ => {}
         }
     }
 
     assert!(
-        libs.len() >= 10,
+        crates.len() >= 10,
         "found only {} lib crates, so this scan is not covering the workspace",
-        libs.len()
+        crates.len()
     );
     assert!(
         missing.is_empty(),
