@@ -76,6 +76,20 @@
   ignores that one advisory and nothing else; `docs/security.md` records why,
   that a new `chrono` advisory still fails, and that the entry ends with the
   migration to `time`.
+- docs(crates): **`missing_docs` is on in eight crates instead of one.** The
+  workspace doc build only fails on undocumented items where the lint is on, so
+  every crate but `rivulet-core` could grow undocumented API with the gate
+  green. `rivulet-audio`, `rivulet-plugins`, `rivulet-vulkan-layer`,
+  `rivulet-obs-compat` and `rivulet-updater` now carry
+  `#![warn(missing_docs)]` and the 19 items it reported are documented;
+  `rivulet-launcher`, `rivulet-browser` and `rivulet-opengl-hook-dll` take the
+  attribute as well (measured clean). `rivulet-capture` (27 items),
+  `rivulet-cli` (39) and `rivulet-obs-websocket` (85) still owe documentation
+  and stay named in `ci_pinning`, which pins both directions: a crate cannot
+  drop the attribute silently, and an entry cannot stay listed after the crate
+  is documented. `rivulet-obs-compat` also drops its unused `cc`
+  build-dependency (it has no `build.rs`), removing the last Cargo warning from
+  the doc log.
 - feat(core): **an OBS Studio scene collection imports into Rivulet scenes and
   sources, and every difference is reported** (M9,
   [#367](https://github.com/thoser666/Rivulet/issues/367)).
