@@ -3131,8 +3131,9 @@ fn beta_gate_checker_is_wired_up() {
         checker.contains("def ci_platforms")
             && checker.contains("strategy")
             && checker.contains("matrix")
-            && checker.contains("def _ci_platforms_lines"),
-        "check-beta-gate.py must parse the build matrix structurally"
+            && checker.contains("def _ci_platforms_lines")
+            && checker.contains("--print-platforms"),
+        "check-beta-gate.py must parse the build matrix structurally and publish it          through `--print-platforms`, which ci_pinning reads from there"
     );
 
     // The gate itself lives in the roadmap; the README must define it.
@@ -6825,17 +6826,32 @@ fn every_target_os_cfg_is_built_by_a_ci_runner() {
 }
 
 /// The `target_os` of every Build & Test matrix runner.
+///
+/// The matrix itself is not read here: `scripts/check-beta-gate.py
+/// --print-platforms` parses `jobs`/`strategy`/`matrix` (PyYAML, with its
+/// documented line-based fallback) and prints the runner labels, so the
+/// platform-parity criterion and this test cannot disagree about what CI
+/// builds, and a matrix renamed or moved fails both instead of one. Mapping a
+/// runner to the `target_os` it compiles for stays here, because that is the
+/// side the `cfg` predicates are compared against.
 fn ci_matrix_target_os() -> Vec<&'static str> {
-    let ci = read(".github/workflows/ci.yml").replace('\r', "");
-    ci.split("\n  build_and_test:\n")
-        .nth(1)
-        .and_then(|job| {
-            job.lines()
-                .find_map(|line| line.trim().strip_prefix("os: ["))
-        })
-        .and_then(|list| list.split(']').next())
-        .expect("the Build & Test job must keep a bracketed `os:` matrix list")
-        .split(',')
+    let python = if cfg!(windows) { "python" } else { "python3" };
+    let output = std::process::Command::new(python)
+        .arg(repo_file("scripts/check-beta-gate.py"))
+        .arg("--print-platforms")
+        .output()
+        .unwrap_or_else(|e| {
+            panic!("failed to run `{python} scripts/check-beta-gate.py --print-platforms`: {e}")
+        });
+    assert!(
+        output.status.success(),
+        "`check-beta-gate.py --print-platforms` failed:
+{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let printed = String::from_utf8_lossy(&output.stdout);
+    let mut platforms: Vec<&'static str> = printed
+        .lines()
         .map(str::trim)
         .filter(|runner| !runner.is_empty())
         .map(
@@ -6846,7 +6862,10 @@ fn ci_matrix_target_os() -> Vec<&'static str> {
                 other => panic!("`{other}` is a runner this test cannot map to a `target_os`"),
             },
         )
-        .collect()
+        .collect();
+    platforms.sort_unstable();
+    platforms.dedup();
+    platforms
 }
 
 /// Every `.rs` file under a workspace crate's `src/`, in a stable order.
