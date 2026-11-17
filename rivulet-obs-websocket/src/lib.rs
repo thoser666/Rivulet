@@ -26,6 +26,7 @@
 
 pub mod backend;
 pub mod companion;
+#[warn(missing_docs)]
 pub mod protocol;
 pub mod server;
 
