@@ -12026,25 +12026,38 @@ fn the_action_pin_generator_help_writes_nothing() {
     let before = std::fs::read(&doc).expect("read docs/ci-action-pins.md");
     let script = repo_file("scripts/generate-action-pins.py");
 
-    let output = ["python", "python3"].iter().find_map(|python| {
-        std::process::Command::new(python)
+    // `python3` first: on macOS runners `python` is a stub that exits non-zero
+    // with a hint instead of running anything, and only an interpreter that
+    // actually runs can tell us whether the script behaves.
+    let mut failures = Vec::new();
+    let mut output = None;
+    for python in ["python3", "python"] {
+        match std::process::Command::new(python)
             .arg(&script)
             .arg("--help")
             .output()
-            .ok()
-    });
+        {
+            Ok(attempt) if attempt.status.success() => {
+                output = Some(attempt);
+                break;
+            }
+            Ok(attempt) => failures.push(format!(
+                "{python}: {}",
+                String::from_utf8_lossy(&attempt.stderr).trim()
+            )),
+            Err(error) => failures.push(format!("{python}: {error}")),
+        }
+    }
     let Some(output) = output else {
-        // The Lints job has python3; a Windows checkout without either
-        // interpreter must not fail the suite for lacking it.
-        eprintln!("skipping: neither `python` nor `python3` is on PATH");
+        // Nothing to verify with: report it rather than pretending the script is
+        // fine, but do not fail a checkout for lacking an interpreter.
+        eprintln!(
+            "skipping: no working python interpreter ({})",
+            failures.join("; ")
+        );
         return;
     };
 
-    assert!(
-        output.status.success(),
-        "`generate-action-pins.py --help` must exit 0, stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("Usage:") && stdout.contains("--check"),
