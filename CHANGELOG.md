@@ -69,6 +69,7 @@
   (`manager_export_keeps_the_switch_history_out_of_the_collection_format`).
 
 
+
 - ci(deps): **one documented advisory exception keeps the security gate green.**
   RustSec published `RUSTSEC-2026-0543` ("chrono is unmaintained", no safe
   upgrade) on 2026-11-17. `chrono` is a direct dependency of `rivulet-core` and
@@ -77,7 +78,7 @@
   ignores that one advisory and nothing else; `docs/security.md` records why,
   that a new `chrono` advisory still fails, and that the entry ends with the
   migration to `time`.
-- docs(crates): **`missing_docs` is on in ten crates instead of one.** The
+- docs(crates): **`missing_docs` is on in eleven crates instead of one.** The
 
   workspace doc build only fails on undocumented items where the lint is on, so
   every crate but `rivulet-core` could grow undocumented API with the gate
