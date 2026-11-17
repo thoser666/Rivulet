@@ -24,9 +24,10 @@
 //! and exercised end-to-end in
 //! `tests/client_smoke.rs` with a real (non-mock) WebSocket client.
 
+#![warn(missing_docs)]
+
 pub mod backend;
 pub mod companion;
-#[warn(missing_docs)]
 pub mod protocol;
 pub mod server;
 

@@ -7060,9 +7060,9 @@ fn cfg_predicate(tokens: &[&str], pos: &mut usize, os: &str) -> Tri {
 fn every_lib_crate_enables_the_missing_docs_lint() {
     // `(crate, None)` = the crate still owes documentation as a whole,
     // `(crate, Some(module))` = only that public module does. Each entry
-    // disappears in the same change that documents the crate or module
-    // (obs-websocket: 85 items at the time of writing).
-    const PENDING: &[(&str, Option<&str>)] = &[("rivulet-obs-websocket", None)];
+    // disappears in the same change that documents the crate or module; the
+    // list is empty because every crate enables the lint today.
+    const PENDING: &[(&str, Option<&str>)] = &[];
 
     /// One lib crate: its name, whether `lib.rs` enables the lint crate-wide,
     /// and its public modules with the same answer per module.
