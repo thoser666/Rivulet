@@ -349,23 +349,34 @@ impl std::fmt::Display for Stage {
 pub enum StatusEvent {
     /// Emitted once when the run starts.
     Started {
+        /// Frame width the run records at.
         width: u32,
+        /// Frame height the run records at.
         height: u32,
+        /// Frame rate the run records at.
         fps: u32,
+        /// Whether the run captures audio (serialized as `audio`).
         #[serde(rename = "audio")]
         audio_enabled: bool,
     },
     /// Emitted every `progress-interval` seconds with engine metrics.
     Progress {
+        /// Elapsed seconds since the run started.
         seconds: u64,
+        /// Frames pushed so far.
         frames: u64,
+        /// Measured frames per second over the reporting interval.
         fps: f64,
+        /// Size of the output file so far, in bytes.
         file_size_bytes: u64,
     },
     /// Emitted once when the recording has been finalized.
     Stopped {
+        /// Frames the run pushed in total.
         frames: u64,
+        /// Duration of the recorded run, in seconds.
         seconds: u64,
+        /// Final size of the output file, in bytes.
         file_size_bytes: u64,
         /// Clock mode that drove the run (`system` or `virtual`).
         clock: String,

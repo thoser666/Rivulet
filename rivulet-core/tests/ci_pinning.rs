@@ -7052,9 +7052,9 @@ fn cfg_predicate(tokens: &[&str], pos: &mut usize, os: &str) -> Tri {
 #[test]
 fn every_lib_crate_enables_the_missing_docs_lint() {
     // Undocumented when the lint was turned on; each entry disappears in the
-    // same change that documents the crate (cli 39, obs-websocket 85 items at
-    // the time of writing).
-    const PENDING: &[&str] = &["rivulet-cli", "rivulet-obs-websocket"];
+    // same change that documents the crate (obs-websocket 85 items at the time
+    // of writing).
+    const PENDING: &[&str] = &["rivulet-obs-websocket"];
 
     let mut crates = Vec::new();
     for entry in fs::read_dir(repo_file("")).expect("read the repository root") {

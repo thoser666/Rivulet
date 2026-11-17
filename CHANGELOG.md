@@ -68,6 +68,7 @@
   with an empty one
   (`manager_export_keeps_the_switch_history_out_of_the_collection_format`).
 
+
 - ci(deps): **one documented advisory exception keeps the security gate green.**
   RustSec published `RUSTSEC-2026-0543` ("chrono is unmaintained", no safe
   upgrade) on 2026-11-17. `chrono` is a direct dependency of `rivulet-core` and
@@ -76,16 +77,16 @@
   ignores that one advisory and nothing else; `docs/security.md` records why,
   that a new `chrono` advisory still fails, and that the entry ends with the
   migration to `time`.
-- docs(crates): **`missing_docs` is on in nine crates instead of one.** The
+- docs(crates): **`missing_docs` is on in ten crates instead of one.** The
 
   workspace doc build only fails on undocumented items where the lint is on, so
   every crate but `rivulet-core` could grow undocumented API with the gate
   green. `rivulet-audio`, `rivulet-plugins`, `rivulet-vulkan-layer`,
-  `rivulet-obs-compat`, `rivulet-updater` and `rivulet-capture` now carry
-  `#![warn(missing_docs)]` and the 46 items they reported are documented;
-  `rivulet-launcher`, `rivulet-browser` and `rivulet-opengl-hook-dll` take the
-  attribute as well (measured clean). `rivulet-cli` (39 items) and
-  `rivulet-obs-websocket` (85) still owe documentation and stay named in
+  `rivulet-obs-compat`, `rivulet-updater`, `rivulet-capture` and `rivulet-cli`
+  now carry `#![warn(missing_docs)]` and the 85 items they reported are
+  documented; `rivulet-launcher`, `rivulet-browser` and
+  `rivulet-opengl-hook-dll` take the attribute as well (measured clean).
+  `rivulet-obs-websocket` still owes documentation and stays named in
   `ci_pinning`, which pins both directions: a crate cannot drop the attribute
   silently, and an entry cannot stay listed after the crate is documented. `rivulet-obs-compat` also drops its unused `cc`
   build-dependency (it has no `build.rs`), removing the last Cargo warning from
