@@ -39,6 +39,7 @@ use crate::capture::AudioFrameCallback;
 /// Format delivered to the engine: interleaved f32, stereo, 48 kHz — exactly
 /// the routed appsrc caps (`audio/x-raw,format=F32LE,...,rate=48000`).
 pub const MACOS_CAPTURE_RATE: u32 = 48_000;
+/// Channel count of the format above: stereo, like the routed appsrc caps.
 pub const MACOS_CAPTURE_CHANNELS: u16 = 2;
 
 /// Input-device name keywords of the known macOS loopback drivers. Same list
@@ -77,7 +78,9 @@ pub fn classify_device(name: Option<&str>) -> Option<bool> {
 /// `pid` carries the fallback sentinel and `name` is the display label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppAudioProcess {
+    /// The fallback sentinel (see [`FALLBACK_PID`]).
     pub pid: u32,
+    /// Display label shown in the picker.
     pub name: String,
 }
 
@@ -143,7 +146,7 @@ impl Drop for AppAudioCapture {
 
 /// Captures the system loopback mix once and fans it out to every frame
 /// sink (one per routed Application source). Lives inside the worker thread;
-/// sinks are appended by [`SharedAppAudio::add_sink`] from the UI thread.
+/// sinks are appended by [`SharedAppAudio::start_shared`] from the UI thread.
 ///
 /// (Kept as a named type so the fan-out contract is documented and
 /// testable; the actual fan-out happens through `SharedAppAudio`.)
@@ -152,6 +155,8 @@ pub struct SharedAppAudio {
 }
 
 impl SharedAppAudio {
+    /// Start with no captures; add them through [`Self::start_shared`] (fan-out)
+    /// or [`Self::start_single`] (single source).
     pub fn new() -> Self {
         Self {
             captures: Vec::new(),

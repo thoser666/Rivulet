@@ -35,6 +35,7 @@ use crate::capture::AudioFrameCallback;
 /// Format delivered to the engine: interleaved f32, stereo, 48 kHz — exactly
 /// the routed appsrc caps (`audio/x-raw,format=F32LE,...,rate=48000`).
 pub const PW_CAPTURE_RATE: u32 = 48_000;
+/// Channel count of the format above: stereo, like the routed appsrc caps.
 pub const PW_CAPTURE_CHANNELS: u16 = 2;
 
 /// media.class of the nodes that carry what an application plays.
@@ -57,7 +58,9 @@ pub const KEY_APP_NAME: &str = "app.name";
 /// display label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppAudioProcess {
+    /// PipeWire sink-input node id the capture stream targets.
     pub pid: u32,
+    /// Display label shown in the picker.
     pub name: String,
 }
 
