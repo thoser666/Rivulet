@@ -8,6 +8,7 @@ the doc is derived from them, so it must not be edited by hand.
 Usage:
     scripts/generate-action-pins.py          # rewrite the table in place
     scripts/generate-action-pins.py --check  # exit non-zero if the doc drifts
+    scripts/generate-action-pins.py --help   # print this text, write nothing
 """
 
 import difflib
@@ -47,11 +48,16 @@ def regenerate(pins):
 
 
 def main():
+    args = sys.argv[1:]
+    if "--help" in args or "-h" in args:
+        print(__doc__.strip())
+        return 0
+
     pins = parse_workflows()
     if not pins:
         sys.exit("no third-party action pins found in .github/workflows")
     new_doc = regenerate(pins)
-    if "--check" in sys.argv[1:]:
+    if "--check" in args:
         current = DOC.read_text(encoding="utf-8")
         if new_doc == current:
             print("Action pin table is up to date.")
