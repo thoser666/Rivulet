@@ -2,7 +2,7 @@
 //! Native browser-source backend for Rivulet.
 //!
 //! **Status: spike / proof of concept (M6.9, issue #215).** This crate
-//! evaluates embedding a real platform webview ([`wry`])
+//! evaluates embedding a real platform webview (`wry`)
 //! as a [`BrowserSourceBackend`](rivulet_core::browser_source::BrowserSourceBackend), replacing the deterministic
 //! [`SyntheticBrowserBackend`](rivulet_core::browser_source::SyntheticBrowserBackend) from `rivulet-core` where real pixels are
 //! needed.
