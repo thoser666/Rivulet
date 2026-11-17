@@ -12016,6 +12016,46 @@ fn branch_hygiene_self_test_is_wired_into_ci_and_the_pre_push_hook() {
     );
 }
 
+/// `generate-action-pins.py` owns a file, so a flag it does not know must not
+/// fall through to the write path: before #444 `--help` printed nothing and
+/// rewrote `docs/ci-action-pins.md`, which looked like a local modification git
+/// could not diff. This runs the script and compares the doc's bytes.
+#[test]
+fn the_action_pin_generator_help_writes_nothing() {
+    let doc = repo_file("docs/ci-action-pins.md");
+    let before = std::fs::read(&doc).expect("read docs/ci-action-pins.md");
+    let script = repo_file("scripts/generate-action-pins.py");
+
+    let output = ["python", "python3"].iter().find_map(|python| {
+        std::process::Command::new(python)
+            .arg(&script)
+            .arg("--help")
+            .output()
+            .ok()
+    });
+    let Some(output) = output else {
+        // The Lints job has python3; a Windows checkout without either
+        // interpreter must not fail the suite for lacking it.
+        eprintln!("skipping: neither `python` nor `python3` is on PATH");
+        return;
+    };
+
+    assert!(
+        output.status.success(),
+        "`generate-action-pins.py --help` must exit 0, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Usage:") && stdout.contains("--check"),
+        "`--help` must print the usage text, got: {stdout}"
+    );
+    assert!(
+        std::fs::read(&doc).expect("re-read docs/ci-action-pins.md") == before,
+        "`--help` must not touch docs/ci-action-pins.md"
+    );
+}
+
 #[test]
 fn every_script_the_workflow_runs_exists_in_the_repository() {
     let ci = read(".github/workflows/ci.yml");
