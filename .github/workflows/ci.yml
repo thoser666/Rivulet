@@ -212,6 +212,12 @@ jobs:
           python3 scripts/check-parity-checklist.py
           python3 scripts/check-parity-checklist.py --self-test
 
+      # `branch-hygiene.py` deletes nothing itself, but it decides which local
+      # branches a human may delete, so its ref parsing and PR mapping get the
+      # same self-test treatment as the other scripts the Lints job runs.
+      - name: Branch hygiene maps gone branches to their PR state (self-test)
+        run: python3 scripts/branch-hygiene.py --self-test
+
       - name: Pre-build test dependencies (benchmark smoke shares the cargo cache)
         run: cargo test -p rivulet-core --lib benchmark --no-run
 
