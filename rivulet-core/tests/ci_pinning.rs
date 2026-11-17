@@ -109,8 +109,8 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v1.2.7",
     ),
     (
-        "EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25",
-        "v2.1.1",
+        "EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9",
+        "v2.1.2",
     ),
     (
         "ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e",
