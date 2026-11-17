@@ -157,6 +157,11 @@ impl std::error::Error for SceneHierarchyError {}
 pub struct SceneManager {
     scenes: Vec<Scene>,
     active: Option<Uuid>,
+    /// Switch-back stack: session navigation, the sibling of undo/redo.
+    /// Deliberately not part of the collection format — a restored collection
+    /// starts with an empty history, so the first `switch_back` after a
+    /// restart never jumps to a scene from a previous session.
+    #[serde(default, skip)]
     history: Vec<Uuid>,
     #[serde(skip)]
     undo_stack: Vec<SceneSnapshot>,
@@ -641,7 +646,8 @@ impl SceneManager {
         serde_json::to_string_pretty(self)
     }
 
-    /// Restore a scene collection from JSON. Undo/redo history starts empty.
+    /// Restore a scene collection from JSON. Undo/redo history and the
+    /// switch-back stack start empty: both are session state, not the document.
     pub fn import_json(json: &str) -> Result<Self, serde_json::Error> {
         let mut manager: Self = serde_json::from_str(json)?;
         manager.undo_stack.clear();
@@ -946,6 +952,42 @@ mod tests {
         assert_eq!(restored.scenes(), original.scenes());
         assert!(!restored.can_undo());
         assert!(!restored.can_redo());
+    }
+
+    #[test]
+    fn manager_export_keeps_the_switch_history_out_of_the_collection_format() {
+        // The switch-back stack is session navigation, the sibling of
+        // undo/redo: exporting and restoring a collection must not resurrect
+        // it, or the first "switch back" after a restart would jump to a scene
+        // from the previous session.
+        let mut manager = SceneManager::new();
+        let first = manager.add(Scene::new("Gameplay".to_string()));
+        let second = manager.add(Scene::new("Chatting".to_string()));
+        manager.switch_to(first);
+        manager.switch_to(second);
+        assert_eq!(manager.last_active(), Some(first));
+
+        let json = manager.export_json().expect("export scene collection");
+        assert!(
+            !json.contains("\"history\""),
+            "the collection format must not carry the switch history: {json}"
+        );
+        let mut restored = SceneManager::import_json(&json).expect("import scene collection");
+        assert_eq!(
+            restored.active(),
+            Some(second),
+            "the active scene is document state"
+        );
+        assert_eq!(
+            restored.last_active(),
+            None,
+            "a restored collection must not remember the previous session's switches"
+        );
+        assert!(
+            !restored.switch_back(),
+            "switch_back must be a no-op in a freshly restored collection"
+        );
+        assert_eq!(restored.active(), Some(second));
     }
 
     #[test]
