@@ -314,7 +314,16 @@ change. Do not silence the advisory or pin back to the yanked release.
   is the one that matters here: a WASI preview 0 `poll_oneoff` that
   circumvents fuel consumption defeats the per-call fuel budget the plugin
   sandbox relies on. These minimums are regression-tested against the
-  committed lockfile; advisories are not silenced with an ignore entry.
+  committed lockfile; those advisories are not silenced with an ignore entry.
+- The policy carries exactly one ignore entry: `RUSTSEC-2026-0543`, published on
+  2026-11-17, marks `chrono` unmaintained with "No safe upgrade is available".
+  `chrono` is a direct dependency of `rivulet-core` and `rivulet-gui` (19 call
+  sites), so `unmaintained = "workspace"` failed `Cargo Deny` on every branch
+  without offering an upgrade to take. The entry names that single advisory, so
+  a future `chrono` advisory still fails the gate, and it is the exit criterion
+  of the migration to `time`, which the workspace already resolves transitively.
+  No `chrono` version changes the verdict, which is why an upgrade cannot
+  replace the entry the way the `wasmtime` and `zstd` cases above were fixed.
 - On 2026-10-29 the RustSec database published four more `wasmtime` advisories:
   `RUSTSEC-2026-0422` (a missing `i31`/`nullref` argument type check that can
   panic), `RUSTSEC-2026-0423` (cross-engine type confusion with host-created

@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+- ci(deps): **one documented advisory exception keeps the security gate green.**
+  RustSec published `RUSTSEC-2026-0543` ("chrono is unmaintained", no safe
+  upgrade) on 2026-11-17. `chrono` is a direct dependency of `rivulet-core` and
+  `rivulet-gui`, so `Cargo Deny` and with it the required `Security` check failed
+  on every branch from that day on, including `develop` itself. `deny.toml` now
+  ignores that one advisory and nothing else; `docs/security.md` records why,
+  that a new `chrono` advisory still fails, and that the entry ends with the
+  migration to `time`.
 - feat(core): **an OBS Studio scene collection imports into Rivulet scenes and
   sources, and every difference is reported** (M9,
   [#367](https://github.com/thoser666/Rivulet/issues/367)).

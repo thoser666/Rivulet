@@ -5,7 +5,14 @@
 version = 2
 yanked = "deny"
 unmaintained = "workspace"
-ignore = []
+# RUSTSEC-2026-0543 (published 2026-11-17) marks `chrono` unmaintained and offers
+# no fixed release: "No safe upgrade is available". `chrono` is a direct
+# dependency of `rivulet-core` and `rivulet-gui`, so the `workspace` rule failed
+# `Cargo Deny` - and with it the required `Security` check - on every branch from
+# that day on. The entry is deliberately narrow: it names one advisory, so a new
+# `chrono` advisory still fails, and it disappears with the migration to `time`
+# recorded in `docs/security.md`.
+ignore = ["RUSTSEC-2026-0543"]
 
 [bans]
 multiple-versions = "warn"
