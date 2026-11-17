@@ -87,8 +87,10 @@
   documented; `rivulet-launcher`, `rivulet-browser` and
   `rivulet-opengl-hook-dll` take the attribute as well (measured clean).
   `rivulet-obs-websocket` still owes documentation and stays named in
-  `ci_pinning`, which pins both directions: a crate cannot drop the attribute
-  silently, and an entry cannot stay listed after the crate is documented. `rivulet-obs-compat` also drops its unused `cc`
+  `ci_pinning`, which pins both directions: a crate or module cannot drop the
+  attribute silently, and an entry cannot stay listed after it was documented.
+  Entries are per crate or per public module, so a crate can enforce the layer
+  that is documented while the rest is still open. `rivulet-obs-compat` also drops its unused `cc`
   build-dependency (it has no `build.rs`), removing the last Cargo warning from
   the doc log.
 - feat(core): **an OBS Studio scene collection imports into Rivulet scenes and

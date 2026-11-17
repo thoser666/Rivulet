@@ -7045,18 +7045,57 @@ fn cfg_predicate(tokens: &[&str], pos: &mut usize, os: &str) -> Tri {
 
 /// `#![warn(missing_docs)]` is what makes "documented" enforceable: without it
 /// a new public item arrives without documentation and the workspace doc gate
-/// stays green, because rustdoc has nothing to report. Every lib crate carries
-/// the attribute; the crates still owing documentation are listed in `PENDING`,
-/// and that list is checked in both directions - a crate cannot drop the lint
-/// silently, and an entry cannot rot there after the crate was documented.
+/// stays green, because rustdoc has nothing to report. Every lib crate enables
+/// the lint - crate-wide, or, while a crate is only half documented, per public
+/// module through `#[warn(missing_docs)]` on the declaration. Whatever is not
+/// covered is listed in `PENDING`, and that list is checked in both directions:
+/// coverage cannot be dropped silently, and an entry cannot rot there after the
+/// crate or module was documented.
+///
+/// The module form exists so a crate can start enforcing the layer that is
+/// done: `rivulet-obs-websocket` documents its protocol types while the backend
+/// bridge is still open, and the pin then requires the attribute on every other
+/// public module of that crate rather than on the crate as a whole.
 #[test]
 fn every_lib_crate_enables_the_missing_docs_lint() {
-    // Undocumented when the lint was turned on; each entry disappears in the
-    // same change that documents the crate (obs-websocket 85 items at the time
-    // of writing).
-    const PENDING: &[&str] = &["rivulet-obs-websocket"];
+    // `(crate, None)` = the crate still owes documentation as a whole,
+    // `(crate, Some(module))` = only that public module does. Each entry
+    // disappears in the same change that documents the crate or module
+    // (obs-websocket: 85 items at the time of writing).
+    const PENDING: &[(&str, Option<&str>)] = &[("rivulet-obs-websocket", None)];
 
-    let mut crates = Vec::new();
+    /// One lib crate: its name, whether `lib.rs` enables the lint crate-wide,
+    /// and its public modules with the same answer per module.
+    struct LibCrate {
+        name: String,
+        crate_lint: bool,
+        modules: Vec<(String, bool)>,
+    }
+
+    /// Public modules declared in `lib.rs`, each with whether its declaration
+    /// carries `#[warn(missing_docs)]`. The attribute lives in the attribute
+    /// block above the declaration, next to `#[cfg(...)]` for a gated module.
+    fn public_modules(source: &str) -> Vec<(String, bool)> {
+        let lines: Vec<&str> = source.lines().map(str::trim).collect();
+        let mut modules = Vec::new();
+        for (index, line) in lines.iter().enumerate() {
+            let Some(name) = line
+                .strip_prefix("pub mod ")
+                .and_then(|rest| rest.strip_suffix(';'))
+            else {
+                continue;
+            };
+            let documented = lines[..index]
+                .iter()
+                .rev()
+                .take_while(|line| line.starts_with("#["))
+                .any(|line| *line == "#[warn(missing_docs)]");
+            modules.push((name.to_string(), documented));
+        }
+        modules
+    }
+
+    let mut crates: Vec<LibCrate> = Vec::new();
     for entry in fs::read_dir(repo_file("")).expect("read the repository root") {
         let dir = entry.expect("read_dir entry").path();
         let lib = dir.join("src").join("lib.rs");
@@ -7064,27 +7103,100 @@ fn every_lib_crate_enables_the_missing_docs_lint() {
             continue;
         }
         let source = fs::read_to_string(&lib)
-            .unwrap_or_else(|e| panic!("failed to read {}: {e}", lib.display()));
-        let lint = source
-            .lines()
-            .any(|line| line.trim() == "#![warn(missing_docs)]");
-        let name = dir
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
-        crates.push((name, lint));
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", lib.display()));
+        crates.push(LibCrate {
+            name: dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            crate_lint: source
+                .lines()
+                .any(|line| line.trim() == "#![warn(missing_docs)]"),
+            modules: public_modules(&source),
+        });
     }
-    crates.sort();
+    crates.sort_by(|a, b| a.name.cmp(&b.name));
 
     let mut missing = Vec::new();
     let mut stale = Vec::new();
-    for (name, lint) in &crates {
-        match (lint, PENDING.contains(&name.as_str())) {
-            (false, false) => missing.push(name.as_str()),
-            (true, true) => stale.push(name.as_str()),
-            _ => {}
+    for krate in &crates {
+        let whole_crate = PENDING.contains(&(krate.name.as_str(), None));
+        let mut pending_modules: Vec<&str> = PENDING
+            .iter()
+            .filter(|(name, module)| *name == krate.name && module.is_some())
+            .filter_map(|(_, module)| *module)
+            .collect();
+        pending_modules.sort_unstable();
+
+        if krate.crate_lint {
+            // A crate-wide lint subsumes every entry for the crate.
+            if whole_crate {
+                stale.push(format!("{} (the crate enables the lint)", krate.name));
+            }
+            for module in &pending_modules {
+                stale.push(format!(
+                    "{}::{module} (the crate enables the lint)",
+                    krate.name
+                ));
+            }
+            continue;
         }
+
+        if whole_crate {
+            for module in &pending_modules {
+                stale.push(format!(
+                    "{}::{module} (redundant, the whole crate is listed)",
+                    krate.name
+                ));
+            }
+            continue;
+        }
+
+        if krate.modules.is_empty() {
+            missing.push(format!("{} (crate-wide)", krate.name));
+        }
+        for (module, documented) in &krate.modules {
+            let pending = pending_modules.contains(&module.as_str());
+            match (documented, pending) {
+                (false, false) => missing.push(format!("{}::{module}", krate.name)),
+                (true, true) => stale.push(format!(
+                    "{}::{module} (the module enables the lint)",
+                    krate.name
+                )),
+                _ => {}
+            }
+        }
+        // An entry for a module the crate no longer declares can never be
+        // removed by documenting anything.
+        for module in &pending_modules {
+            if !krate.modules.iter().any(|(declared, _)| declared == module) {
+                stale.push(format!("{}::{module} (no such public module)", krate.name));
+            }
+        }
+    }
+    for (name, _) in PENDING {
+        if !crates.iter().any(|krate| krate.name == *name) {
+            stale.push(format!("{name} (no such lib crate)"));
+        }
+    }
+
+    // Both lists land in one message: a change that documents a module while
+    // another one is still open must not hide the stale entry behind the
+    // missing one.
+    let mut problems = Vec::new();
+    if !missing.is_empty() {
+        problems.push(format!(
+            "these lib crates or modules must enable `missing_docs` (add a PENDING entry only \
+             while they still owe documentation):\n  {}",
+            missing.join("\n  ")
+        ));
+    }
+    if !stale.is_empty() {
+        problems.push(format!(
+            "these PENDING entries are stale, so the crate or module is documented already:\n  {}",
+            stale.join("\n  ")
+        ));
     }
 
     assert!(
@@ -7092,17 +7204,7 @@ fn every_lib_crate_enables_the_missing_docs_lint() {
         "found only {} lib crates, so this scan is not covering the workspace",
         crates.len()
     );
-    assert!(
-        missing.is_empty(),
-        "these lib crates must enable `#![warn(missing_docs)]` (add one to PENDING only \
-         while it still owes documentation):\n  {}",
-        missing.join("\n  ")
-    );
-    assert!(
-        stale.is_empty(),
-        "these crates enable the lint, so PENDING is stale:\n  {}",
-        stale.join("\n  ")
-    );
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
 /// #293's acceptance criteria say an example that only compiles but never
