@@ -11526,6 +11526,31 @@ fn assert_aggregate_requires(ci: &str, job: &str) {
 /// the file. The scan below reads every `python3 scripts/<name>` invocation in
 /// the workflow and checks it against the working tree, so a dropped or renamed
 /// script fails here instead of on a 20-minute CI run.
+/// `scripts/branch-hygiene.py` decides whether a gone branch may be deleted, so
+/// its `git for-each-ref` parsing, PR mapping and exit-code rule are the parts
+/// that can rot unseen. The self-test covers them; this pin keeps that self-test
+/// wired into the two places that run the other script self-tests.
+#[test]
+fn branch_hygiene_self_test_is_wired_into_ci_and_the_pre_push_hook() {
+    let script = read("scripts/branch-hygiene.py");
+    assert!(
+        script.contains("\"--self-test\"") && script.contains("def self_test()"),
+        "scripts/branch-hygiene.py must keep its --self-test entry point"
+    );
+
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("python3 scripts/branch-hygiene.py --self-test"),
+        "the Lints job must run the branch-hygiene self-test"
+    );
+
+    let hook = read(".githooks/pre-push");
+    assert!(
+        hook.contains("python scripts/branch-hygiene.py --self-test"),
+        "the pre-push fast stage mirrors the Lints-job self-tests"
+    );
+}
+
 #[test]
 fn every_script_the_workflow_runs_exists_in_the_repository() {
     let ci = read(".github/workflows/ci.yml");

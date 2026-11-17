@@ -208,6 +208,14 @@ gh pr merge <PR-number> --squash --delete-branch
 git checkout develop && git pull --ff-only
 ```
 
+Squash-merging is also why `git branch -d` never cleans the branch up
+afterwards: the squashed commit carries no parent link to the branch tip, so
+git does not consider it merged and refuses the delete — use
+`scripts/branch-hygiene.py`, which maps local branches whose upstream is gone
+against `gh pr list --state all` and only flags a branch whose PR is `MERGED` or
+`CLOSED` under `--check`. Its ref parsing, PR mapping and exit-code rule are
+covered by `--self-test`, which the Lints job and the pre-push hook run.
+
 **Multi-slice issues:** after each merged slice, post a progress comment on
 the tracking issue in a fixed form — `**Slice N/M — <topic>: shipped** in
 PR #X (squash `<hash>` on `develop`)`, followed by what landed and the

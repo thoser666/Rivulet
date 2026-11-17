@@ -66,6 +66,9 @@ if [[ "${RIVULET_PRE_PUSH_FAST_TESTS:-}" != "0" ]]; then
 
     echo "pre-push: python scripts/check-code-scanning-alerts.py --self-test"
     python scripts/check-code-scanning-alerts.py --self-test
+
+    echo "pre-push: python scripts/branch-hygiene.py --self-test"
+    python scripts/branch-hygiene.py --self-test
   else
     echo "pre-push: python not found — skipping script self-tests"
   fi
