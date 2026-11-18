@@ -893,6 +893,21 @@ struct CompoundStep {
     sources: rivulet_core::SourceManager,
 }
 
+/// A staged OBS collection import (issue #367): the file it was read from plus the
+/// mapped scene managers and report.
+///
+/// The payload carries everything the report modal needs, so the modal can be
+/// drawn without mutating app state. Nothing is applied until the user presses
+/// Apply; Cancel (or closing the modal) drops the staging entirely.
+#[derive(Debug, Clone)]
+struct ObsImportPending {
+    /// The collection file the user picked, named in the status line after
+    /// applying.
+    path: std::path::PathBuf,
+    /// The mapped collection plus the report the modal shows.
+    import: rivulet_core::ObsImport,
+}
+
 #[cfg(target_os = "linux")]
 enum BackendMessage {
     Stream(Stream, Fd),
@@ -1741,6 +1756,10 @@ pub struct RivuletApp {
     compound_undo: Vec<CompoundStep>,
     #[serde(skip)]
     compound_redo: Vec<CompoundStep>,
+    /// A staged OBS collection import (#367), shown as a report modal before
+    /// anything is applied. Runtime-only, never persisted.
+    #[serde(skip)]
+    pending_obs_import: Option<ObsImportPending>,
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[serde(skip)]
     source_preview_rx: Option<Receiver<RawFrame>>,
@@ -2354,6 +2373,7 @@ impl Default for RivuletApp {
             pending_confirmation: None,
             compound_undo: Vec::new(),
             compound_redo: Vec::new(),
+            pending_obs_import: None,
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             source_preview_rx: None,
             #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -5158,7 +5178,11 @@ impl RivuletApp {
     /// ("…failed"); only failures belong in the global surface.
     fn scene_status_is_problem(text: &str) -> bool {
         let mut problem = false;
-        for key in ["scenes_export_failed", "scenes_import_failed"] {
+        for key in [
+            "scenes_export_failed",
+            "scenes_import_failed",
+            "obs_import_failed",
+        ] {
             let localized = Self::static_tr(key);
             let prefix = localized
                 .split_once("{0}")
@@ -5608,6 +5632,11 @@ impl RivuletApp {
             }
             if theme::accent_button(ui, self.tr("scenes_import")).clicked() {
                 self.import_scene_collection();
+            }
+            let obs_import = theme::accent_button(ui, self.tr("scenes_import_obs"))
+                .on_hover_text(self.tr("scenes_import_obs_hint"));
+            if obs_import.clicked() {
+                self.import_obs_collection();
             }
         });
         ui.label(format!(
@@ -6503,6 +6532,75 @@ impl RivuletApp {
             }
             Err(error) => self.scene_status = Some(self.tr_fmt("scenes_import_failed", &[error])),
         }
+    }
+
+    /// Open the file dialog for an OBS Studio scene collection and stage the
+    /// import behind its report modal (#367).
+    fn import_obs_collection(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("JSON", &["json"])
+            .pick_file()
+        else {
+            return;
+        };
+        self.stage_obs_import(&path);
+    }
+
+    /// Read and map an OBS collection file without touching the live state.
+    ///
+    /// Split from `import_obs_collection` so tests can drive the staging path
+    /// without a file dialog. A broken file reports through `scene_status`
+    /// and stages nothing, mirroring the CLI's honesty rule.
+    fn stage_obs_import(&mut self, path: &std::path::Path) {
+        match rivulet_core::import_file(path) {
+            Ok(import) => {
+                self.pending_obs_import = Some(ObsImportPending {
+                    path: path.to_owned(),
+                    import,
+                });
+            }
+            Err(error) => {
+                self.scene_status = Some(self.tr_fmt("obs_import_failed", &[error.to_string()]));
+            }
+        }
+    }
+
+    /// Replace the live scene collection and its sources with a staged import.
+    ///
+    /// The GUI persists both managers, so an OBS migration lands in the same
+    /// state the next restart restores; the selection names IDs of the
+    /// previous collection and must not survive the replacement.
+    fn apply_obs_import(&mut self, import: rivulet_core::ObsImport, path: std::path::PathBuf) {
+        self.scenes = import.scenes;
+        self.source_manager = import.sources;
+        self.scene_selection.clear();
+        self.scene_visible_ids.clear();
+        // Everything else that names a scene or a source of the replaced
+        // collection would now point at IDs that no longer exist: the drag
+        // target, the copied item, the composition selection and Studio
+        // Mode's two roles.
+        self.scene_drag = None;
+        self.scene_item_clipboard = None;
+        self.selected_composition_source = None;
+        let studio_enabled = self.studio_mode.enabled();
+        self.studio_mode.set_enabled(false, None);
+        self.studio_mode
+            .set_enabled(studio_enabled, self.scenes.active());
+        let path_text = path.display().to_string();
+        self.scene_status = Some(if import.report.has_notes() {
+            self.tr_fmt(
+                "obs_import_applied_notes",
+                &[path_text, import.report.notes.len().to_string()],
+            )
+        } else {
+            self.tr_fmt("obs_import_applied", &[path_text])
+        });
+        self.pending_obs_import = None;
+    }
+
+    /// Discard a staged import without touching the live collection.
+    fn cancel_obs_import(&mut self) {
+        self.pending_obs_import = None;
     }
 
     /// Create a scene source from the add dialog, applying the picked device id
@@ -10319,6 +10417,55 @@ impl RivuletApp {
             ConfirmationChoice::Pending => {
                 if response.should_close() || response.backdrop_response.clicked() {
                     self.cancel_pending_confirmation();
+                }
+            }
+        }
+    }
+
+    /// The OBS import report modal (#367): the user reads what the import maps,
+    /// skips and approximates before anything is applied.
+    fn draw_obs_import_modal(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.pending_obs_import.clone() else {
+            return;
+        };
+        let title = self.tr("obs_import_title").to_owned();
+        let replace_hint = self.tr("obs_import_replace_hint").to_owned();
+        let report_label = self.tr("obs_import_report").to_owned();
+        let report = pending.import.report.describe();
+        let apply_label = self.tr("obs_import_apply").to_owned();
+        let cancel_label = self.tr("confirm_dialog_cancel").to_owned();
+
+        let mut choice = ConfirmationChoice::Pending;
+        let response = egui::Modal::new(egui::Id::new("rivulet_obs_import")).show(ctx, |ui| {
+            ui.set_min_width(480.0);
+            ui.set_max_width(640.0);
+            ui.heading(title);
+            ui.add_space(6.0);
+            ui.label(replace_hint);
+            ui.add_space(8.0);
+            ui.label(report_label);
+            ui.add_space(4.0);
+            egui::ScrollArea::vertical()
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    ui.label(report);
+                });
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                if ui.button(cancel_label).clicked() {
+                    choice = ConfirmationChoice::Cancel;
+                }
+                if theme::accent_button(ui, apply_label).clicked() {
+                    choice = ConfirmationChoice::Confirm;
+                }
+            });
+        });
+        match choice {
+            ConfirmationChoice::Confirm => self.apply_obs_import(pending.import, pending.path),
+            ConfirmationChoice::Cancel => self.cancel_obs_import(),
+            ConfirmationChoice::Pending => {
+                if response.should_close() || response.backdrop_response.clicked() {
+                    self.cancel_obs_import();
                 }
             }
         }
@@ -15096,6 +15243,10 @@ impl eframe::App for RivuletApp {
         // Destructive confirmation modal: rendered last so it always sits on
         // top of every dock and drawer.
         self.draw_confirmation_modal(ui.ctx());
+
+        // OBS import report modal (#367): after the confirmation modal, since
+        // only one action is staged at a time.
+        self.draw_obs_import_modal(ui.ctx());
     }
 }
 
@@ -17613,6 +17764,228 @@ mod tests {
             restored.scenes.last_active(),
             None,
             "switch-back history is session navigation and must not survive a restart"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // OBS collection import (#367): staging is side-effect free, applying
+    // replaces the collection and its sources, and a broken file reports
+    // through the global error surface instead of staging anything.
+    // ---------------------------------------------------------------------------
+
+    /// A collection with one mapped capture (bound to its scene, without
+    /// `bounds`, so its scale is reported) and one unsupported plugin source.
+    /// Two notes in total, which exercises the "noted differences" status.
+    const OBS_IMPORT_COLLECTION: &str = r#"{
+        "name": "Game",
+        "current_scene": "Main",
+        "scene_order": [{"name": "Main"}],
+        "sources": [
+            {"id": "scene", "name": "Main", "settings": {"items": [
+                {"name": "Capture", "visible": true}
+            ]}},
+            {"id": "monitor_capture", "name": "Capture", "settings": {"monitor": 1}},
+            {"id": "obs_nvidia_denoiser", "name": "Denoiser", "settings": {}}
+        ]
+    }"#;
+
+    /// Write an OBS collection fixture to the temp dir and return its path.
+    fn write_obs_fixture(name: &str, contents: &str) -> std::path::PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("rivulet_obs_import_{}_{name}", std::process::id()));
+        std::fs::write(&path, contents).expect("write the OBS fixture");
+        path
+    }
+
+    #[test]
+    fn stage_obs_import_leaves_the_live_collection_untouched() {
+        let mut app = RivuletApp::default();
+        let live = app.scenes.add(rivulet_core::Scene::new("Live".to_owned()));
+        app.scenes.switch_to(live);
+        let live_source = app.source_manager.add_source(rivulet_core::Source::new(
+            "Webcam".to_owned(),
+            rivulet_core::SourceKind::Webcam,
+        ));
+        app.source_manager.bind_source(live_source, live, None);
+        app.scene_selection.select(live);
+        app.scene_visible_ids = vec![live];
+
+        let path = write_obs_fixture("stage", OBS_IMPORT_COLLECTION);
+        app.stage_obs_import(&path);
+
+        let pending = app
+            .pending_obs_import
+            .as_ref()
+            .expect("staging must keep the import for the report modal");
+        assert_eq!(pending.import.report.collection, "Game");
+        assert_eq!(pending.import.report.scenes, 1);
+        assert_eq!(pending.import.report.sources, 1);
+        assert_eq!(pending.import.report.bindings, 1);
+        assert_eq!(pending.import.report.skipped, 1);
+        assert!(pending.import.report.has_notes());
+
+        assert_ne!(app.scenes.collection(), "Game", "staging must not apply");
+        assert_eq!(app.scenes.active(), Some(live));
+        assert!(
+            app.source_manager.get_source(live_source).is_some(),
+            "staging must not replace the live sources"
+        );
+        assert!(app.scene_selection.contains(live));
+        assert_eq!(app.scene_visible_ids, vec![live]);
+        assert_eq!(app.scene_status, None, "a readable file stages silently");
+    }
+
+    #[test]
+    fn apply_obs_import_replaces_the_collection_and_its_sources() {
+        let mut app = RivuletApp::default();
+        let stale = app.scenes.add(rivulet_core::Scene::new("Stale".to_owned()));
+        app.scenes.switch_to(stale);
+        let stale_source = app.source_manager.add_source(rivulet_core::Source::new(
+            "Webcam".to_owned(),
+            rivulet_core::SourceKind::Webcam,
+        ));
+        app.source_manager.bind_source(stale_source, stale, None);
+        app.scene_selection.select(stale);
+        app.scene_visible_ids = vec![stale];
+        app.scene_item_clipboard = app.source_manager.copy_scene_item(stale_source, stale);
+        app.selected_composition_source = Some(stale_source);
+        app.scene_drag = Some(stale);
+        app.studio_mode.set_enabled(true, Some(stale));
+
+        let path = write_obs_fixture("apply", OBS_IMPORT_COLLECTION);
+        app.stage_obs_import(&path);
+        let pending = app.pending_obs_import.clone().expect("staged import");
+        app.apply_obs_import(pending.import, pending.path);
+
+        assert_eq!(app.scenes.collection(), "Game");
+        let main_id = app
+            .scenes
+            .active()
+            .expect("the OBS current scene is active");
+        assert_eq!(
+            app.scenes.get(main_id).map(|scene| scene.name.as_str()),
+            Some("Main")
+        );
+        assert_eq!(app.scenes.scenes().len(), 1);
+        assert!(
+            app.source_manager
+                .sources()
+                .iter()
+                .all(|source| source.name != "Webcam"),
+            "the old sources must be gone"
+        );
+        assert_eq!(
+            app.source_manager.sources().len(),
+            1,
+            "the denoiser is skipped"
+        );
+        assert_eq!(
+            app.source_manager.scene_sources(main_id).len(),
+            1,
+            "the scene item arrives as a binding"
+        );
+        assert!(app.scene_selection.is_empty(), "the selection is stale");
+        assert!(app.scene_visible_ids.is_empty(), "the fold state is stale");
+        assert!(
+            app.scene_item_clipboard.is_none(),
+            "the clipboard names a source of the replaced collection"
+        );
+        assert_eq!(app.selected_composition_source, None);
+        assert!(app.scene_drag.is_none(), "the drag target is stale");
+        assert!(app.studio_mode.enabled(), "Studio Mode stays enabled");
+        assert_eq!(
+            app.studio_mode.preview(),
+            app.scenes.active(),
+            "Studio Mode re-points at the imported active scene"
+        );
+        assert_eq!(app.studio_mode.program(), app.scenes.active());
+        assert!(
+            app.pending_obs_import.is_none(),
+            "applying clears the staged import"
+        );
+        let status = app.tr_fmt(
+            "obs_import_applied_notes",
+            &[path.display().to_string(), "2".to_string()],
+        );
+        assert_eq!(app.scene_status, Some(status));
+    }
+
+    /// A collection whose scene and group both hold the same capture: the
+    /// group arrives as a folder scene with its member bound inside it.
+    const OBS_IMPORT_GROUP_COLLECTION: &str = r#"{
+        "name": "Grouped",
+        "current_scene": "Main",
+        "scene_order": [{"name": "Main"}, {"name": "Overlay"}],
+        "groups": [{"name": "Overlay", "items": [{"name": "Logo"}]}],
+        "sources": [
+            {"id": "scene", "name": "Main", "settings": {"items": [{"name": "Logo"}]}},
+            {"id": "group", "name": "Overlay", "settings": {"items": []}},
+            {"id": "image_source", "name": "Logo", "settings": {"file": "logo.png"}}
+        ]
+    }"#;
+
+    #[test]
+    fn apply_obs_import_brings_groups_and_bindings_into_the_collection() {
+        let mut app = RivuletApp::default();
+        let path = write_obs_fixture("group", OBS_IMPORT_GROUP_COLLECTION);
+        app.stage_obs_import(&path);
+        let pending = app.pending_obs_import.clone().expect("staged import");
+        assert_eq!(pending.import.report.folders, 1);
+        assert_eq!(pending.import.report.bindings, 2);
+        app.apply_obs_import(pending.import, pending.path);
+
+        // The OBS group becomes a scene the folder dock renders as a folder …
+        let folder_id = app
+            .scenes
+            .scenes()
+            .iter()
+            .find(|scene| scene.name == "Overlay")
+            .map(|scene| scene.id)
+            .expect("the group arrives as a scene");
+        assert!(app.scenes.get(folder_id).unwrap().parent.is_none());
+        // … with its member bound inside it, while the scene keeps its own
+        // binding to the same source.
+        let folder_items = app.source_manager.scene_sources(folder_id);
+        assert_eq!(folder_items.len(), 1, "the group member is a binding");
+        let main_id = app
+            .scenes
+            .active()
+            .expect("the OBS current scene is active");
+        let main_items = app.source_manager.scene_sources(main_id);
+        assert_eq!(main_items.len(), 1);
+        assert_eq!(
+            folder_items[0].source_id, main_items[0].source_id,
+            "one OBS source, two scene bindings"
+        );
+        assert!(app
+            .source_manager
+            .get_source(folder_items[0].source_id)
+            .is_some());
+    }
+
+    #[test]
+    fn stage_obs_import_reports_a_broken_collection_without_staging_it() {
+        let mut app = RivuletApp::default();
+        let live = app.scenes.add(rivulet_core::Scene::new("Live".to_owned()));
+        app.scenes.switch_to(live);
+
+        let path = write_obs_fixture("broken", "{ not valid json");
+        app.stage_obs_import(&path);
+
+        assert!(
+            app.pending_obs_import.is_none(),
+            "a broken file must stage nothing"
+        );
+        assert_eq!(app.scenes.active(), Some(live), "the live collection stays");
+        let status = app.scene_status.clone().expect("the failure is reported");
+        let failure = RivuletApp::static_tr("obs_import_failed");
+        let prefix = failure
+            .split_once("{0}")
+            .map_or(status.as_str(), |(head, _)| head);
+        assert!(status.starts_with(prefix), "{status}");
+        assert!(
+            RivuletApp::scene_status_is_problem(&status),
+            "the import failure must reach the global issue surface"
         );
     }
 

@@ -799,10 +799,25 @@ Discord Rich Presence. Never includes stream keys, URLs, paths or window titles.
                 ("scenes_profile", "Profile"),
                 ("scenes_export", "Export"),
                 ("scenes_import", "Import"),
+                ("scenes_import_obs", "Import OBS collection..."),
+                ("scenes_import_obs_hint", "Import an OBS Studio scene collection from its JSON file"),
                 ("scenes_exported", "Scene collection exported to {0}."),
                 ("scenes_export_failed", "Could not export scene collection: {0}"),
                 ("scenes_imported", "Scene collection imported from {0}."),
                 ("scenes_import_failed", "Could not import scene collection: {0}"),
+                ("obs_import_title", "Import OBS collection"),
+                ("obs_import_report", "Import report"),
+                (
+                    "obs_import_replace_hint",
+                    "Applying replaces the current scene collection and its sources.",
+                ),
+                ("obs_import_apply", "Apply"),
+                ("obs_import_failed", "Could not import OBS collection: {0}"),
+                ("obs_import_applied", "OBS collection imported from {0}."),
+                (
+                    "obs_import_applied_notes",
+                    "OBS collection imported from {0} ({1} difference(s) noted).",
+                ),
                 ("scenes_hotkey", "Scene hotkey"),
                 ("scene_overlay", "Scene overlay"),
                 ("scene_overlay_enabled", "Enable overlay"),
@@ -1691,10 +1706,28 @@ Discord Rich Presence. Enthält nie Stream-Keys, URLs, Pfade oder Fenstertitel."
                 ("scenes_profile", "Profil"),
                 ("scenes_export", "Exportieren"),
                 ("scenes_import", "Importieren"),
+                ("scenes_import_obs", "OBS-Sammlung importieren..."),
+                (
+                    "scenes_import_obs_hint",
+                    "Eine OBS-Studio-Szenensammlung aus ihrer JSON-Datei importieren",
+                ),
                 ("scenes_exported", "Szenensammlung exportiert nach {0}."),
                 ("scenes_export_failed", "Szenensammlung konnte nicht exportiert werden: {0}"),
                 ("scenes_imported", "Szenensammlung importiert aus {0}."),
                 ("scenes_import_failed", "Szenensammlung konnte nicht importiert werden: {0}"),
+                ("obs_import_title", "OBS-Sammlung importieren"),
+                ("obs_import_report", "Importbericht"),
+                (
+                    "obs_import_replace_hint",
+                    "Anwenden ersetzt die aktuelle Szenensammlung und ihre Quellen.",
+                ),
+                ("obs_import_apply", "Anwenden"),
+                ("obs_import_failed", "OBS-Sammlung konnte nicht importiert werden: {0}"),
+                ("obs_import_applied", "OBS-Sammlung importiert aus {0}."),
+                (
+                    "obs_import_applied_notes",
+                    "OBS-Sammlung importiert aus {0} ({1} Abweichung(en) vermerkt).",
+                ),
                 ("scenes_hotkey", "Szenen-Hotkey"),
                 ("scene_overlay", "Szenen-Overlay"),
                 ("scene_overlay_enabled", "Overlay aktivieren"),
@@ -2325,6 +2358,65 @@ mod tests {
         assert_eq!(en_removed, "Scene \"Old\" removed.");
         let de_removed = Locale::De.tr_fmt("scenes_removed", &["Old".to_string()]);
         assert_eq!(de_removed, "Szene \"Old\" entfernt.");
+    }
+
+    #[test]
+    fn obs_import_keys_translate_in_both_locales() {
+        // The OBS import surface (#367): the collection-menu button, the
+        // report modal and the status line after applying.
+        assert_eq!(
+            Locale::En.tr("scenes_import_obs"),
+            "Import OBS collection..."
+        );
+        assert_eq!(
+            Locale::De.tr("scenes_import_obs"),
+            "OBS-Sammlung importieren..."
+        );
+        assert_eq!(Locale::En.tr("obs_import_title"), "Import OBS collection");
+        assert_eq!(
+            Locale::De.tr("obs_import_title"),
+            "OBS-Sammlung importieren"
+        );
+        assert_eq!(Locale::En.tr("obs_import_report"), "Import report");
+        assert_eq!(Locale::De.tr("obs_import_report"), "Importbericht");
+        assert_eq!(Locale::En.tr("obs_import_apply"), "Apply");
+        assert_eq!(Locale::De.tr("obs_import_apply"), "Anwenden");
+        assert_eq!(
+            Locale::En.tr("obs_import_replace_hint"),
+            "Applying replaces the current scene collection and its sources."
+        );
+        assert_eq!(
+            Locale::De.tr("obs_import_replace_hint"),
+            "Anwenden ersetzt die aktuelle Szenensammlung und ihre Quellen."
+        );
+        assert_eq!(
+            Locale::En.tr("obs_import_failed"),
+            "Could not import OBS collection: {0}"
+        );
+        assert_eq!(
+            Locale::De.tr("obs_import_failed"),
+            "OBS-Sammlung konnte nicht importiert werden: {0}"
+        );
+        let en = Locale::En.tr_fmt("obs_import_applied", &["Game.json".to_string()]);
+        assert_eq!(en, "OBS collection imported from Game.json.");
+        let de = Locale::De.tr_fmt("obs_import_applied", &["Game.json".to_string()]);
+        assert_eq!(de, "OBS-Sammlung importiert aus Game.json.");
+        let en = Locale::En.tr_fmt(
+            "obs_import_applied_notes",
+            &["Game.json".to_string(), "3".to_string()],
+        );
+        assert_eq!(
+            en,
+            "OBS collection imported from Game.json (3 difference(s) noted)."
+        );
+        let de = Locale::De.tr_fmt(
+            "obs_import_applied_notes",
+            &["Game.json".to_string(), "3".to_string()],
+        );
+        assert_eq!(
+            de,
+            "OBS-Sammlung importiert aus Game.json (3 Abweichung(en) vermerkt)."
+        );
     }
 
     #[test]

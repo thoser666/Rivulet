@@ -30,6 +30,30 @@
   `duplicate_scene_action_copies_the_scene_items_with_own_ids` and
   `duplicate_scene_undo_reverts_the_scene_and_its_items_in_one_step` (GUI).
 
+- feat(gui): **an OBS Studio collection imports straight into the running
+  collection, sources and groups included**
+  ([#367](https://github.com/thoser666/Rivulet/issues/367)). The Scenes menu
+  now has **Import OBS collection…**: it reads the file `rivulet_core::obs_import`
+  already maps and shows that report - scenes, group folders, sources, bound
+  scene items, and every difference the mapper had to make - in a modal before
+  anything changes. Apply replaces the live scene collection and its sources
+  with the mapped ones, i.e. exactly the state the next restart restores:
+  group sources become folder scenes, group members and scene items become
+  bindings with transform, crop, visibility and lock preserved, and
+  `current_scene` becomes the active scene. The replacement also drops state
+  that names the previous collection: scene selection, fold state, the drag
+  target, the copied scene item, the composition selection, and Studio Mode's
+  preview/program roles, which re-point at the imported active scene. Cancel,
+  closing the modal and an unreadable file all leave the live collection
+  untouched; a broken file reports through the status line and the global
+  issue surface. The CLI stays the report/export path - `import-obs --out`
+  still writes the scene tree only, so bindings reach Rivulet through the GUI
+  import. Tests: `stage_obs_import_leaves_the_live_collection_untouched`,
+  `apply_obs_import_replaces_the_collection_and_its_sources`,
+  `apply_obs_import_brings_groups_and_bindings_into_the_collection`,
+  `stage_obs_import_reports_a_broken_collection_without_staging_it` (GUI) and
+  `obs_import_keys_translate_in_both_locales` (i18n).
+
 - fix(gui): **the scene collection survives a restart.** `RivuletApp` carried
   `scenes` and `source_manager` behind `#[serde(skip)]`, so `save()` never wrote
   the collection: every restart came back with no scenes, and only a manual
