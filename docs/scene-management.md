@@ -92,8 +92,21 @@ the same reason.
 
 ## Persistence and compatibility
 
-`SceneManager::export_json` / `import_json` are the on-disk and clipboard
-format. Two compatibility guarantees hold:
+The GUI keeps the live collection in the app state, so the scene tree, its
+sources and every scene-local binding are written with the eframe storage and
+restored on the next start — a restart never comes back with an empty
+collection. `restore_from_storage` re-reads them from the same `APP_KEY` blob
+as the other settings; a state file written before this was persisted simply
+loads with no scenes, exactly as that version left it.
+
+What comes back is the document, not the session: the active scene is restored,
+the switch-back stack is not. Like undo/redo it is navigation state, so
+`SceneManager` keeps `history` out of the collection JSON as well and a restored
+collection starts with an empty one.
+
+`SceneManager::export_json` / `import_json` are the portable export/import and
+clipboard format (the file carries the scene tree and its transitions, not the
+sources). Two compatibility guarantees hold:
 
 - **Collections written before the `kind` field load unchanged.** `kind` is
   `#[serde(default)]`, so a missing field means `Primary`. Existing users must

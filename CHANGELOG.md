@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+- fix(gui): **the scene collection survives a restart.** `RivuletApp` carried
+  `scenes` and `source_manager` behind `#[serde(skip)]`, so `save()` never wrote
+  the collection: every restart came back with no scenes, and only a manual
+  Export/Import kept them. Both now travel in the app blob with the rest of the
+  state (`#[serde(default)]`, so a state file written by an older build still
+  loads), which restores the scene tree, folder parents, per-folder transitions,
+  the active scene and every scene-local source binding.
+  `the_scene_collection_and_its_sources_survive_a_restart` drives the real
+  `save()` → `restore_from_storage` path. The switch-back stack stays out of it:
+  like undo/redo it is session navigation, so `SceneManager` no longer writes
+  `history` into the collection JSON either and a restored collection starts
+  with an empty one
+  (`manager_export_keeps_the_switch_history_out_of_the_collection_format`).
+
 - ci(deps): **one documented advisory exception keeps the security gate green.**
   RustSec published `RUSTSEC-2026-0543` ("chrono is unmaintained", no safe
   upgrade) on 2026-11-17. `chrono` is a direct dependency of `rivulet-core` and

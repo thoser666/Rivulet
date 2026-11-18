@@ -1754,7 +1754,11 @@ pub struct RivuletApp {
     view: AppView,
 
     // Scenes (multiple scenes & switching)
-    #[serde(skip)]
+    /// The scene collection: scenes, folder parents, per-folder transitions and
+    /// the active scene. Persisted in the app blob with the rest of the state —
+    /// it is the user's document, not runtime state, so a restart must not come
+    /// back with an empty collection.
+    #[serde(default)]
     scenes: rivulet_core::SceneManager,
 
     /// Whether recording and streaming carry the composed active scene
@@ -1843,7 +1847,10 @@ pub struct RivuletApp {
     auto_switch_rules: Vec<(String, uuid::Uuid)>,
     #[serde(skip)]
     auto_switch_window_input: String,
-    #[serde(skip)]
+    /// Every source and its scene-local bindings (transform, crop,
+    /// visibility, lock, z-order). Persisted with the collection: scenes whose
+    /// bindings were dropped would come back as empty shells after a restart.
+    #[serde(default)]
     source_manager: rivulet_core::SourceManager,
     #[serde(skip)]
     source_name_input: String,
@@ -17464,6 +17471,47 @@ mod tests {
         assert!(
             !restored.scene_dock.is_collapsed("Podcast", folder),
             "another collection must not inherit the fold"
+        );
+    }
+
+    #[test]
+    fn the_scene_collection_and_its_sources_survive_a_restart() {
+        // Regression: `scenes` and `source_manager` were `#[serde(skip)]`, so
+        // every restart started from an empty collection and the scenes the
+        // user built were gone; only a manual Export/Import kept them.
+        let mut app = RivuletApp::default();
+        let scene = app
+            .scenes
+            .add(rivulet_core::Scene::new("Gaming".to_string()));
+        let source = app.source_manager.add_source(rivulet_core::Source::new(
+            "Webcam".to_string(),
+            rivulet_core::SourceKind::Webcam,
+        ));
+        app.source_manager.bind_source(source, scene, None);
+        assert!(app.scenes.switch_to(scene));
+        let expected = app.scenes.export_json().expect("serialize collection");
+
+        let mut storage = MemoryStorage::default();
+        eframe::App::save(&mut app, &mut storage);
+
+        let restored = RivuletApp::restore_from_storage(Some(&storage))
+            .expect("persisted app state must be restored");
+        assert_eq!(
+            restored.scenes.export_json().expect("serialize restored"),
+            expected,
+            "the collection must come back exactly as it was saved"
+        );
+        assert_eq!(restored.scenes.active(), Some(scene));
+        assert_eq!(restored.source_manager.sources().len(), 1);
+        assert_eq!(
+            restored.source_manager.scene_sources(scene).len(),
+            1,
+            "the scene binding must come back with its scene"
+        );
+        assert_eq!(
+            restored.scenes.last_active(),
+            None,
+            "switch-back history is session navigation and must not survive a restart"
         );
     }
 
