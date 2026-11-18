@@ -63,7 +63,11 @@
   with the mapped ones, i.e. exactly the state the next restart restores:
   group sources become folder scenes, group members and scene items become
   bindings with transform, crop, visibility and lock preserved, and
-  `current_scene` becomes the active scene. The replacement also drops state
+  `current_scene` becomes the active scene. Applying is **one undo step**: the
+  pre-edit state of both managers is recorded as the same `CompoundStep` a
+  scene duplicate uses, so a single `Ctrl+Z` brings the previous collection and
+  its sources back and `Ctrl+Y` re-applies the import. The replacement also
+  drops state
   that names the previous collection: scene selection, fold state, the drag
   target, the copied scene item, the composition selection, and Studio Mode's
   preview/program roles, which re-point at the imported active scene. Cancel,
@@ -74,7 +78,8 @@
   import. Tests: `stage_obs_import_leaves_the_live_collection_untouched`,
   `apply_obs_import_replaces_the_collection_and_its_sources`,
   `apply_obs_import_brings_groups_and_bindings_into_the_collection`,
-  `stage_obs_import_reports_a_broken_collection_without_staging_it` (GUI) and
+  `stage_obs_import_reports_a_broken_collection_without_staging_it`,
+  `apply_obs_import_is_one_undo_step` (GUI) and
   `obs_import_keys_translate_in_both_locales` (i18n).
 
 - refactor(deps): **`chrono` is replaced by `time`, so the security gate needs
