@@ -101,8 +101,8 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v4.39.3",
     ),
     (
-        "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294",
-        "v5.0.0",
+        "actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec",
+        "v5.0.1",
     ),
     (
         "actions-rust-lang/audit@72c09e02f132669d52284a3323acdb503cfc1a24",
