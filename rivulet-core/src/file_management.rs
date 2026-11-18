@@ -257,11 +257,21 @@ pub struct PatternValues {
 
 impl PatternValues {
     /// Builds `PatternValues` from a wall clock timestamp.
-    pub fn from_datetime(now: chrono::DateTime<chrono::Local>) -> Self {
+    ///
+    /// The timestamp's own UTC offset is used, so a caller passing
+    /// [`crate::local_now`] gets the user's wall clock while
+    /// `OffsetDateTime::now_utc()` renders UTC.
+    pub fn from_datetime(now: time::OffsetDateTime) -> Self {
         Self {
             name: String::new(),
-            date: now.format("%Y-%m-%d").to_string(),
-            time: now.format("%H-%M-%S").to_string(),
+            date: now
+                .format(time::macros::format_description!("[year]-[month]-[day]"))
+                .unwrap_or_default(),
+            time: now
+                .format(time::macros::format_description!(
+                    "[hour]-[minute]-[second]"
+                ))
+                .unwrap_or_default(),
         }
     }
 }
@@ -465,7 +475,7 @@ mod tests {
     #[test]
     fn render_zero_pads_sequence() {
         let p = FileNamePattern::new("sess_{seq}").unwrap();
-        let vals = PatternValues::from_datetime(chrono::Local::now());
+        let vals = PatternValues::from_datetime(crate::local_now());
         assert_eq!(p.render(&vals, 1, ""), "sess_01");
         assert_eq!(p.render(&vals, 12, ""), "sess_12");
     }
@@ -473,7 +483,7 @@ mod tests {
     #[test]
     fn render_sanitizes_stream_component() {
         let p = FileNamePattern::new("{stream}_gone_live").unwrap();
-        let vals = PatternValues::from_datetime(chrono::Local::now());
+        let vals = PatternValues::from_datetime(crate::local_now());
         let out = p.render(&vals, 1, "Twitch!");
         assert_eq!(out, "twitch_gone_live");
     }
@@ -637,11 +647,17 @@ mod tests {
     #[test]
     fn pattern_values_from_datetime() {
         // Format-aware check that is independent of the local timezone.
-        let now = chrono::Local::now();
+        let now = crate::local_now();
         let vals = PatternValues::from_datetime(now);
-        // Date always matches %Y-%m-%d regardless of zone.
-        let expected_date = now.format("%Y-%m-%d").to_string();
-        let expected_time = now.format("%H-%M-%S").to_string();
+        // Date always matches the same components regardless of zone.
+        let expected_date = now
+            .format(time::macros::format_description!("[year]-[month]-[day]"))
+            .unwrap_or_default();
+        let expected_time = now
+            .format(time::macros::format_description!(
+                "[hour]-[minute]-[second]"
+            ))
+            .unwrap_or_default();
         assert_eq!(vals.date, expected_date);
         assert_eq!(vals.time, expected_time);
     }
