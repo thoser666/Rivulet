@@ -269,8 +269,10 @@ impl SceneManager {
     }
 
     /// Change stamp of the newest undo entry, or `None` when there is nothing
-    /// to undo. Together with [`SourceManager::paste_undo_seq`] this lets a
-    /// caller that owns several histories undo the newest edit first.
+    /// to undo. Together with
+    /// [`SourceManager::paste_undo_seq`](crate::SourceManager::paste_undo_seq)
+    /// this lets a caller that owns several histories undo the newest edit
+    /// first.
     pub fn undo_seq(&self) -> Option<u64> {
         self.undo_stack.last().map(|snapshot| snapshot.seq)
     }
