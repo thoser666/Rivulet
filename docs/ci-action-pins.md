@@ -27,7 +27,7 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | `actions-rust-lang/audit` | `v1.2.7` | `72c09e02f132669d52284a3323acdb503cfc1a24` | security.yml |
 | `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, obs-upstream.yml, reproducible-build.yml |
 | `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | assets-tool-image.yml, build-package.yml, ci.yml, distribution-readiness.yml, flatpak-build.yml, fuzz-deep.yml, nightly.yml, obs-upstream.yml, release.yml, reproducible-build.yml, ruleset-guard.yml, scorecard.yml, security.yml, signing-e2e.yml, weekly-promotion.yml, wiki-translations.yml |
-| `actions/dependency-review-action` | `v5.0.0` | `a1d282b36b6f3519aa1f3fc636f609c47dddb294` | security.yml |
+| `actions/dependency-review-action` | `v5.0.1` | `bbc44d14a204704ccc493733616cd1e93a0321ec` | security.yml |
 | `actions/download-artifact` | `v8.0.2` | `9000827ccba6bdab643e8b6fd33ac0654aef8333` | ci.yml, release.yml, reproducible-build.yml |
 | `actions/upload-artifact` | `v7.0.2` | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` | build-package.yml, ci.yml, fuzz-deep.yml, obs-upstream.yml, reproducible-build.yml, scorecard.yml, weekly-promotion.yml |
 | `dtolnay/rust-toolchain` | `stable` | `89b12181fb390509a0842a86cc55eeb8eb928c1d` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, reproducible-build.yml, security.yml |
