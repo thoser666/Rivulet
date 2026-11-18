@@ -72,7 +72,12 @@ removed scene's own parent. Deleting `Show/Game` therefore leaves `Chat` under
 `Show` rather than making it a scene with a parent that no longer exists.
 
 `SceneManager::duplicate_scene` keeps the source's `parent` and `kind`, so
-duplicating inside a folder does not eject the copy to the top level.
+duplicating inside a folder does not eject the copy to the top level. The copy
+is not empty: the scene items live in `SourceManager`, so duplicating a scene
+also calls `SourceManager::duplicate_scene_bindings`, which copies every item
+into the new scene as its own source instance (binding properties preserved,
+source under a fresh id), the way OBS's "Duplicate Scene" brings the sources
+along.
 
 ### Presentation order and broken input
 

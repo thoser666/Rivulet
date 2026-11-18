@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+- fix(gui): **duplicating a scene copies its sources instead of leaving the
+  copy empty.** The Duplicate button only ever copied the scene node, so the
+  new scene opened with no items while the original kept the only ones — OBS's
+  "Duplicate Scene" brings every source along. `SceneManager::duplicate_scene`
+  still owns the node (fresh id, same folder, same kind), and the GUI pairs it
+  with the new `SourceManager::duplicate_scene_bindings`: each scene item is
+  copied into the new scene as its own source instance — binding properties
+  (transform override, crop, visibility, lock, z-order) preserved, source
+  definition under a fresh id with the same ` copy` name paste uses — so
+  editing the duplicate never reaches back into the original scene. A binding
+  whose source is missing is skipped rather than copied as a dangling item,
+  the duplication lands on the paste-undo stack like every other copy mutation,
+  and a duplicate with nothing to copy records no undo step. Covered by
+  `duplicate_scene_bindings_copies_items_with_own_source_ids`,
+  `duplicate_scene_bindings_is_undoable`,
+  `duplicate_scene_bindings_of_empty_scene_changes_nothing` (core) and
+  `duplicate_scene_action_copies_the_scene_items_with_own_ids` (GUI).
+
 - fix(gui): **the scene collection survives a restart.** `RivuletApp` carried
   `scenes` and `source_manager` behind `#[serde(skip)]`, so `save()` never wrote
   the collection: every restart came back with no scenes, and only a manual

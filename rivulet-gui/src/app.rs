@@ -6234,14 +6234,7 @@ impl RivuletApp {
             self.request_scene_selection_removal();
         }
         if let Some(id) = duplicate_target {
-            let name = self
-                .scenes
-                .get(id)
-                .map(|scene| scene.name.clone())
-                .unwrap_or_default();
-            let _ = self
-                .scenes
-                .duplicate_scene(id, self.tr_fmt("scenes_duplicate_name", &[name]));
+            self.duplicate_scene_with_sources(id);
         }
         if let Some((id, old_name)) = rename_target {
             if let Some(new_name) = self.scene_rename_prompt(ui, id, old_name) {
@@ -10038,6 +10031,20 @@ impl RivuletApp {
             self.scene_item_clipboard = Some(clipboard);
             self.scene_status = Some(self.tr("composition_copy_ok").to_owned());
         }
+    }
+
+    /// Duplicates a scene the way OBS's "Duplicate Scene" does: the scene node
+    /// is copied by `SceneManager::duplicate_scene`, and every scene item
+    /// follows through `SourceManager::duplicate_scene_bindings` as its own
+    /// source instance — the copy is editable without touching the original
+    /// scene.
+    fn duplicate_scene_with_sources(&mut self, id: uuid::Uuid) -> Option<uuid::Uuid> {
+        let name = self.scenes.get(id).map(|scene| scene.name.clone())?;
+        let copy_id = self
+            .scenes
+            .duplicate_scene(id, self.tr_fmt("scenes_duplicate_name", &[name]))?;
+        self.source_manager.duplicate_scene_bindings(id, copy_id);
+        Some(copy_id)
     }
 
     /// Undo for the Scenes view: source pastes first (issue #192 — the most
@@ -19232,6 +19239,43 @@ mod tests {
         );
         assert!(binding.locked, "lock state travels with the item");
         assert_eq!(app.scene_status.as_deref(), Some("Scene item copied"));
+    }
+
+    #[test]
+    fn duplicate_scene_action_copies_the_scene_items_with_own_ids() {
+        // The Duplicate button must not leave the copy empty (OBS parity):
+        // every scene item follows as its own source instance.
+        let mut app = RivuletApp::default();
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+        let source_id = app.source_manager.add_source(rivulet_core::Source::new(
+            "Banner".to_owned(),
+            rivulet_core::SourceKind::Image,
+        ));
+        app.source_manager.bind_source(source_id, scene_id, None);
+        app.source_manager.set_locked(source_id, scene_id, true);
+
+        let copy_id = app
+            .duplicate_scene_with_sources(scene_id)
+            .expect("the scene is duplicated");
+
+        assert_ne!(copy_id, scene_id);
+        let copy_items = app.source_manager.scene_sources(copy_id);
+        assert_eq!(copy_items.len(), 1, "the copy carries the scene's items");
+        assert_ne!(
+            copy_items[0].source_id, source_id,
+            "the copy owns a separate source instance"
+        );
+        assert!(copy_items[0].locked, "scene-item state follows the copy");
+        assert!(app
+            .source_manager
+            .get_source(copy_items[0].source_id)
+            .is_some());
+        assert_eq!(
+            app.source_manager.source_count_in_scene(scene_id),
+            1,
+            "the original scene keeps its one item"
+        );
     }
 
     #[test]
