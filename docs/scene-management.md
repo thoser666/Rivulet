@@ -77,7 +77,9 @@ is not empty: the scene items live in `SourceManager`, so duplicating a scene
 also calls `SourceManager::duplicate_scene_bindings`, which copies every item
 into the new scene as its own source instance (binding properties preserved,
 source under a fresh id), the way OBS's "Duplicate Scene" brings the sources
-along.
+along. That duplicate is one undo step: both managers skip their own history
+entry through `without_undo`, so a single undo reverts the scene node and its
+copied items together instead of stopping at an empty scene.
 
 ### Presentation order and broken input
 
