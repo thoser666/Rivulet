@@ -113,8 +113,8 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v2.1.2",
     ),
     (
-        "ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e",
-        "v2.5.0",
+        "ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5",
+        "v2.6.0",
     ),
 ];
 
