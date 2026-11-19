@@ -322,12 +322,26 @@ Everything that has no one-to-one counterpart is reported as an
   indirectly) contains itself is cut off at the cycle and reported once.
 
 The importer reads the collection file and nothing else - no OBS install, no
-capture hardware. `--out` writes the scene tree only (the `SceneManager` JSON
-the GUI's "Import scene collection" button reads), atomically through a sibling
-`.tmp` file and a rename. Source bindings are in the in-memory model and in the
-report, but the GUI's collection file does not persist sources yet; the command
-says so on stderr when it imported any. Input problems (unreadable file,
-invalid JSON, no scenes or groups) exit `2`, because the collection file is the
+capture hardware.
+
+In the GUI, **Scenes -> Import OBS collection...** applies the mapping to the
+running collection: the scene tree, group folders, every source and every scene
+binding. Nothing changes before the report modal is confirmed, so the user
+reads what was mapped, skipped and approximated first. Apply replaces the live
+collection and its sources together - the same state the next restart restores
+- and drops state that names the replaced collection: scene selection, fold
+state, the drag target, the copied scene item, the composition selection and
+Studio Mode's preview/program roles, which re-point at the imported active
+scene. Cancel, closing the modal and an unreadable file all leave the live
+collection untouched; a broken file is reported through the status line and the
+global issue surface.
+
+The CLI stays the report/export path. `--out` writes the scene tree only (the
+`SceneManager` JSON the GUI's "Import scene collection" button reads),
+atomically through a sibling `.tmp` file and a rename, so source bindings reach
+Rivulet through the GUI import rather than a collection file; the command says
+so on stderr when it imported any. Input problems (unreadable file, invalid
+JSON, no scenes or groups) exit `2`, because the collection file is the
 command's configuration; an unwritable `--out` path exits `1`.
 
 ## Delivery packages
@@ -339,7 +353,7 @@ command's configuration; an unwritable `--out` path exits `1`.
 | **C. Scene dock** | Tree with indentation, collapse state per collection, colour swatch and picker, drag & drop to re-parent, component toggle | done ([#350](https://github.com/thoser666/Rivulet/issues/350)) |
 | **D. Search and filter** | Real-time search with "match anywhere"/"starts with", auto-expand of matches, component filter, persisted collapse state | done ([#351](https://github.com/thoser666/Rivulet/issues/351)) |
 | **E. Multi-select and bulk actions** | Selection with click/toggle/range over the drawn rows, atomic bulk move, bulk colour, kind and delete as single undo steps, sticky filter semantics | done ([#366](https://github.com/thoser666/Rivulet/issues/366)) |
-| **F. OBS import** | `obs_import` mapper (scenes, folders, nesting, bindings, transform, crop, visibility, lock), typed difference report, `rivulet import-obs` with `--dry-run`/`--out`/`--json` | done ([#367](https://github.com/thoser666/Rivulet/issues/367)) |
+| **F. OBS import** | `obs_import` mapper (scenes, folders, nesting, bindings, transform, crop, visibility, lock), typed difference report, `rivulet import-obs` with `--dry-run`/`--out`/`--json`, and the Scenes-menu GUI import that applies scenes, groups and bindings with the report as a confirmation modal | done ([#367](https://github.com/thoser666/Rivulet/issues/367)) |
 
 Packages C and D were tracked as separate issues
 ([#350](https://github.com/thoser666/Rivulet/issues/350),
