@@ -3206,7 +3206,7 @@ fn code_signing_automation_is_wired_up() {
         );
     }
     assert!(
-        build.contains("signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092"),
+        build.contains("signpath/github-action-submit-signing-request@4a84eb4ad763290f059275786f2deed97c2c672b"),
         "build-package.yml must pin the SignPath action to the reviewed SHA"
     );
     assert!(
@@ -3242,7 +3242,7 @@ fn code_signing_automation_is_wired_up() {
 
     let signpath_check = read("scripts/test-signpath-config.py");
     assert!(
-        signpath_check.contains("f6d04783b4569d051e0c80105fe66e82819d0092")
+        signpath_check.contains("4a84eb4ad763290f059275786f2deed97c2c672b")
             && signpath_check.contains("signpath_enabled")
             && signpath_check.contains("--self-test"),
         "test-signpath-config.py must pin the action SHA and offer --self-test"
