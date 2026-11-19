@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! G4 – OpenGL wglSwapBuffers hook DLL.
 //!
 //! This crate is compiled as a cdylib (`.dll`) and injected into an OpenGL
@@ -7,7 +8,7 @@
 //! # SHM Protocol
 //!
 //! Identical to the Vulkan capture layer (`rivulet-core/src/capture_channel.rs`):
-//! a 32-byte [`FrameHeader`] followed by raw BGRA pixel data.
+//! a 32-byte `FrameHeader` followed by raw BGRA pixel data.
 
 #[cfg(target_os = "windows")]
 mod imp {

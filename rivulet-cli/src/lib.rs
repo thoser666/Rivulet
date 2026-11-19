@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! Library path for the headless CLI (M7 W1, issue #186): the same recording
 //! a `rivulet record` binary run performs, achievable in-process without
 //! spawning the binary.

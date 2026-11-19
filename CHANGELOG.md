@@ -68,6 +68,9 @@
   with an empty one
   (`manager_export_keeps_the_switch_history_out_of_the_collection_format`).
 
+
+
+
 - ci(deps): **one documented advisory exception keeps the security gate green.**
   RustSec published `RUSTSEC-2026-0543` ("chrono is unmaintained", no safe
   upgrade) on 2026-11-17. `chrono` is a direct dependency of `rivulet-core` and
@@ -76,6 +79,23 @@
   ignores that one advisory and nothing else; `docs/security.md` records why,
   that a new `chrono` advisory still fails, and that the entry ends with the
   migration to `time`.
+- docs(crates): **`missing_docs` is on in twelve crates instead of one.** The
+
+  workspace doc build only fails on undocumented items where the lint is on, so
+  every crate but `rivulet-core` could grow undocumented API with the gate
+  green. `rivulet-audio`, `rivulet-plugins`, `rivulet-vulkan-layer`,
+  `rivulet-obs-compat`, `rivulet-updater`, `rivulet-capture` and `rivulet-cli`
+  now carry `#![warn(missing_docs)]` and the 85 items they reported are
+  documented; `rivulet-launcher`, `rivulet-browser` and
+  `rivulet-opengl-hook-dll` take the attribute as well (measured clean), and
+  `rivulet-obs-websocket` follows with the 29 items of its backend bridge after
+  the protocol layer went first under an attribute on the module.
+  `ci_pinning` pins both directions: a crate or module cannot drop the attribute
+  silently, and an exception cannot stay listed after it was documented. Entries
+  are per crate or per public module, so a crate can enforce the layer that is
+  documented while the rest is still open; that list is empty now.
+  `rivulet-obs-compat` also drops its unused `cc` build-dependency (it has no
+  `build.rs`), removing the last Cargo warning from the doc log.
 - feat(core): **an OBS Studio scene collection imports into Rivulet scenes and
   sources, and every difference is reported** (M9,
   [#367](https://github.com/thoser666/Rivulet/issues/367)).

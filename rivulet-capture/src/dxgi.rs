@@ -45,7 +45,9 @@ pub struct GpuFrame {
     /// Shared handle of the owned shared texture containing the frame. The
     /// encoder opens it with `ID3D11Device::OpenSharedResource`.
     pub shared_handle: HANDLE,
+    /// Frame width in pixels.
     pub width: u32,
+    /// Frame height in pixels.
     pub height: u32,
     /// Whether the frame contained protected content that was masked out.
     pub protected_masked: bool,
@@ -54,11 +56,19 @@ pub struct GpuFrame {
 /// Metadata about a monitor/output, used for output selection in the GUI.
 #[derive(Debug, Clone)]
 pub struct DxgiOutputInfo {
+    /// Index of the adapter that owns the output, as
+    /// [`DxgiDesktopDuplication::for_output`] takes it.
     pub adapter_index: u32,
+    /// Index of the output within that adapter.
     pub output_index: u32,
+    /// Output width in pixels.
     pub width: u32,
+    /// Output height in pixels.
     pub height: u32,
+    /// Whether Windows currently has the output attached to the desktop; only
+    /// an attached output can be duplicated.
     pub attached_to_desktop: bool,
+    /// The output's device name, e.g. `\.\DISPLAY1`.
     pub device_name: String,
 }
 

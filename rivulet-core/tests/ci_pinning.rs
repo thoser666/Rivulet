@@ -3131,8 +3131,9 @@ fn beta_gate_checker_is_wired_up() {
         checker.contains("def ci_platforms")
             && checker.contains("strategy")
             && checker.contains("matrix")
-            && checker.contains("def _ci_platforms_lines"),
-        "check-beta-gate.py must parse the build matrix structurally"
+            && checker.contains("def _ci_platforms_lines")
+            && checker.contains("--print-platforms"),
+        "check-beta-gate.py must parse the build matrix structurally and publish it          through `--print-platforms`, which ci_pinning reads from there"
     );
 
     // The gate itself lives in the roadmap; the README must define it.
@@ -6619,7 +6620,9 @@ fn m8_closeout_statements_match_across_readme_gate_and_report() {
 ///   `RIVULET_DOWNSTREAM_REQUIRE_AUDIO`, hides the positive audio evidence,
 /// * an `api-overview.md` nobody regenerates drifts from `lib.rs` within a
 ///   release, and a `cargo doc` without `-D warnings` prints the same broken
-///   links it did before #297.
+///   links it did before #297,
+/// * a doc step with an `if:`, a `continue-on-error` or a job-level
+///   `RUSTDOCFLAGS` is still *found* above, yet never runs the gate.
 #[test]
 fn m8_exit_evidence_is_wired_into_ci_and_docs() {
     // --- The external consumer crate --------------------------------------
@@ -6714,7 +6717,8 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
     // M8 #297 / F-M8-004: rustdoc only sees the `cfg` branches that compile on
     // the runner it runs on, so the warning-denied doc build runs on every matrix
     // platform and nowhere else; a second copy would rebuild the same Linux docs.
-    const DOC_STEP: &str = "Build API docs without warnings on every platform (M8 #297, F-M8-004)";
+    const DOC_STEP: &str =
+        "Build workspace API docs without warnings on every platform (M8 #297, F-M8-004)";
     let (matrix_head, job_steps) = ci
         .split("\n  build_and_test:\n")
         .nth(1)
@@ -6730,17 +6734,477 @@ fn m8_exit_evidence_is_wired_into_ci_and_docs() {
         .unwrap_or_else(|| panic!("the Build & Test matrix must run `{DOC_STEP}`"));
     assert!(
         doc_step.contains("RUSTDOCFLAGS: -D warnings")
-            && doc_step.contains("cargo doc -p rivulet-core --no-deps"),
-        "the doc step must deny warnings and run `cargo doc -p rivulet-core --no-deps`, got:\n{doc_step}"
+            && doc_step.contains("cargo doc --workspace --no-deps"),
+        "the doc step must deny warnings and run `cargo doc --workspace --no-deps`, got:\n{doc_step}"
+    );
+    // The step is found by the assertions above even if it never runs: `if:`
+    // skips a runner, `continue-on-error` swallows the failure.
+    for banned in ["if:", "continue-on-error"] {
+        assert!(
+            !doc_step
+                .lines()
+                .map(str::trim_start)
+                .any(|line| line.starts_with(banned)),
+            "the doc step must run unconditionally, so it must not carry `{banned}`, got:\n{doc_step}"
+        );
+    }
+    // The step env outranks the job's; a job-level flag would be a second
+    // owner that takes over if the step env is ever edited.
+    assert!(
+        !matrix_head
+            .lines()
+            .any(|line| line.trim_start().starts_with("RUSTDOCFLAGS")),
+        "`RUSTDOCFLAGS` belongs to the doc step alone, got:\n{matrix_head}"
     );
     assert_eq!(
         ci.lines()
             .filter(|line| !line.trim_start().starts_with('#'))
-            .filter(|line| line.contains("cargo doc -p rivulet-core --no-deps"))
+            .filter(|line| line.contains("cargo doc --workspace --no-deps"))
             .count(),
         1,
-        "the doc build belongs in the Build & Test matrix only, not in the Lints job too"
+        "the workspace doc build belongs in the Build & Test matrix only"
     );
+}
+
+/// A `#[cfg(...)]` over `target_os` that no CI runner satisfies is dead code:
+/// `vst3.rs` names `freebsd` today only *alongside* `linux`, so it compiles, but
+/// a future `#[cfg(target_os = "android")]` would sit in the tree with no build
+/// ever touching it. The Build & Test matrix is the only place such a branch
+/// could be seen, so every `target_os` predicate has to be satisfiable by one of
+/// its runners.
+///
+/// Predicates are evaluated once per runner with three-valued logic: an atom
+/// this test cannot decide (`unix`, `test`, `feature = "…"`) is `unknown`, so
+/// only a predicate that is *false on every runner* fails here. A predicate
+/// that names no platform outside the matrix - typically
+/// `not(any(…every runner…))` as an "any other platform" fallback - claims no
+/// platform of its own and is skipped.
+#[test]
+fn every_target_os_cfg_is_built_by_a_ci_runner() {
+    let platforms = ci_matrix_target_os();
+    let mut cfgs = 0;
+    let mut dead = Vec::new();
+    for path in rust_sources() {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+        for (line, predicate) in cfg_predicates(&source) {
+            cfgs += 1;
+            let tokens = cfg_tokens(predicate);
+            let names_unbuilt = tokens
+                .windows(3)
+                .any(|w| w[0] == "target_os" && w[1] == "=" && !platforms.contains(&w[2]));
+            if !names_unbuilt {
+                continue;
+            }
+            if platforms
+                .iter()
+                .all(|os| cfg_eval(&tokens, os) == Tri::False)
+            {
+                let rel = path
+                    .strip_prefix(repo_file(""))
+                    .unwrap_or(&path)
+                    .display()
+                    .to_string()
+                    .replace('\\', "/");
+                dead.push(format!("{rel}:{line}: #[cfg({predicate})]"));
+            }
+        }
+    }
+
+    assert!(
+        cfgs >= 100,
+        "the scan found only {cfgs} `#[cfg(...)]` attributes; it must still cover the workspace"
+    );
+    assert!(
+        dead.is_empty(),
+        "these cfg branches are compiled on none of the CI runners ({}), so no build would \
+         ever see them:\n  {}\n\
+         Either add a runner for the platform to the Build & Test matrix or drop the cfg.",
+        platforms.join(", "),
+        dead.join("\n  ")
+    );
+}
+
+/// The `target_os` of every Build & Test matrix runner.
+///
+/// The matrix itself is not read here: `scripts/check-beta-gate.py
+/// --print-platforms` parses `jobs`/`strategy`/`matrix` (PyYAML, with its
+/// documented line-based fallback) and prints the runner labels, so the
+/// platform-parity criterion and this test cannot disagree about what CI
+/// builds, and a matrix renamed or moved fails both instead of one. Mapping a
+/// runner to the `target_os` it compiles for stays here, because that is the
+/// side the `cfg` predicates are compared against.
+fn ci_matrix_target_os() -> Vec<&'static str> {
+    let python = if cfg!(windows) { "python" } else { "python3" };
+    let output = std::process::Command::new(python)
+        .arg(repo_file("scripts/check-beta-gate.py"))
+        .arg("--print-platforms")
+        .output()
+        .unwrap_or_else(|e| {
+            panic!("failed to run `{python} scripts/check-beta-gate.py --print-platforms`: {e}")
+        });
+    assert!(
+        output.status.success(),
+        "`check-beta-gate.py --print-platforms` failed:
+{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let printed = String::from_utf8_lossy(&output.stdout);
+    let mut platforms: Vec<&'static str> = printed
+        .lines()
+        .map(str::trim)
+        .filter(|runner| !runner.is_empty())
+        .map(
+            |runner| match runner.split('-').next().unwrap_or_default() {
+                "ubuntu" => "linux",
+                "macos" => "macos",
+                "windows" => "windows",
+                other => panic!("`{other}` is a runner this test cannot map to a `target_os`"),
+            },
+        )
+        .collect();
+    platforms.sort_unstable();
+    platforms.dedup();
+    platforms
+}
+
+/// Every `.rs` file under a workspace crate's `src/`, in a stable order.
+fn rust_sources() -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut dirs: Vec<PathBuf> = fs::read_dir(repo_file(""))
+        .expect("read the repository root")
+        .map(|entry| entry.expect("read_dir entry").path().join("src"))
+        .filter(|src| src.is_dir())
+        .collect();
+    while let Some(dir) = dirs.pop() {
+        let entries =
+            fs::read_dir(&dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()));
+        for entry in entries {
+            let path = entry.expect("read_dir entry").path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+/// Every `#[cfg(<predicate>)]` in `source`, as (1-based line, predicate). An
+/// attribute may span lines, but always closes with `)]`.
+fn cfg_predicates(source: &str) -> Vec<(usize, &str)> {
+    let mut found = Vec::new();
+    let mut from = 0;
+    while let Some(offset) = source[from..].find("#[cfg(") {
+        let start = from + offset;
+        // `#[cfg(...)]` quoted inside a comment is documentation, not a branch.
+        let line_start = source[..start].rfind('\n').map_or(0, |nl| nl + 1);
+        if source[line_start..start].contains("//") {
+            from = start + 6;
+            continue;
+        }
+        let Some(closing) = source[start + 6..].find(")]") else {
+            break;
+        };
+        let end = start + 6 + closing;
+        found.push((
+            source[..start].lines().count(),
+            source[start + 6..end].trim(),
+        ));
+        from = end + 2;
+    }
+    found
+}
+
+/// Split a predicate into words and the `( ) , =` punctuation; strings lose
+/// their quotes.
+fn cfg_tokens(predicate: &str) -> Vec<&str> {
+    let mut tokens = Vec::new();
+    let mut rest = predicate;
+    while let Some(first) = rest.chars().next() {
+        let step = first.len_utf8();
+        if first.is_whitespace() {
+            rest = &rest[step..];
+        } else if first == '"' {
+            let body = &rest[1..];
+            let end = body
+                .find('"')
+                .expect("unterminated string in a cfg predicate");
+            tokens.push(&body[..end]);
+            rest = &body[end + 1..];
+        } else if "(),=".contains(first) {
+            tokens.push(&rest[..step]);
+            rest = &rest[step..];
+        } else {
+            let end = rest
+                .find(|c: char| c.is_whitespace() || "(),=".contains(c))
+                .unwrap_or(rest.len());
+            tokens.push(&rest[..end]);
+            rest = &rest[end..];
+        }
+    }
+    tokens
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Tri {
+    True,
+    False,
+    Unknown,
+}
+
+impl Tri {
+    fn all(self, other: Tri) -> Tri {
+        match (self, other) {
+            (Tri::False, _) | (_, Tri::False) => Tri::False,
+            (Tri::True, Tri::True) => Tri::True,
+            _ => Tri::Unknown,
+        }
+    }
+
+    fn any(self, other: Tri) -> Tri {
+        match (self, other) {
+            (Tri::True, _) | (_, Tri::True) => Tri::True,
+            (Tri::False, Tri::False) => Tri::False,
+            _ => Tri::Unknown,
+        }
+    }
+
+    fn not(self) -> Tri {
+        match self {
+            Tri::True => Tri::False,
+            Tri::False => Tri::True,
+            Tri::Unknown => Tri::Unknown,
+        }
+    }
+}
+
+fn cfg_eval(tokens: &[&str], os: &str) -> Tri {
+    let mut pos = 0;
+    let value = cfg_predicate(tokens, &mut pos, os);
+    if pos == tokens.len() {
+        value
+    } else {
+        Tri::Unknown
+    }
+}
+
+/// Evaluate one predicate for one `target_os`; `unix`, `test`, `feature = "…"`
+/// and anything else this test cannot decide stays `Unknown`.
+fn cfg_predicate(tokens: &[&str], pos: &mut usize, os: &str) -> Tri {
+    let Some(&name) = tokens.get(*pos) else {
+        return Tri::Unknown;
+    };
+    match name {
+        "any" | "all" => {
+            let is_any = name == "any";
+            *pos += 2;
+            let mut result = if is_any { Tri::False } else { Tri::True };
+            loop {
+                let value = cfg_predicate(tokens, pos, os);
+                result = if is_any {
+                    result.any(value)
+                } else {
+                    result.all(value)
+                };
+                match tokens.get(*pos).copied() {
+                    Some(",") => *pos += 1,
+                    Some(")") => {
+                        *pos += 1;
+                        return result;
+                    }
+                    _ => return Tri::Unknown,
+                }
+            }
+        }
+        "not" => {
+            *pos += 2;
+            let value = cfg_predicate(tokens, pos, os);
+            *pos += 1;
+            value.not()
+        }
+        _ => {
+            *pos += 1;
+            if tokens.get(*pos).copied() == Some("=") {
+                let value = tokens.get(*pos + 1).copied();
+                *pos += 2;
+                if name == "target_os" {
+                    return if value == Some(os) {
+                        Tri::True
+                    } else {
+                        Tri::False
+                    };
+                }
+            }
+            Tri::Unknown
+        }
+    }
+}
+
+/// `#![warn(missing_docs)]` is what makes "documented" enforceable: without it
+/// a new public item arrives without documentation and the workspace doc gate
+/// stays green, because rustdoc has nothing to report. Every lib crate enables
+/// the lint - crate-wide, or, while a crate is only half documented, per public
+/// module through `#[warn(missing_docs)]` on the declaration. Whatever is not
+/// covered is listed in `PENDING`, and that list is checked in both directions:
+/// coverage cannot be dropped silently, and an entry cannot rot there after the
+/// crate or module was documented.
+///
+/// The module form exists so a crate can start enforcing the layer that is
+/// done: `rivulet-obs-websocket` documents its protocol types while the backend
+/// bridge is still open, and the pin then requires the attribute on every other
+/// public module of that crate rather than on the crate as a whole.
+#[test]
+fn every_lib_crate_enables_the_missing_docs_lint() {
+    // `(crate, None)` = the crate still owes documentation as a whole,
+    // `(crate, Some(module))` = only that public module does. Each entry
+    // disappears in the same change that documents the crate or module; the
+    // list is empty because every crate enables the lint today.
+    const PENDING: &[(&str, Option<&str>)] = &[];
+
+    /// One lib crate: its name, whether `lib.rs` enables the lint crate-wide,
+    /// and its public modules with the same answer per module.
+    struct LibCrate {
+        name: String,
+        crate_lint: bool,
+        modules: Vec<(String, bool)>,
+    }
+
+    /// Public modules declared in `lib.rs`, each with whether its declaration
+    /// carries `#[warn(missing_docs)]`. The attribute lives in the attribute
+    /// block above the declaration, next to `#[cfg(...)]` for a gated module.
+    fn public_modules(source: &str) -> Vec<(String, bool)> {
+        let lines: Vec<&str> = source.lines().map(str::trim).collect();
+        let mut modules = Vec::new();
+        for (index, line) in lines.iter().enumerate() {
+            let Some(name) = line
+                .strip_prefix("pub mod ")
+                .and_then(|rest| rest.strip_suffix(';'))
+            else {
+                continue;
+            };
+            let documented = lines[..index]
+                .iter()
+                .rev()
+                .take_while(|line| line.starts_with("#["))
+                .any(|line| *line == "#[warn(missing_docs)]");
+            modules.push((name.to_string(), documented));
+        }
+        modules
+    }
+
+    let mut crates: Vec<LibCrate> = Vec::new();
+    for entry in fs::read_dir(repo_file("")).expect("read the repository root") {
+        let dir = entry.expect("read_dir entry").path();
+        let lib = dir.join("src").join("lib.rs");
+        if !lib.is_file() {
+            continue;
+        }
+        let source = fs::read_to_string(&lib)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", lib.display()));
+        crates.push(LibCrate {
+            name: dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            crate_lint: source
+                .lines()
+                .any(|line| line.trim() == "#![warn(missing_docs)]"),
+            modules: public_modules(&source),
+        });
+    }
+    crates.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let mut missing = Vec::new();
+    let mut stale = Vec::new();
+    for krate in &crates {
+        let whole_crate = PENDING.contains(&(krate.name.as_str(), None));
+        let mut pending_modules: Vec<&str> = PENDING
+            .iter()
+            .filter(|(name, module)| *name == krate.name && module.is_some())
+            .filter_map(|(_, module)| *module)
+            .collect();
+        pending_modules.sort_unstable();
+
+        if krate.crate_lint {
+            // A crate-wide lint subsumes every entry for the crate.
+            if whole_crate {
+                stale.push(format!("{} (the crate enables the lint)", krate.name));
+            }
+            for module in &pending_modules {
+                stale.push(format!(
+                    "{}::{module} (the crate enables the lint)",
+                    krate.name
+                ));
+            }
+            continue;
+        }
+
+        if whole_crate {
+            for module in &pending_modules {
+                stale.push(format!(
+                    "{}::{module} (redundant, the whole crate is listed)",
+                    krate.name
+                ));
+            }
+            continue;
+        }
+
+        if krate.modules.is_empty() {
+            missing.push(format!("{} (crate-wide)", krate.name));
+        }
+        for (module, documented) in &krate.modules {
+            let pending = pending_modules.contains(&module.as_str());
+            match (documented, pending) {
+                (false, false) => missing.push(format!("{}::{module}", krate.name)),
+                (true, true) => stale.push(format!(
+                    "{}::{module} (the module enables the lint)",
+                    krate.name
+                )),
+                _ => {}
+            }
+        }
+        // An entry for a module the crate no longer declares can never be
+        // removed by documenting anything.
+        for module in &pending_modules {
+            if !krate.modules.iter().any(|(declared, _)| declared == module) {
+                stale.push(format!("{}::{module} (no such public module)", krate.name));
+            }
+        }
+    }
+    for (name, _) in PENDING {
+        if !crates.iter().any(|krate| krate.name == *name) {
+            stale.push(format!("{name} (no such lib crate)"));
+        }
+    }
+
+    // Both lists land in one message: a change that documents a module while
+    // another one is still open must not hide the stale entry behind the
+    // missing one.
+    let mut problems = Vec::new();
+    if !missing.is_empty() {
+        problems.push(format!(
+            "these lib crates or modules must enable `missing_docs` (add a PENDING entry only \
+             while they still owe documentation):\n  {}",
+            missing.join("\n  ")
+        ));
+    }
+    if !stale.is_empty() {
+        problems.push(format!(
+            "these PENDING entries are stale, so the crate or module is documented already:\n  {}",
+            stale.join("\n  ")
+        ));
+    }
+
+    assert!(
+        crates.len() >= 10,
+        "found only {} lib crates, so this scan is not covering the workspace",
+        crates.len()
+    );
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
 /// #293's acceptance criteria say an example that only compiles but never
@@ -7060,6 +7524,7 @@ fn local_pre_push_hook_mirrors_the_ci_lints_job() {
         "RIVULET_SKIP_PRE_PUSH",
         "RIVULET_PRE_PUSH_FAST_TESTS",
         "cargo test -p rivulet-core --test ci_pinning",
+        "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps",
         "generate-action-pins.py --check",
         "check-parity-checklist.py --self-test",
         "check-release-notes.py --self-test",
@@ -11548,6 +12013,59 @@ fn branch_hygiene_self_test_is_wired_into_ci_and_the_pre_push_hook() {
     assert!(
         hook.contains("python scripts/branch-hygiene.py --self-test"),
         "the pre-push fast stage mirrors the Lints-job self-tests"
+    );
+}
+
+/// `generate-action-pins.py` owns a file, so a flag it does not know must not
+/// fall through to the write path: before #444 `--help` printed nothing and
+/// rewrote `docs/ci-action-pins.md`, which looked like a local modification git
+/// could not diff. This runs the script and compares the doc's bytes.
+#[test]
+fn the_action_pin_generator_help_writes_nothing() {
+    let doc = repo_file("docs/ci-action-pins.md");
+    let before = std::fs::read(&doc).expect("read docs/ci-action-pins.md");
+    let script = repo_file("scripts/generate-action-pins.py");
+
+    // `python3` first: on macOS runners `python` is a stub that exits non-zero
+    // with a hint instead of running anything, and only an interpreter that
+    // actually runs can tell us whether the script behaves.
+    let mut failures = Vec::new();
+    let mut output = None;
+    for python in ["python3", "python"] {
+        match std::process::Command::new(python)
+            .arg(&script)
+            .arg("--help")
+            .output()
+        {
+            Ok(attempt) if attempt.status.success() => {
+                output = Some(attempt);
+                break;
+            }
+            Ok(attempt) => failures.push(format!(
+                "{python}: {}",
+                String::from_utf8_lossy(&attempt.stderr).trim()
+            )),
+            Err(error) => failures.push(format!("{python}: {error}")),
+        }
+    }
+    let Some(output) = output else {
+        // Nothing to verify with: report it rather than pretending the script is
+        // fine, but do not fail a checkout for lacking an interpreter.
+        eprintln!(
+            "skipping: no working python interpreter ({})",
+            failures.join("; ")
+        );
+        return;
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Usage:") && stdout.contains("--check"),
+        "`--help` must print the usage text, got: {stdout}"
+    );
+    assert!(
+        std::fs::read(&doc).expect("re-read docs/ci-action-pins.md") == before,
+        "`--help` must not touch docs/ci-action-pins.md"
     );
 }
 

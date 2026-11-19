@@ -8,6 +8,7 @@ the doc is derived from them, so it must not be edited by hand.
 Usage:
     scripts/generate-action-pins.py          # rewrite the table in place
     scripts/generate-action-pins.py --check  # exit non-zero if the doc drifts
+    scripts/generate-action-pins.py --help   # print this text, write nothing
 """
 
 import difflib
@@ -24,7 +25,23 @@ START_MARKER = "<!-- action-pins-table:start -->"
 END_MARKER = "<!-- action-pins-table:end -->"
 
 
-def render_table(pins):
+def read_doc():
+    """The doc verbatim, without newline translation.
+
+    `read_text` folds every CRLF into LF, so the rewrite hands back a file whose
+    bytes differ from the checkout while its content does not: git then reports
+    a modification it cannot diff. Reading and writing the bytes keeps whatever
+    endings the file already had.
+    """
+    return DOC.read_bytes().decode("utf-8")
+
+
+def newline_of(doc):
+    """The doc's line ending, so a generated row matches the file around it."""
+    return "\r\n" if "\r\n" in doc else "\n"
+
+
+def render_table(pins, nl):
     lines = [
         "| Action | Version | Pinned SHA | Used in |",
         "| --- | --- | --- | --- |",
@@ -33,26 +50,32 @@ def render_table(pins):
         sha, version, files = pins[action]
         used_in = ", ".join(sorted(files))
         lines.append(f"| `{action}` | `{version}` | `{sha}` | {used_in} |")
-    return "\n".join(lines)
+    return nl.join(lines)
 
 
 def regenerate(pins):
-    doc = DOC.read_text(encoding="utf-8")
+    doc = read_doc()
     if START_MARKER not in doc or END_MARKER not in doc:
         sys.exit(f"{DOC} is missing the {START_MARKER!r}/{END_MARKER!r} markers")
+    nl = newline_of(doc)
     prefix_end = doc.index(START_MARKER) + len(START_MARKER)
     suffix_start = doc.index(END_MARKER, prefix_end)
-    middle = "\n" + render_table(pins) + "\n"
+    middle = nl + render_table(pins, nl) + nl
     return doc[:prefix_end] + middle + doc[suffix_start:]
 
 
 def main():
+    args = sys.argv[1:]
+    if "--help" in args or "-h" in args:
+        print(__doc__.strip())
+        return 0
+
     pins = parse_workflows()
     if not pins:
         sys.exit("no third-party action pins found in .github/workflows")
     new_doc = regenerate(pins)
-    if "--check" in sys.argv[1:]:
-        current = DOC.read_text(encoding="utf-8")
+    if "--check" in args:
+        current = read_doc()
         if new_doc == current:
             print("Action pin table is up to date.")
             return 0
@@ -69,7 +92,7 @@ def main():
         ):
             print(line, file=sys.stderr)
         return 1
-    DOC.write_text(new_doc, encoding="utf-8")
+    DOC.write_bytes(new_doc.encode("utf-8"))
     print(f"Wrote {DOC} ({len(pins)} actions).")
     return 0
 

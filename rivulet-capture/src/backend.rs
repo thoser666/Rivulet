@@ -5,7 +5,7 @@
 //! and to classify DXGI failure codes into actionable states instead of
 //! surfacing raw HRESULTs. This module contains that logic so it can be unit
 //! tested on every CI platform (Linux/macOS/Windows), while the actual DXGI
-//! calls live in the Windows-only [`crate::dxgi`] module.
+//! calls live in the Windows-only `crate::dxgi` module.
 
 /// The capture backend currently responsible for producing frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

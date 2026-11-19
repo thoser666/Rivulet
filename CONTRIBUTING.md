@@ -262,6 +262,12 @@ self-tests (`generate-action-pins.py --check`, parity-checklist/release-
 notes/theme-contrast/apt-parity checks, `generate-release-notes.sh
 --self-test`).
 
+It also runs the warning-denied doc build from the CI matrix
+(`RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps`): about a minute
+warm when the workspace rebuilds, against ~20 minutes until the matrix reports
+the same failure, and the only check that turns a broken intra-doc link into a
+red build (`fmt` and `clippy` never see rustdoc warnings).
+
 If `actionlint` is installed, the hook also lints every workflow; with
 `shellcheck` on `PATH` as well, it checks the `run:` blocks too — the same
 check the CI Lints job performs, and the only one that catches a shell mistake

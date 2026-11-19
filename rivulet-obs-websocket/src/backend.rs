@@ -47,23 +47,39 @@ pub struct ObsSnapshot {
 /// A mutating command a client can issue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ObsCommand {
+    /// Switches the program scene; the payload is the scene name.
     SetCurrentScene(String),
+    /// Starts the recording output.
     StartRecording,
+    /// Stops the recording output.
     StopRecording,
+    /// Pauses a running recording, keeping the file open.
     PauseRecording,
+    /// Resumes a paused recording.
     UnpauseRecording,
+    /// Starts recording when idle and stops it when running.
     ToggleRecording,
+    /// Starts the streaming output.
     StartStreaming,
+    /// Stops the streaming output.
     StopStreaming,
+    /// Starts streaming when idle and stops it when running.
     ToggleStreaming,
+    /// Flips the mute state of the single implicit input Rivulet
+    /// exposes as its main source.
     ToggleMute,
+    /// Starts the replay buffer so recent output stays available to save.
     StartReplayBuffer,
+    /// Stops the replay buffer and drops the retained footage.
     StopReplayBuffer,
+    /// Starts the replay buffer when idle and stops it when running.
     ToggleReplayBuffer,
+    /// Saves the buffered footage to the configured directory.
     SaveReplayBuffer,
     /// Save with an explicit file path (the request may carry
     /// `saveReplayPath`); the path is echoed back through the saved event.
     SaveReplayBufferTo(String),
+    /// Turns studio mode on or off; the payload is the desired state.
     SetStudioMode(bool),
 }
 
@@ -99,7 +115,13 @@ pub enum ObsCommandResult {
     /// subscribed clients (e.g. output state changed).
     Success(Vec<ObsEvent>),
     /// The command failed with the given status code and comment.
-    Failure { status_code: u16, comment: String },
+    Failure {
+        /// Protocol status code the client receives, from
+        /// [`crate::protocol::status`].
+        status_code: u16,
+        /// Explanation for the client, sent as the `comment` field.
+        comment: String,
+    },
 }
 
 /// Events emitted by the backend when state changes (both request-driven and
@@ -108,19 +130,46 @@ pub enum ObsCommandResult {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ObsEvent {
     /// The current program scene changed.
-    CurrentProgramSceneChanged { scene_name: String },
+    CurrentProgramSceneChanged {
+        /// Name of the scene that is now on air.
+        scene_name: String,
+    },
     /// The recording output state changed.
-    RecordStateChanged { active: bool, paused: bool },
+    RecordStateChanged {
+        /// Whether recording is running.
+        active: bool,
+        /// Whether the recording is paused.
+        paused: bool,
+    },
     /// The streaming output state changed.
-    StreamStateChanged { active: bool, reconnecting: bool },
+    StreamStateChanged {
+        /// Whether the stream is running.
+        active: bool,
+        /// Whether the stream is reconnecting after a drop.
+        reconnecting: bool,
+    },
     /// The mute state of the main input changed.
-    InputMuteStateChanged { input_name: String, muted: bool },
+    InputMuteStateChanged {
+        /// Name of the input whose mute state changed.
+        input_name: String,
+        /// The new mute state.
+        muted: bool,
+    },
     /// The replay buffer started or stopped capturing.
-    ReplayBufferStateChanged { active: bool },
+    ReplayBufferStateChanged {
+        /// Whether the replay buffer is capturing.
+        active: bool,
+    },
     /// A replay was saved to disk (`None` when the path is unavailable).
-    ReplayBufferSaved { saved_replay_path: Option<String> },
+    ReplayBufferSaved {
+        /// Where the replay was written, when the backend knows the path.
+        saved_replay_path: Option<String>,
+    },
     /// Studio mode was enabled or disabled.
-    StudioModeStateChanged { enabled: bool },
+    StudioModeStateChanged {
+        /// Whether studio mode is now on.
+        enabled: bool,
+    },
 }
 
 impl ObsEvent {
@@ -208,6 +257,7 @@ pub fn missing_request_field(field: &str) -> ObsCommandResult {
     }
 }
 
+/// A backend shared across the server's connection threads.
 pub type SharedBackend = Arc<dyn ObsBackend>;
 
 /// Bridge backend used by the Rivulet GUI.
@@ -224,6 +274,8 @@ pub struct ChannelBackend {
 }
 
 impl ChannelBackend {
+    /// Wraps the snapshot the host refreshes and the command channel it
+    /// drains.
     pub fn new(
         snapshot: Arc<Mutex<ObsSnapshot>>,
         commands: std::sync::mpsc::Sender<(ObsCommand, std::sync::mpsc::Sender<ObsCommandResult>)>,

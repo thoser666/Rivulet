@@ -473,9 +473,10 @@ Workstream issues:
     dependency — and `scripts/run-downstream-smoke.sh` builds and runs it
     against the unpacked `cargo package` artifact, i.e. the file set
     `cargo publish` would upload, on Linux in the Build & Test job with
-    `RIVULET_DOWNSTREAM_REQUIRE_AUDIO=1`. `cargo doc -p rivulet-core --no-deps`
+    `RIVULET_DOWNSTREAM_REQUIRE_AUDIO=1`. `cargo doc --workspace --no-deps`
     runs with `RUSTDOCFLAGS=-D warnings` on all three platforms of the Build &
-    Test matrix and is at zero warnings, from 22 broken intra-doc links.
+    Test matrix and is at zero warnings, from 22 broken intra-doc links in
+    `rivulet-core` and six more in the other crates.
     `docs/api-overview.md` is generated from `lib.rs` by
     `scripts/generate-api-overview.py` and checked on every push. Running the
     doc build on every platform is what makes it cover `cfg`-gated items: rustdoc

@@ -12,32 +12,70 @@ use sha2::{Digest, Sha256};
 
 /// WebSocketOpCode values (v5).
 pub mod op {
+    /// The server's first frame: protocol version, `rpcVersion` and, when a
+    /// password is configured, the `authentication` salt/challenge pair.
     pub const HELLO: u8 = 0;
+    /// The client's handshake answer: negotiated rpc version, the optional
+    /// authentication response, and the event subscriptions it wants.
     pub const IDENTIFY: u8 = 1;
+    /// The server's acknowledgement of `Identify`, carrying the
+    /// `negotiatedRpcVersion` the session will use from here on.
     pub const IDENTIFIED: u8 = 2;
+    /// Updates the session's event subscriptions without running the
+    /// handshake again.
     pub const REIDENTIFY: u8 = 3;
     // NOTE: v4 used opcode 4 for `Heartbeat`; v5 deliberately has no opcode 4.
+    /// A server-initiated event the client subscribed to, with `eventType`,
+    /// `eventIntent` and `eventData`.
     pub const EVENT: u8 = 5;
+    /// A client request: `requestType`, a client-chosen `requestId` that the
+    /// response echoes, and the optional `requestData`.
     pub const REQUEST: u8 = 6;
+    /// The reply to a single `Request`, pairing `requestId` with a
+    /// `requestStatus` and the `responseData`.
     pub const REQUEST_RESPONSE: u8 = 7;
+    /// Several requests in one frame, each with its own `requestId`.
     pub const REQUEST_BATCH: u8 = 8;
+    /// One reply per request of a `RequestBatch`, in the order they arrived.
     pub const REQUEST_BATCH_RESPONSE: u8 = 9;
 }
 
 /// EventSubscription bit flags (v5). Values verified against the generated
 /// protocol reference.
 pub mod intent {
+    /// General lifecycle events: server exit, studio mode toggles, virtual
+    /// camera, and anything that fits no narrower category.
     pub const GENERAL: u32 = 1 << 0;
+    /// Configuration changes: scene collection switches, profile changes and
+    /// the current scene collection file being written.
     pub const CONFIG: u32 = 1 << 1;
+    /// Scene lifecycle: created, removed, renamed, and changes to the scene
+    /// order.
     pub const SCENES: u32 = 1 << 2;
+    /// Input lifecycle and settings: created, removed, renamed, settings
+    /// changed, and audio balance/track changes.
     pub const INPUTS: u32 = 1 << 3;
+    /// Transition events: begin/end of a transition and changes to the current
+    /// or configured transition.
     pub const TRANSITIONS: u32 = 1 << 4;
+    /// Filter lifecycle on an input or source: added, removed, renamed, and
+    /// settings changed.
     pub const FILTERS: u32 = 1 << 5;
+    /// Output lifecycle: stream, recording and replay buffer started, stopped,
+    /// paused or saved.
     pub const OUTPUTS: u32 = 1 << 6;
+    /// Scene item lifecycle within a scene: created, removed, its index moved,
+    /// and transform or enabled-state changes.
     pub const SCENE_ITEMS: u32 = 1 << 7;
+    /// Playback events of media inputs. These fire per frame of playback, so
+    /// they are opt-in rather than part of [`ALL`].
     pub const MEDIA_INPUTS: u32 = 1 << 8;
+    /// Events emitted by third-party plugins under a vendor namespace.
     pub const VENDORS: u32 = 1 << 9;
+    /// User-interface events: screensaver state and studio mode UI changes.
     pub const UI: u32 = 1 << 10;
+    /// Canvas lifecycle in multi-canvas setups: created, removed, and changes
+    /// to the canvas order.
     pub const CANVASES: u32 = 1 << 11;
     /// All non-high-volume event categories (matches the spec's default when
     /// `eventSubscriptions` is omitted).
@@ -92,15 +130,29 @@ pub mod status {
 
 /// WebSocketCloseCode values (v5) used by the server.
 pub mod close {
+    /// No close code: used where the protocol expects a code field but the
+    /// connection is not being closed.
     pub const DONT_CLOSE: u16 = 0;
+    /// The frame was not valid JSON.
     pub const MESSAGE_DECODE_ERROR: u16 = 4002;
+    /// The frame had no `d` field.
     pub const MISSING_DATA_FIELD: u16 = 4003;
+    /// `d` was not the JSON type the op expects (for example an array for a
+    /// `Request`).
     pub const INVALID_DATA_FIELD_TYPE: u16 = 4004;
+    /// `d` had the right type but a value the op cannot accept, such as an
+    /// unknown `requestType` or an out-of-range subscription mask.
     pub const INVALID_DATA_FIELD_VALUE: u16 = 4005;
+    /// The `op` field named an op code this server does not implement.
     pub const UNKNOWN_OP_CODE: u16 = 4006;
+    /// The client sent a request before completing `Identify`.
     pub const NOT_IDENTIFIED: u16 = 4007;
+    /// The client sent a second `Identify` on an identified session; re-identify
+    /// through `Reidentify` instead.
     pub const ALREADY_IDENTIFIED: u16 = 4008;
+    /// The authentication response did not match the configured password.
     pub const AUTHENTICATION_FAILED: u16 = 4009;
+    /// `Identify` asked for a `rpcVersion` this server cannot speak.
     pub const UNSUPPORTED_RPC_VERSION: u16 = 4010;
 }
 
@@ -118,33 +170,60 @@ pub const JSON_SUBPROTOCOL: &str = "obswebsocket.json";
 /// Companion, Touch Portal, …) can drive Rivulet unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestType {
+    /// Reports the obs-websocket protocol version and the OBS version behind it.
     GetVersion,
+    /// Reports whether the server challenges clients with a password. The v4
+    /// name is kept so older clients still get an answer.
     GetAuthRequired,
+    /// Lists every scene with its index and names the current program scene.
     GetSceneList,
+    /// Names the scene currently on air.
     GetCurrentProgramScene,
+    /// Switches the program scene; `requestData` carries the scene `sceneName`.
     SetCurrentProgramScene,
+    /// Lists the inputs with their kind and, on request, their full settings.
     GetInputList,
+    /// Reports whether recording is active, paused, and for how long.
     GetRecordStatus,
+    /// Starts recording with the configured output settings.
     StartRecord,
+    /// Stops the current recording.
     StopRecord,
+    /// Starts recording when idle and stops it when running.
     ToggleRecord,
+    /// Pauses a running recording, keeping the file open.
     PauseRecord,
+    /// Resumes a paused recording.
     UnpauseRecord,
+    /// Reports whether streaming is active, for how long, and the congestion
+    /// state of the connection.
     GetStreamStatus,
+    /// Starts streaming to the configured service.
     StartStream,
+    /// Stops the current stream.
     StopStream,
+    /// Starts streaming when idle and stops it when running.
     ToggleStream,
+    /// Flips the mute state of one input; `requestData` carries `inputName`.
     ToggleInputMute,
+    /// Reports whether the replay buffer is running.
     GetReplayBufferStatus,
+    /// Starts the replay buffer so the last seconds of output stay available.
     StartReplayBuffer,
+    /// Stops the replay buffer and drops the retained footage.
     StopReplayBuffer,
+    /// Starts the replay buffer when idle and stops it when running.
     ToggleReplayBuffer,
+    /// Writes the buffered footage to a file.
     SaveReplayBuffer,
+    /// Reports whether studio mode (preview/program) is on.
     GetStudioModeEnabled,
+    /// Turns studio mode on or off; `requestData` carries `studioModeEnabled`.
     SetStudioModeEnabled,
 }
 
 impl RequestType {
+    /// The wire name of the request, exactly as it appears in `requestType`.
     pub fn as_str(self) -> &'static str {
         match self {
             RequestType::GetVersion => "GetVersion",

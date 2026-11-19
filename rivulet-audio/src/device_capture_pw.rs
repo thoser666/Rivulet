@@ -41,6 +41,7 @@ use crate::capture::AudioFrameCallback;
 /// Format delivered to the engine: interleaved f32, stereo, 48 kHz — exactly
 /// the routed appsrc caps (`audio/x-raw,format=F32LE,...,rate=48000`).
 pub const PW_CAPTURE_RATE: u32 = 48_000;
+/// Channel count of the format above: stereo, like the routed appsrc caps.
 pub const PW_CAPTURE_CHANNELS: u16 = 2;
 
 /// media.class of the nodes that carry what an application plays into a
@@ -62,6 +63,8 @@ pub const KEY_APP_NAME: &str = "app.name";
 /// (`sm-objects`/`default`), holding `default.audio.sink` /
 /// `default.audio.source` as JSON `{"name": ...}`.
 pub const KEY_DEFAULT_AUDIO_SINK: &str = "default.audio.sink";
+/// Key holding the default source name (`default.audio.source`) in the same
+/// metadata object.
 pub const KEY_DEFAULT_AUDIO_SOURCE: &str = "default.audio.source";
 
 /// One capturable device node offered by the device picker.

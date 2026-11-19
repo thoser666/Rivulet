@@ -35,11 +35,13 @@ pub enum JobStatus {
 pub struct BatchRenderJob {
     /// Config path, as given on the command line.
     pub config: String,
+    /// Outcome of this job.
     pub status: JobStatus,
     /// Rendered container, relative to the output directory.
     pub video: Option<PathBuf>,
     /// Rendered still of `--frame`, relative to the output directory.
     pub png: Option<PathBuf>,
+    /// Frames the job rendered.
     pub frames: u32,
     /// Duration derived from the frame count and fps, not measured.
     pub duration_secs: f64,
@@ -54,10 +56,15 @@ pub struct BatchRenderJob {
 /// rather than silently getting a default.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BatchRenderSummary {
+    /// Version of the emitted schema; see [`BatchRenderSummary::SCHEMA_VERSION`].
     pub schema_version: u32,
+    /// Directory the batch wrote into.
     pub out_dir: PathBuf,
+    /// One entry per config file, in the order the batch ran them.
     pub jobs: Vec<BatchRenderJob>,
+    /// Jobs that rendered and wrote their outputs.
     pub succeeded: usize,
+    /// Jobs that failed; each one carries its error in `jobs`.
     pub failed: usize,
 }
 
@@ -93,6 +100,7 @@ pub struct RenderArgs {
     pub png: Option<PathBuf>,
     /// Single-mode video output.
     pub video: Option<PathBuf>,
+    /// Container for the rendered video, when the run produces one.
     pub container: Option<RenderVideoTarget>,
     /// Where the batch summary is written (default: `<out-dir>/summary.json`).
     pub summary: Option<PathBuf>,
