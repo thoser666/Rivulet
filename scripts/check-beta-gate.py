@@ -26,6 +26,11 @@ Output modes (the exit code is the same regardless of mode):
 - `--json`       a single JSON document on stdout (machine-readable).
 - `--comment`    a compact Markdown dashboard for the GitHub Actions step
                  summary, an issue, or a PR comment.
+- `--print-platforms`  the runner labels of the build-matrix `os:` lists, one
+                 per line, sorted. This is the same reader the platform-parity
+                 criterion uses, exposed so `ci_pinning` compares `cfg`
+                 predicates against the matrix without growing a second YAML
+                 parser.
 
 Exit codes: `0` by default — this is an informational dashboard, and the
 project is expected to be NOT READY while it is still in alpha. Pass `--fail`
@@ -35,6 +40,7 @@ gate for a beta tag).
 Usage:
     scripts/check-beta-gate.py [--fail] [--json | --comment]
         [--repo owner/repo] [--ref develop] [--token TOKEN]
+    scripts/check-beta-gate.py --print-platforms
 """
 
 import json
@@ -581,6 +587,21 @@ def run_self_test():
     except ImportError:
         print("SKIP [CI matrix parsing] (PyYAML not installed)")
 
+    # 8. `--print-platforms` publishes the matrix the parity criterion reads,
+    # so the pinning test has one owner for "how ci.yml is parsed" instead of
+    # its own line scan.
+    printed = subprocess.run(
+        [sys.executable, str(Path(__file__).resolve()), "--print-platforms"],
+        capture_output=True,
+        text=True,
+    )
+    case(
+        "print-platforms lists the build matrix",
+        printed.returncode == 0
+        and {"ubuntu-latest", "windows-latest", "macos-latest"}
+        <= set(printed.stdout.split()),
+    )
+
     if failures:
         print(f"{failures} self-test case(s) FAILED")
         return 1
@@ -595,6 +616,14 @@ def main():
         return 0
     if "--self-test" in args:
         return run_self_test()
+    if "--print-platforms" in args:
+        platforms = sorted(ci_platforms())
+        if not platforms:
+            print("no build-matrix `os:` list found in ci.yml", file=sys.stderr)
+            return 1
+        for platform in platforms:
+            print(platform)
+        return 0
 
     fail = "--fail" in args
     as_json = "--json" in args

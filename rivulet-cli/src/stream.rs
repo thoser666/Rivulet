@@ -227,9 +227,13 @@ pub fn parse_stream_args(args: &[String]) -> Result<StreamArgs, String> {
 pub enum StreamStatusEvent {
     /// Emitted once, after the ingest probe succeeded and the session started.
     Started {
+        /// Frame width the stream sends.
         width: u32,
+        /// Frame height the stream sends.
         height: u32,
+        /// Frame rate the stream sends.
         fps: u32,
+        /// Whether the stream carries audio (serialized as `audio`).
         #[serde(rename = "audio")]
         audio_enabled: bool,
         /// Platform label (`Twitch`, `YouTube`, `Kick`, `Custom`).
@@ -243,10 +247,13 @@ pub enum StreamStatusEvent {
     },
     /// Emitted every second with the engine's stream telemetry.
     Progress {
+        /// Elapsed seconds since the stream started.
         seconds: u64,
+        /// Frames sent so far.
         frames: u64,
         /// Measured bitrate over the engine's sliding window (kbit/s).
         kbps: f64,
+        /// Total bytes handed to the muxer so far.
         bytes_sent: u64,
         /// Dropped frames as a fraction of sent + dropped (0.0 ..= 1.0).
         dropped_ratio: f64,
@@ -255,11 +262,17 @@ pub enum StreamStatusEvent {
     },
     /// Emitted once when the stream has been finalized.
     Stopped {
+        /// Duration of the stream session, in seconds.
         seconds: u64,
+        /// Frames sent in total.
         frames: u64,
+        /// Total bytes handed to the muxer.
         bytes_sent: u64,
+        /// Average bitrate over the session (kbit/s).
         kbps: f64,
+        /// Dropped frames as a fraction of sent + dropped (0.0 ..= 1.0).
         dropped_ratio: f64,
+        /// Final connection health (`good`, `warning` or `poor`).
         health: String,
     },
 }

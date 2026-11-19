@@ -104,6 +104,11 @@ The printed commit must equal the SHA in the PR. Then run
 entry in `rivulet-core/tests/ci_pinning.rs` so the reference and the
 enforcement stay in sync (the test suite fails otherwise).
 
+The script only writes when asked to: `--check` reports drift and exits 1,
+`--help` prints its usage and returns before reading or writing the table. A
+regeneration keeps the file's existing line endings, so running it on a checkout
+that differs from `HEAD` only in CRLF/LF leaves no diff behind.
+
 ## Auto-merge
 
 `.github/workflows/dependabot-auto-merge.yml` approves Dependabot PRs and

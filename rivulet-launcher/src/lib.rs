@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! Bootstrap diagnostics that can run before the GUI's tracing subscriber.
 //!
 //! This crate deliberately has no third-party dependencies. It is suitable for

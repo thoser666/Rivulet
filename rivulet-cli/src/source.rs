@@ -17,6 +17,7 @@ pub use rivulet_core::source::TestVideoSource;
 pub struct SilenceSource;
 
 impl SilenceSource {
+    /// A source that yields silence from its first frame on.
     pub fn new() -> Self {
         Self
     }

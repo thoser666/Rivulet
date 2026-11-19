@@ -109,7 +109,9 @@ pub struct MetricsArgs {
     pub frames: u32,
     /// Synthetic capture geometry for the `record` phase.
     pub width: u32,
+    /// Frame height for the `record` phase.
     pub height: u32,
+    /// Frame rate for the `record` phase.
     pub fps: u32,
     /// Skip [`RivuletEngine`] construction (and therefore GStreamer init).
     pub no_engine: bool,
@@ -135,9 +137,13 @@ impl Default for MetricsArgs {
 pub struct FrameStats {
     /// Frames the statistics are computed over (warmup excluded).
     pub frames: u32,
+    /// Median per-frame time in milliseconds.
     pub p50_ms: f64,
+    /// 95th percentile per-frame time in milliseconds.
     pub p95_ms: f64,
+    /// 99th percentile per-frame time in milliseconds.
     pub p99_ms: f64,
+    /// Slowest single frame, in milliseconds.
     pub max_ms: f64,
     /// Frames per second implied by the mean of the slowest 1 % of frames.
     /// `None` when there are no samples to derive it from.

@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! Audio capture and mixing for Rivulet.
 //!
 //! Captures system audio (what you hear) and microphone input. By default the
@@ -10,6 +11,8 @@
 pub mod app_audio_macos;
 #[cfg(target_os = "linux")]
 pub mod app_audio_pw;
+/// Capture pipeline: starts the mixed or per-track streams and reports the
+/// filters that were skipped on this system.
 pub mod capture;
 // Core Audio device capture (issue #231): the macOS mirror of the WASAPI
 // device backend below.

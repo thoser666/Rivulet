@@ -1,9 +1,16 @@
+#![warn(missing_docs)]
 #![allow(
     non_camel_case_types,
     non_upper_case_globals,
     non_snake_case,
     dead_code
 )]
+
+//! Vulkan capture layer.
+//!
+//! A `VK_LAYER` implementation that hooks `vkQueuePresentKHR` and writes the
+//! presented image into a shared-memory section, using the same
+//! [`capture_channel::FrameHeader`] protocol as the OpenGL hook DLL.
 
 pub mod capture_channel;
 
@@ -99,6 +106,7 @@ struct VkLayerDeviceCreateInfo {
 }
 
 #[repr(C)]
+/// What the Vulkan loader hands the layer when it negotiates the interface.
 pub struct VkNegotiateLayerInterface {
     s_type: i32,
     p_next: *mut c_void,

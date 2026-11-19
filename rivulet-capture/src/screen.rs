@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use rivulet_core::CaptureRegion;
 use xcap::Monitor;
 
+/// Captures one monitor through xcap, optionally cropped to a region.
 pub struct XCapScreenCapture {
     monitor: Monitor,
     width: u32,
@@ -90,14 +91,23 @@ impl XCapScreenCapture {
     }
 }
 
+/// One monitor as reported by [`XCapScreenCapture::list_monitors`].
 #[derive(Debug, Clone)]
 pub struct MonitorInfo {
+    /// Position in the monitor list, i.e. the value
+    /// [`XCapScreenCapture::new`] takes.
     pub index: u32,
+    /// The monitor's name as the OS reports it; may be empty.
     pub name: String,
+    /// Width in pixels.
     pub width: u32,
+    /// Height in pixels.
     pub height: u32,
+    /// Left edge in the virtual-desktop coordinate space.
     pub x: i32,
+    /// Top edge in the virtual-desktop coordinate space.
     pub y: i32,
+    /// Whether this is the OS's primary monitor.
     pub is_primary: bool,
 }
 

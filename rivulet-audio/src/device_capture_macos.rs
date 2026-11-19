@@ -49,6 +49,7 @@ use crate::capture::AudioFrameCallback;
 /// Format delivered to the engine: interleaved f32, stereo, 48 kHz — exactly
 /// the routed appsrc caps (`audio/x-raw,format=F32LE,...,rate=48000`).
 pub const MACOS_CAPTURE_RATE: u32 = 48_000;
+/// Channel count of the format above: stereo, like the routed appsrc caps.
 pub const MACOS_CAPTURE_CHANNELS: u16 = 2;
 
 /// Input-device name keywords of the known loopback-capable drivers. Same

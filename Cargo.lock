@@ -5406,7 +5406,6 @@ name = "rivulet-obs-compat"
 version = "0.65.0-alpha.55"
 dependencies = [
  "anyhow",
- "cc",
  "libc",
  "libloading 0.9.0",
  "rivulet-core",

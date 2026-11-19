@@ -40,8 +40,10 @@ pub struct FrameHeader {
 }
 
 impl FrameHeader {
+    /// Size of the shared-memory header in bytes.
     pub const SIZE: usize = 32;
 
+    /// Build a header for a `width` × `height` frame carrying `sequence`.
     pub fn new(width: u32, height: u32, sequence: u64) -> Self {
         // Checked multiplication: a hostile/corrupt extent (e.g. u32::MAX
         // from a broken swapchain) must wrap to None instead of overflowing
