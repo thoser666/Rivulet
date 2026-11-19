@@ -202,7 +202,7 @@ impl CloudRecording {
         &self,
         file_path: &Path,
         http: &dyn HttpPut,
-        now: chrono::DateTime<chrono::Utc>,
+        now: time::OffsetDateTime,
     ) -> Result<u64, String> {
         if !self.enabled {
             return Err("cloud upload is disabled".to_string());
@@ -275,6 +275,14 @@ pub fn sigv4_signing_key(secret: &str, date: &str, region: &str, service: &str) 
     hmac_sha256(&k_service, b"aws4_request")
 }
 
+/// `%Y%m%d` for the SigV4 credential scope.
+const SIGV4_DATE: &[time::format_description::BorrowedFormatItem<'static>] =
+    time::macros::format_description!("[year][month][day]");
+
+/// `%Y%m%dT%H%M%SZ` for the `x-amz-date` header.
+const SIGV4_TIMESTAMP: &[time::format_description::BorrowedFormatItem<'static>] =
+    time::macros::format_description!("[year][month][day]T[hour][minute][second]Z");
+
 /// Sign an S3 `PUT` request and return the headers to send.
 ///
 /// Signature V4 uses the exact same canonicalisation for an anonymous body as
@@ -283,12 +291,14 @@ pub fn sign_sigv4_put(
     access_key: &str,
     secret_key: &str,
     region: &str,
-    now: chrono::DateTime<chrono::Utc>,
+    now: time::OffsetDateTime,
     url: &str,
     body: &[u8],
 ) -> Vec<(&'static str, String)> {
-    let date = now.format("%Y%m%d").to_string();
-    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+    // SigV4 dates are always UTC, whatever offset the caller's clock carried.
+    let now = now.to_offset(time::UtcOffset::UTC);
+    let date = now.format(SIGV4_DATE).unwrap_or_default();
+    let amz_date = now.format(SIGV4_TIMESTAMP).unwrap_or_default();
     let payload_hash = sha256_hex(body);
 
     let (host, canonical_uri) = split_url(url);
@@ -430,9 +440,11 @@ mod tests {
             "AKIDEXAMPLE",
             "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
             "us-east-1",
-            chrono::DateTime::parse_from_rfc3339("2015-08-30T12:36:00Z")
+            time::Date::from_calendar_date(2015, time::Month::August, 30)
                 .unwrap()
-                .with_timezone(&chrono::Utc),
+                .with_hms(12, 36, 0)
+                .unwrap()
+                .assume_utc(),
             "https://examplebucket.s3.amazonaws.com/test%24file.text",
             &[],
         );
@@ -506,7 +518,7 @@ mod tests {
             ok: true,
         };
         let n = c
-            .upload_recording(&file, &http, chrono::Utc::now())
+            .upload_recording(&file, &http, time::OffsetDateTime::now_utc())
             .unwrap();
         assert_eq!(n, b"hello cloud".len() as u64);
         let _ = std::fs::remove_dir_all(&dir);
@@ -520,7 +532,7 @@ mod tests {
             .upload_recording(
                 std::path::Path::new("ignored.mp4"),
                 &http,
-                chrono::Utc::now(),
+                time::OffsetDateTime::now_utc(),
             )
             .is_err());
     }
@@ -539,7 +551,7 @@ mod tests {
             ok: false,
         };
         let err = c
-            .upload_recording(&file, &http, chrono::Utc::now())
+            .upload_recording(&file, &http, time::OffsetDateTime::now_utc())
             .unwrap_err();
         assert!(err.contains("403"), "got: {err}");
         let _ = std::fs::remove_dir_all(&dir);

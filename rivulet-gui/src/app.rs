@@ -8136,7 +8136,11 @@ impl RivuletApp {
             .add_filter("Video", &["mp4"])
             .set_file_name(format!(
                 "rivulet-replay-{}.mp4",
-                chrono::Utc::now().format("%Y-%m-%d_%H-%M-%S")
+                time::OffsetDateTime::now_utc()
+                    .format(time::macros::format_description!(
+                        "[year]-[month]-[day]_[hour]-[minute]-[second]"
+                    ))
+                    .unwrap_or_default()
             ))
             .save_file()
         else {
@@ -8728,7 +8732,7 @@ impl RivuletApp {
     fn build_crash_report(&self) -> rivulet_core::crash_report::CrashReport {
         let mut log = std::fs::read_to_string(crate::logging::log_path(
             &crate::logging::LogConfig::default_directory(),
-            chrono::Local::now().date_naive(),
+            rivulet_core::local_now().date(),
         ))
         .unwrap_or_default();
         // A pending crash record is appended as a crash block. It is the only

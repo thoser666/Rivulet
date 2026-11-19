@@ -54,6 +54,21 @@
   `stage_obs_import_reports_a_broken_collection_without_staging_it` (GUI) and
   `obs_import_keys_translate_in_both_locales` (i18n).
 
+- refactor(deps): **`chrono` is replaced by `time`, so the security gate needs
+  no advisory exception any more.** `RUSTSEC-2026-0543` (2026-11-17) marks
+  `chrono` unmaintained with no fixed release; while it was a direct dependency
+  of `rivulet-core` and `rivulet-gui`, `deny.toml` had to ignore that one
+  advisory to keep `Cargo Deny` — and the required `Security` check — green.
+  Both crates now take their wall-clock timestamps from `time` (already resolved
+  transitively), and the formats are unchanged: recording file patterns and the
+  daily log name stay `%Y-%m-%d` / `%H-%M-%S`, the replay save dialog keeps
+  `%Y-%m-%d_%H-%M-%S`, and the S3 SigV4 headers keep `%Y%m%d` and
+  `%Y%m%dT%H%M%SZ` in UTC whatever offset the caller passes. The
+  `RUSTSEC-2026-0543` ignore entry is gone; `docs/security.md` records why no
+  exception is needed instead. `rivulet_core::local_now()` centralises the
+  local-zone lookup used by the log, file-name and crash-report paths and falls
+  back to UTC where `time` refuses to guess an offset.
+
 - fix(gui): **the scene collection survives a restart.** `RivuletApp` carried
   `scenes` and `source_manager` behind `#[serde(skip)]`, so `save()` never wrote
   the collection: every restart came back with no scenes, and only a manual

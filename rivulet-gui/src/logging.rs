@@ -1,9 +1,9 @@
-use chrono::{Local, NaiveDate};
 use std::{
     io,
     path::{Path, PathBuf},
     sync::Mutex,
 };
+use time::{macros::format_description, Date, Duration};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 pub const DEFAULT_RETENTION_DAYS: u32 = 14;
@@ -45,16 +45,19 @@ pub fn crash_record_directory() -> PathBuf {
         .join("crashes")
 }
 
-pub fn log_path(directory: &Path, date: NaiveDate) -> PathBuf {
-    directory.join(format!("{LOG_PREFIX}{}.log", date.format("%Y-%m-%d")))
+pub fn log_path(directory: &Path, date: Date) -> PathBuf {
+    let day = date
+        .format(format_description!("[year]-[month]-[day]"))
+        .unwrap_or_default();
+    directory.join(format!("{LOG_PREFIX}{day}.log"))
 }
 
 pub fn remove_expired_logs(
     directory: &Path,
     retention_days: u32,
-    today: NaiveDate,
+    today: Date,
 ) -> io::Result<usize> {
-    let cutoff = today - chrono::Duration::days(i64::from(retention_days.max(1)));
+    let cutoff = today - Duration::days(i64::from(retention_days.max(1)));
     let mut removed = 0;
     if !directory.is_dir() {
         return Ok(0);
@@ -68,7 +71,7 @@ pub fn remove_expired_logs(
         else {
             continue;
         };
-        let Ok(date) = NaiveDate::parse_from_str(date_text, "%Y-%m-%d") else {
+        let Ok(date) = Date::parse(date_text, format_description!("[year]-[month]-[day]")) else {
             continue;
         };
         if date < cutoff {
@@ -97,7 +100,7 @@ pub fn log_crash(path: &Path, context: &str, error: &str) -> io::Result<()> {
 
 pub fn init(config: &LogConfig) -> io::Result<PathBuf> {
     std::fs::create_dir_all(&config.directory)?;
-    let today = Local::now().date_naive();
+    let today = rivulet_core::local_now().date();
     let _ = remove_expired_logs(&config.directory, config.retention_days, today)?;
     let path = log_path(&config.directory, today);
     let file = std::fs::OpenOptions::new()
@@ -134,7 +137,7 @@ mod tests {
 
     #[test]
     fn log_path_is_daily_and_stable() {
-        let date = NaiveDate::from_ymd_opt(2026, 8, 25).unwrap();
+        let date = Date::from_calendar_date(2026, time::Month::August, 25).unwrap();
         assert_eq!(
             log_path(Path::new("logs"), date),
             PathBuf::from("logs/rivulet-2026-08-25.log")
@@ -145,19 +148,28 @@ mod tests {
     fn retention_removes_only_old_rivulet_logs() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            log_path(dir.path(), NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
+            log_path(
+                dir.path(),
+                Date::from_calendar_date(2026, time::Month::January, 1).unwrap(),
+            ),
             "old",
         )
         .unwrap();
         std::fs::write(
-            log_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 20).unwrap()),
+            log_path(
+                dir.path(),
+                Date::from_calendar_date(2026, time::Month::August, 20).unwrap(),
+            ),
             "new",
         )
         .unwrap();
         std::fs::write(dir.path().join("notes.log"), "keep").unwrap();
-        let removed =
-            remove_expired_logs(dir.path(), 3, NaiveDate::from_ymd_opt(2026, 8, 25).unwrap())
-                .unwrap();
+        let removed = remove_expired_logs(
+            dir.path(),
+            3,
+            Date::from_calendar_date(2026, time::Month::August, 25).unwrap(),
+        )
+        .unwrap();
         assert_eq!(removed, 2);
         assert!(dir.path().join("notes.log").exists());
     }

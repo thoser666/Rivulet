@@ -64,6 +64,18 @@ use uuid::Uuid;
 // Important: The prelude is still needed for methods like .set_state(), .by_name(), etc.
 use gst::prelude::*;
 
+/// Current wall-clock time in the local time zone, with that zone's UTC offset.
+///
+/// Used for user-facing timestamps — daily log file names, recording file
+/// patterns — which should follow the user's clock rather than UTC. `time`
+/// refuses to look up the local offset in some multithreaded processes (its
+/// `local-offset` feature is documented as unsound there), so the fallback is
+/// UTC instead of a panic: a name in the wrong zone is still usable, an abort
+/// at startup is not.
+pub fn local_now() -> time::OffsetDateTime {
+    time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+}
+
 /// Recording output targets (`Output`, `OutputSettings`) and their validation.
 pub mod output;
 pub use output::{Output, OutputSettings};
@@ -1113,12 +1125,8 @@ impl RivuletEngine {
     /// applying the configured filename pattern with the current timestamp and
     /// an optional stream label. Used by the GUI's file dialogs.
     pub fn default_recording_path(&self, dir: &str, stream_label: &str) -> PathBuf {
-        let now = chrono::Local::now();
-        let vals = PatternValues {
-            name: "rivulet-recording".to_string(),
-            date: now.format("%Y-%m-%d").to_string(),
-            time: now.format("%H-%M-%S").to_string(),
-        };
+        let mut vals = PatternValues::from_datetime(local_now());
+        vals.name = "rivulet-recording".to_string();
         let stem = self
             .recording_file
             .filename_pattern
@@ -3157,7 +3165,7 @@ impl RivuletEngine {
         if !cloud.enabled {
             return;
         }
-        match cloud.upload_recording(path, &cloud::UreqPut, chrono::Utc::now()) {
+        match cloud.upload_recording(path, &cloud::UreqPut, time::OffsetDateTime::now_utc()) {
             Ok(bytes) => {
                 tracing::info!(path = %path.display(), bytes, "Recording uploaded to cloud");
             }
@@ -5663,7 +5671,9 @@ mod tests {
         // The timestamp date component is the current local date, so compare
         // dynamically instead of hard-coding a month (the test used to break
         // on every month boundary).
-        let today = chrono::Local::now().format("%Y-%m-").to_string();
+        let today = crate::local_now()
+            .format(time::macros::format_description!("[year]-[month]-"))
+            .unwrap_or_default();
         assert!(
             name.contains(&today),
             "timestamp date component missing: {name}"

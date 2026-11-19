@@ -14,7 +14,11 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 
 # Other core dependencies (unchanged)
-chrono = { version = "0.4.35", features = ["serde"] }
+# Wall-clock timestamps (recording file names, SigV4 signing). `chrono` was
+# dropped after RUSTSEC-2026-0543 marked it unmaintained with no fixed release
+# (see `docs/security.md`); `time` was already resolved transitively, and its
+# formatting macros replace `strftime` patterns at compile time.
+time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 crossbeam-channel = "0.5"
 parking_lot = "0.12"

@@ -52,7 +52,7 @@ fn main() -> Result<(), eframe::Error> {
             .and_then(|value| value.parse().ok())
             .unwrap_or(logging::DEFAULT_RETENTION_DAYS),
     );
-    let crash_log = logging::log_path(&log_config.directory, chrono::Local::now().date_naive());
+    let crash_log = logging::log_path(&log_config.directory, rivulet_core::local_now().date());
     if let Err(error) = logging::init(&log_config) {
         // Keep bootstrap diagnostics visible even when the requested log
         // directory is unavailable, but do not let logging failure prevent the
