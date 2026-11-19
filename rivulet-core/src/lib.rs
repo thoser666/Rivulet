@@ -277,7 +277,7 @@ pub mod region;
 pub use region::CaptureRegion;
 
 pub mod scene;
-pub use scene::{Scene, SceneHierarchyError, SceneKind, SceneManager};
+pub use scene::{next_change_seq, Scene, SceneHierarchyError, SceneKind, SceneManager};
 
 pub mod scene_dock;
 pub use scene_dock::{

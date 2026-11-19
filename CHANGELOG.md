@@ -1,5 +1,35 @@
 ## [Unreleased]
 
+- fix(gui): **duplicating a scene copies its sources instead of leaving the
+  copy empty.** The Duplicate button only ever copied the scene node, so the
+  new scene opened with no items while the original kept the only ones — OBS's
+  "Duplicate Scene" brings every source along. `SceneManager::duplicate_scene`
+  still owns the node (fresh id, same folder, same kind), and the GUI pairs it
+  with the new `SourceManager::duplicate_scene_bindings`: each scene item is
+  copied into the new scene as its own source instance — binding properties
+  (transform override, crop, visibility, lock, z-order) preserved, source
+  definition under a fresh id with the same ` copy` name paste uses — so
+  editing the duplicate never reaches back into the original scene. A binding
+  whose source is missing is skipped rather than copied as a dangling item.
+  The whole duplicate is **one** undo step: `SceneManager::without_undo` and
+  `SourceManager::without_undo` keep the ready-made-node and the item copy out
+  of their own histories, and the pre-edit state of both managers travels as a
+  single compound step in the app. One `Ctrl+Z` therefore takes the duplicated
+  scene and its copied items back together - before this, the first press
+  removed only the copied items through the paste stack and left an empty
+  duplicated scene behind for a second press. Undo and redo now also pick the
+  newest entry by a shared change stamp (`next_change_seq`) instead of a fixed
+  paste-then-scene stack priority, so a compound step, a scene edit and a scene
+  item paste interleave in the order the user made them. Covered by
+  `duplicate_scene_bindings_copies_items_with_own_source_ids`,
+  `duplicate_scene_bindings_is_undoable`,
+  `duplicate_scene_bindings_of_empty_scene_changes_nothing`,
+  `without_undo_keeps_a_scene_copy_out_of_the_paste_history`,
+  `without_undo_keeps_an_edit_out_of_the_scene_history`,
+  `undo_and_redo_entries_carry_increasing_change_stamps` (core),
+  `duplicate_scene_action_copies_the_scene_items_with_own_ids` and
+  `duplicate_scene_undo_reverts_the_scene_and_its_items_in_one_step` (GUI).
+
 - fix(gui): **the scene collection survives a restart.** `RivuletApp` carried
   `scenes` and `source_manager` behind `#[serde(skip)]`, so `save()` never wrote
   the collection: every restart came back with no scenes, and only a manual

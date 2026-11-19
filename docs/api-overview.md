@@ -109,7 +109,7 @@ re-export that disappeared.
 | `region` | Rectangular capture regions (subsets of a monitor) for region capture. | 1 | yes |
 | `render` | Headless deterministic rendering from code (M7 W3, issue #189). | 10 | yes |
 | `replay` | Replay buffer / instant replay support. | 4 | yes |
-| `scene` | Scenes, scene collections, and the folder hierarchy between them. | 4 | yes |
+| `scene` | Scenes, scene collections, and the folder hierarchy between them. | 5 | yes |
 | `scene_dock` | Dock-level presentation state for the scene tree (issue #350). | 14 | yes |
 | `scene_snapshot` | (no module documentation) | 5 | yes |
 | `sdp` | Deterministic Session Description Protocol (SDP) helpers for WHIP/WebRTC. | 1 | yes |
@@ -191,7 +191,7 @@ its own path.
 | `i18n` | `Locale` |
 | `preset` | `RecordingPreset` |
 | `region` | `CaptureRegion` |
-| `scene` | `Scene`, `SceneHierarchyError`, `SceneKind`, `SceneManager` |
+| `scene` | `Scene`, `SceneHierarchyError`, `SceneKind`, `SceneManager`, `next_change_seq` |
 | `scene_dock` | `SceneColorLabel`, `SceneDock`, `SceneDockRow`, `SceneFilterState`, `SceneSearchMode`, `SceneSelection`, `apply_drop`, `apply_drop_selection`, `can_drop`, `can_drop_selection`, `dock_rows`, `dock_rows_filtered`, `drop_error_key`, `first_match` |
 | `scene_snapshot` | `SceneSnapshot`, `SnapshotFrame`, `SnapshotLayer` |
 | `live_compositor` | `ComposedFrame`, `LIVE_CANVAS_HEIGHT`, `LIVE_CANVAS_WIDTH`, `compose_scene` |

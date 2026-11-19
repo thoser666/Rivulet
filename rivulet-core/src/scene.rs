@@ -14,9 +14,23 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
 
 use crate::transition::TransitionDefault;
+
+/// Monotonic stamp for undo entries.
+///
+/// The managers keep separate histories (scenes here, scene items in
+/// [`SourceManager`](crate::SourceManager)), and an application records some
+/// edits as one compound step of its own — duplicating a scene copies its
+/// items into the other manager. Without a shared stamp the newest edit could
+/// sit in any of them, and "undo" would replay the wrong history; the stamp is
+/// what lets the caller order them.
+pub fn next_change_seq() -> u64 {
+    static SEQ: AtomicU64 = AtomicU64::new(1);
+    SEQ.fetch_add(1, Ordering::Relaxed)
+}
 
 /// What a scene is for in a collection ([#319](https://github.com/thoser666/Rivulet/issues/319)).
 ///
@@ -167,6 +181,11 @@ pub struct SceneManager {
     undo_stack: Vec<SceneSnapshot>,
     #[serde(skip)]
     redo_stack: Vec<SceneSnapshot>,
+    /// Set while a caller records its own compound step around an edit that
+    /// spans more than one manager, so this edit adds no second undo entry
+    /// (see [`Self::without_undo`]).
+    #[serde(skip)]
+    suspend_undo: bool,
     /// Per-folder default transitions, keyed by the folder scene's ID (#368).
     ///
     /// Deliberately not a field on [`Scene`]: `Scene` is public and constructible
@@ -188,6 +207,10 @@ struct SceneSnapshot {
     folder_transitions: HashMap<Uuid, TransitionDefault>,
     collection: String,
     profile: String,
+    /// Change stamp: 0 while the snapshot is being built, set when the entry is
+    /// recorded, so the caller can order it against other histories
+    /// ([`next_change_seq`]).
+    seq: u64,
 }
 
 impl Default for SceneManager {
@@ -205,6 +228,7 @@ impl SceneManager {
             history: Vec::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            suspend_undo: false,
             folder_transitions: HashMap::new(),
             collection: "Default".to_string(),
             profile: "Default".to_string(),
@@ -219,11 +243,16 @@ impl SceneManager {
             folder_transitions: self.folder_transitions.clone(),
             collection: self.collection.clone(),
             profile: self.profile.clone(),
+            seq: 0,
         }
     }
 
-    fn record_change(&mut self, before: SceneSnapshot) {
+    fn record_change(&mut self, mut before: SceneSnapshot) {
+        if self.suspend_undo {
+            return;
+        }
         if before != self.snapshot() {
+            before.seq = next_change_seq();
             self.undo_stack.push(before);
             self.redo_stack.clear();
         }
@@ -239,12 +268,44 @@ impl SceneManager {
         !self.redo_stack.is_empty()
     }
 
+    /// Change stamp of the newest undo entry, or `None` when there is nothing
+    /// to undo. Together with
+    /// [`SourceManager::paste_undo_seq`](crate::SourceManager::paste_undo_seq)
+    /// this lets a caller that owns several histories undo the newest edit
+    /// first.
+    pub fn undo_seq(&self) -> Option<u64> {
+        self.undo_stack.last().map(|snapshot| snapshot.seq)
+    }
+
+    /// Change stamp of the newest redo entry, or `None` when there is nothing
+    /// to redo.
+    pub fn redo_seq(&self) -> Option<u64> {
+        self.redo_stack.last().map(|snapshot| snapshot.seq)
+    }
+
+    /// Runs `edit` without recording an undo step.
+    ///
+    /// For a caller that records one compound step around edits in more than
+    /// one manager: the GUI duplicates a scene here and copies its items into
+    /// [`SourceManager`](crate::SourceManager), and a single undo has to revert
+    /// both — so neither manager may add a history entry of its own. The
+    /// suspension nests and is restored even when `edit` returns early.
+    pub fn without_undo<T>(&mut self, edit: impl FnOnce(&mut Self) -> T) -> T {
+        let suspended = self.suspend_undo;
+        self.suspend_undo = true;
+        let result = edit(self);
+        self.suspend_undo = suspended;
+        result
+    }
+
     /// Undo the most recent scene mutation or selection change.
     pub fn undo(&mut self) -> bool {
         let Some(previous) = self.undo_stack.pop() else {
             return false;
         };
-        self.redo_stack.push(self.snapshot());
+        let mut current = self.snapshot();
+        current.seq = next_change_seq();
+        self.redo_stack.push(current);
         self.scenes = previous.scenes;
         self.active = previous.active;
         self.history = previous.history;
@@ -259,7 +320,9 @@ impl SceneManager {
         let Some(next) = self.redo_stack.pop() else {
             return false;
         };
-        self.undo_stack.push(self.snapshot());
+        let mut current = self.snapshot();
+        current.seq = next_change_seq();
+        self.undo_stack.push(current);
         self.scenes = next.scenes;
         self.active = next.active;
         self.history = next.history;
@@ -920,6 +983,44 @@ mod tests {
         assert_eq!(mgr.get(duplicate).unwrap().name, "Copy");
         assert_eq!(mgr.get(duplicate).unwrap().color, 0xFF123456);
         assert_eq!(mgr.scenes().len(), 2);
+    }
+
+    #[test]
+    fn without_undo_keeps_an_edit_out_of_the_scene_history() {
+        let mut mgr = SceneManager::new();
+        // The setup runs unrecorded too, so the manager owns a scene but starts
+        // with an empty history.
+        let original = mgr.without_undo(|scenes| scenes.add(Scene::new("Main".to_string())));
+        assert!(!mgr.can_undo());
+        assert_eq!(mgr.undo_seq(), None);
+
+        let duplicate = mgr
+            .without_undo(|scenes| scenes.duplicate_scene(original, "Copy"))
+            .expect("duplicate");
+        assert_ne!(duplicate, original);
+        assert_eq!(mgr.scenes().len(), 2);
+        assert!(!mgr.can_undo(), "the compound owner records the step");
+        assert_eq!(mgr.undo_seq(), None);
+
+        // Recording resumes after the scope, with a stamp the caller can order
+        // against the other histories.
+        mgr.rename(original, "Renamed".to_string());
+        assert!(mgr.can_undo());
+        assert!(mgr.undo_seq().is_some());
+    }
+
+    #[test]
+    fn undo_and_redo_entries_carry_increasing_change_stamps() {
+        let mut mgr = SceneManager::new();
+        mgr.add(Scene::new("A".to_string()));
+        let first = mgr.undo_seq().expect("a stamped step");
+        mgr.add(Scene::new("B".to_string()));
+        let second = mgr.undo_seq().expect("a stamped step");
+        assert!(second > first, "{second} must be newer than {first}");
+
+        assert!(mgr.undo());
+        let redo = mgr.redo_seq().expect("a stamped redo step");
+        assert!(redo > second, "the undone step is the newest change");
     }
 
     #[test]

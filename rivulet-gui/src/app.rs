@@ -878,6 +878,21 @@ enum ConfirmationChoice {
     Cancel,
 }
 
+/// One undo step for an edit that spans both managers.
+///
+/// Duplicating a scene adds the node in `SceneManager` and copies its items
+/// into `SourceManager`; a single undo has to revert both, and neither manager
+/// can revert the other's document. The step therefore keeps the state of both
+/// managers, and `seq` carries the stamp that orders it against their own
+/// histories ([`rivulet_core::next_change_seq`]).
+#[derive(Debug, Clone, Default)]
+struct CompoundStep {
+    /// Stamp of the edit this step reverts (undo) or replays (redo).
+    seq: u64,
+    scenes: rivulet_core::SceneManager,
+    sources: rivulet_core::SourceManager,
+}
+
 #[cfg(target_os = "linux")]
 enum BackendMessage {
     Stream(Stream, Fd),
@@ -1719,6 +1734,13 @@ pub struct RivuletApp {
     /// Runtime-only, never persisted.
     #[serde(skip)]
     pending_confirmation: Option<PendingConfirmation>,
+    /// Undo steps for edits that span both managers (duplicating a scene), so
+    /// one Ctrl+Z reverts the scene and its copied items together.
+    /// Runtime-only, never persisted.
+    #[serde(skip)]
+    compound_undo: Vec<CompoundStep>,
+    #[serde(skip)]
+    compound_redo: Vec<CompoundStep>,
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[serde(skip)]
     source_preview_rx: Option<Receiver<RawFrame>>,
@@ -2330,6 +2352,8 @@ impl Default for RivuletApp {
             recording_preview: RecordingPreview::default(),
             pending_preview_frame: None,
             pending_confirmation: None,
+            compound_undo: Vec::new(),
+            compound_redo: Vec::new(),
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             source_preview_rx: None,
             #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -6234,14 +6258,7 @@ impl RivuletApp {
             self.request_scene_selection_removal();
         }
         if let Some(id) = duplicate_target {
-            let name = self
-                .scenes
-                .get(id)
-                .map(|scene| scene.name.clone())
-                .unwrap_or_default();
-            let _ = self
-                .scenes
-                .duplicate_scene(id, self.tr_fmt("scenes_duplicate_name", &[name]));
+            self.duplicate_scene_with_sources(id);
         }
         if let Some((id, old_name)) = rename_target {
             if let Some(new_name) = self.scene_rename_prompt(ui, id, old_name) {
@@ -6474,9 +6491,13 @@ impl RivuletApp {
             }) {
             Ok(manager) => {
                 self.scenes = manager;
-                // The selection names IDs of the previous collection.
+                // The selection names IDs of the previous collection, and a
+                // staged compound step would restore a collection that is no
+                // longer loaded.
                 self.scene_selection.clear();
                 self.scene_visible_ids.clear();
+                self.compound_undo.clear();
+                self.compound_redo.clear();
                 self.scene_status =
                     Some(self.tr_fmt("scenes_imported", &[path.display().to_string()]));
             }
@@ -10040,21 +10061,101 @@ impl RivuletApp {
         }
     }
 
-    /// Undo for the Scenes view: source pastes first (issue #192 — the most
-    /// recent mutation wins and they have their own stack), then the M2
-    /// scene-history stack.
+    /// Duplicates a scene the way OBS's "Duplicate Scene" does: the scene node
+    /// is copied by `SceneManager::duplicate_scene`, and every scene item
+    /// follows through `SourceManager::duplicate_scene_bindings` as its own
+    /// source instance — the copy is editable without touching the original
+    /// scene.
+    ///
+    /// **One** undo step: both managers run under `without_undo`, so neither
+    /// adds a history entry of its own, and the pre-edit state of both is kept
+    /// here as a compound step. A single Ctrl+Z therefore takes the duplicated
+    /// scene and its copied items back together instead of leaving an empty
+    /// scene behind for a second press.
+    fn duplicate_scene_with_sources(&mut self, id: uuid::Uuid) -> Option<uuid::Uuid> {
+        let name = self.scenes.get(id).map(|scene| scene.name.clone())?;
+        let new_name = self.tr_fmt("scenes_duplicate_name", &[name]);
+        let before_scenes = self.scenes.clone();
+        let before_sources = self.source_manager.clone();
+        let copy_id = self
+            .scenes
+            .without_undo(|scenes| scenes.duplicate_scene(id, new_name))?;
+        self.source_manager
+            .without_undo(|sources| sources.duplicate_scene_bindings(id, copy_id));
+        self.compound_undo.push(CompoundStep {
+            seq: rivulet_core::next_change_seq(),
+            scenes: before_scenes,
+            sources: before_sources,
+        });
+        self.compound_redo.clear();
+        Some(copy_id)
+    }
+
+    /// Undo for the Scenes view: the newest edit wins, whichever history
+    /// recorded it — source pastes have their own stack (issue #192), the M2
+    /// scene history its own, and an edit spanning both is a [`CompoundStep`].
+    /// The managers stamp their entries, so this picks by age instead of by
+    /// stack priority (a scene duplicate is one step, not two).
     fn dispatch_scene_undo(&mut self) {
-        if !self.source_manager.undo_paste() {
+        let newest = self.newest_undo_stamp();
+        if newest.is_some() && newest == self.compound_undo.last().map(|step| step.seq) {
+            let step = self.compound_undo.pop().expect("stamped compound step");
+            self.compound_redo.push(CompoundStep {
+                seq: rivulet_core::next_change_seq(),
+                scenes: self.scenes.clone(),
+                sources: self.source_manager.clone(),
+            });
+            self.scenes = step.scenes;
+            self.source_manager = step.sources;
+        } else if newest.is_some() && newest == self.source_manager.paste_undo_seq() {
+            self.source_manager.undo_paste();
+        } else {
             self.scenes.undo();
         }
     }
 
-    /// Redo counterpart of [`Self::dispatch_scene_undo`] with the same
-    /// paste-first priority.
+    /// Redo counterpart of [`Self::dispatch_scene_undo`]: the step undone most
+    /// recently is the one replayed next.
     fn dispatch_scene_redo(&mut self) {
-        if !self.source_manager.redo_paste() {
+        let newest = self.newest_redo_stamp();
+        if newest.is_some() && newest == self.compound_redo.last().map(|step| step.seq) {
+            let step = self.compound_redo.pop().expect("stamped compound step");
+            self.compound_undo.push(CompoundStep {
+                seq: rivulet_core::next_change_seq(),
+                scenes: self.scenes.clone(),
+                sources: self.source_manager.clone(),
+            });
+            self.scenes = step.scenes;
+            self.source_manager = step.sources;
+        } else if newest.is_some() && newest == self.source_manager.paste_redo_seq() {
+            self.source_manager.redo_paste();
+        } else {
             self.scenes.redo();
         }
+    }
+
+    /// Stamp of the newest undo entry across the three histories, if any.
+    fn newest_undo_stamp(&self) -> Option<u64> {
+        [
+            self.scenes.undo_seq(),
+            self.source_manager.paste_undo_seq(),
+            self.compound_undo.last().map(|step| step.seq),
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+    }
+
+    /// Stamp of the newest redo entry across the three histories, if any.
+    fn newest_redo_stamp(&self) -> Option<u64> {
+        [
+            self.scenes.redo_seq(),
+            self.source_manager.paste_redo_seq(),
+            self.compound_redo.last().map(|step| step.seq),
+        ]
+        .into_iter()
+        .flatten()
+        .max()
     }
 
     /// Paste the scene-item clipboard into the composition scene. Deterministic
@@ -19232,6 +19333,84 @@ mod tests {
         );
         assert!(binding.locked, "lock state travels with the item");
         assert_eq!(app.scene_status.as_deref(), Some("Scene item copied"));
+    }
+
+    #[test]
+    fn duplicate_scene_action_copies_the_scene_items_with_own_ids() {
+        // The Duplicate button must not leave the copy empty (OBS parity):
+        // every scene item follows as its own source instance.
+        let mut app = RivuletApp::default();
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+        let source_id = app.source_manager.add_source(rivulet_core::Source::new(
+            "Banner".to_owned(),
+            rivulet_core::SourceKind::Image,
+        ));
+        app.source_manager.bind_source(source_id, scene_id, None);
+        app.source_manager.set_locked(source_id, scene_id, true);
+
+        let copy_id = app
+            .duplicate_scene_with_sources(scene_id)
+            .expect("the scene is duplicated");
+
+        assert_ne!(copy_id, scene_id);
+        let copy_items = app.source_manager.scene_sources(copy_id);
+        assert_eq!(copy_items.len(), 1, "the copy carries the scene's items");
+        assert_ne!(
+            copy_items[0].source_id, source_id,
+            "the copy owns a separate source instance"
+        );
+        assert!(copy_items[0].locked, "scene-item state follows the copy");
+        assert!(app
+            .source_manager
+            .get_source(copy_items[0].source_id)
+            .is_some());
+        assert_eq!(
+            app.source_manager.source_count_in_scene(scene_id),
+            1,
+            "the original scene keeps its one item"
+        );
+    }
+
+    #[test]
+    fn duplicate_scene_undo_reverts_the_scene_and_its_items_in_one_step() {
+        // Regression: the node copy and the item copies were two history
+        // entries, so the first Ctrl+Z left the empty duplicated scene behind
+        // and only a second press removed it.
+        let mut app = RivuletApp::default();
+        let scene_id = app.scenes.add(rivulet_core::Scene::new("Main".to_owned()));
+        app.scenes.switch_to(scene_id);
+        let source_id = app.source_manager.add_source(rivulet_core::Source::new(
+            "Banner".to_owned(),
+            rivulet_core::SourceKind::Image,
+        ));
+        app.source_manager.bind_source(source_id, scene_id, None);
+
+        let copy_id = app
+            .duplicate_scene_with_sources(scene_id)
+            .expect("the scene is duplicated");
+        let copied_source = app.source_manager.scene_sources(copy_id)[0].source_id;
+        assert_eq!(app.scenes.scenes().len(), 2);
+        assert_eq!(app.source_manager.sources().len(), 2);
+        // Exactly one step, and it is the compound one: neither manager kept
+        // a history entry for the duplicate.
+        assert!(!app.source_manager.can_undo_paste());
+        assert_eq!(app.compound_undo.len(), 1);
+
+        app.dispatch_scene_undo();
+
+        assert_eq!(app.scenes.scenes().len(), 1, "the duplicated scene is gone");
+        assert!(app.scenes.get(copy_id).is_none());
+        assert!(app.source_manager.get_source(copied_source).is_none());
+        assert_eq!(app.source_manager.sources().len(), 1);
+        assert_eq!(app.source_manager.source_count_in_scene(scene_id), 1);
+
+        // Redo brings the scene and its copied item back as the same step.
+        app.dispatch_scene_redo();
+        assert!(app.scenes.get(copy_id).is_some());
+        assert!(app.source_manager.get_source(copied_source).is_some());
+        assert_eq!(app.source_manager.scene_sources(copy_id).len(), 1);
+        assert!(app.compound_undo.len() == 1);
     }
 
     #[test]

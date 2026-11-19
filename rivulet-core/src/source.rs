@@ -469,6 +469,11 @@ pub struct SourceManager {
     paste_undo_stack: Vec<SourceCollectionSnapshot>,
     #[serde(default, skip)]
     paste_redo_stack: Vec<SourceCollectionSnapshot>,
+    /// Set while a caller records its own compound step around an edit that
+    /// spans more than one manager, so this edit adds no second undo entry
+    /// (see [`Self::without_undo`]).
+    #[serde(default, skip)]
+    suspend_undo: bool,
 }
 
 /// Full-state snapshot of the source collection (M2 undo pattern).
@@ -476,6 +481,10 @@ pub struct SourceManager {
 struct SourceCollectionSnapshot {
     sources: Vec<Source>,
     bindings: Vec<SceneSource>,
+    /// Change stamp: 0 while the snapshot is being built, set when the entry is
+    /// recorded, so the caller can order it against the other histories
+    /// ([`crate::next_change_seq`]).
+    seq: u64,
 }
 
 impl SourceManager {
@@ -570,9 +579,13 @@ impl SourceManager {
     /// Snapshots the collection before a paste/duplicate mutation (M2
     /// undo pattern: full-state snapshot, redo cleared on new change).
     fn record_paste_change(&mut self) {
+        if self.suspend_undo {
+            return;
+        }
         self.paste_undo_stack.push(SourceCollectionSnapshot {
             sources: self.sources.clone(),
             bindings: self.bindings.clone(),
+            seq: crate::scene::next_change_seq(),
         });
         self.paste_redo_stack.clear();
     }
@@ -587,6 +600,38 @@ impl SourceManager {
         !self.paste_redo_stack.is_empty()
     }
 
+    /// Change stamp of the newest paste undo entry, or `None` when there is
+    /// nothing to undo. Together with [`SceneManager::undo_seq`] this lets a
+    /// caller that owns several histories undo the newest edit first.
+    ///
+    /// [`SceneManager::undo_seq`]: crate::SceneManager::undo_seq
+    pub fn paste_undo_seq(&self) -> Option<u64> {
+        self.paste_undo_stack.last().map(|snapshot| snapshot.seq)
+    }
+
+    /// Change stamp of the newest paste redo entry, or `None` when there is
+    /// nothing to redo.
+    pub fn paste_redo_seq(&self) -> Option<u64> {
+        self.paste_redo_stack.last().map(|snapshot| snapshot.seq)
+    }
+
+    /// Runs `edit` without recording a paste undo step.
+    ///
+    /// For a caller that records one compound step around edits in more than
+    /// one manager: the GUI duplicates a scene in [`SceneManager`] and copies
+    /// its items here, and a single undo has to revert both — so neither
+    /// manager may add a history entry of its own. The suspension nests and is
+    /// restored even when `edit` returns early.
+    ///
+    /// [`SceneManager`]: crate::SceneManager
+    pub fn without_undo<T>(&mut self, edit: impl FnOnce(&mut Self) -> T) -> T {
+        let suspended = self.suspend_undo;
+        self.suspend_undo = true;
+        let result = edit(self);
+        self.suspend_undo = suspended;
+        result
+    }
+
     /// Undo the most recent paste/duplicate: restores the exact pre-paste
     /// source collection (both sources and scene bindings). Returns whether
     /// an undo was applied.
@@ -594,7 +639,9 @@ impl SourceManager {
         let Some(previous) = self.paste_undo_stack.pop() else {
             return false;
         };
-        self.paste_redo_stack.push(self.current_snapshot());
+        let mut current = self.current_snapshot();
+        current.seq = crate::scene::next_change_seq();
+        self.paste_redo_stack.push(current);
         self.sources = previous.sources;
         self.bindings = previous.bindings;
         true
@@ -605,7 +652,9 @@ impl SourceManager {
         let Some(next) = self.paste_redo_stack.pop() else {
             return false;
         };
-        self.paste_undo_stack.push(self.current_snapshot());
+        let mut current = self.current_snapshot();
+        current.seq = crate::scene::next_change_seq();
+        self.paste_undo_stack.push(current);
         self.sources = next.sources;
         self.bindings = next.bindings;
         true
@@ -615,6 +664,7 @@ impl SourceManager {
         SourceCollectionSnapshot {
             sources: self.sources.clone(),
             bindings: self.bindings.clone(),
+            seq: 0,
         }
     }
 
@@ -627,6 +677,52 @@ impl SourceManager {
     pub fn duplicate_scene_item(&mut self, source_id: Uuid, scene_id: Uuid) -> Option<Uuid> {
         let clipboard = self.copy_scene_item(source_id, scene_id)?;
         self.paste_scene_item(&clipboard, scene_id)
+    }
+
+    /// Copies every scene item of `from_scene` into `to_scene`, each as its own
+    /// source instance.
+    ///
+    /// [`SceneManager::duplicate_scene`](crate::SceneManager::duplicate_scene)
+    /// only copies the scene node; the items live here, so the caller that owns
+    /// both managers (GUI or engine) pairs the two calls. Each copied binding
+    /// keeps its scene-local properties — transform override, crop, visibility,
+    /// lock and z-order — while the source keeps its definition under a fresh
+    /// id and the same ` copy` name paste uses, so editing the duplicate never
+    /// changes the original scene's item. A binding whose source is missing is
+    /// skipped instead of being copied as a dangling item. The duplication
+    /// lands on the paste-undo stack like every other copy mutation, and the
+    /// return value is the number of items copied (0 when nothing changed).
+    pub fn duplicate_scene_bindings(&mut self, from_scene: Uuid, to_scene: Uuid) -> usize {
+        let originals: Vec<SceneSource> = self
+            .scene_sources(from_scene)
+            .into_iter()
+            .cloned()
+            .collect();
+        let mut copies: Vec<(Source, SceneSource)> = Vec::with_capacity(originals.len());
+        for binding in originals {
+            let Some(source) = self.get_source(binding.source_id) else {
+                // A binding without its source is already invisible in the
+                // UI; copying it would duplicate the corruption.
+                continue;
+            };
+            let mut new_source = source.clone();
+            new_source.id = Uuid::new_v4();
+            new_source.name = format!("{} copy", source.name);
+            let mut new_binding = binding;
+            new_binding.source_id = new_source.id;
+            new_binding.scene_id = to_scene;
+            copies.push((new_source, new_binding));
+        }
+        if copies.is_empty() {
+            return 0;
+        }
+        self.record_paste_change();
+        let copied = copies.len();
+        for (source, binding) in copies {
+            self.sources.push(source);
+            self.bindings.push(binding);
+        }
+        copied
     }
 
     // ── source CRUD ──────────────────────────────────────────────
@@ -1562,6 +1658,82 @@ mod tests {
         assert_eq!(copy.crop, original.crop);
         assert_eq!(copy.z_order, original.z_order);
         assert_eq!(mgr.get_source(new_id).unwrap().name, "Cam copy");
+    }
+
+    #[test]
+    fn duplicate_scene_bindings_copies_items_with_own_source_ids() {
+        // OBS "Duplicate Scene" parity: the copy arrives with its own item
+        // instances and the same scene-item properties, so editing it never
+        // reaches back into the source scene.
+        let (mut mgr, scene, sid) = clipboard_fixture();
+        let copy_scene = Uuid::new_v4();
+        assert_eq!(mgr.duplicate_scene_bindings(scene, copy_scene), 1);
+
+        assert_eq!(
+            mgr.source_count_in_scene(scene),
+            1,
+            "the source scene keeps its single item"
+        );
+        let original = mgr.scene_sources(scene)[0].clone();
+        let copy = mgr.scene_sources(copy_scene)[0].clone();
+        assert_ne!(copy.source_id, sid, "the copy is its own source instance");
+        assert_eq!(copy.scene_id, copy_scene);
+        assert_eq!(copy.transform_override, original.transform_override);
+        assert_eq!(copy.crop, original.crop);
+        assert_eq!(copy.visible, original.visible);
+        assert_eq!(copy.locked, original.locked);
+        assert_eq!(copy.z_order, original.z_order);
+        let source = mgr.get_source(copy.source_id).unwrap();
+        assert_eq!(source.kind, SourceKind::Webcam);
+        assert_eq!(source.name, "Cam copy");
+        assert_eq!(source.transform, mgr.get_source(sid).unwrap().transform);
+
+        // Editing the copy leaves the original scene's item alone.
+        mgr.set_crop(copy.source_id, copy_scene, Crop::new(9, 9, 9, 9));
+        assert_eq!(mgr.scene_sources(scene)[0].crop, original.crop);
+    }
+
+    #[test]
+    fn duplicate_scene_bindings_is_undoable() {
+        let (mut mgr, scene, _sid) = clipboard_fixture();
+        let before = SceneState::new(mgr.current_collection());
+        let copy_scene = Uuid::new_v4();
+        mgr.duplicate_scene_bindings(scene, copy_scene);
+        assert!(mgr.can_undo_paste());
+
+        assert!(mgr.undo_paste());
+        SceneState::new(mgr.current_collection()).assert_matches(&before);
+        assert_eq!(mgr.source_count_in_scene(copy_scene), 0);
+    }
+
+    #[test]
+    fn duplicate_scene_bindings_of_empty_scene_changes_nothing() {
+        let mut mgr = SourceManager::new();
+        assert_eq!(
+            mgr.duplicate_scene_bindings(Uuid::new_v4(), Uuid::new_v4()),
+            0
+        );
+        assert!(
+            !mgr.can_undo_paste(),
+            "copying an empty scene is not a change"
+        );
+    }
+
+    #[test]
+    fn without_undo_keeps_a_scene_copy_out_of_the_paste_history() {
+        let (mut mgr, scene, sid) = clipboard_fixture();
+        let copy_scene = Uuid::new_v4();
+        mgr.without_undo(|sources| sources.duplicate_scene_bindings(scene, copy_scene));
+        assert_eq!(mgr.source_count_in_scene(copy_scene), 1);
+        assert!(!mgr.can_undo_paste(), "the compound owner records the step");
+        assert_eq!(mgr.paste_undo_seq(), None);
+
+        // Recording resumes after the scope, with a stamp the caller can order
+        // against the other histories.
+        let clipboard = mgr.copy_scene_item(sid, scene).unwrap();
+        mgr.paste_scene_item(&clipboard, scene).unwrap();
+        assert!(mgr.can_undo_paste());
+        assert!(mgr.paste_undo_seq().is_some());
     }
 
     #[test]
