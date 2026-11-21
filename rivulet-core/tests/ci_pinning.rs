@@ -85,20 +85,20 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v3.0.4",
     ),
     (
-        "github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066",
-        "v4.39.3",
+        "github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea",
+        "v4.39.4",
     ),
     (
-        "github/codeql-action/autobuild@33d7b85da1a04171e211befe2c739303b9a4c066",
-        "v4.39.3",
+        "github/codeql-action/autobuild@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea",
+        "v4.39.4",
     ),
     (
-        "github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066",
-        "v4.39.3",
+        "github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea",
+        "v4.39.4",
     ),
     (
-        "github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066",
-        "v4.39.3",
+        "github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea",
+        "v4.39.4",
     ),
     (
         "actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec",
@@ -109,8 +109,8 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v1.2.7",
     ),
     (
-        "EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9",
-        "v2.1.2",
+        "EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd",
+        "v2.1.3",
     ),
     (
         "ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5",
@@ -1756,10 +1756,11 @@ fn wasmtime_cache_feature_stays_disabled_so_the_zstd_advisories_stay_gone() {
     }
 }
 
-/// The patched bands for RUSTSEC-2026-0420/-0422/-0423/-0424 are
-/// `>= 49.0.5, < 50.0.0` and `>= 50.0.1`, so `50.0.0` is still vulnerable. A
-/// plain minimum comparison would accept it, which is why the release line is
-/// part of the check instead of a single version tuple.
+/// The patched bands for the 2026 advisories are `>= 49.0.7, < 50.0.0` and
+/// `>= 50.0.3` (49.0.6/50.0.2 cover RUSTSEC-2026-0566..-0573, but -0587 needs
+/// 49.0.7/50.0.3), so `50.0.0` through `50.0.2` are still vulnerable. A plain
+/// minimum comparison would accept them, which is why the release line is part
+/// of the check instead of a single version tuple.
 fn wasmtime_version_is_patched(version: &str) -> bool {
     let mut parts = version.split('.').map(|part| part.parse::<u64>().ok());
     let (major, minor, patch) = match (parts.next(), parts.next(), parts.next()) {
@@ -1768,8 +1769,8 @@ fn wasmtime_version_is_patched(version: &str) -> bool {
     };
     match major {
         0..=48 => false,
-        49 => (minor, patch) >= (0, 5),
-        50 => (minor, patch) >= (0, 1),
+        49 => (minor, patch) >= (0, 7),
+        50 => (minor, patch) >= (0, 3),
         _ => true,
     }
 }
@@ -1777,12 +1778,15 @@ fn wasmtime_version_is_patched(version: &str) -> bool {
 #[test]
 fn wasmtime_stays_on_a_patched_release_for_the_2026_advisories() {
     // RustSec published RUSTSEC-2026-0420 (`wasmtime-wasi`), -0422, -0423 and
-    // -0424 against 49.0.4 on 2026-10-29, the version both lockfiles carried;
-    // `Cargo Audit` and with it the required `Security` check failed on every
-    // commit until the workspace moved to 49.0.5. The caret range in the
-    // manifest cannot hold that fix, so this guard pins the patched bands for
-    // the advised pair in both lockfiles — the workspace one and the fuzz one,
-    // which is a separate workspace and resolves the same crates.
+    // -0424 against 49.0.4 on 2026-10-29, and RUSTSEC-2026-0566..-0573 plus
+    // -0587 (a Windows WASI filesystem sandbox escape) against 49.0.5 on
+    // 2026-11-19/20. Each time `Cargo Audit` and with it the required
+    // `Security` check failed on every commit until the workspace moved to the
+    // patched release, now 49.0.7. The manifest requirement is raised too, but
+    // a caret range cannot express which 50.x releases are excluded, so this
+    // guard still pins the patched bands for the advised pair in both lockfiles
+    // (the workspace one and the fuzz one, which is a separate workspace and
+    // resolves the same crates).
     for lockfile in ["Cargo.lock", "fuzz/Cargo.lock"] {
         let lock = read(lockfile).replace("\r\n", "\n");
         for crate_name in ["wasmtime", "wasmtime-wasi"] {
@@ -1798,21 +1802,24 @@ fn wasmtime_stays_on_a_patched_release_for_the_2026_advisories() {
             assert!(
                 wasmtime_version_is_patched(version),
                 "{lockfile} locks {crate_name} {version}, which is outside the patched \
-                 bands for RUSTSEC-2026-0420/-0422/-0423/-0424 (`>= 49.0.5, < 50.0.0` \
-                 or `>= 50.0.1`); bump it instead of ignoring the advisories"
+                 bands for the 2026 advisories (`>= 49.0.7, < 50.0.0` \
+                 or `>= 50.0.3`); bump it instead of ignoring the advisories"
             );
         }
     }
 
     // The band logic is exercised directly as well, so a future refactor cannot
-    // quietly turn it back into a plain minimum: 50.0.0 sits above 49.0.5 and
-    // still carries all four advisories.
+    // quietly turn it back into a plain minimum: 50.0.0 sits above 49.0.7 and
+    // still carries every one of the advisories.
     for (version, patched) in [
         ("49.0.4", false),
-        ("49.0.5", true),
+        ("49.0.5", false),
+        ("49.0.6", false),
+        ("49.0.7", true),
         ("49.1.0", true),
         ("50.0.0", false),
-        ("50.0.1", true),
+        ("50.0.2", false),
+        ("50.0.3", true),
         ("51.0.0", true),
     ] {
         assert_eq!(
@@ -1831,6 +1838,9 @@ fn wasmtime_stays_on_a_patched_release_for_the_2026_advisories() {
         "RUSTSEC-2026-0422",
         "RUSTSEC-2026-0423",
         "RUSTSEC-2026-0424",
+        "RUSTSEC-2026-0566",
+        "RUSTSEC-2026-0573",
+        "RUSTSEC-2026-0587",
         "wasmtime_stays_on_a_patched_release_for_the_2026_advisories",
     ] {
         assert!(
@@ -3207,7 +3217,7 @@ fn code_signing_automation_is_wired_up() {
         );
     }
     assert!(
-        build.contains("signpath/github-action-submit-signing-request@4a84eb4ad763290f059275786f2deed97c2c672b"),
+        build.contains("signpath/github-action-submit-signing-request@a2c5b60d9c75f073142b653c354b632eedce097b"),
         "build-package.yml must pin the SignPath action to the reviewed SHA"
     );
     assert!(
@@ -3243,7 +3253,7 @@ fn code_signing_automation_is_wired_up() {
 
     let signpath_check = read("scripts/test-signpath-config.py");
     assert!(
-        signpath_check.contains("4a84eb4ad763290f059275786f2deed97c2c672b")
+        signpath_check.contains("a2c5b60d9c75f073142b653c354b632eedce097b")
             && signpath_check.contains("signpath_enabled")
             && signpath_check.contains("--self-test"),
         "test-signpath-config.py must pin the action SHA and offer --self-test"

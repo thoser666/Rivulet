@@ -34,7 +34,7 @@ SIGNPATH_SECRETS = [
 ]
 
 SIGNPATH_ACTION = "signpath/github-action-submit-signing-request"
-SIGNPATH_PIN = "4a84eb4ad763290f059275786f2deed97c2c672b"
+SIGNPATH_PIN = "a2c5b60d9c75f073142b653c354b632eedce097b"
 
 # Pattern for a full SignPath submit step: id, action@pin, and all inputs.
 SUBMIT_RE = re.compile(

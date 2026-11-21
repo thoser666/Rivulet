@@ -1,5 +1,28 @@
 ## [Unreleased]
 
+- fix(security): **the plugin host moves to `wasmtime`/`wasmtime-wasi` 49.0.7,
+  clearing the nine advisories that turned `Cargo Audit` red on every commit
+  since 2026-11-19** (`RUSTSEC-2026-0566` through `-0573`, and
+  `RUSTSEC-2026-0587`). `-0587` is the important one: a WASI filesystem
+  sandbox escape on Windows through a drive-prefixed path component, i.e. a
+  path out of the plugin sandbox on the platform most users run. The other
+  eight describe 49.0.5: unbounded host memory growth through empty writes to
+  `AsyncWriteStream` (`-0566`) and to `wasmtime-wasi-http` bodies over HTTP/2
+  (`-0571`), a stale GC heap base pointer that lets a guest abort the host
+  (`-0568`), a GC heap reservation that aborts the process (`-0573`), aborts
+  in builds without the `threads` (`-0567`) or `gc` (`-0570`) feature, a panic
+  in `Caller::get_module_export` (`-0569`) and a panic when a component
+  cancels a stream or future copy on the wrong end (`-0572`). The 49 line is
+  patched by 49.0.6 (`-0566`..`-0573`) and 49.0.7 (`-0587`), so the workspace
+  resolves 49.0.7 - a patch update with no plugin ABI change, still on
+  wasmtime 49's default feature set without `cache` (see
+  [`docs/security.md`](docs/security.md)), so the zstd advisories stay gone.
+  The requirement in `Cargo.toml` is raised from `49.0` to `49.0.7`, so a
+  lockfile refresh cannot fall back below the patched release. `Cargo.lock`,
+  `fuzz/Cargo.lock` and the Flatpak offline crate pin (regenerated with
+  `packaging/flatpak/generate-cargo-sources.sh`) move together; `cargo audit`
+  reports no vulnerabilities and no advisory is silenced with an ignore entry.
+
 - fix(gui): **duplicating a scene copies its sources instead of leaving the
   copy empty.** The Duplicate button only ever copied the scene node, so the
   new scene opened with no items while the original kept the only ones — OBS's
