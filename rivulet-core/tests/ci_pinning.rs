@@ -85,20 +85,20 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v3.0.4",
     ),
     (
-        "github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066",
-        "v4.39.3",
+        "github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea",
+        "v4.39.4",
     ),
     (
-        "github/codeql-action/autobuild@33d7b85da1a04171e211befe2c739303b9a4c066",
-        "v4.39.3",
+        "github/codeql-action/autobuild@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea",
+        "v4.39.4",
     ),
     (
-        "github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066",
-        "v4.39.3",
+        "github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea",
+        "v4.39.4",
     ),
     (
-        "github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066",
-        "v4.39.3",
+        "github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea",
+        "v4.39.4",
     ),
     (
         "actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec",
@@ -109,8 +109,8 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v1.2.7",
     ),
     (
-        "EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9",
-        "v2.1.2",
+        "EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd",
+        "v2.1.3",
     ),
     (
         "ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5",
@@ -3217,7 +3217,7 @@ fn code_signing_automation_is_wired_up() {
         );
     }
     assert!(
-        build.contains("signpath/github-action-submit-signing-request@4a84eb4ad763290f059275786f2deed97c2c672b"),
+        build.contains("signpath/github-action-submit-signing-request@a2c5b60d9c75f073142b653c354b632eedce097b"),
         "build-package.yml must pin the SignPath action to the reviewed SHA"
     );
     assert!(
@@ -3253,7 +3253,7 @@ fn code_signing_automation_is_wired_up() {
 
     let signpath_check = read("scripts/test-signpath-config.py");
     assert!(
-        signpath_check.contains("4a84eb4ad763290f059275786f2deed97c2c672b")
+        signpath_check.contains("a2c5b60d9c75f073142b653c354b632eedce097b")
             && signpath_check.contains("signpath_enabled")
             && signpath_check.contains("--self-test"),
         "test-signpath-config.py must pin the action SHA and offer --self-test"

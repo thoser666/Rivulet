@@ -23,7 +23,7 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 <!-- action-pins-table:start -->
 | Action | Version | Pinned SHA | Used in |
 | --- | --- | --- | --- |
-| `EmbarkStudios/cargo-deny-action` | `v2.1.2` | `70f81531115945ba6eb6b941ec9d39d063438eb9` | security.yml |
+| `EmbarkStudios/cargo-deny-action` | `v2.1.3` | `17aeb3c839e42274e2b8adf721c8c65edfdc74dd` | security.yml |
 | `actions-rust-lang/audit` | `v1.2.7` | `72c09e02f132669d52284a3323acdb503cfc1a24` | security.yml |
 | `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, obs-upstream.yml, reproducible-build.yml |
 | `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | assets-tool-image.yml, build-package.yml, ci.yml, distribution-readiness.yml, flatpak-build.yml, fuzz-deep.yml, nightly.yml, obs-upstream.yml, release.yml, reproducible-build.yml, ruleset-guard.yml, scorecard.yml, security.yml, signing-e2e.yml, weekly-promotion.yml, wiki-translations.yml |
@@ -31,12 +31,12 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 | `actions/download-artifact` | `v8.0.2` | `9000827ccba6bdab643e8b6fd33ac0654aef8333` | ci.yml, release.yml, reproducible-build.yml |
 | `actions/upload-artifact` | `v7.0.2` | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` | build-package.yml, ci.yml, fuzz-deep.yml, obs-upstream.yml, reproducible-build.yml, scorecard.yml, weekly-promotion.yml |
 | `dtolnay/rust-toolchain` | `stable` | `89b12181fb390509a0842a86cc55eeb8eb928c1d` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, reproducible-build.yml, security.yml |
-| `github/codeql-action/analyze` | `v4.39.3` | `33d7b85da1a04171e211befe2c739303b9a4c066` | security.yml |
-| `github/codeql-action/autobuild` | `v4.39.3` | `33d7b85da1a04171e211befe2c739303b9a4c066` | security.yml |
-| `github/codeql-action/init` | `v4.39.3` | `33d7b85da1a04171e211befe2c739303b9a4c066` | security.yml |
-| `github/codeql-action/upload-sarif` | `v4.39.3` | `33d7b85da1a04171e211befe2c739303b9a4c066` | scorecard.yml |
+| `github/codeql-action/analyze` | `v4.39.4` | `1bd86f2fdb4b86187fa4059f16f31a3202acc9ea` | security.yml |
+| `github/codeql-action/autobuild` | `v4.39.4` | `1bd86f2fdb4b86187fa4059f16f31a3202acc9ea` | security.yml |
+| `github/codeql-action/init` | `v4.39.4` | `1bd86f2fdb4b86187fa4059f16f31a3202acc9ea` | security.yml |
+| `github/codeql-action/upload-sarif` | `v4.39.4` | `1bd86f2fdb4b86187fa4059f16f31a3202acc9ea` | scorecard.yml |
 | `ossf/scorecard-action` | `v2.6.0` | `23f22cd43608bae7a1f1fa2603d7314dee9538a5` | scorecard.yml |
-| `signpath/github-action-submit-signing-request` | `v3.1` | `4a84eb4ad763290f059275786f2deed97c2c672b` | build-package.yml |
+| `signpath/github-action-submit-signing-request` | `v3.2` | `a2c5b60d9c75f073142b653c354b632eedce097b` | build-package.yml |
 | `softprops/action-gh-release` | `v3.0.4` | `8a0cd651e5b2365bd640854a3fa5dfc70e4875f3` | ci.yml, release.yml |
 <!-- action-pins-table:end -->
 
