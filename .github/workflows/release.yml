@@ -376,47 +376,9 @@ jobs:
           draft: false
           fail_on_unmatched_files: true
 
-      - name: Delete temporary release branch
-        run: |
-          set -euo pipefail
-
-          # The branch was temporary scaffolding: the tag above was pushed
-          # onto its tip, so the commit stays reachable through the tag and
-          # deleting the branch never loses the release. Without this, stale
-          # release/v* branches accumulate (200 of them had piled up).
-          #
-          # TAG-ANCHOR SAFETY RULE: only delete when the remote branch tip is
-          # EXACTLY the tagged commit. If anything was pushed after tagging,
-          # the tip is not anchored and the branch is kept for inspection.
-          # Refs are URL-encoded in full - the branch contains a slash.
-          branch_ref="heads/${RELEASE_BRANCH//\/%2F}"
-          tag_ref="tags/${TAG//\/%2F}"
-
-          tip_sha="$(gh api "repos/$REPO/git/ref/$branch_ref" --jq '.object.sha' 2>/dev/null || true)"
-          if [[ -z "$tip_sha" ]]; then
-            echo "Release branch $RELEASE_BRANCH does not exist on the remote; nothing to clean up."
-            exit 0
-          fi
-
-          tag_sha="$(gh api "repos/$REPO/git/ref/$tag_ref" --jq '.object.sha' 2>/dev/null || true)"
-          if [[ -z "$tag_sha" ]]; then
-            echo "Tag $TAG not found on the remote; keeping branch $RELEASE_BRANCH for manual inspection." >&2
-            exit 0
-          fi
-
-          if [[ "$tip_sha" != "$tag_sha" ]]; then
-            echo "Branch tip ($tip_sha) is not exactly the tag target ($tag_sha);" >&2
-            echo "Keeping $RELEASE_BRANCH for manual inspection (tag-anchor safety rule)." >&2
-            exit 0
-          fi
-
-          gh api -X DELETE "repos/$REPO/git/ref/$branch_ref"
-          echo "Deleted temporary release branch $RELEASE_BRANCH (anchored at $tag_sha)."
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          TAG: ${{ needs.version.outputs.tag }}
-          RELEASE_BRANCH: ${{ needs.version.outputs.release_branch }}
+      # The temporary release branch is deleted by `cleanup_release_branch`
+      # below: `Rebuild & Compare` checks that branch out in parallel with
+      # this job, so deleting it here raced the rebuild's checkout.
 
   verify_release:
     name: Verify published release (post-publish)
@@ -481,13 +443,90 @@ jobs:
 
   ################################################################
   # CLEANUP: the release branch was temporary scaffolding. The tag
-  # above was pushed onto the branch head commit, so that commit
-  # stays reachable through the tag forever; deleting the branch
-  # therefore never loses the release. Without this, stale
-  # release/v* branches accumulate on the remote (200 of them had
-  # piled up before this cleanup existed).
+  # was pushed onto the branch head commit, so that commit stays
+  # reachable through the tag forever; deleting the branch therefore
+  # never loses the release. Without this, stale release/v* branches
+  # accumulate on the remote (200 of them had piled up before this
+  # cleanup existed).
+  #
+  # Runs after every job that still needs the branch: `Rebuild &
+  # Compare` checks it out in parallel with the release job, so a
+  # delete inside that job raced the rebuild's checkout.
   #
   # TAG-ANCHOR SAFETY RULE: only delete when the remote branch tip is
   # EXACTLY the tagged commit. If anything was pushed after tagging
   # (or a manual run tagged a different commit), the tip is not
   # anchored and the branch is kept for manual inspection instead.
+  # The tag must be peeled first: `git tag -a` writes an annotated
+  # tag, whose ref points at a tag object, not at a commit.
+  cleanup_release_branch:
+    name: Delete temporary release branch
+    needs: [check, version, github_release, reproducible, verify_release]
+    # Deliberately not `always()`: a failed release or rebuild is re-run from
+    # this branch (both jobs check it out), so the branch must survive a
+    # failure. A successful release means nothing needs it any more.
+    if: >-
+      ${{ needs.check.outputs.should_release == 'true'
+      && needs.github_release.result == 'success'
+      && needs.reproducible.result == 'success'
+      && needs.verify_release.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete temporary release branch
+        run: |
+          set -euo pipefail
+
+          # TAG-ANCHOR SAFETY RULE: only delete when the remote branch tip is
+          # EXACTLY the tagged commit. If anything was pushed after tagging,
+          # the tip is not anchored and the branch is kept for inspection.
+          # Refs are URL-encoded in full - the branch contains a slash.
+          branch_ref="heads/${RELEASE_BRANCH//\//%2F}"
+          tag_ref="tags/${TAG//\//%2F}"
+
+          tip_sha="$(gh api "repos/$REPO/git/ref/$branch_ref" --jq '.object.sha' 2>/dev/null || true)"
+          if [[ -z "$tip_sha" ]]; then
+            echo "Release branch $RELEASE_BRANCH does not exist on the remote; nothing to clean up."
+            exit 0
+          fi
+
+          tag_sha="$(gh api "repos/$REPO/git/ref/$tag_ref" --jq '.object.sha' 2>/dev/null || true)"
+          if [[ -z "$tag_sha" ]]; then
+            echo "Tag $TAG not found on the remote; keeping branch $RELEASE_BRANCH for manual inspection." >&2
+            exit 0
+          fi
+
+          # `git tag -a` writes an annotated tag, so this ref's `.object.sha` is
+          # the tag OBJECT, never a commit: compared against a branch tip it can
+          # never match, which is why the rule fired on every release and kept
+          # every branch. Peel annotated tags down to the commit they name
+          # before the anchor comparison; the loop also covers a tag pointing
+          # at another tag.
+          tag_type="$(gh api "repos/$REPO/git/ref/$tag_ref" --jq '.object.type' 2>/dev/null || true)"
+          while [[ "$tag_type" == "tag" ]]; do
+            peeled="$(gh api "repos/$REPO/git/tags/$tag_sha" \
+              --jq '.object.type + " " + .object.sha' 2>/dev/null || true)"
+            if [[ -z "$peeled" ]]; then
+              echo "Tag $TAG could not be peeled; keeping branch $RELEASE_BRANCH for manual inspection." >&2
+              exit 0
+            fi
+            tag_type="${peeled%% *}"
+            tag_sha="${peeled##* }"
+          done
+
+          if [[ "$tip_sha" != "$tag_sha" ]]; then
+            echo "Branch tip ($tip_sha) is not exactly the tag target ($tag_sha);" >&2
+            echo "Keeping $RELEASE_BRANCH for manual inspection (tag-anchor safety rule)." >&2
+            exit 0
+          fi
+
+          # Deleting goes through the collection endpoint: `/git/ref` only reads a
+          # single ref, `/git/refs` is the one that accepts DELETE.
+          gh api -X DELETE "repos/$REPO/git/refs/$branch_ref"
+          echo "Deleted temporary release branch $RELEASE_BRANCH (anchored at $tag_sha)."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.version.outputs.tag }}
+          RELEASE_BRANCH: ${{ needs.version.outputs.release_branch }}

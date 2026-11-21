@@ -4761,21 +4761,38 @@ fn alpha_release_cleans_up_its_temporary_branch() {
     // pushed onto the branch tip, so the commit stays reachable through the
     // tag after the branch is deleted. The workflow must clean the branch up
     // itself, otherwise stale release/* branches accumulate (200 piled up
-    // before the cleanup existed).
+    // before the cleanup existed; 38 piled up again while the anchor check
+    // compared a tag object against a commit).
     let workflow = read(".github/workflows/release.yml");
 
-    // 1. The cleanup step runs as the final step of the release job (after
-    //    the GitHub release has been published), using env-indirection so
-    //    no expression reaches the shell unquoted.
+    // 1. Cleanup is its own job that waits for every job still using the
+    //    branch: `Rebuild & Compare` checks the branch out in parallel with
+    //    the release job, so deleting it from that job raced the rebuild.
     assert!(
-        workflow.contains("Delete temporary release branch")
+        workflow.contains("cleanup_release_branch:")
+            && workflow.contains(
+                "needs: [check, version, github_release, reproducible, verify_release]"
+            )
+            && workflow.contains("needs.github_release.result == 'success'")
+            && workflow.contains("needs.reproducible.result == 'success'")
+            && workflow.contains("needs.verify_release.result == 'success'")
+            && !workflow.contains("always() && needs.check.outputs.should_release")
             && workflow.contains("TAG: ${{ needs.version.outputs.tag }}")
             && workflow.contains("RELEASE_BRANCH: ${{ needs.version.outputs.release_branch }}"),
-        "release.yml must delete the temporary release branch as the final release-job step"
+        "release.yml must delete the temporary release branch in a final job that waits for the rebuild and the verification"
     );
 
-    // 2. The tag-anchor safety rule: deletion only when the branch tip is
-    //    exactly the tag target; otherwise keep for manual inspection.
+    // 2. An annotated tag (`git tag -a`) makes the ref point at a tag object,
+    //    so `.object.sha` is never a commit: compared with the branch tip it
+    //    can never match, which kept every branch. The tag must be peeled.
+    assert!(
+        workflow.contains("git/tags/$tag_sha")
+            && workflow.contains("while [[ \"$tag_type\" == \"tag\" ]]; do"),
+        "cleanup must peel an annotated tag down to its commit before the anchor check"
+    );
+
+    // 3. The tag-anchor safety rule: deletion only when the branch tip is
+    //    exactly the (peeled) tagged commit; otherwise keep for inspection.
     assert!(
         workflow.contains("tag-anchor safety rule")
             && workflow.contains("[[ \"$tip_sha\" != \"$tag_sha\" ]]; then")
@@ -4784,14 +4801,16 @@ fn alpha_release_cleans_up_its_temporary_branch() {
         "cleanup must verify the branch tip is exactly the tagged commit before deleting"
     );
 
-    //    and the deletion goes through the git refs API.
+    // 4. The deletion goes through the git refs API, with a URL-encoded ref.
     assert!(
-        workflow.contains(r"heads/${RELEASE_BRANCH//\/%2F}")
-            && workflow.contains("-X DELETE \"repos/$REPO/git/ref/$branch_ref\""),
+        // `//\//%2F` is the form that actually encodes: `//\/%2F` leaves the
+        // slash untouched (bash reads it as pattern `\/` with no separator).
+        workflow.contains(r"heads/${RELEASE_BRANCH//\//%2F}")
+            && workflow.contains("-X DELETE \"repos/$REPO/git/refs/$branch_ref\""),
         "cleanup must URL-encode the slashed branch ref and delete via the refs API"
     );
 
-    // 4. Missing branch/tag are no-ops (idempotent cleanup), not failures.
+    // 5. Missing branch/tag are no-ops (idempotent cleanup), not failures.
     assert!(
         workflow.contains("nothing to clean up") && workflow.contains("for manual inspection"),
         "cleanup must tolerate a missing branch or tag instead of failing the release run"
