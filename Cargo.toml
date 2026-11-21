@@ -50,7 +50,7 @@ base64 = "0.22"
 # an ignore entry (see docs/security.md). The list below is wasmtime 49's
 # default feature set WITHOUT `cache` - every other default stays enabled, so
 # plugin runtime behaviour is unchanged.
-wasmtime = { version = "49.0", default-features = false, features = [
+wasmtime = { version = "49.0.7", default-features = false, features = [
     "anyhow",
     "async",
     "backtrace",
@@ -77,7 +77,7 @@ wasmtime = { version = "49.0", default-features = false, features = [
     "compile-time-builtins",
     "wit-parser",
 ] }
-wasmtime-wasi = "49.0"
+wasmtime-wasi = "49.0.7"
 
 [profile.release]
 # Release build settings. Debug info is deliberately PRESERVED (no `strip`, no

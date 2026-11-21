@@ -344,7 +344,31 @@ change. Do not silence the advisory or pin back to the yanked release.
   automatically; no ignore entry was added.
   `wasmtime_stays_on_a_patched_release_for_the_2026_advisories` regression-tests
   both lockfiles against those bands. It encodes the bands instead of a single
-  minimum, because `50.0.0` sits above `49.0.5` and is still vulnerable.
+  minimum, because `50.0.0` sits above the 49.x patch line and is still
+  vulnerable. The bands moved again with the 2026-11 advisories below.
+- On 2026-11-19 the RustSec database published eight `wasmtime` advisories
+  (`RUSTSEC-2026-0566` through `RUSTSEC-2026-0573`) and a ninth on 2026-11-20
+  (`RUSTSEC-2026-0587`), all matching 49.0.5, the release the lockfile then
+  carried. `-0587` is the one that matters most here: it is a WASI filesystem
+  sandbox escape on Windows through a drive-prefixed path component, i.e. a
+  path out of the plugin sandbox on the platform most users run. The others are
+  denial-of-service and panic bugs in the runtime and the WASI host: unbounded
+  host memory growth through empty writes to `AsyncWriteStream` (`-0566`) and
+  to `wasmtime-wasi-http` bodies over HTTP/2 (`-0571`), a stale GC heap base
+  pointer that lets a guest abort the host (`-0568`), a GC heap reservation
+  that is not a page-size multiple aborting the process (`-0573`), aborts in
+  builds without the `threads` (`-0567`) or `gc` (`-0570`) feature, a panic in
+  `Caller::get_module_export` (`-0569`) and a panic when a component cancels a
+  stream or future copy on the wrong end (`-0572`). The patched bands are
+  `49.0.6` / `50.0.2` for the eight and `49.0.7` / `50.0.3` for `-0587`, so the
+  workspace resolves `49.0.7` and the requirement in `Cargo.toml` is raised
+  from `49.0` to `49.0.7`: a lockfile refresh can no longer fall back below a
+  patched release. The feature set is unchanged (wasmtime 49's defaults without
+  `cache`, see below), so `wasmtime-internal-cache` and the zstd family stay
+  out. `Cargo.lock`, `fuzz/Cargo.lock` and the Flatpak offline crate pin
+  (`packaging/flatpak/cargo/cargo-sources.json`, regenerated with
+  `packaging/flatpak/generate-cargo-sources.sh`) move together; `cargo audit`
+  reports no vulnerabilities and no ignore entry was added.
 - The `zstd` family is removed rather than ignored, because no upgrade can
   reach a fixed release. `RUSTSEC-2026-0391` (`zstd >= 0.14.3`),
   `RUSTSEC-2026-0398` and `RUSTSEC-2026-0403` (`zstd-safe >= 8.2.0`) and

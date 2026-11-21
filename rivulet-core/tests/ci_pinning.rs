@@ -1756,10 +1756,11 @@ fn wasmtime_cache_feature_stays_disabled_so_the_zstd_advisories_stay_gone() {
     }
 }
 
-/// The patched bands for RUSTSEC-2026-0420/-0422/-0423/-0424 are
-/// `>= 49.0.5, < 50.0.0` and `>= 50.0.1`, so `50.0.0` is still vulnerable. A
-/// plain minimum comparison would accept it, which is why the release line is
-/// part of the check instead of a single version tuple.
+/// The patched bands for the 2026 advisories are `>= 49.0.7, < 50.0.0` and
+/// `>= 50.0.3` (49.0.6/50.0.2 cover RUSTSEC-2026-0566..-0573, but -0587 needs
+/// 49.0.7/50.0.3), so `50.0.0` through `50.0.2` are still vulnerable. A plain
+/// minimum comparison would accept them, which is why the release line is part
+/// of the check instead of a single version tuple.
 fn wasmtime_version_is_patched(version: &str) -> bool {
     let mut parts = version.split('.').map(|part| part.parse::<u64>().ok());
     let (major, minor, patch) = match (parts.next(), parts.next(), parts.next()) {
@@ -1768,8 +1769,8 @@ fn wasmtime_version_is_patched(version: &str) -> bool {
     };
     match major {
         0..=48 => false,
-        49 => (minor, patch) >= (0, 5),
-        50 => (minor, patch) >= (0, 1),
+        49 => (minor, patch) >= (0, 7),
+        50 => (minor, patch) >= (0, 3),
         _ => true,
     }
 }
@@ -1777,12 +1778,15 @@ fn wasmtime_version_is_patched(version: &str) -> bool {
 #[test]
 fn wasmtime_stays_on_a_patched_release_for_the_2026_advisories() {
     // RustSec published RUSTSEC-2026-0420 (`wasmtime-wasi`), -0422, -0423 and
-    // -0424 against 49.0.4 on 2026-10-29, the version both lockfiles carried;
-    // `Cargo Audit` and with it the required `Security` check failed on every
-    // commit until the workspace moved to 49.0.5. The caret range in the
-    // manifest cannot hold that fix, so this guard pins the patched bands for
-    // the advised pair in both lockfiles — the workspace one and the fuzz one,
-    // which is a separate workspace and resolves the same crates.
+    // -0424 against 49.0.4 on 2026-10-29, and RUSTSEC-2026-0566..-0573 plus
+    // -0587 (a Windows WASI filesystem sandbox escape) against 49.0.5 on
+    // 2026-11-19/20. Each time `Cargo Audit` and with it the required
+    // `Security` check failed on every commit until the workspace moved to the
+    // patched release, now 49.0.7. The manifest requirement is raised too, but
+    // a caret range cannot express which 50.x releases are excluded, so this
+    // guard still pins the patched bands for the advised pair in both lockfiles
+    // (the workspace one and the fuzz one, which is a separate workspace and
+    // resolves the same crates).
     for lockfile in ["Cargo.lock", "fuzz/Cargo.lock"] {
         let lock = read(lockfile).replace("\r\n", "\n");
         for crate_name in ["wasmtime", "wasmtime-wasi"] {
@@ -1798,21 +1802,24 @@ fn wasmtime_stays_on_a_patched_release_for_the_2026_advisories() {
             assert!(
                 wasmtime_version_is_patched(version),
                 "{lockfile} locks {crate_name} {version}, which is outside the patched \
-                 bands for RUSTSEC-2026-0420/-0422/-0423/-0424 (`>= 49.0.5, < 50.0.0` \
-                 or `>= 50.0.1`); bump it instead of ignoring the advisories"
+                 bands for the 2026 advisories (`>= 49.0.7, < 50.0.0` \
+                 or `>= 50.0.3`); bump it instead of ignoring the advisories"
             );
         }
     }
 
     // The band logic is exercised directly as well, so a future refactor cannot
-    // quietly turn it back into a plain minimum: 50.0.0 sits above 49.0.5 and
-    // still carries all four advisories.
+    // quietly turn it back into a plain minimum: 50.0.0 sits above 49.0.7 and
+    // still carries every one of the advisories.
     for (version, patched) in [
         ("49.0.4", false),
-        ("49.0.5", true),
+        ("49.0.5", false),
+        ("49.0.6", false),
+        ("49.0.7", true),
         ("49.1.0", true),
         ("50.0.0", false),
-        ("50.0.1", true),
+        ("50.0.2", false),
+        ("50.0.3", true),
         ("51.0.0", true),
     ] {
         assert_eq!(
@@ -1831,6 +1838,9 @@ fn wasmtime_stays_on_a_patched_release_for_the_2026_advisories() {
         "RUSTSEC-2026-0422",
         "RUSTSEC-2026-0423",
         "RUSTSEC-2026-0424",
+        "RUSTSEC-2026-0566",
+        "RUSTSEC-2026-0573",
+        "RUSTSEC-2026-0587",
         "wasmtime_stays_on_a_patched_release_for_the_2026_advisories",
     ] {
         assert!(
