@@ -881,8 +881,9 @@ enum ConfirmationChoice {
 /// One undo step for an edit that spans both managers.
 ///
 /// Duplicating a scene adds the node in `SceneManager` and copies its items
-/// into `SourceManager`; a single undo has to revert both, and neither manager
-/// can revert the other's document. The step therefore keeps the state of both
+/// into `SourceManager`, and applying an OBS import replaces both managers; a
+/// single undo has to revert both, and neither manager can revert the other's
+/// document. The step therefore keeps the state of both
 /// managers, and `seq` carries the stamp that orders it against their own
 /// histories ([`rivulet_core::next_change_seq`]).
 #[derive(Debug, Clone, Default)]
@@ -1749,8 +1750,9 @@ pub struct RivuletApp {
     /// Runtime-only, never persisted.
     #[serde(skip)]
     pending_confirmation: Option<PendingConfirmation>,
-    /// Undo steps for edits that span both managers (duplicating a scene), so
-    /// one Ctrl+Z reverts the scene and its copied items together.
+    /// Undo steps for edits that span both managers (duplicating a scene,
+    /// applying an OBS import), so one Ctrl+Z reverts scene and items - or the
+    /// whole replaced collection - together.
     /// Runtime-only, never persisted.
     #[serde(skip)]
     compound_undo: Vec<CompoundStep>,
@@ -6570,7 +6572,21 @@ impl RivuletApp {
     /// The GUI persists both managers, so an OBS migration lands in the same
     /// state the next restart restores; the selection names IDs of the
     /// previous collection and must not survive the replacement.
+    ///
+    /// One undo step: the pre-edit pair of both managers is kept as a
+    /// [`CompoundStep`], so a single `Ctrl+Z` brings the previous collection
+    /// and its sources back (and redo re-applies the import) instead of
+    /// leaving the user with no way out of a wrong file.
     fn apply_obs_import(&mut self, import: rivulet_core::ObsImport, path: std::path::PathBuf) {
+        // The replacement swaps both managers, so the pre-edit state of both
+        // travels as one compound step: a single undo restores the collection
+        // and its sources together, the same way a scene duplicate does.
+        self.compound_undo.push(CompoundStep {
+            seq: rivulet_core::next_change_seq(),
+            scenes: self.scenes.clone(),
+            sources: self.source_manager.clone(),
+        });
+        self.compound_redo.clear();
         self.scenes = import.scenes;
         self.source_manager = import.sources;
         self.scene_selection.clear();
@@ -10209,6 +10225,7 @@ impl RivuletApp {
             });
             self.scenes = step.scenes;
             self.source_manager = step.sources;
+            self.prune_stale_studio_roles();
         } else if newest.is_some() && newest == self.source_manager.paste_undo_seq() {
             self.source_manager.undo_paste();
         } else {
@@ -10229,10 +10246,33 @@ impl RivuletApp {
             });
             self.scenes = step.scenes;
             self.source_manager = step.sources;
+            self.prune_stale_studio_roles();
         } else if newest.is_some() && newest == self.source_manager.paste_redo_seq() {
             self.source_manager.redo_paste();
         } else {
             self.scenes.redo();
+        }
+    }
+
+    /// Drops Studio Mode roles that name scenes the collection no longer has.
+    ///
+    /// A compound step (scene duplicate, OBS import) replaces whole managers, so
+    /// the Preview/Program roles can outlive the collection they were picked
+    /// in. Roles that still resolve are left untouched.
+    fn prune_stale_studio_roles(&mut self) {
+        // Removing the Program role never re-points Preview at a stale id, and
+        // two passes are enough to clear both roles.
+        for _ in 0..2 {
+            let stale = self
+                .studio_mode
+                .program()
+                .into_iter()
+                .chain(self.studio_mode.preview())
+                .find(|id| self.scenes.get(*id).is_none());
+            match stale {
+                Some(id) => self.studio_mode.remove_scene(id),
+                None => break,
+            }
         }
     }
 
@@ -17927,6 +17967,59 @@ mod tests {
             {"id": "image_source", "name": "Logo", "settings": {"file": "logo.png"}}
         ]
     }"#;
+
+    #[test]
+    fn apply_obs_import_is_one_undo_step() {
+        // The import replaces both managers. Ctrl+Z must bring the previous
+        // collection and its sources back in one press, like a scene duplicate,
+        // and redo must re-apply the import as that same step.
+        let mut app = RivuletApp::default();
+        let live = app.scenes.add(rivulet_core::Scene::new("Live".to_owned()));
+        app.scenes.switch_to(live);
+        let live_source = app.source_manager.add_source(rivulet_core::Source::new(
+            "Webcam".to_owned(),
+            rivulet_core::SourceKind::Webcam,
+        ));
+        app.source_manager.bind_source(live_source, live, None);
+        app.studio_mode.set_enabled(true, Some(live));
+
+        let path = write_obs_fixture("undo", OBS_IMPORT_COLLECTION);
+        app.stage_obs_import(&path);
+        let pending = app.pending_obs_import.clone().expect("staged import");
+        app.apply_obs_import(pending.import, pending.path);
+        assert_eq!(app.scenes.collection(), "Game");
+        assert_eq!(app.compound_undo.len(), 1, "the import is one undo step");
+
+        let imported_active = app.scenes.active().expect("imported scene active");
+        assert_eq!(app.studio_mode.preview(), Some(imported_active));
+
+        app.dispatch_scene_undo();
+
+        assert_eq!(app.scenes.collection(), "Default");
+        assert_ne!(
+            app.studio_mode.preview(),
+            Some(imported_active),
+            "Studio Mode must not keep a role from the undone import"
+        );
+        for id in [app.studio_mode.preview(), app.studio_mode.program()]
+            .into_iter()
+            .flatten()
+        {
+            assert!(app.scenes.get(id).is_some(), "role must still resolve");
+        }
+        assert_eq!(app.scenes.scenes().len(), 1);
+        assert!(app.scenes.get(live).is_some(), "the previous scene is back");
+        assert_eq!(app.scenes.active(), Some(live));
+        assert_eq!(app.source_manager.sources().len(), 1);
+        assert!(app.source_manager.get_source(live_source).is_some());
+        assert_eq!(app.source_manager.source_count_in_scene(live), 1);
+
+        // Redo re-applies the import, still as one step.
+        app.dispatch_scene_redo();
+        assert_eq!(app.scenes.collection(), "Game");
+        assert!(app.source_manager.get_source(live_source).is_none());
+        assert!(app.scenes.get(live).is_none());
+    }
 
     #[test]
     fn apply_obs_import_brings_groups_and_bindings_into_the_collection() {

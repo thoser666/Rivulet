@@ -332,7 +332,9 @@ collection and its sources together - the same state the next restart restores
 - and drops state that names the replaced collection: scene selection, fold
 state, the drag target, the copied scene item, the composition selection and
 Studio Mode's preview/program roles, which re-point at the imported active
-scene. Cancel, closing the modal and an unreadable file all leave the live
+scene. Applying is one undo step: `Ctrl+Z` restores the previous collection
+and its sources, `Ctrl+Y` re-applies the import. Cancel, closing the modal and
+an unreadable file all leave the live
 collection untouched; a broken file is reported through the status line and the
 global issue surface.
 
