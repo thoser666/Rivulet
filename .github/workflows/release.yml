@@ -521,7 +521,9 @@ jobs:
             exit 0
           fi
 
-          gh api -X DELETE "repos/$REPO/git/ref/$branch_ref"
+          # Deleting goes through the collection endpoint: `/git/ref` only reads a
+          # single ref, `/git/refs` is the one that accepts DELETE.
+          gh api -X DELETE "repos/$REPO/git/refs/$branch_ref"
           echo "Deleted temporary release branch $RELEASE_BRANCH (anchored at $tag_sha)."
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

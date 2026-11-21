@@ -4806,7 +4806,7 @@ fn alpha_release_cleans_up_its_temporary_branch() {
         // `//\//%2F` is the form that actually encodes: `//\/%2F` leaves the
         // slash untouched (bash reads it as pattern `\/` with no separator).
         workflow.contains(r"heads/${RELEASE_BRANCH//\//%2F}")
-            && workflow.contains("-X DELETE \"repos/$REPO/git/ref/$branch_ref\""),
+            && workflow.contains("-X DELETE \"repos/$REPO/git/refs/$branch_ref\""),
         "cleanup must URL-encode the slashed branch ref and delete via the refs API"
     );
 
