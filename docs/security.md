@@ -306,11 +306,15 @@ change. Do not silence the advisory or pin back to the yanked release.
 `deny.toml` is the reviewed policy for dependency hygiene:
 
 - RustSec advisories and yanked releases fail the gate.
-- The fixed releases for the advisories detected on the previous CI run are
+- The fixed releases for the advisories detected on previous CI runs are
   `anyhow >= 1.0.103` (`RUSTSEC-2026-0190`), `bytes >= 1.11.1`
-  (`RUSTSEC-2026-0007`), and `crossbeam-epoch >= 0.9.20`
-  (`RUSTSEC-2026-0204`), and `wasmtime`/`wasmtime-wasi` >= 48.0.5
-  (`RUSTSEC-2026-0321` through `RUSTSEC-2026-0327`). `RUSTSEC-2026-0321`
+  (`RUSTSEC-2026-0007`), `crossbeam-epoch >= 0.9.20` (`RUSTSEC-2026-0204`),
+  `url >= 2.5.9` (`RUSTSEC-2026-0592`), and `wasmtime`/`wasmtime-wasi` >=
+  48.0.5 (`RUSTSEC-2026-0321` through `RUSTSEC-2026-0327`). `url` 2.5.8 was
+  reached twice: through `wasmtime-wasi` 49.0.7 on the plugin-sandbox path and
+  through `webbrowser` → `egui-winit` in the GUI, and the advisory is a stack
+  overflow in `Url::origin()` while parsing nested `blob:` URLs, published on
+  2026-11-20. `RUSTSEC-2026-0321`
   is the one that matters here: a WASI preview 0 `poll_oneoff` that
   circumvents fuel consumption defeats the per-call fuel budget the plugin
   sandbox relies on. These minimums are regression-tested against the
