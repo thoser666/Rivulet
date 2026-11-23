@@ -12,6 +12,27 @@
   ignore entry and no pin-back: the fix is a patch update inside the existing
   caret range.
 
+- fix(ci): **the temporary `release/v*` branch is deleted again after a
+  release.** The cleanup compared the branch tip against the *tag object*
+  that `git tag -a` pushes, so the tag-anchor rule could never match and every
+  branch survived; the tag is peeled to its commit first. The deletion uses
+  `/git/refs/` — the collection endpoint — because `/git/ref/<ref>` only reads
+  and answered 404 on `DELETE`. The delete step now lives in the existing
+  release job: Scorecard flags *every* job-level `contents: write`, and a
+  dedicated third grant for a ref deletion the release job can do itself only
+  produced another Token-Permissions alert. The deletion is the job's last
+  step, so the cleanup now runs *before* `Verify published release
+  (post-publish)` starts; that job checks out the tag rather than the branch,
+  and a failed release is recovered from the tag or the commit SHA — the
+  references that outlive the temporary branch — never from the `release/v*`
+  branch the cleanup has just removed. To keep that safe the rebuild is
+  pinned to the version job's commit SHA instead of the branch (the rebuild
+  workflow already accepts a SHA), so publishing still does not wait for
+  `Rebuild & Compare` (issue #288) and the deleted branch cannot race it.
+  `alpha_release_cleans_up_its_temporary_branch` pins the anchor rule, the
+  peeled tag, the refs endpoint, the folded job and the two remaining
+  job-level write grants.
+
 - fix(security): **the plugin host moves to `wasmtime`/`wasmtime-wasi` 49.0.7,
   clearing the nine advisories that turned `Cargo Audit` red on every commit
   since 2026-11-19** (`RUSTSEC-2026-0566` through `-0573`, and
