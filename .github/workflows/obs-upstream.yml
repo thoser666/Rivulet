@@ -68,6 +68,21 @@ jobs:
         if: always()
         run: cat "$RUNNER_TEMP/obs-upstream-report.md" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Ensure the obs-upstream label exists
+        # `gh label create --force` creates the label or updates it in place, so
+        # the step is idempotent. It deliberately does not swallow errors like
+        # the weekly-review label below: GitHub silently drops labels it does
+        # not know when an issue is created, so a failed creation here would
+        # otherwise leave the new candidate threads unlabelled without a trace.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh label create "obs-upstream" \
+            --repo "$GITHUB_REPOSITORY" \
+            --color "0052cc" \
+            --description "Automated OBS upstream release-note candidate (weekly sweep)" \
+            --force
+
       - name: Sync OBS candidates to tracked issues (dedupe by upstream title)
         # One issue per upstream release-note candidate. When a thread already
         # tracks the same title it is updated in place, so consecutive runs

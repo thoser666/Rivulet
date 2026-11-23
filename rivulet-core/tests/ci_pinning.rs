@@ -5227,6 +5227,22 @@ fn obs_upstream_candidate_issues_are_deduplicated_by_title() {
         !workflow.contains("continue-on-error"),
         "the dedupe step must fail loudly, like the rest of the workflow"
     );
+    // GitHub drops labels it does not know without an error, so the workflow
+    // has to make sure the candidate label exists before it files an issue.
+    let label_step = workflow
+        .find("Ensure the obs-upstream label exists")
+        .expect("the workflow must create the obs-upstream label before the sync");
+    let sync_step = workflow
+        .find("Sync OBS candidates to tracked issues")
+        .expect("the dedupe step must exist");
+    assert!(
+        label_step < sync_step,
+        "the label must exist before the sync creates labelled issues"
+    );
+    assert!(
+        workflow.contains("obs-upstream\"") && workflow.contains("--force"),
+        "creating the label must target obs-upstream and be idempotent (--force)"
+    );
 }
 
 #[test]

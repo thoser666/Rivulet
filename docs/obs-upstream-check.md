@@ -73,7 +73,11 @@ stays in the weekly report (and its checklist row) for the maintainer who
 asked why OBS parity does not justify the change. Already-represented
 candidates are skipped the same way. Each new issue carries the `feature` and
 `obs-upstream` labels, so a sweep thread is distinguishable from the
-`weekly-vision-review` issue and from a plain community wish.
+`weekly-vision-review` issue and from a plain community wish. The workflow
+creates `obs-upstream` itself (idempotently, via `gh label create --force`) and
+fails if that does not work: GitHub silently drops unknown labels at issue
+creation, so a missing label would otherwise leave new threads unlabelled
+without any error.
 
 ### Rivulet open-issue sweep (community wishes)
 
