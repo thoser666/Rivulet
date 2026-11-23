@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+- fix(deps): **`url` moves to 2.5.9, clearing `RUSTSEC-2026-0592`** — a stack
+  overflow in `Url::origin()` when it parses nested `blob:` URLs, published by
+  RustSec on 2026-11-20. `url` 2.5.8 reached the build twice: through
+  `wasmtime-wasi` 49.0.7 on the plugin-sandbox path and through `webbrowser` →
+  `egui-winit` in the GUI. `Cargo Audit` and `Cargo Deny` failed the required
+  `Security` check on `develop` from that day on, which also kept every open PR
+  red. The lockfile now resolves `url` 2.5.9 (with its `form_urlencoded` 1.2.3
+  companion) in `Cargo.lock` and `fuzz/Cargo.lock`, and
+  `audited_dependencies_remain_on_fixed_releases` guards the new minimum. No
+  ignore entry and no pin-back: the fix is a patch update inside the existing
+  caret range.
+
 - fix(ci): **the temporary `release/v*` branch is deleted again after a
   release.** The cleanup compared the branch tip against the *tag object*
   that `git tag -a` pushes, so the tag-anchor rule could never match and every
