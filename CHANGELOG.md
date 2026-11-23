@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+- docs(readme): **the feature-parity table stops understating M5.** Hotkeys and
+  the source-delete hotkey were still listed as `Partial`/`Open`, and platform
+  parity as `Open`, although all three shipped: the table now names the
+  rebindable hotkey set with its persistence and OS-registration rules, the
+  `delete_source` action with its deliberately in-app-only scope, and the
+  Windows/Linux-verified, macOS-implemented state with the gaps that remain —
+  each row pointing at `docs/hotkeys.md` and `docs/platform-feature-matrix.md`.
+
 - fix(security): **the plugin host moves to `wasmtime`/`wasmtime-wasi` 49.0.7,
   clearing the nine advisories that turned `Cargo Audit` red on every commit
   since 2026-11-19** (`RUSTSEC-2026-0566` through `-0573`, and
