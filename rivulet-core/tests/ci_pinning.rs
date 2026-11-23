@@ -4442,6 +4442,7 @@ fn audited_dependencies_remain_on_fixed_releases() {
         ("anyhow", (1, 0, 103)),
         ("bytes", (1, 11, 1)),
         ("crossbeam-epoch", (0, 9, 20)),
+        ("url", (2, 5, 9)),
     ] {
         let package = lock
             .split("[[package]]")
