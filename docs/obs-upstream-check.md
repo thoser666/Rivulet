@@ -42,6 +42,35 @@ still never modifies `develop` or the parity checklist — release notes and
 wishes are editorial and need human classification. The generated candidate
 documents are a review queue, not product approval.
 
+### One issue per candidate (deduplicated)
+
+Every release-note candidate that still needs a decision also gets its own
+issue, so a single upstream change can be discussed on its own thread. The
+sweep is idempotent: it matches the candidate against the tracked issues —
+open **and** closed — by *upstream title*, ignoring the `OBS: ` prefix, a
+trailing `[author]` tag and the `— <decision> (<pillars>)` suffix, and updates
+the existing thread's body (current release tag, vision decision, quoted
+release note) instead of creating another one. Only titles that no tracked
+issue carries are created, and a second sweep over the same release notes
+reports them all as `updated`. Comments and labels on an existing thread
+therefore stay attached to the same upstream change.
+
+Closed threads are part of the key on purpose: once maintainers closed a
+candidate, reopening it would undo that decision and refiling it would put the
+same upstream change back into the queue every week. A closed match is
+reported as `left closed` and left untouched — no reopen, no body rewrite, no
+new issue — while the report and the review checklist still list the candidate
+so the decision stays visible. An open thread wins over a closed one when both
+exist. The tracked fetch reads `state=all` (newest activity first, at most
+three pages), while the community-wish sweep below still reads open issues
+only.
+
+New issues are reserved for candidates that carry a product decision:
+`strong-fit` and `review`. A `not-aligned` note never grows the tracker; it
+stays in the weekly report (and its checklist row) for the maintainer who
+asked why OBS parity does not justify the change. Already-represented
+candidates are skipped the same way.
+
 ### Rivulet open-issue sweep (community wishes)
 
 The same run also fetches this repository's open issues and classifies feature

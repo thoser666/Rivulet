@@ -68,6 +68,20 @@ jobs:
         if: always()
         run: cat "$RUNNER_TEMP/obs-upstream-report.md" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Sync OBS candidates to tracked issues (dedupe by upstream title)
+        # One issue per upstream release-note candidate. When a thread already
+        # tracks the same title it is updated in place, so consecutive runs
+        # cannot file the same change two or three times again (the earlier
+        # sweep produced several duplicate threads for one upstream PR). Closed
+        # threads are part of the key and stay closed, so a decided candidate
+        # does not return as a new issue every week, and only strong-fit/review
+        # candidates create one.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/check-obs-upstream.py --sync-issues \
+            --issues-repo "$GITHUB_REPOSITORY"
+
       - name: Publish weekly review issue
         env:
           GH_TOKEN: ${{ github.token }}

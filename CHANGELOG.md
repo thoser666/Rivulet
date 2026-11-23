@@ -1,5 +1,25 @@
 ## [Unreleased]
 
+- ci(obs): the weekly OBS upstream check keeps one issue per release-note
+  candidate instead of filing a fresh copy on every run.
+  `scripts/check-obs-upstream.py --sync-issues` matches a candidate against the
+  tracked issues by *upstream title* (normalised: the `OBS: ` prefix, a
+  trailing `[author]` tag and the `— <decision> (<pillars>)` suffix are
+  ignored) and updates that thread's body with the current release tag,
+  decision and quoted note. Closed threads are matched too and deliberately
+  stay closed — a candidate whose canonical thread was already decided is
+  reported as `left closed`, never reopened, rewritten into a live queue entry,
+  or refiled next week; an open thread still wins over a closed one. The
+  dedicated tracked fetch reads `state=all` (newest activity first, bounded to
+  three pages), while the community-wish sweep keeps reading open issues only.
+  New issues are reserved for `strong-fit` and `review` candidates; a
+  `not-aligned` note stays in the weekly report and checklist. The workflow
+  gains a `Sync OBS candidates to tracked issues` step with `GITHUB_TOKEN` and
+  no `continue-on-error`, the self-test covers closed-thread keep-alive,
+  open-over-closed preference and the creation restriction, the ci_pinning
+  guard `obs_upstream_candidate_issues_are_deduplicated_by_title` is extended,
+  and `docs/obs-upstream-check.md` documents the rules.
+
 - fix(security): **the plugin host moves to `wasmtime`/`wasmtime-wasi` 49.0.7,
   clearing the nine advisories that turned `Cargo Audit` red on every commit
   since 2026-11-19** (`RUSTSEC-2026-0566` through `-0573`, and
