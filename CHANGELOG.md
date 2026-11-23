@@ -8,7 +8,12 @@
   and answered 404 on `DELETE`. The delete step now lives in the existing
   release job: Scorecard flags *every* job-level `contents: write`, and a
   dedicated third grant for a ref deletion the release job can do itself only
-  produced another Token-Permissions alert. To keep that safe the rebuild is
+  produced another Token-Permissions alert. The deletion is the job's last
+  step, so the cleanup now runs *before* `Verify published release
+  (post-publish)` starts; that job checks out the tag rather than the branch,
+  and a failed release is recovered from the tag or the commit SHA — the
+  references that outlive the temporary branch — never from the `release/v*`
+  branch the cleanup has just removed. To keep that safe the rebuild is
   pinned to the version job's commit SHA instead of the branch (the rebuild
   workflow already accepts a SHA), so publishing still does not wait for
   `Rebuild & Compare` (issue #288) and the deleted branch cannot race it.
