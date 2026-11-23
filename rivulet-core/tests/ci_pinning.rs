@@ -4765,21 +4765,40 @@ fn alpha_release_cleans_up_its_temporary_branch() {
     // compared a tag object against a commit).
     let workflow = read(".github/workflows/release.yml");
 
-    // 1. Cleanup is its own job that waits for every job still using the
-    //    branch: `Rebuild & Compare` checks the branch out in parallel with
-    //    the release job, so deleting it from that job raced the rebuild.
+    // 1. Cleanup is the last step of the release job, which already carries
+    //    `contents: write` for publishing. A dedicated job needed a third
+    //    job-level write grant and therefore another Scorecard
+    //    Token-Permissions alert for a ref deletion this job can do itself.
+    //    The release job waits for `Rebuild & Compare` (it publishes nothing a
+    //    rebuild has not reproduced), so the branch is not checked out anywhere
+    //    else when the cleanup deletes it.
+    let release_job = workflow
+        .split("\n  github_release:")
+        .nth(1)
+        .and_then(|rest| rest.split("\n  verify_release:").next())
+        .expect("release.yml must keep a github_release job before verify_release");
     assert!(
-        workflow.contains("cleanup_release_branch:")
-            && workflow.contains(
-                "needs: [check, version, github_release, reproducible, verify_release]"
-            )
-            && workflow.contains("needs.github_release.result == 'success'")
-            && workflow.contains("needs.reproducible.result == 'success'")
-            && workflow.contains("needs.verify_release.result == 'success'")
-            && !workflow.contains("always() && needs.check.outputs.should_release")
-            && workflow.contains("TAG: ${{ needs.version.outputs.tag }}")
-            && workflow.contains("RELEASE_BRANCH: ${{ needs.version.outputs.release_branch }}"),
-        "release.yml must delete the temporary release branch in a final job that waits for the rebuild and the verification"
+        release_job.contains("- name: Delete temporary release branch")
+            && release_job.contains("TAG: ${{ needs.version.outputs.tag }}")
+            && release_job.contains("RELEASE_BRANCH: ${{ needs.version.outputs.release_branch }}"),
+        "the release job must delete the temporary release branch as its last step"
+    );
+    assert!(
+        !release_job
+            .lines()
+            .find(|line| line.trim_start().starts_with("needs:"))
+            .unwrap_or("")
+            .contains("reproducible"),
+        "the cleanup must not make publishing wait for the rebuild (issue #288)"
+    );
+    assert!(
+        !workflow.contains("cleanup_release_branch"),
+        "cleanup must not return as a separate job that needs its own contents: write"
+    );
+    assert_eq!(
+        workflow.matches("      contents: write").count(),
+        2,
+        "only the version and release jobs may carry a job-level contents: write"
     );
 
     // 2. An annotated tag (`git tag -a`) makes the ref point at a tag object,
@@ -11268,9 +11287,11 @@ fn release_rebuild_and_compare_is_pinned_to_the_release_workflow() {
         "release.yml must call the rebuild-and-compare workflow"
     );
     assert!(
-        release.contains("ref: ${{ needs.version.outputs.release_branch }}"),
-        "the rebuild must be pinned to the release branch that was published, \
-         not to a moving ref"
+        release.contains("revision: ${{ steps.bump.outputs.revision }}")
+            && release.contains("echo \"revision=$(git rev-parse HEAD)\"")
+            && release.contains("ref: ${{ needs.version.outputs.revision }}"),
+        "the rebuild must be pinned to the published commit SHA: the release job \
+         deletes the release branch, and a branch name is a moving ref"
     );
     let github_release = &release[release
         .find("  github_release:")
