@@ -41,6 +41,11 @@ DECISION_SUFFIX = re.compile(
     r"\s*—\s*(?:strong-fit|review|not-aligned)\s*\([^)]*\)\s*$", re.IGNORECASE
 )
 TRAILING_AUTHOR = re.compile(r"\s*\[[^\[\]]*\]\s*$")
+# Upstream release notes name the pull request in one of two shapes: the legacy
+# `[author] (#13110)` suffix or the markdown link `([#13110](https://…))`. Both
+# have to leave the key, otherwise a thread written in one shape is refiled as a
+# duplicate when the release note is read in the other one.
+PR_REFERENCE = re.compile(r"\s*(?:\(\[#\d+\]\([^)]*\)\)|\(#\d+\))\s*", re.IGNORECASE)
 FEATURE_WORDS = re.compile(r"\b(add|added|introduce|introduced|support|supports|new|feature|implemented)\b", re.I)
 # Issue labels that mark a request as an open product wish (triage only).
 # "enhancement"/"epic" deliberately are NOT wishes: in this repository they
@@ -163,14 +168,17 @@ def fetch_tracked_issues(repo: str) -> list[dict]:
 def candidate_key(title: str) -> str:
     """Normalized identity of an OBS candidate issue title.
 
-    Drops the `OBS: ` prefix, a trailing vision-decision suffix and a trailing
-    `[author]` tag, then collapses everything to lowercase words. This is the
-    key the sweep compares, so the same upstream line matches an issue created
-    by an earlier run even if that run appended the author or decision.
+    Drops the `OBS: ` prefix, an upstream PR reference in either shape (the
+    legacy `[author] (#123)` suffix or the markdown link `([#123](…))`), a
+    trailing vision-decision suffix and a trailing `[author]` tag, then
+    collapses everything to lowercase words. This is the key the sweep
+    compares, so the same upstream line matches an issue created by an earlier
+    run even if that run wrote a different decoration.
     """
     text = title.strip()
     if text.lower().startswith(CANDIDATE_PREFIX.lower()):
         text = text[len(CANDIDATE_PREFIX):]
+    text = PR_REFERENCE.sub(" ", text)
     text = DECISION_SUFFIX.sub("", text)
     text = TRAILING_AUTHOR.sub("", text.strip())
     return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
@@ -627,6 +635,23 @@ def self_test() -> None:
     bare = "Changed new capture devices to use fallback frame rate by default"
     assert candidate_key(canonical) == candidate_key(bare), "title decorations must not defeat the dedupe key"
     assert candidate_key(bare) == "changed new capture devices to use fallback frame rate by default"
+    # Upstream names the PR either as a legacy `[author] (#123)` suffix or as a
+    # markdown link; both shapes must map to one key, or the two oldest open
+    # threads (#378/#339) are refiled as duplicates by the next sweep.
+    legacy_pr = (
+        "OBS: Added obs_canvas_video_active() to check if the video of a canvas is active"
+        " [exeldro] (#13110) — review (streamer-value)"
+    )
+    linked_pr = (
+        "Added obs_canvas_video_active() to check if the video of a canvas is active"
+        " [exeldro] ([#13110](https://github.com/obsproject/obs-studio/pull/13110))"
+    )
+    assert candidate_key(legacy_pr) == candidate_key(linked_pr), (
+        "a PR reference in either shape must not defeat the dedupe key"
+    )
+    assert candidate_key(linked_pr) == (
+        "added obs canvas video active to check if the video of a canvas is active"
+    )
     open_issues = [
         {"number": 7, "title": canonical},
         {"number": 8, "title": "Unrelated wish", "labels": [{"name": "feature"}]},

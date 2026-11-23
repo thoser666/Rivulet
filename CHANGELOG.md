@@ -3,9 +3,10 @@
 - ci(obs): the weekly OBS upstream check keeps one issue per release-note
   candidate instead of filing a fresh copy on every run.
   `scripts/check-obs-upstream.py --sync-issues` matches a candidate against the
-  tracked issues by *upstream title* (normalised: the `OBS: ` prefix, a
-  trailing `[author]` tag and the `— <decision> (<pillars>)` suffix are
-  ignored) and updates that thread's body with the current release tag,
+  tracked issues by *upstream title* (normalised: the `OBS: ` prefix, an
+  upstream PR reference in either shape (the legacy `[author] (#123)` suffix or
+  the markdown link `([#123](…))`), a trailing `[author]` tag and the
+  `— <decision> (<pillars>)` suffix are ignored) and updates that thread's body with the current release tag,
   decision and quoted note. Closed threads are matched too and deliberately
   stay closed — a candidate whose canonical thread was already decided is
   reported as `left closed`, never reopened, rewritten into a live queue entry,

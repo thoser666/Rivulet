@@ -47,8 +47,10 @@ documents are a review queue, not product approval.
 Every release-note candidate that still needs a decision also gets its own
 issue, so a single upstream change can be discussed on its own thread. The
 sweep is idempotent: it matches the candidate against the tracked issues —
-open **and** closed — by *upstream title*, ignoring the `OBS: ` prefix, a
-trailing `[author]` tag and the `— <decision> (<pillars>)` suffix, and updates
+open **and** closed — by *upstream title*, ignoring the `OBS: ` prefix, an
+upstream PR reference (the legacy `[author] (#123)` suffix or the markdown link
+`([#123](…))`), a trailing `[author]` tag and the `— <decision> (<pillars>)`
+suffix, and updates
 the existing thread's body (current release tag, vision decision, quoted
 release note) instead of creating another one. Only titles that no tracked
 issue carries are created, and a second sweep over the same release notes

@@ -5192,6 +5192,11 @@ fn obs_upstream_candidate_issues_are_deduplicated_by_title() {
         "the dedupe key must ignore the decision suffix and the trailing [author] tag"
     );
     assert!(
+        script.contains("PR_REFERENCE"),
+        "the dedupe key must ignore the upstream PR reference in both its legacy \
+         and markdown-link shape, or existing threads are refiled as duplicates"
+    );
+    assert!(
         script.contains("request(\"PATCH\"") && script.contains("request(\"POST\""),
         "an existing issue is updated (PATCH); only unseen titles are created (POST)"
     );
