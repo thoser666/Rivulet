@@ -30,6 +30,10 @@ TRACKED_ISSUE_PAGES = 3
 # Only candidates that carry a product decision may file a new issue; a
 # not-aligned upstream note stays in the report instead of the tracker.
 CREATE_DECISIONS = {"strong-fit", "review"}
+# New candidate issues are labelled so they are recognisable at a glance: a
+# sweep thread must not be mistaken for the weekly review issue
+# (`weekly-vision-review`) or for a plain community wish (`feature` only).
+CANDIDATE_LABELS = ("feature", "obs-upstream")
 REPO_ISSUES_API = "https://api.github.com/repos/{repo}/issues"
 # One issue per OBS release-note candidate. The title carries the upstream
 # line, optionally followed by the upstream author in brackets and the vision
@@ -299,7 +303,12 @@ def sync_candidate_issues(
             continue
         if decision not in CREATE_DECISIONS:
             continue
-        issue = request("POST", endpoint, {"title": candidate_issue_title(line), "body": body})
+        payload = {
+            "title": candidate_issue_title(line),
+            "body": body,
+            "labels": list(CANDIDATE_LABELS),
+        }
+        issue = request("POST", endpoint, payload)
         created.append(issue.get("number"))
         issues.append({"number": issue.get("number"), "title": candidate_issue_title(line), "state": "open"})
     return created, updated, kept_closed
@@ -729,6 +738,9 @@ def self_test() -> None:
             globals()["github_request"] = real_request
         assert token_created == [99, 99] and token_updated == [] and token_closed == []
         assert [call[0] for call in calls] == ["POST", "POST"], "every candidate goes through the API"
+        assert all(call[2].get("labels") == ["feature", "obs-upstream"] for call in calls), (
+            "every created candidate issue must carry the feature + obs-upstream labels"
+        )
     finally:
         os.environ.pop("GITHUB_TOKEN", None)
         if saved_token is not None:

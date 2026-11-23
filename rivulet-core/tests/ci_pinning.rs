@@ -5197,6 +5197,11 @@ fn obs_upstream_candidate_issues_are_deduplicated_by_title() {
          and markdown-link shape, or existing threads are refiled as duplicates"
     );
     assert!(
+        script.contains("obs-upstream"),
+        "candidate issues must carry the obs-upstream label so they are \
+         distinguishable from the weekly review issue"
+    );
+    assert!(
         script.contains("request(\"PATCH\"") && script.contains("request(\"POST\""),
         "an existing issue is updated (PATCH); only unseen titles are created (POST)"
     );

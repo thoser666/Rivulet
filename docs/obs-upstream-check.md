@@ -71,7 +71,9 @@ New issues are reserved for candidates that carry a product decision:
 `strong-fit` and `review`. A `not-aligned` note never grows the tracker; it
 stays in the weekly report (and its checklist row) for the maintainer who
 asked why OBS parity does not justify the change. Already-represented
-candidates are skipped the same way.
+candidates are skipped the same way. Each new issue carries the `feature` and
+`obs-upstream` labels, so a sweep thread is distinguishable from the
+`weekly-vision-review` issue and from a plain community wish.
 
 ### Rivulet open-issue sweep (community wishes)
 

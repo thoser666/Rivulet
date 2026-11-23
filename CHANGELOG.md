@@ -13,8 +13,10 @@
   or refiled next week; an open thread still wins over a closed one. The
   dedicated tracked fetch reads `state=all` (newest activity first, bounded to
   three pages), while the community-wish sweep keeps reading open issues only.
-  New issues are reserved for `strong-fit` and `review` candidates; a
-  `not-aligned` note stays in the weekly report and checklist. The workflow
+  New issues are reserved for `strong-fit` and `review` candidates and carry
+  the `feature` and `obs-upstream` labels, so a sweep thread is distinguishable
+  from the weekly review issue and from a plain community wish; a `not-aligned`
+  note stays in the weekly report and checklist. The workflow
   gains a `Sync OBS candidates to tracked issues` step with `GITHUB_TOKEN` and
   no `continue-on-error`, the self-test covers closed-thread keep-alive,
   open-over-closed preference and the creation restriction, the ci_pinning
