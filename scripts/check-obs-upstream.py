@@ -248,7 +248,7 @@ def sync_candidate_issues(
     repo: str,
     request=None,
     tag: str | None = None,
-) -> tuple[list[int], list[int]]:
+) -> tuple[list[int], list[int], list[int]]:
     """Upsert one issue per OBS candidate, keyed on the upstream title.
 
     Returns (created, updated, kept_closed) issue numbers. `issues` is the
@@ -724,8 +724,9 @@ def main() -> int:
         "--sync-issues",
         action="store_true",
         help=(
-            "upsert one open issue per OBS candidate, deduplicated by upstream title "
-            "(updates an existing issue instead of filing a duplicate; needs GITHUB_TOKEN)"
+            "file one issue per strong-fit/review OBS candidate, deduplicated by upstream "
+            "title (updates the canonical thread instead of filing a duplicate, leaves a "
+            "closed thread closed; needs GITHUB_TOKEN)"
         ),
     )
     args = parser.parse_args()
