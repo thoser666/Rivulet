@@ -103,7 +103,11 @@ jobs:
         run: |
           set -euo pipefail
           LABEL="weekly-vision-review"
+          # `--force` rewrites the label on every run, so the colour has to be
+          # part of the command: without `--color` gh resets it to #0E8A16 and
+          # the first weekly run silently repaints the label.
           gh label create "$LABEL" \
+            --color "BFD4F2" \
             --description "Automated weekly vision review (OBS upstream + community wishes)" \
             --force >/dev/null 2>&1 || true
           DATE="$(date -u +%F)"
