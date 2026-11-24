@@ -308,9 +308,15 @@ change. Do not silence the advisory or pin back to the yanked release.
 - RustSec advisories and yanked releases fail the gate.
 - The fixed releases for the advisories detected on previous CI runs are
   `anyhow >= 1.0.103` (`RUSTSEC-2026-0190`), `bytes >= 1.11.1`
-  (`RUSTSEC-2026-0007`), `crossbeam-epoch >= 0.9.20` (`RUSTSEC-2026-0204`),
+  (`RUSTSEC-2026-0007`), `cookie >= 0.18.3` (`RUSTSEC-2026-0594`),
+  `crossbeam-epoch >= 0.9.20` (`RUSTSEC-2026-0204`),
   `url >= 2.5.9` (`RUSTSEC-2026-0592`), and `wasmtime`/`wasmtime-wasi` >=
-  48.0.5 (`RUSTSEC-2026-0321` through `RUSTSEC-2026-0327`). `url` 2.5.8 was
+  48.0.5 (`RUSTSEC-2026-0321` through `RUSTSEC-2026-0327`). `cookie` reaches
+  the tree only through `wry`'s browser backend, and the advisory needs a
+  `fork()` followed by private (encrypted) cookies on the forking thread —
+  Rivulet does neither and never forks on Windows at all — but 0.18.3 takes
+  its nonces from the OS generator, so the patch is taken instead of an
+  ignore entry. `url` 2.5.8 was
   reached twice: through `wasmtime-wasi` 49.0.7 on the plugin-sandbox path and
   through `webbrowser` → `egui-winit` in the GUI, and the advisory is a stack
   overflow in `Url::origin()` while parsing nested `blob:` URLs, published on
