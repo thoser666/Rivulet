@@ -4441,6 +4441,7 @@ fn audited_dependencies_remain_on_fixed_releases() {
     for (name, minimum) in [
         ("anyhow", (1, 0, 103)),
         ("bytes", (1, 11, 1)),
+        ("cookie", (0, 18, 3)),
         ("crossbeam-epoch", (0, 9, 20)),
         ("url", (2, 5, 9)),
     ] {

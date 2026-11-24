@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+- fix(deps): **`cookie` moves to 0.18.3, clearing `RUSTSEC-2026-0594`** — a
+  medium (6.5) advisory published on 2026-11-23: private cookies took their
+  AES-256-GCM nonce from `rand::thread_rng()`, whose buffered bytes survive a
+  `fork()`, so parent and child sealed their first private cookies with the
+  same nonce — and two cookies that share a nonce leak the XOR of their
+  plaintexts and the GHASH key, which forges private cookies. 0.18.3 draws
+  nonces from the operating system's generator instead. The crate reaches the
+  build only through `wry` 0.57 in `rivulet-browser`, which asks for `0.18`, so
+  this is a patch update inside the existing range. `Cargo.lock` and
+  `fuzz/Cargo.lock` resolve 0.18.3, the Flatpak offline crate pin is
+  regenerated (`packaging/flatpak/cargo/cargo-sources.json`),
+  `audited_dependencies_remain_on_fixed_releases` guards the new minimum and
+  `docs/security.md` records the fixed release. Rivulet never forks and adds
+  no private cookies — and the advisory exempts Windows builds outright — but
+  the audit gate fails on any resolved advisory: no ignore entry, no pin-back.
+
 - fix(deps): **`url` moves to 2.5.9, clearing `RUSTSEC-2026-0592`** — a stack
   overflow in `Url::origin()` when it parses nested `blob:` URLs, published by
   RustSec on 2026-11-20. `url` 2.5.8 reached the build twice: through
