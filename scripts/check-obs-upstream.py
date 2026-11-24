@@ -22,8 +22,34 @@ COMMUNITY_DOC = ROOT / "docs" / "community-wish-candidates.md"
 API = "https://api.github.com/repos/obsproject/obs-studio/releases/latest"
 ISSUES_API = (
     "https://api.github.com/repos/{repo}/issues"
-    "?state=open&per_page=100&sort=updated&direction=desc"
+    "?state={state}&per_page=100&sort=updated&direction=desc&page={page}"
 )
+# The dedupe must also see closed canonical threads, so its fetch walks a
+# bounded number of pages of every issue state, most recently updated first.
+TRACKED_ISSUE_PAGES = 3
+# Only candidates that carry a product decision may file a new issue; a
+# not-aligned upstream note stays in the report instead of the tracker.
+CREATE_DECISIONS = {"strong-fit", "review"}
+# New candidate issues are labelled so they are recognisable at a glance: a
+# sweep thread must not be mistaken for the weekly review issue
+# (`weekly-vision-review`) or for a plain community wish (`feature` only).
+CANDIDATE_LABELS = ("feature", "obs-upstream")
+REPO_ISSUES_API = "https://api.github.com/repos/{repo}/issues"
+# One issue per OBS release-note candidate. The title carries the upstream
+# line, optionally followed by the upstream author in brackets and the vision
+# decision; the dedupe key strips all of that so a candidate is recognised no
+# matter which of those decorations a previous run wrote.
+CANDIDATE_PREFIX = "OBS: "
+CANDIDATE_MARKER = "<!-- obs-upstream-candidate -->"
+DECISION_SUFFIX = re.compile(
+    r"\s*—\s*(?:strong-fit|review|not-aligned)\s*\([^)]*\)\s*$", re.IGNORECASE
+)
+TRAILING_AUTHOR = re.compile(r"\s*\[[^\[\]]*\]\s*$")
+# Upstream release notes name the pull request in one of two shapes: the legacy
+# `[author] (#13110)` suffix or the markdown link `([#13110](https://…))`. Both
+# have to leave the key, otherwise a thread written in one shape is refiled as a
+# duplicate when the release note is read in the other one.
+PR_REFERENCE = re.compile(r"\s*(?:\(\[#\d+\]\([^)]*\)\)|\(#\d+\))\s*", re.IGNORECASE)
 FEATURE_WORDS = re.compile(r"\b(add|added|introduce|introduced|support|supports|new|feature|implemented)\b", re.I)
 # Issue labels that mark a request as an open product wish (triage only).
 # "enhancement"/"epic" deliberately are NOT wishes: in this repository they
@@ -111,18 +137,181 @@ def fetch_release() -> dict:
         return json.load(response)
 
 
-def fetch_open_issues(repo: str) -> list[dict]:
-    """Fetch the repository's open issues (issues API returns PRs too — they
-    are filtered out downstream by the `pull_request` key). Uses the
-    GITHUB_TOKEN when available so private/fork runs work identically.
+def fetch_issues(repo: str, state: str = "open", pages: int = 1) -> list[dict]:
+    """Fetch issues in one state, following at most `pages` pages.
+
+    The issues API returns PRs too; they are filtered out downstream by the
+    `pull_request` key. Uses the GITHUB_TOKEN when available so private/fork
+    runs work identically.
     """
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "rivulet-obs-check"}
     token = os.environ.get("GITHUB_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(ISSUES_API.format(repo=repo), headers=headers)
+    issues: list[dict] = []
+    for page in range(1, pages + 1):
+        url = ISSUES_API.format(repo=repo, state=state, page=page)
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=30) as response:
+            batch = json.load(response)
+        issues.extend(batch)
+        if len(batch) < 100:
+            break
+    return issues
+
+
+def fetch_open_issues(repo: str) -> list[dict]:
+    return fetch_issues(repo)
+
+
+def fetch_tracked_issues(repo: str) -> list[dict]:
+    """Open *and* closed issues, so the dedupe sees a canonical thread either way."""
+    return fetch_issues(repo, state="all", pages=TRACKED_ISSUE_PAGES)
+
+
+def candidate_key(title: str) -> str:
+    """Normalized identity of an OBS candidate issue title.
+
+    Drops the `OBS: ` prefix, an upstream PR reference in either shape (the
+    legacy `[author] (#123)` suffix or the markdown link `([#123](…))`), a
+    trailing vision-decision suffix and a trailing `[author]` tag, then
+    collapses everything to lowercase words. This is the key the sweep
+    compares, so the same upstream line matches an issue created by an earlier
+    run even if that run wrote a different decoration.
+    """
+    text = title.strip()
+    if text.lower().startswith(CANDIDATE_PREFIX.lower()):
+        text = text[len(CANDIDATE_PREFIX):]
+    text = PR_REFERENCE.sub(" ", text)
+    text = DECISION_SUFFIX.sub("", text)
+    text = TRAILING_AUTHOR.sub("", text.strip())
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
+
+
+def candidate_issue_title(line: str) -> str:
+    return f"{CANDIDATE_PREFIX}{line}"
+
+
+def candidate_issue_body(tag: str, line: str, decision: str, matches: list[str]) -> str:
+    return "\n".join([
+        CANDIDATE_MARKER,
+        f"Upstream: OBS Studio `{tag}` release notes.",
+        f"Vision decision: **{decision}** ({', '.join(matches) or 'none'})",
+        "",
+        "Upstream release note:",
+        "",
+        f"> {line}",
+        "",
+        "Maintained by `scripts/check-obs-upstream.py`: when the same upstream title is seen",
+        "again this issue is updated in place instead of filing a duplicate.",
+        "",
+    ])
+
+
+def issue_state(issue: dict) -> str:
+    return str(issue.get("state") or "open").lower()
+
+
+def find_candidate_issue(issues: list[dict], line: str) -> dict | None:
+    """The non-PR issue that already tracks this upstream candidate.
+
+    Matching is on the normalized title only, so comments and labels on the
+    existing thread survive and stay attached to the same upstream change.
+    Closed threads match as well: a decision made once must not come back as a
+    new issue every week. An open match wins over a closed one.
+    """
+    key = candidate_key(line)
+    if not key:
+        return None
+    closed = None
+    for issue in issues:
+        if issue_is_pr(issue):
+            continue
+        if candidate_key(issue.get("title", "")) != key:
+            continue
+        if issue_state(issue) == "closed":
+            closed = closed or issue
+            continue
+        return issue
+    return closed
+
+
+def github_request(token: str, method: str, url: str, payload: dict | None = None) -> dict:
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "rivulet-obs-check",
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+    )
     with urllib.request.urlopen(request, timeout=30) as response:
-        return json.load(response)
+        body = response.read()
+    return json.loads(body) if body else {}
+
+
+def sync_candidate_issues(
+    release: dict,
+    issues: list[dict],
+    repo: str,
+    request=None,
+    tag: str | None = None,
+) -> tuple[list[int], list[int], list[int]]:
+    """Upsert one issue per OBS candidate, keyed on the upstream title.
+
+    Returns (created, updated, kept_closed) issue numbers. `issues` is the
+    tracked list (open and closed) and is mutated with the issues created here
+    so a repeated candidate in the same release notes cannot be filed twice.
+    Covered candidates (already in the roadmap catalog) are skipped, as in the
+    report. A closed thread that already tracks the title is reported instead
+    of being reopened, updated, or filed again, and only strong-fit/review
+    candidates create a new issue.
+    """
+    if request is None:
+        token = os.environ.get("GITHUB_TOKEN", "")
+        if not token:
+            raise RuntimeError("--sync-issues needs GITHUB_TOKEN")
+
+        def request(method: str, url: str, payload: dict | None = None) -> dict:
+            return github_request(token, method, url, payload)
+
+    vision = load_vision()
+    tag = tag or release.get("tag_name", "unknown")
+    endpoint = REPO_ISSUES_API.format(repo=repo)
+    created: list[int] = []
+    updated: list[int] = []
+    kept_closed: list[int] = []
+    for line in candidate_lines(release.get("body", "")):
+        covered, _ = classify([line], load_catalog())
+        if covered:
+            continue
+        decision, matches = vision_fit(line, vision)
+        body = candidate_issue_body(tag, line, decision, matches)
+        existing = find_candidate_issue(issues, line)
+        if existing is not None:
+            if issue_state(existing) == "closed":
+                # Reopening would undo a maintainer decision; refiling would put
+                # the same upstream change back in the queue every week.
+                kept_closed.append(existing["number"])
+                continue
+            request("PATCH", f"{endpoint}/{existing['number']}", {"body": body})
+            updated.append(existing["number"])
+            continue
+        if decision not in CREATE_DECISIONS:
+            continue
+        payload = {
+            "title": candidate_issue_title(line),
+            "body": body,
+            "labels": list(CANDIDATE_LABELS),
+        }
+        issue = request("POST", endpoint, payload)
+        created.append(issue.get("number"))
+        issues.append({"number": issue.get("number"), "title": candidate_issue_title(line), "state": "open"})
+    return created, updated, kept_closed
 
 
 def issue_is_pr(issue: dict) -> bool:
@@ -445,6 +634,117 @@ def self_test() -> None:
     assert "- [ ] Wish: [#1 Add a deterministic headless WebGPU scene API]" in checklist
     assert "Scene collections" not in checklist, "covered wishes are not checklist rows"
     assert "Crash when streaming" not in checklist, "bug reports are not checklist rows"
+    # Candidate-issue dedupe: an existing open issue for the same upstream
+    # title is updated in place, only unseen titles create an issue, and a
+    # second sweep over the same release notes must not file anything again.
+    canonical = (
+        "OBS: Changed new capture devices to use fallback frame rate by default"
+        " [PatTheMav] — review (streamer-value)"
+    )
+    bare = "Changed new capture devices to use fallback frame rate by default"
+    assert candidate_key(canonical) == candidate_key(bare), "title decorations must not defeat the dedupe key"
+    assert candidate_key(bare) == "changed new capture devices to use fallback frame rate by default"
+    # Upstream names the PR either as a legacy `[author] (#123)` suffix or as a
+    # markdown link; both shapes must map to one key, or the two oldest open
+    # threads (#378/#339) are refiled as duplicates by the next sweep.
+    legacy_pr = (
+        "OBS: Added obs_canvas_video_active() to check if the video of a canvas is active"
+        " [exeldro] (#13110) — review (streamer-value)"
+    )
+    linked_pr = (
+        "Added obs_canvas_video_active() to check if the video of a canvas is active"
+        " [exeldro] ([#13110](https://github.com/obsproject/obs-studio/pull/13110))"
+    )
+    assert candidate_key(legacy_pr) == candidate_key(linked_pr), (
+        "a PR reference in either shape must not defeat the dedupe key"
+    )
+    assert candidate_key(linked_pr) == (
+        "added obs canvas video active to check if the video of a canvas is active"
+    )
+    open_issues = [
+        {"number": 7, "title": canonical},
+        {"number": 8, "title": "Unrelated wish", "labels": [{"name": "feature"}]},
+        {"number": 9, "title": "OBS: Never filed before", "pull_request": {"url": "https://x"}},
+    ]
+    assert find_candidate_issue(open_issues, bare)["number"] == 7, "the existing issue must be found"
+    assert find_candidate_issue(open_issues, "Never filed before") is None, "pull requests are not tracked issues"
+
+    calls: list[tuple[str, str, dict]] = []
+
+    def fake_request(method: str, url: str, payload: dict | None = None) -> dict:
+        calls.append((method, url, payload or {}))
+        return {"number": 99} if method == "POST" else {}
+
+    sync_release = {
+        "tag_name": "31.0.0",
+        "body": f"- {bare}\n- Added a new hardware encoder preset",
+    }
+    created, updated, kept_closed = sync_candidate_issues(sync_release, open_issues, "x/y", request=fake_request)
+    assert updated == [7], "the seen title must update the existing issue instead of filing a duplicate"
+    assert created == [99], "only the unseen title may create an issue"
+    assert kept_closed == [], "nothing is closed in this fixture"
+    assert [call[0] for call in calls] == ["PATCH", "POST"]
+    assert calls[0][1].endswith("/issues/7")
+    assert calls[1][2]["title"] == "OBS: Added a new hardware encoder preset"
+    assert CANDIDATE_MARKER in calls[0][2]["body"] and "**review**" in calls[0][2]["body"]
+    calls.clear()
+    created_again, updated_again, kept_again = sync_candidate_issues(sync_release, open_issues, "x/y", request=fake_request)
+    assert created_again == [], "a second sweep of the same release notes must not file duplicates"
+    assert updated_again == [7, 99] and kept_again == []
+
+    # Closed canonical threads: an already-decided candidate must not return as
+    # a new issue, and it must not be reopened or rewritten either. An open
+    # match still wins over a closed one when both exist.
+    both = [{"number": 11, "state": "closed", "title": bare}, {"number": 12, "title": canonical}]
+    assert find_candidate_issue(both, bare)["number"] == 12, "an open thread wins over a closed one"
+    only_closed = [{"number": 13, "state": "closed", "title": canonical}]
+    assert find_candidate_issue(only_closed, bare)["number"] == 13, "closed threads must match the dedupe key"
+    calls.clear()
+    created_closed, updated_closed, kept_closed = sync_candidate_issues(
+        {"tag_name": "31.1.0", "body": f"- {bare}"}, only_closed, "x/y", request=fake_request
+    )
+    assert (created_closed, updated_closed, kept_closed) == ([], [], [13])
+    assert calls == [], "a closed canonical thread is neither reopened, updated, nor refiled"
+
+    # Only strong-fit/review candidates file a new issue; a not-aligned note
+    # stays in the report instead of growing the tracker.
+    calls.clear()
+    not_aligned = sync_candidate_issues(
+        {"tag_name": "31.2.0", "body": "- Added a new emoji picker"}, [], "x/y", request=fake_request
+    )
+    assert not_aligned == ([], [], [])
+    assert calls == [], "not-aligned candidates must not create an issue"
+
+    # Token path: without an injected transport the sync must talk to the API
+    # through github_request with GITHUB_TOKEN, and a missing token must be a
+    # loud error rather than a silent no-op.
+    saved_token = os.environ.pop("GITHUB_TOKEN", None)
+    try:
+        try:
+            sync_candidate_issues(sync_release, [], "x/y")
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("issue sync without GITHUB_TOKEN must fail")
+        os.environ["GITHUB_TOKEN"] = "self-test-token"
+        real_request = globals()["github_request"]
+        calls.clear()
+        globals()["github_request"] = lambda token, method, url, payload=None: (
+            calls.append((method, url, payload or {})) or ({"number": 99} if method == "POST" else {})
+        )
+        try:
+            token_created, token_updated, token_closed = sync_candidate_issues(sync_release, [], "x/y")
+        finally:
+            globals()["github_request"] = real_request
+        assert token_created == [99, 99] and token_updated == [] and token_closed == []
+        assert [call[0] for call in calls] == ["POST", "POST"], "every candidate goes through the API"
+        assert all(call[2].get("labels") == ["feature", "obs-upstream"] for call in calls), (
+            "every created candidate issue must carry the feature + obs-upstream labels"
+        )
+    finally:
+        os.environ.pop("GITHUB_TOKEN", None)
+        if saved_token is not None:
+            os.environ["GITHUB_TOKEN"] = saved_token
     print("OK: OBS upstream + community wish checker self-test")
 
 
@@ -457,6 +757,15 @@ def main() -> int:
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--update-doc", action="store_true", help="update docs/obs-vision-candidates.md and docs/community-wish-candidates.md with strong-fit candidates")
     parser.add_argument("--checklist-file", type=Path, help="write the review checklist (for the weekly GitHub issue) to this file")
+    parser.add_argument(
+        "--sync-issues",
+        action="store_true",
+        help=(
+            "file one issue per strong-fit/review OBS candidate, deduplicated by upstream "
+            "title (updates the canonical thread instead of filing a duplicate, leaves a "
+            "closed thread closed; needs GITHUB_TOKEN)"
+        ),
+    )
     args = parser.parse_args()
     if args.self_test:
         self_test()
@@ -470,6 +779,18 @@ def main() -> int:
             issues = None
         else:
             issues = fetch_open_issues(args.issues_repo)
+        if args.sync_issues:
+            # Dedupe lives here so every caller (scheduled run, manual dispatch,
+            # local replay) goes through the same title normalisation. The
+            # tracked fetch reads closed issues too: a canonical thread that was
+            # closed must not reappear as a new issue on the next run.
+            tracked = issues if args.issues_file else fetch_tracked_issues(args.issues_repo)
+            created, updated, kept_closed = sync_candidate_issues(release, tracked, args.issues_repo)
+            print(
+                f"OBS candidate issues: {len(created)} created, {len(updated)} updated, "
+                f"{len(kept_closed)} left closed (deduplicated by upstream title)"
+            )
+            return 0
         if args.update_doc:
             rows = strong_fit_rows(candidate_lines(release.get("body", "")), load_vision())
             update_candidate_doc(release, rows)
