@@ -73,6 +73,13 @@
   open-over-closed preference and the creation restriction, the ci_pinning
   guard `obs_upstream_candidate_issues_are_deduplicated_by_title` is extended,
   and `docs/obs-upstream-check.md` documents the rules.
+- docs(readme): **the feature-parity table stops understating M5.** Hotkeys and
+  the source-delete hotkey were still listed as `Partial`/`Open`, and platform
+  parity as `Open`, although all three shipped: the table now names the
+  rebindable hotkey set with its persistence and OS-registration rules, the
+  `delete_source` action with its deliberately in-app-only scope, and the
+  Windows/Linux-verified, macOS-implemented state with the gaps that remain —
+  each row pointing at `docs/hotkeys.md` and `docs/platform-feature-matrix.md`.
 
 - fix(security): **the plugin host moves to `wasmtime`/`wasmtime-wasi` 49.0.7,
   clearing the nine advisories that turned `Cargo Audit` red on every commit

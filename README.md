@@ -600,8 +600,8 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Scene collections & profiles | Partial (named collection/profile context; import/export and per-profile settings open, M2) |
 | Studio mode & multi-view | Partial (Studio Mode done; multi-view/projectors open, M2) |
 | Source transforms & composition | ✅ Done (M2 S1) |
-| Hotkeys (incl. remapping, global) | Partial (record/pause/mute/save-replay; remapping planned M5) |
-| Source delete hotkey | Open (M5: delete-source hotkey action on all platforms, OBS 32.2 parity) |
+| Hotkeys (incl. remapping, global) | Done (M5: record/pause/mute/save-replay/scene hotkeys, each rebindable in Settings → Hotkeys and persisted across restarts; OS-registered so bindings keep working while Rivulet is unfocused on Windows, in-app on macOS/Linux — Linux OS-level grab still open, see [`docs/hotkeys.md`](docs/hotkeys.md)) |
+| Source delete hotkey | Done (M5: `delete_source` action with OBS 32.2 parity, rebindable, default `Delete`; deliberately in-app only — never OS-registered, text-input-guarded, locked sources kept — see [`docs/hotkeys.md`](docs/hotkeys.md)) |
 | Scene-item copy/paste (API) | Done (M7 #192: scriptable copy/paste of scene items with paste-scoped undo + deterministic IDs, OBS 32.2 frontend-API parity) |
 | Undo/Redo | Done (M2) |
 | Audio mixer (sources, tracks, filters) | Partial (mixer, separate tracks, filters) |
@@ -626,7 +626,7 @@ then adds declarative plugins before considering sandboxed WASM execution.
 | Discord Rich Presence | Implemented (optional, privacy-safe activity status; M5, see docs/activity-status.md) |
 | Chat dock & alerts | Partial (M5/M6: combined multi-platform chat dock — one list, one send box, all connected platforms (Twitch IRC + Kick WebSocket + YouTube polling) with per-line platform badges, broadcast send with per-platform delivery feedback, and platform-routed replies, see docs/twitch-chat.md; follow/sub/donation/raid ingestion surfaced locally in the chat dock **and** in a dedicated combined alerts dock — one live list for all platforms with platform badges, bounded independently and clearable, fed by an opt-in loopback webhook receiver for Streamlabs + Twitch EventSub with HMAC verification, and a native outbound Twitch EventSub WebSocket transport (wss://, forwarder-free, no port) — see docs/alerts-ingest.md) *[#129](https://github.com/thoser666/Rivulet/issues/129)* |
 | Multi-language support | Implemented (EN/DE, 528 keys, parity-tested; see docs/i18n.md) |
-| Platform parity (Windows/macOS) | Open |
+| Platform parity (Windows/macOS) | Partial (M5: Windows and Linux verified; macOS recording implemented — monitor/window capture plus microphone and loopback system audio — with the remaining gaps documented per platform: no macOS Game Capture hooks, no region source picker, no audio filters/volume/monitoring, and macOS is compile-checked only until a real Mac runs a live session. See [`docs/platform-feature-matrix.md`](docs/platform-feature-matrix.md)) |
 | AI chat assistant | Open (M10) |
 | AI creative studio (Spark-like overlays) | Open (M10, planned: chat-driven local code-gen of browser-source overlays + emote/asset T2I; code-gen spike done — `qwen2.5-coder:7b` default on 8 GB GPUs, see docs/m10-ai-creative-studio.md + scripts/codegen-spike/) |
 | AI off-switches | Open (M10, planned: master switch + per-feature toggles + pause-while-live, default off, see docs/m10-ai-creative-studio.md) |
