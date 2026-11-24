@@ -5299,6 +5299,13 @@ fn obs_upstream_weekly_check_also_reviews_rivulet_open_issues() {
             && workflow.contains("community-wish-candidates.md"),
         "the common report must carry the issue section and the community doc artifact"
     );
+    // `gh label create --force` rewrites the label, so a step without
+    // `--color` repaints it (#0E8A16) on every weekly run; the colour has to
+    // be part of the command to keep it stable.
+    assert!(
+        workflow.contains("gh label create \"$LABEL\"") && workflow.contains("--color \"BFD4F2\""),
+        "the weekly review label must keep its fixed colour on every --force update"
+    );
     assert!(
         workflow.contains("weekly-vision-review")
             && workflow.contains("gh issue create")

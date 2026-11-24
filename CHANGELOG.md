@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+- ci(obs): **the weekly review label keeps its colour.** The workflow creates
+  `weekly-vision-review` idempotently with `gh label create --force`, but the
+  command passed no `--color`, so every weekly run rewrote the label with gh's
+  default green (`#0E8A16`) — the colour silently changed and had to be reset
+  by hand. The step now passes `BFD4F2`, and
+  `obs_upstream_weekly_check_also_reviews_rivulet_open_issues` pins the colour
+  argument so a later edit cannot drop it again.
+
 - fix(deps): **`cookie` moves to 0.18.3, clearing `RUSTSEC-2026-0594`** — a
   medium (6.5) advisory published on 2026-11-23: private cookies took their
   AES-256-GCM nonce from `rand::thread_rng()`, whose buffered bytes survive a
