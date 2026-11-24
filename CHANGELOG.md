@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+- ci(obs): **the weekly vision sweep no longer counts its own OBS candidate
+  threads as community wishes.** Every candidate issue carries `feature` and
+  `obs-upstream`, so the wish triage picked the open ones up again through the
+  `feature` label: each open OBS thread was listed a second time under
+  `## Rivulet open issues`, `Feature-request candidates` read 14 instead of 9,
+  and the weekly review checklist carried an `OBS:` box *and* a `Wish:` box
+  for one upstream change. `analyze_issues` now skips issues labelled
+  `obs-upstream` before the wish buckets, so the release-note section stays
+  the only place a candidate is reviewed; `CANDIDATE_LABELS` is derived from
+  the new `CANDIDATE_LABEL`, so the exclusion cannot drift from the label the
+  sync writes. The self-test feeds an `obs-upstream` thread through the triage
+  (report and checklist) and
+  `obs_upstream_weekly_check_also_reviews_rivulet_open_issues` pins the
+  exclusion; `docs/obs-upstream-check.md` and
+  `docs/community-wish-candidates.md` document the rule.
+
 - fix(deps): **`cookie` moves to 0.18.3, clearing `RUSTSEC-2026-0594`** — a
   medium (6.5) advisory published on 2026-11-23: private cookies took their
   AES-256-GCM nonce from `rand::thread_rng()`, whose buffered bytes survive a

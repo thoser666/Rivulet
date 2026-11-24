@@ -18,8 +18,11 @@ README or closing the issue.
 **Label taxonomy:** `feature`/`idea`/`wish` marks an open product wish and is
 swept; `bug`-labelled issues and housekeeping are excluded; `enhancement`/`epic`
 marks roadmap-tracked milestone work, which the sweep lists in a separate
-"Roadmap-tracked" section instead of re-triaging it every week. Unlabelled
-issues whose titles read like additions are swept too.
+"Roadmap-tracked" section instead of re-triaging it every week. `obs-upstream`
+threads from the OBS sweep are excluded too — they carry `feature`, but they
+are release-note candidates reviewed in the OBS section of the weekly report,
+not community wishes. Unlabelled issues whose titles read like additions are
+swept too.
 
 The report itself — published weekly in the Actions step summary and as an
 artifact — shows every candidate with its advisory vision decision
