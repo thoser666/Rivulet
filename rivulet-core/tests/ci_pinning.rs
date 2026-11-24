@@ -4762,21 +4762,57 @@ fn alpha_release_cleans_up_its_temporary_branch() {
     // pushed onto the branch tip, so the commit stays reachable through the
     // tag after the branch is deleted. The workflow must clean the branch up
     // itself, otherwise stale release/* branches accumulate (200 piled up
-    // before the cleanup existed).
+    // before the cleanup existed; 38 piled up again while the anchor check
+    // compared a tag object against a commit).
     let workflow = read(".github/workflows/release.yml");
 
-    // 1. The cleanup step runs as the final step of the release job (after
-    //    the GitHub release has been published), using env-indirection so
-    //    no expression reaches the shell unquoted.
+    // 1. Cleanup is the last step of the release job, which already carries
+    //    `contents: write` for publishing. A dedicated job needed a third
+    //    job-level write grant and therefore another Scorecard
+    //    Token-Permissions alert for a ref deletion this job can do itself.
+    //    The release job waits for `Rebuild & Compare` (it publishes nothing a
+    //    rebuild has not reproduced), so the branch is not checked out anywhere
+    //    else when the cleanup deletes it.
+    let release_job = workflow
+        .split("\n  github_release:")
+        .nth(1)
+        .and_then(|rest| rest.split("\n  verify_release:").next())
+        .expect("release.yml must keep a github_release job before verify_release");
     assert!(
-        workflow.contains("Delete temporary release branch")
-            && workflow.contains("TAG: ${{ needs.version.outputs.tag }}")
-            && workflow.contains("RELEASE_BRANCH: ${{ needs.version.outputs.release_branch }}"),
-        "release.yml must delete the temporary release branch as the final release-job step"
+        release_job.contains("- name: Delete temporary release branch")
+            && release_job.contains("TAG: ${{ needs.version.outputs.tag }}")
+            && release_job.contains("RELEASE_BRANCH: ${{ needs.version.outputs.release_branch }}"),
+        "the release job must delete the temporary release branch as its last step"
+    );
+    assert!(
+        !release_job
+            .lines()
+            .find(|line| line.trim_start().starts_with("needs:"))
+            .unwrap_or("")
+            .contains("reproducible"),
+        "the cleanup must not make publishing wait for the rebuild (issue #288)"
+    );
+    assert!(
+        !workflow.contains("cleanup_release_branch"),
+        "cleanup must not return as a separate job that needs its own contents: write"
+    );
+    assert_eq!(
+        workflow.matches("      contents: write").count(),
+        2,
+        "only the version and release jobs may carry a job-level contents: write"
     );
 
-    // 2. The tag-anchor safety rule: deletion only when the branch tip is
-    //    exactly the tag target; otherwise keep for manual inspection.
+    // 2. An annotated tag (`git tag -a`) makes the ref point at a tag object,
+    //    so `.object.sha` is never a commit: compared with the branch tip it
+    //    can never match, which kept every branch. The tag must be peeled.
+    assert!(
+        workflow.contains("git/tags/$tag_sha")
+            && workflow.contains("while [[ \"$tag_type\" == \"tag\" ]]; do"),
+        "cleanup must peel an annotated tag down to its commit before the anchor check"
+    );
+
+    // 3. The tag-anchor safety rule: deletion only when the branch tip is
+    //    exactly the (peeled) tagged commit; otherwise keep for inspection.
     assert!(
         workflow.contains("tag-anchor safety rule")
             && workflow.contains("[[ \"$tip_sha\" != \"$tag_sha\" ]]; then")
@@ -4785,14 +4821,16 @@ fn alpha_release_cleans_up_its_temporary_branch() {
         "cleanup must verify the branch tip is exactly the tagged commit before deleting"
     );
 
-    //    and the deletion goes through the git refs API.
+    // 4. The deletion goes through the git refs API, with a URL-encoded ref.
     assert!(
-        workflow.contains(r"heads/${RELEASE_BRANCH//\/%2F}")
-            && workflow.contains("-X DELETE \"repos/$REPO/git/ref/$branch_ref\""),
+        // `//\//%2F` is the form that actually encodes: `//\/%2F` leaves the
+        // slash untouched (bash reads it as pattern `\/` with no separator).
+        workflow.contains(r"heads/${RELEASE_BRANCH//\//%2F}")
+            && workflow.contains("-X DELETE \"repos/$REPO/git/refs/$branch_ref\""),
         "cleanup must URL-encode the slashed branch ref and delete via the refs API"
     );
 
-    // 4. Missing branch/tag are no-ops (idempotent cleanup), not failures.
+    // 5. Missing branch/tag are no-ops (idempotent cleanup), not failures.
     assert!(
         workflow.contains("nothing to clean up") && workflow.contains("for manual inspection"),
         "cleanup must tolerate a missing branch or tag instead of failing the release run"
@@ -11321,9 +11359,11 @@ fn release_rebuild_and_compare_is_pinned_to_the_release_workflow() {
         "release.yml must call the rebuild-and-compare workflow"
     );
     assert!(
-        release.contains("ref: ${{ needs.version.outputs.release_branch }}"),
-        "the rebuild must be pinned to the release branch that was published, \
-         not to a moving ref"
+        release.contains("revision: ${{ steps.bump.outputs.revision }}")
+            && release.contains("echo \"revision=$(git rev-parse HEAD)\"")
+            && release.contains("ref: ${{ needs.version.outputs.revision }}"),
+        "the rebuild must be pinned to the published commit SHA: the release job \
+         deletes the release branch, and a branch name is a moving ref"
     );
     let github_release = &release[release
         .find("  github_release:")
