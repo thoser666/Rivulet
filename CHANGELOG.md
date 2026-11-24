@@ -1,5 +1,18 @@
 ## [Unreleased]
 
+- ci(obs): **the candidate sweep re-labels the threads it updates, not only the
+  ones it files.** A repo-wide label deletion strips `obs-upstream` from every
+  issue, and the sync's update path sent a body-only PATCH — so the open
+  candidate threads stayed unlabelled while newly filed ones kept their labels,
+  and the workflow's idempotent `gh label create --force` did not help. The
+  update now sends the labels too, merged with the thread's existing labels
+  because a PATCH replaces the whole set: a maintainer's own triage label (for
+  example `blocked`) survives instead of being replaced by the candidate pair.
+  The self-test asserts the update payload and the merge, and
+  `obs_upstream_candidate_issues_are_deduplicated_by_title` pins both payloads
+  so a body-only PATCH cannot come back; `docs/obs-upstream-check.md` records
+  the rule.
+
 - fix(deps): **`cookie` moves to 0.18.3, clearing `RUSTSEC-2026-0594`** — a
   medium (6.5) advisory published on 2026-11-23: private cookies took their
   AES-256-GCM nonce from `rand::thread_rng()`, whose buffered bytes survive a

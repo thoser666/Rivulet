@@ -33,6 +33,9 @@ CREATE_DECISIONS = {"strong-fit", "review"}
 # New candidate issues are labelled so they are recognisable at a glance: a
 # sweep thread must not be mistaken for the weekly review issue
 # (`weekly-vision-review`) or for a plain community wish (`feature` only).
+# The same labels are re-applied when a thread is updated: deleting or renaming
+# the label repo-wide strips it from every issue, and a body-only PATCH never
+# puts it back.
 CANDIDATE_LABELS = ("feature", "obs-upstream")
 REPO_ISSUES_API = "https://api.github.com/repos/{repo}/issues"
 # One issue per OBS release-note candidate. The title carries the upstream
@@ -208,6 +211,24 @@ def candidate_issue_body(tag: str, line: str, decision: str, matches: list[str])
     ])
 
 
+def candidate_labels(issue: dict) -> list[str]:
+    """Label set that keeps a candidate thread recognisable.
+
+    A PATCH replaces an issue's whole label set, so sending only
+    `CANDIDATE_LABELS` would silently drop a label a maintainer added to the
+    thread (for example `blocked`). The existing labels keep their order and
+    only the missing candidate labels are appended; the comparison is
+    case-insensitive because GitHub label names are.
+    """
+    current = [
+        label.get("name", "")
+        for label in issue.get("labels") or []
+        if label.get("name")
+    ]
+    known = {name.lower() for name in current}
+    return current + [name for name in CANDIDATE_LABELS if name.lower() not in known]
+
+
 def issue_state(issue: dict) -> str:
     return str(issue.get("state") or "open").lower()
 
@@ -269,7 +290,8 @@ def sync_candidate_issues(
     Covered candidates (already in the roadmap catalog) are skipped, as in the
     report. A closed thread that already tracks the title is reported instead
     of being reopened, updated, or filed again, and only strong-fit/review
-    candidates create a new issue.
+    candidates create a new issue. An updated thread also gets the candidate
+    labels back, so a repo-wide label deletion cannot leave it unlabelled.
     """
     if request is None:
         token = os.environ.get("GITHUB_TOKEN", "")
@@ -298,7 +320,11 @@ def sync_candidate_issues(
                 # the same upstream change back in the queue every week.
                 kept_closed.append(existing["number"])
                 continue
-            request("PATCH", f"{endpoint}/{existing['number']}", {"body": body})
+            # Labels belong on the update too, not only on creation: a
+            # repo-wide label deletion strips `obs-upstream` from every thread
+            # and a body-only PATCH leaves the open candidates unlabelled.
+            label_set = candidate_labels(existing)
+            request("PATCH", f"{endpoint}/{existing['number']}", {"body": body, "labels": label_set})
             updated.append(existing["number"])
             continue
         if decision not in CREATE_DECISIONS:
@@ -687,6 +713,27 @@ def self_test() -> None:
     assert calls[0][1].endswith("/issues/7")
     assert calls[1][2]["title"] == "OBS: Added a new hardware encoder preset"
     assert CANDIDATE_MARKER in calls[0][2]["body"] and "**review**" in calls[0][2]["body"]
+    assert calls[0][2]["labels"] == ["feature", "obs-upstream"], (
+        "the update must carry the candidate labels, not only the body"
+    )
+    # A repo-wide label deletion strips `obs-upstream` from every thread, so the
+    # weekly update has to put it back — without dropping a maintainer's own
+    # triage label, because a PATCH replaces the whole label set.
+    relabel = [{"number": 21, "title": canonical, "labels": [{"name": "blocked"}]}]
+    calls.clear()
+    _, relabelled, _ = sync_candidate_issues(
+        {"tag_name": "31.3.0", "body": f"- {bare}"}, relabel, "x/y", request=fake_request
+    )
+    assert relabelled == [21]
+    assert calls[0][2]["labels"] == ["blocked", "feature", "obs-upstream"], (
+        "the update must restore the candidate labels without dropping triage labels"
+    )
+    # Running again over an already correct set stays byte-identical (idempotent).
+    calls.clear()
+    sync_candidate_issues(
+        {"tag_name": "31.4.0", "body": f"- {bare}"}, relabel, "x/y", request=fake_request
+    )
+    assert calls[0][2]["labels"] == ["blocked", "feature", "obs-upstream"]
     calls.clear()
     created_again, updated_again, kept_again = sync_candidate_issues(sync_release, open_issues, "x/y", request=fake_request)
     assert created_again == [], "a second sweep of the same release notes must not file duplicates"
