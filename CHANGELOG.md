@@ -1,5 +1,13 @@
 ## [Unreleased]
 
+- ci(deps): **`github/codeql-action` moves to v4.39.5.** Upstream published
+  v4.39.5 after the previous bump to v4.39.4, and the blocking
+  `Stale Action Pins (gate)` check fails an open PR on any same-major release
+  it has not taken, so every PR stayed red until the pin moved. The four
+  sub-actions (`init`, `autobuild`, `analyze`, `upload-sarif`) share one SHA,
+  `1bd86f2` -> `915412f`; `security.yml` and `scorecard.yml` both point at the
+  released commit, `docs/ci-action-pins.md` is regenerated and the
+  `PINNED_ACTIONS` table in `rivulet-core/tests/ci_pinning.rs` matches.
 - fix(deps): **`cookie` moves to 0.18.3, clearing `RUSTSEC-2026-0594`** — a
   medium (6.5) advisory published on 2026-11-23: private cookies took their
   AES-256-GCM nonce from `rand::thread_rng()`, whose buffered bytes survive a
