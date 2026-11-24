@@ -5334,6 +5334,46 @@ fn obs_upstream_weekly_check_also_reviews_rivulet_open_issues() {
 }
 
 #[test]
+fn obs_upstream_report_flags_removals_and_deprecations() {
+    // Saving the behaviour of upstream removals: a "Removed …" / "Deprecated
+    // …" line carries none of the feature words, so the candidate filter
+    // dropped it and the weekly report stayed silent about the one kind of
+    // upstream change that can actually break Rivulet's OBS import. The notes
+    // are now extracted separately and listed in their own section, but stay
+    // out of the candidate path: a removal has nothing to adopt, so it files
+    // no issue and gets no checklist row.
+    let script = read("scripts/check-obs-upstream.py");
+    assert!(
+        script.contains("REMOVAL_WORDS") && script.contains("def removal_lines("),
+        "the checker must extract removal/deprecation notes from the release body"
+    );
+    assert!(
+        script.contains("### Removals and deprecations")
+            && script.contains("Removal/deprecation notes: {len(removals)}"),
+        "the report must carry a removals section and its own count next to the feature count"
+    );
+    assert!(
+        script.contains("removals = removal_lines(release.get(\"body\", \"\"))"),
+        "report() must read the removal notes"
+    );
+    // Both the issue sync and the checklist iterate candidate_lines: keeping
+    // that the only candidate source is what guarantees a removal never grows
+    // the tracker or the weekly review queue.
+    assert!(
+        script.contains("for line in candidate_lines(release.get(\"body\", \"\")):")
+            && !script.contains("for line in removal_lines("),
+        "only feature notes may become candidates, get issues, or get checklist rows"
+    );
+    let docs = read("docs/obs-upstream-check.md");
+    assert!(
+        docs.contains("Removals and deprecations")
+            && docs.contains("files no issue")
+            && docs.contains("REMOVAL_WORDS"),
+        "the checker docs must describe the removals section and its informational scope"
+    );
+}
+
+#[test]
 fn ndi_output_is_wired_into_the_engine_and_gui() {
     // M5 #77: the NDI contract must actually publish — the engine embeds the
     // `ndisink` feed into every session pipeline and the GUI exposes the

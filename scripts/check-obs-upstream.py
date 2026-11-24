@@ -51,6 +51,17 @@ TRAILING_AUTHOR = re.compile(r"\s*\[[^\[\]]*\]\s*$")
 # duplicate when the release note is read in the other one.
 PR_REFERENCE = re.compile(r"\s*(?:\(\[#\d+\]\([^)]*\)\)|\(#\d+\))\s*", re.IGNORECASE)
 FEATURE_WORDS = re.compile(r"\b(add|added|introduce|introduced|support|supports|new|feature|implemented)\b", re.I)
+# Upstream also takes behaviour away: "Removed …", "Deprecated …", "Dropped
+# support for …", "… is no longer available". Those lines contain none of the
+# feature words, so the feature-note filter dropped them and a removal that can
+# break Rivulet's OBS import (or a documented workflow) never reached the
+# weekly report. They are reported on their own and deliberately do not become
+# candidates: there is nothing to adopt.
+REMOVAL_WORDS = re.compile(
+    r"\b(remov(?:e|ed|es|ing|al)|deprecat(?:e|ed|es|ing|ion)|drop(?:ped|s|ping)"
+    r"|retir(?:e|ed|es|ing)|discontinu(?:e|ed|es)|no longer)\b",
+    re.I,
+)
 # Issue labels that mark a request as an open product wish (triage only).
 # "enhancement"/"epic" deliberately are NOT wishes: in this repository they
 # mean roadmap-tracked milestone work, which the sweep lists separately
@@ -361,8 +372,27 @@ def is_roadmap_tracked(issue: dict) -> bool:
     return bool(issue_labels(issue) & ROADMAP_LABELS)
 
 
+def note_lines(body: str) -> list[str]:
+    """Release-note bullets, deduplicated and kept in upstream order.
+
+    Shared by both extractors below, so feature notes and removal/deprecation
+    notes read exactly the same set of lines and only the word filter differs.
+    """
+    return list(dict.fromkeys(line.strip(" -*\t") for line in body.splitlines() if line.strip(" -*\t")))
+
+
 def candidate_lines(body: str) -> list[str]:
-    return list(dict.fromkeys(line.strip(" -*\t") for line in body.splitlines() if line.strip(" -*\t") and FEATURE_WORDS.search(line)))
+    return [line for line in note_lines(body) if FEATURE_WORDS.search(line)]
+
+
+def removal_lines(body: str) -> list[str]:
+    """Upstream lines that remove or deprecate behaviour.
+
+    Informational only: these lines are listed in the report so a removal
+    cannot pass unseen, but they never file a candidate issue and get no
+    checklist row — there is no feature to adopt.
+    """
+    return [line for line in note_lines(body) if REMOVAL_WORDS.search(line)]
 
 
 def classify(lines: list[str], catalog: list[dict]) -> tuple[list[str], list[str]]:
@@ -557,15 +587,28 @@ def issues_report(issues: list[dict], fixture: bool = False) -> str:
 def report(release: dict, fixture: bool = False) -> str:
     vision = load_vision()
     lines = candidate_lines(release.get("body", ""))
+    removals = removal_lines(release.get("body", ""))
     covered, review = classify(lines, load_catalog())
     previous = previous_tag_from(STATE)
-    result = [f"## OBS upstream check — {release.get('tag_name', 'unknown')}", "", f"Source: {'fixture' if fixture else 'GitHub API'}", f"Previous checked release: {previous or 'none'}", f"Feature-note candidates: {len(lines)}", ""]
+    result = [f"## OBS upstream check — {release.get('tag_name', 'unknown')}", "", f"Source: {'fixture' if fixture else 'GitHub API'}", f"Previous checked release: {previous or 'none'}", f"Feature-note candidates: {len(lines)}", f"Removal/deprecation notes: {len(removals)}", ""]
     if review:
         result += ["### Needs review — vision fit", "", "| Candidate | Vision decision | Matching pillars |", "| --- | --- | --- |"]
         for line in review:
             label, matches = vision_fit(line, vision)
             result.append(f"| {line.replace('|', '\\|')} | **{label}** | {', '.join(matches) or 'none'} |")
         result.append("")
+    if removals:
+        result += [
+            "### Removals and deprecations",
+            "",
+            "Upstream removed or deprecated the behaviour named below. These notes carry no "
+            "addition wording, so the feature filter does not surface them; they are not "
+            "product candidates (no issue, no checklist row), but a removal or deprecation can "
+            "break Rivulet's OBS import or a documented workflow — check before the next release.",
+            "",
+            *[f"- {line}" for line in removals],
+            "",
+        ]
     if covered:
         result += ["### Already represented", *[f"- {line}" for line in covered], ""]
     result += ["Vision decisions are advisory. Strong-fit candidates are copied to `docs/obs-vision-candidates.md` for maintainer review; they are not automatically added to the roadmap.", "", "Vision criteria: `scripts/vision-criteria.json`."]
@@ -714,6 +757,39 @@ def self_test() -> None:
     )
     assert not_aligned == ([], [], [])
     assert calls == [], "not-aligned candidates must not create an issue"
+
+    # Removals and deprecations: upstream taking behaviour away carries none
+    # of the feature words, so the feature filter dropped those lines and the
+    # sweep said nothing about the one kind of upstream change that can break
+    # Rivulet's OBS import. They now get their own report section and count,
+    # while staying out of the candidate path (no issue, no checklist row).
+    removal_body = (
+        "- Removed the legacy QSV encoder wrapper\n"
+        "- Deprecated the obs-frontend-api v1 scene callbacks\n"
+        "- Fixed a crash on shutdown\n"
+        "- Added a new emoji"
+    )
+    removal_release = {"tag_name": "30.1.0", "body": removal_body}
+    removals = removal_lines(removal_body)
+    assert removals == [
+        "Removed the legacy QSV encoder wrapper",
+        "Deprecated the obs-frontend-api v1 scene callbacks",
+    ], "removals and deprecations must be extracted, unrelated notes must not"
+    assert candidate_lines(removal_body) == ["Added a new emoji"], (
+        "a removal note must not be counted as a feature candidate"
+    )
+    removal_report = report(removal_release, fixture=True)
+    assert "### Removals and deprecations" in removal_report
+    assert "Removal/deprecation notes: 2" in removal_report
+    assert "Feature-note candidates: 1" in removal_report, (
+        "the removal notes must not inflate the feature-candidate count"
+    )
+    assert "- Removed the legacy QSV encoder wrapper" in removal_report
+    assert "- Deprecated the obs-frontend-api v1 scene callbacks" in removal_report
+    assert "Fixed a crash on shutdown" not in removal_report, "unrelated notes stay out"
+    calls.clear()
+    assert sync_candidate_issues(removal_release, [], "x/y", request=fake_request) == ([], [], [])
+    assert calls == [], "a removal or deprecation must never file a candidate issue"
 
     # Token path: without an injected transport the sync must talk to the API
     # through github_request with GITHUB_TOKEN, and a missing token must be a
