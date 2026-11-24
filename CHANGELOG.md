@@ -48,6 +48,31 @@
   `alpha_release_cleans_up_its_temporary_branch` pins the anchor rule, the
   peeled tag, the refs endpoint, the folded job and the two remaining
   job-level write grants.
+- ci(obs): the weekly OBS upstream check keeps one issue per release-note
+  candidate instead of filing a fresh copy on every run.
+  `scripts/check-obs-upstream.py --sync-issues` matches a candidate against the
+  tracked issues by *upstream title* (normalised: the `OBS: ` prefix, an
+  upstream PR reference in either shape (the legacy `[author] (#123)` suffix or
+  the markdown link `([#123](…))`), a trailing `[author]` tag and the
+  `— <decision> (<pillars>)` suffix are ignored) and updates that thread's body with the current release tag,
+  decision and quoted note. Closed threads are matched too and deliberately
+  stay closed — a candidate whose canonical thread was already decided is
+  reported as `left closed`, never reopened, rewritten into a live queue entry,
+  or refiled next week; an open thread still wins over a closed one. The
+  dedicated tracked fetch reads `state=all` (newest activity first, bounded to
+  three pages), while the community-wish sweep keeps reading open issues only.
+  New issues are reserved for `strong-fit` and `review` candidates and carry
+  the `feature` and `obs-upstream` labels, so a sweep thread is distinguishable
+  from the weekly review issue and from a plain community wish; the workflow
+  creates `obs-upstream` idempotently (`gh label create --force`) before the
+  sync and fails loudly if it cannot, so a missing label can never be dropped
+  silently at issue creation. A `not-aligned` note stays in the weekly report
+  and checklist. The workflow
+  gains a `Sync OBS candidates to tracked issues` step with `GITHUB_TOKEN` and
+  no `continue-on-error`, the self-test covers closed-thread keep-alive,
+  open-over-closed preference and the creation restriction, the ci_pinning
+  guard `obs_upstream_candidate_issues_are_deduplicated_by_title` is extended,
+  and `docs/obs-upstream-check.md` documents the rules.
 - docs(readme): **the feature-parity table stops understating M5.** Hotkeys and
   the source-delete hotkey were still listed as `Partial`/`Open`, and platform
   parity as `Open`, although all three shipped: the table now names the

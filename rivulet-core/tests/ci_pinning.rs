@@ -5214,6 +5214,77 @@ fn obs_upstream_check_persists_checked_release_tag_across_runs() {
 }
 
 #[test]
+fn obs_upstream_candidate_issues_are_deduplicated_by_title() {
+    // Each OBS release-note candidate gets one open issue. The earlier sweep
+    // filed the same change again on every run (three copies for one upstream
+    // PR), so the checker now matches an existing open issue by upstream title
+    // and updates it in place instead of creating a duplicate.
+    let script = read("scripts/check-obs-upstream.py");
+    assert!(
+        script.contains("def candidate_key(")
+            && script.contains("def find_candidate_issue(")
+            && script.contains("def candidate_issue_body(")
+            && script.contains("def sync_candidate_issues("),
+        "the checker must normalise candidate titles and upsert issues through one code path"
+    );
+    assert!(
+        script.contains("DECISION_SUFFIX") && script.contains("TRAILING_AUTHOR"),
+        "the dedupe key must ignore the decision suffix and the trailing [author] tag"
+    );
+    assert!(
+        script.contains("PR_REFERENCE"),
+        "the dedupe key must ignore the upstream PR reference in both its legacy \
+         and markdown-link shape, or existing threads are refiled as duplicates"
+    );
+    assert!(
+        script.contains("obs-upstream"),
+        "candidate issues must carry the obs-upstream label so they are \
+         distinguishable from the weekly review issue"
+    );
+    assert!(
+        script.contains("request(\"PATCH\"") && script.contains("request(\"POST\""),
+        "an existing issue is updated (PATCH); only unseen titles are created (POST)"
+    );
+    assert!(
+        script.contains("def fetch_tracked_issues(") && script.contains("state=\"all\""),
+        "the dedupe must read closed issues too, so a decided thread cannot come back"
+    );
+    assert!(
+        script.contains("kept_closed") && script.contains("issue_state(existing)"),
+        "a closed canonical thread is kept closed instead of being reopened or refiled"
+    );
+    assert!(
+        script.contains("CREATE_DECISIONS") && script.contains("\"strong-fit\", \"review\""),
+        "only strong-fit/review candidates may file a new issue"
+    );
+    let workflow = read(".github/workflows/obs-upstream.yml");
+    assert!(
+        workflow.contains("--sync-issues") && workflow.contains("GITHUB_TOKEN"),
+        "the weekly run must sync candidates with a token so dedupe happens on every sweep"
+    );
+    assert!(
+        !workflow.contains("continue-on-error"),
+        "the dedupe step must fail loudly, like the rest of the workflow"
+    );
+    // GitHub drops labels it does not know without an error, so the workflow
+    // has to make sure the candidate label exists before it files an issue.
+    let label_step = workflow
+        .find("Ensure the obs-upstream label exists")
+        .expect("the workflow must create the obs-upstream label before the sync");
+    let sync_step = workflow
+        .find("Sync OBS candidates to tracked issues")
+        .expect("the dedupe step must exist");
+    assert!(
+        label_step < sync_step,
+        "the label must exist before the sync creates labelled issues"
+    );
+    assert!(
+        workflow.contains("obs-upstream\"") && workflow.contains("--force"),
+        "creating the label must target obs-upstream and be idempotent (--force)"
+    );
+}
+
+#[test]
 fn obs_upstream_weekly_check_also_reviews_rivulet_open_issues() {
     // The weekly sweep covers Rivulet's own open issues with the same vision
     // scoring and publishes them in the same report, so maintainers review
