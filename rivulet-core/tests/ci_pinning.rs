@@ -5245,6 +5245,20 @@ fn obs_upstream_candidate_issues_are_deduplicated_by_title() {
         script.contains("request(\"PATCH\"") && script.contains("request(\"POST\""),
         "an existing issue is updated (PATCH); only unseen titles are created (POST)"
     );
+    // A repo-wide label deletion strips `obs-upstream` from every thread. The
+    // update path used to PATCH only the body, so those open candidate threads
+    // stayed unlabelled forever; the update has to reconcile the labels too,
+    // merged with the thread's own labels because a PATCH replaces the set.
+    assert!(
+        script.contains("candidate_labels(existing)")
+            && script.contains("def candidate_labels(")
+            && script.contains("\"labels\": list(CANDIDATE_LABELS)"),
+        "both the update and the creation must carry the candidate labels"
+    );
+    assert!(
+        !script.contains("{\"body\": body})"),
+        "the update must not fall back to a body-only PATCH that drops the labels"
+    );
     assert!(
         script.contains("def fetch_tracked_issues(") && script.contains("state=\"all\""),
         "the dedupe must read closed issues too, so a decided thread cannot come back"

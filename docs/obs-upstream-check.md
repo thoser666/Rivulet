@@ -57,6 +57,16 @@ issue carries are created, and a second sweep over the same release notes
 reports them all as `updated`. Comments and labels on an existing thread
 therefore stay attached to the same upstream change.
 
+The update reconciles the labels as well as the body. Deleting or renaming
+`obs-upstream` repo-wide strips it from every issue, and a body-only PATCH
+never put it back, so the open candidate threads stayed unlabelled while newly
+filed ones were labelled correctly. An update now sends the thread's existing
+labels plus the missing `feature`/`obs-upstream` pair — a PATCH replaces the
+whole label set, so a maintainer's own triage label (for example `blocked`)
+survives instead of being dropped by a payload that names only the candidate
+labels. The step is idempotent: a second sweep over the same release notes
+sends the same set again.
+
 Closed threads are part of the key on purpose: once maintainers closed a
 candidate, reopening it would undo that decision and refiling it would put the
 same upstream change back into the queue every week. A closed match is
