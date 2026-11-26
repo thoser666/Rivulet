@@ -52,10 +52,26 @@ these settings.
 - **Dependency Review** on pull requests. The check fails for high-severity or
   critical dependency advisories and posts a summary to the pull request.
 - **OpenSSF Scorecard** on pushes to `develop`, pull requests, weekly scheduled
-  scans, and manual dispatch. The workflow publishes the result to the OpenSSF
-  API, stores the SARIF artifact for 14 days, and uploads a separate
-  `openssf-scorecard` category to GitHub Code Scanning. Its required check is
-  named `OpenSSF Scorecard`.
+  scans, and manual dispatch. The workflow downloads the pinned Scorecard CLI
+  release, verifies the tarball against the SHA-256 published with that release,
+  and runs it with the checked-in `.github/scorecard-policy.yml` and
+  `--show-details`, so alerts keep pointing at the offending workflow line; it
+  stores the SARIF artifact for 14 days and uploads a separate
+  `openssf-scorecard` category to GitHub Code Scanning. The required job runs no
+  Docker image and requests no `id-token: write`, so neither a container-registry
+  outage nor a missing OIDC grant can redden the check before the scan starts.
+  Version and checksum are the only pins Dependabot cannot bump, because it only
+  updates `uses:` references — take a new release and its
+  `scorecard_checksums.txt` line together. Its required check is named `OpenSSF
+  Scorecard`.
+- **OpenSSF Scorecard (publish)** is a separate, **not required** job in the same
+  workflow. Only `ossf/scorecard-action` can publish: it signs the JSON results
+  with the workflow's OIDC token, the CLI has no publish mode, and the Scorecard
+  API only accepts a job with no `run:` steps, no job-level env and no containers.
+  That job therefore keeps the action pinned, requests `id-token: write`, and runs
+  only on `develop` pushes and the weekly schedule — the supported triggers for
+  publishing. If the action's image breaks, the badge and API data go stale; the
+  required check is unaffected.
 - **Cargo Audit** checks the committed lockfile against the RustSec Advisory
   Database and fails on vulnerabilities; informational warnings remain visible
   in the step summary.
@@ -125,15 +141,18 @@ Current state:
   `.github/workflows/scorecard.yml` 0 for a top-level `security-events: write`
   on 2026-10-30 and the blocking triage step failed the `Security` check on
   `develop`. Unlike #85 this one was **redundancy, not a requirement**: the
-  `scorecard` job already declares `security-events: write` (SARIF upload) and
-  `id-token: write` (`publish_results`), and job-level permissions replace the
+  `scorecard` job already declared the scopes it needed (`security-events: write`
+  for the SARIF upload and, at the time, `id-token: write` for
+  `publish_results`), and job-level permissions replace the
   workflow default rather than add to it, so the top-level copies granted
   nothing. They are gone; the workflow default is `contents: read` and every
   write scope lives on the job that needs it. This also supersedes the reason
   recorded for the earlier dismissal (#62): the upload is satisfied by the job
   scope, not by a workflow-level grant. Pinned by
-  `scorecard_workflow_is_wired_for_sarif_and_provenance`, which fails if a
-  workflow-level write scope comes back or if the job loses either scope.
+  `scorecard_workflow_runs_the_pinned_cli_without_a_docker_image`, which fails if
+  a workflow-level write scope comes back, if the job loses
+  `security-events: write`, or if the job starts requesting `id-token: write`
+  again.
 - **Alert #93 (`rust/cleartext-logging`, high, dismissed as *false
   positive*):** CodeQL reports `self.chat_accounts` on its way to a log sink
   and pins the instance to the remove-account confirmation in
@@ -427,7 +446,11 @@ ignored in the repository at present. If a future audit reports a new
 advisory, upgrade the dependency or document a bounded, reviewed mitigation
 before considering any temporary exception.
 
-Scorecard requires `id-token: write` for signed, repository-bound publication.
+The required Scorecard job runs the CLI and needs no `id-token: write`: only
+`security-events: write` for the SARIF upload sits on it. The OIDC scope lives on
+the separate, not-required `OpenSSF Scorecard (publish)` job, where the action
+signs the results for the OpenSSF API. `persist-credentials: false` stays on
+every checkout.
 The workflow sets `persist-credentials: false` during checkout and does not
 request write access to repository contents. Review the first score regularly;
 Scorecard findings are improvement signals, not a substitute for threat
@@ -446,7 +469,7 @@ are recommended but not yet enabled, so the decision is traceable.
 | Dependabot | Enabled | GitHub Actions SHA pins (see the ownership split above). |
 | Renovate | Enabled | Grouped Cargo updates + dependency dashboard. |
 | CodeQL | Enabled | Run by `security.yml` (workflow, not the GitHub App); SARIF uploaded to Code Scanning. |
-| OpenSSF Scorecard | Enabled | Run by `security.yml`; result published to the OpenSSF API. |
+| OpenSSF Scorecard | Enabled | Run by `scorecard.yml` with the pinned CLI; SARIF uploaded to Code Scanning. Badge/API data published by the not-required `OpenSSF Scorecard (publish)` job via `ossf/scorecard-action`. |
 | Secret Scanning + Push Protection | Enabled | Repository settings, not a workflow. |
 
 ### Recommended but not yet enabled

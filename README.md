@@ -878,8 +878,9 @@ The repository security baseline is enabled and enforced in two layers:
   yanked crates, licenses, dependency sources, and the checked-in `deny.toml`
   policy.
 - **OpenSSF Scorecard:** `.github/workflows/scorecard.yml` evaluates supply-chain
-  practices weekly and on repository changes, publishes the signed result, and
-  uploads a separate SARIF category to Code Scanning.
+  practices weekly and on repository changes with the pinned Scorecard CLI,
+  uploads a separate SARIF category to Code Scanning, and publishes the signed
+  result to the OpenSSF API from a separate, not-required job.
 
 The workflow actions are pinned to commit SHAs and covered by
 `rivulet-core/tests/ci_pinning.rs`. Verify the repository-level settings with:

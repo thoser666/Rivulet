@@ -8,21 +8,20 @@ on:
     - cron: "17 4 * * 1"
   workflow_dispatch:
 
-# Keep the workflow-level token read-only. The two write scopes Scorecard
-# needs — `security-events` for the SARIF upload and `id-token` for
-# `publish_results` — are declared on the `scorecard` job below, and GitHub
-# applies job-level permissions on their own, so repeating them here granted
-# them to the workflow default for no benefit. That top-level write was the
-# only thing code-scanning alert #92 (`TokenPermissionsID`, high) flagged and
-# it scored the workflow 0, which failed the required `Security` check on
-# `develop`.
+# Keep the workflow-level token read-only. The only write scope this workflow
+# needs — `security-events` for the SARIF upload — is declared on the
+# `scorecard` job below, and GitHub applies job-level permissions on their own,
+# so repeating it here granted it to the workflow default for no benefit. That
+# top-level write was the only thing code-scanning alert #92
+# (`TokenPermissionsID`, high) flagged and it scored the workflow 0, which
+# failed the required `Security` check on `develop`.
 permissions:
   contents: read
 
 # A newer run for the same ref supersedes the older one: pushing twice to a
 # pull-request branch cancels the superseded scan instead of queueing a second
 # one behind it. Pushes to develop, scheduled runs and manual dispatches are
-# never cancelled (the weekly scan still publishes its result).
+# never cancelled (the weekly scan still refreshes the code-scanning results).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -34,19 +33,53 @@ jobs:
     permissions:
       contents: read
       security-events: write
-      id-token: write
+    # The scan used to run through `ossf/scorecard-action`, which executes from
+    # a Docker image: on 2026-11-26 ghcr.io served a broken multi-arch index
+    # for v2.6.0 (both platform manifests 404), so `docker pull` failed and the
+    # required check reddened every branch before a single line of repository
+    # code ran. The CLI is one static binary from a GitHub release, so the check
+    # no longer depends on a container registry.
+    #
+    # Dependabot only bumps `uses:` pins, so this version and checksum are
+    # updated by hand; take the release and the matching `scorecard_checksums.txt`
+    # line together. `docs/security.md` records that rule.
+    env:
+      SCORECARD_VERSION: "5.7.0"
+      SCORECARD_SHA256: "3b08ec0a8681806c3e744ec9210742a502c7d66f06f25523b70f7128738235d3"
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      - name: Install the pinned Scorecard CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="scorecard_${SCORECARD_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location \
+            --retry 3 --retry-connrefused \
+            --output "$asset" \
+            "https://github.com/ossf/scorecard/releases/download/v${SCORECARD_VERSION}/${asset}"
+          echo "${SCORECARD_SHA256}  ${asset}" | sha256sum --check --strict
+          tar --extract --gzip --file "$asset" scorecard
+          ./scorecard version
+
       - name: Run OpenSSF Scorecard
-        uses: ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5 # v2.6.0
-        with:
-          results_file: scorecard-results.sarif
-          results_format: sarif
-          publish_results: true
+        shell: bash
+        env:
+          # The CLI gates `--format=sarif` and the `--policy` flag behind this
+          # variable; the action set the same feature flag internally.
+          ENABLE_SARIF: "1"
+          GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ./scorecard \
+            --repo="github.com/${GITHUB_REPOSITORY}" \
+            --format=sarif \
+            --policy=.github/scorecard-policy.yml \
+            --output=scorecard-results.sarif \
+            --show-details
 
       - name: Upload Scorecard SARIF artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -61,3 +94,31 @@ jobs:
         with:
           sarif_file: scorecard-results.sarif
           category: openssf-scorecard
+
+  # Publication to the OpenSSF API is the one thing the CLI cannot do: only
+  # `ossf/scorecard-action` signs the JSON results with the workflow's OIDC
+  # token, and the Scorecard API only accepts results from a job shaped like
+  # this one (no `run:` steps, no job-level env, no containers, Ubuntu
+  # runner). The job is deliberately not a required check and never runs on
+  # pull requests, so the Docker image it pulls can cost badge/API freshness
+  # but never mergeability. Publishing supports `push` and `schedule` on the
+  # default branch only.
+  publish:
+    name: OpenSSF Scorecard (publish)
+    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Publish the signed Scorecard result
+        uses: ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5 # v2.6.0
+        with:
+          results_file: scorecard-publish.sarif
+          results_format: sarif
+          publish_results: true

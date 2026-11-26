@@ -81,6 +81,18 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 > can change rustfmt output and redden the Lints job until the tree is
 > reformatted with the same version.
 
+> **`ossf/scorecard` is two pins, not one.** The required `OpenSSF Scorecard`
+> check runs the pinned **CLI** release (version and tarball SHA-256 in
+> `.github/workflows/scorecard.yml`), so a broken Docker image cannot redden the
+> gate: on 2026-11-26 a ghcr.io image index for `scorecard-action` v2.6.0 pointed
+> at two missing platform manifests and failed every branch before the scan
+> started. Publishing the results to the OpenSSF API still needs
+> `ossf/scorecard-action` (it signs the JSON with the OIDC token; the CLI has no
+> publish mode), so the action stays pinned for the `publish` job, which runs on
+> `develop` pushes and the weekly schedule only and is not a required check. The
+> CLI pair is bumped by hand (see `docs/security.md`); the action is covered by
+> Dependabot like every other `uses:` pin.
+
 ## Reviewing a Dependabot update
 
 When Dependabot opens a PR that bumps a pin, verify that the new SHA really is

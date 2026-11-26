@@ -5506,23 +5506,103 @@ fn security_workflow_enables_codeql_and_dependency_review() {
 }
 
 #[test]
-fn scorecard_workflow_is_wired_for_sarif_and_provenance() {
+fn scorecard_workflow_runs_the_pinned_cli_without_a_docker_image() {
+    // The required check must not depend on the `ossf/scorecard-action` Docker
+    // image. On 2026-11-26 ghcr.io served a broken multi-arch index for v2.6.0
+    // (both platform manifests 404), so the image pull failed and the check
+    // reddened every branch before any repository code ran. The workflow now
+    // downloads the pinned CLI release, verifies it against the SHA-256
+    // published in the same release and runs it directly, which moves the gate
+    // from a container registry to a GitHub release asset.
     let workflow = read(".github/workflows/scorecard.yml");
     assert!(
-        workflow.contains("name: OpenSSF Scorecard")
-            && workflow.contains("ossf/scorecard-action@")
-            && workflow.contains("results_format: sarif")
-            && workflow.contains("publish_results: true"),
-        "scorecard.yml must run OpenSSF Scorecard and publish SARIF results"
+        workflow.contains("name: OpenSSF Scorecard"),
+        "scorecard.yml must keep the stable check name"
     );
+    assert_eq!(
+        workflow.matches("uses: ossf/scorecard-action@").count(),
+        1,
+        "the Docker action may only appear in the publication job"
+    );
+
+    let version = workflow
+        .split("SCORECARD_VERSION: \"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("scorecard.yml must pin SCORECARD_VERSION");
+    assert!(
+        version.split('.').count() == 3
+            && version
+                .split('.')
+                .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())),
+        "SCORECARD_VERSION must be a plain release version (got {version:?})"
+    );
+
+    let checksum = workflow
+        .split("SCORECARD_SHA256: \"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("scorecard.yml must pin the CLI tarball checksum");
+    assert!(
+        checksum.len() == 64 && checksum.bytes().all(|b| b.is_ascii_hexdigit()),
+        "SCORECARD_SHA256 must be the full checksum from the release (got {checksum:?})"
+    );
+
+    assert!(
+        workflow.contains("scorecard_${SCORECARD_VERSION}_linux_amd64.tar.gz")
+            && workflow.contains("releases/download/v${SCORECARD_VERSION}/${asset}"),
+        "the CLI download must be derived from the pinned version, not a floating tag"
+    );
+    let verify = workflow
+        .find("sha256sum --check --strict")
+        .expect("the downloaded CLI tarball must be checked against SCORECARD_SHA256");
+    let unpack = workflow
+        .find("tar --extract --gzip")
+        .expect("scorecard.yml must unpack the verified CLI");
+    assert!(
+        verify < unpack,
+        "the checksum must be verified before the tarball is unpacked"
+    );
+
+    assert!(
+        workflow.contains("ENABLE_SARIF: \"1\"")
+            && workflow.contains("--format=sarif")
+            && workflow.contains("--policy=.github/scorecard-policy.yml")
+            && workflow.contains("--output=scorecard-results.sarif")
+            && workflow.contains("--show-details")
+            && workflow.contains("GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}"),
+        "scorecard.yml must run the CLI in SARIF mode with the checked-in policy, finding details and a read-only token"
+    );
+
+    // The CLI's `--format=sarif` and `--policy` flag are behind ENABLE_SARIF,
+    // and the SARIF writer needs a policy entry for every check it renders:
+    // without a policy file it aborts with "missing policy for check".
+    let policy = read(".github/scorecard-policy.yml");
+    assert!(
+        policy.contains("version: 1")
+            && policy.contains("policies:")
+            && policy.contains("mode: enforced"),
+        "the SARIF policy must be a versioned per-check policy"
+    );
+    for check in [
+        "Token-Permissions",
+        "Branch-Protection",
+        "Pinned-Dependencies",
+    ] {
+        assert!(
+            policy.contains(&format!("  {check}:")),
+            "the SARIF policy must cover the {check} check"
+        );
+    }
+
     assert!(
         workflow.contains("github/codeql-action/upload-sarif@")
             && workflow.contains("category: openssf-scorecard"),
         "scorecard.yml must upload a distinct Code Scanning SARIF category"
     );
     assert!(
-        workflow.contains("id-token: write") && workflow.contains("persist-credentials: false"),
-        "Scorecard must use OIDC publication and avoid persisted checkout credentials"
+        workflow.contains("persist-credentials: false"),
+        "Scorecard must avoid persisted checkout credentials"
     );
     assert!(
         workflow.contains("actions/upload-artifact@")
@@ -5532,10 +5612,10 @@ fn scorecard_workflow_is_wired_for_sarif_and_provenance() {
 
     // Code-scanning alert #92 (`TokenPermissionsID`, high) scored the workflow
     // 0 for a *top-level* `security-events: write`, although the `scorecard`
-    // job already declares every write scope it needs. GitHub applies
-    // job-level permissions on their own, so the top-level copy was pure
-    // redundancy — dropping it clears the alert without narrowing what the job
-    // may do. Keep the workflow default read-only and the writes on the job.
+    // job already declares the write scope it needs. GitHub applies job-level
+    // permissions on their own, so the top-level copy was pure redundancy —
+    // dropping it clears the alert without narrowing what the job may do. Keep
+    // the workflow default read-only and the writes on the job.
     let before_jobs = workflow
         .split("\njobs:")
         .next()
@@ -5550,8 +5630,8 @@ fn scorecard_workflow_is_wired_for_sarif_and_provenance() {
         .collect();
     assert!(
         defaults.iter().all(|line| !line.contains(": write")),
-        "scorecard.yml workflow-level permissions must stay read-only: a top-level write \
-         scope rates the workflow 0 in Scorecard's Token-Permissions check and \
+        "scorecard.yml workflow-level permissions must stay read-only: a top-level write \r
+         scope rates the workflow 0 in Scorecard's Token-Permissions check and \r
          re-opens alert #92 (got {defaults:?})"
     );
     assert!(
@@ -5562,11 +5642,33 @@ fn scorecard_workflow_is_wired_for_sarif_and_provenance() {
         .split("\njobs:")
         .nth(1)
         .expect("scorecard.yml must declare its jobs");
+    // The required scan job must stay Docker-free; only the publication job
+    // may run `ossf/scorecard-action`, and that job is gated to the default
+    // branch so a broken action image can never redden a pull request.
+    let publish_at = jobs
+        .find("\n  publish:")
+        .expect("scorecard.yml must declare the publication job");
+    let scan_job = &jobs[..publish_at];
+    let publish_job = &jobs[publish_at..];
     assert!(
-        jobs.contains("security-events: write") && jobs.contains("id-token: write"),
-        "the scorecard job must keep `security-events: write` (SARIF upload) and \
-         `id-token: write` (OIDC publication) — the top-level copies were removed in \
-         favour of these"
+        scan_job.contains("security-events: write") && !scan_job.contains("id-token: write"),
+        "the required scorecard job must keep `security-events: write` for the \
+         SARIF upload and must not request `id-token: write`"
+    );
+    assert!(
+        !scan_job.contains("ossf/scorecard-action@") && !scan_job.contains("uses: docker://"),
+        "the required scorecard job must not depend on a Docker image"
+    );
+    assert!(
+        publish_job.contains("ossf/scorecard-action@")
+            && publish_job.contains("publish_results: true")
+            && publish_job.contains("id-token: write")
+            && publish_job.contains("refs/heads/develop")
+            && publish_job.contains("github.event_name == 'schedule'")
+            && !publish_job.contains("run:"),
+        "the publication job must publish with the action on the default branch \
+         only and must contain no `run:` step (the Scorecard API rejects such \
+         a workflow)"
     );
 }
 
