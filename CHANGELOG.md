@@ -1,5 +1,12 @@
 ## [Unreleased]
 
+- ci(deps): **`cargo-deny-action` moves to v2.1.4.** Upstream published
+  v2.1.4 after the v2.1.3 pin, and the blocking `Stale Action Pins (gate)`
+  check fails an open PR on any same-major release it has not taken, so the
+  gate would redden this PR for a reason its change has no part in. The pin
+  moves `17aeb3c` -> `81891ab`; `docs/ci-action-pins.md` is regenerated and
+  the `PINNED_ACTIONS` table in `rivulet-core/tests/ci_pinning.rs` matches.
+
 - ci(scorecard): **the required `OpenSSF Scorecard` check no longer runs from a
   Docker image.** The workflow used `ossf/scorecard-action`, so every run pulled
   `ghcr.io/ossf/scorecard-action:v2.6.0`; on 2026-11-26 that image's multi-arch

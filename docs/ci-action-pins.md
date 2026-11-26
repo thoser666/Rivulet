@@ -23,7 +23,7 @@ below is generated from the workflows by `scripts/generate-action-pins.py`
 <!-- action-pins-table:start -->
 | Action | Version | Pinned SHA | Used in |
 | --- | --- | --- | --- |
-| `EmbarkStudios/cargo-deny-action` | `v2.1.3` | `17aeb3c839e42274e2b8adf721c8c65edfdc74dd` | security.yml |
+| `EmbarkStudios/cargo-deny-action` | `v2.1.4` | `81891abc19297b21343b15ef67dc61e4aea74fda` | security.yml |
 | `actions-rust-lang/audit` | `v1.2.7` | `72c09e02f132669d52284a3323acdb503cfc1a24` | security.yml |
 | `actions/cache` | `v6.1.0` | `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` | build-package.yml, ci.yml, fuzz-deep.yml, nightly.yml, obs-upstream.yml, reproducible-build.yml |
 | `actions/checkout` | `v7.0.1` | `3d3c42e5aac5ba805825da76410c181273ba90b1` | assets-tool-image.yml, build-package.yml, ci.yml, distribution-readiness.yml, flatpak-build.yml, fuzz-deep.yml, nightly.yml, obs-upstream.yml, release.yml, reproducible-build.yml, ruleset-guard.yml, scorecard.yml, security.yml, signing-e2e.yml, weekly-promotion.yml, wiki-translations.yml |
