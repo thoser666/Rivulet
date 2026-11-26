@@ -5323,6 +5323,15 @@ fn obs_upstream_weekly_check_also_reviews_rivulet_open_issues() {
             && script.contains("### Roadmap-tracked"),
         "enhancement/epic milestone work must be excluded from the wish review"
     );
+    // Candidate issues carry `feature` next to `obs-upstream`, so the wish
+    // sweep must exclude them by the dedicated label — otherwise every open
+    // OBS thread is reported (and checked off) twice in the same week.
+    assert!(
+        script.contains("CANDIDATE_LABEL = \"obs-upstream\"")
+            && script.contains("CANDIDATE_LABELS = (\"feature\", CANDIDATE_LABEL)")
+            && script.contains("if CANDIDATE_LABEL in labels:"),
+        "obs-upstream candidate threads must not be re-triaged as community wishes"
+    );
     let doc = read("docs/community-wish-candidates.md");
     assert!(
         doc.contains("<!-- COMMUNITY-WISH-CANDIDATES:START -->")

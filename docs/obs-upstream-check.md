@@ -85,7 +85,12 @@ The same run also fetches this repository's open issues and classifies feature
 wishes against the same `scripts/vision-criteria.json` — one common review
 report with two sections (OBS release notes and the issue sweep). Bug reports
 and PRs are excluded; `feature`/`idea`/`wish`-labelled issues and unlabelled
-titles that read like additions are triaged. `enhancement`/`epic` marks
+titles that read like additions are triaged. Threads created by the OBS sweep
+itself (`obs-upstream`) are excluded as well: they carry `feature` too, but
+they are release-note candidates that the report already reviews in its OBS
+section, so triaging them again listed every open OBS thread a second time
+under `## Rivulet open issues`, inflated the feature-request count, and put a
+second `Wish:` checkbox for one upstream change into the review checklist. `enhancement`/`epic` marks
 roadmap-tracked milestone work: those issues are listed in a dedicated
 "Roadmap-tracked" section and excluded from the wish review, so the weekly
 report shows real community wishes instead of the repo's own milestone backlog.

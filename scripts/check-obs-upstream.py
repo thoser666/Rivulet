@@ -33,7 +33,10 @@ CREATE_DECISIONS = {"strong-fit", "review"}
 # New candidate issues are labelled so they are recognisable at a glance: a
 # sweep thread must not be mistaken for the weekly review issue
 # (`weekly-vision-review`) or for a plain community wish (`feature` only).
-CANDIDATE_LABELS = ("feature", "obs-upstream")
+# The dedicated label is the only marker the wish sweep can trust, because the
+# `feature` half is shared with genuine community wishes.
+CANDIDATE_LABEL = "obs-upstream"
+CANDIDATE_LABELS = ("feature", CANDIDATE_LABEL)
 REPO_ISSUES_API = "https://api.github.com/repos/{repo}/issues"
 # One issue per OBS release-note candidate. The title carries the upstream
 # line, optionally followed by the upstream author in brackets and the vision
@@ -427,12 +430,22 @@ def analyze_issues(issues: list[dict]) -> tuple[list[dict], list[dict], list[dic
     wishes are already represented in the roadmap catalog, strong rows are the
     review-priority subset, and roadmap rows are milestone-tracked work
     (enhancement/epic) that is excluded from the wish review but still shown.
+    The sweep's own `obs-upstream` threads are skipped: they are OBS candidate
+    issues, not community wishes.
     """
     vision = load_vision()
     review, covered, strong, roadmap = [], [], [], []
     for issue in issues:
         labels = issue_labels(issue)
         if issue_is_pr(issue) or labels & BUG_LABELS:
+            continue
+        # Candidate issues carry `obs-upstream` next to the shared `feature`
+        # label. They are already reviewed as OBS release-note candidates in
+        # the report above, so triaging them here listed every open OBS thread
+        # a second time as a wish — inflating the count and putting two boxes
+        # (one `OBS:`, one `Wish:`) for a single upstream change into the
+        # weekly review checklist.
+        if CANDIDATE_LABEL in labels:
             continue
         # Roadmap-owned milestone work (enhancement/epic) is excluded from the
         # wish review even when its title reads like an addition; an explicit
@@ -602,15 +615,22 @@ def self_test() -> None:
         {"number": 2, "title": "Crash when streaming to Twitch", "body": "Happens every hour", "html_url": "https://github.com/x/y/issues/2"},
         {"number": 3, "title": "Scene collections import from OBS", "body": "OBS already has this", "html_url": "https://github.com/x/y/issues/3", "labels": [{"name": "feature"}]},
         {"number": 4, "title": "[M6] Multi-platform restream", "body": "Milestone backlog item", "html_url": "https://github.com/x/y/issues/4", "labels": [{"name": "enhancement"}]},
+        {"number": 5, "title": "OBS: Added a new hardware encoder preset", "body": "Upstream release note", "html_url": "https://github.com/x/y/issues/5", "labels": [{"name": "feature"}, {"name": "obs-upstream"}]},
     ]
     review, covered, strong, roadmap = analyze_issues(issues)
     assert [row["number"] for row in review] == [1], "WebGPU issue must need review"
     assert [row["number"] for row in covered] == [3], "scene-collections wish is already represented"
     assert [row["number"] for row in roadmap] == [4], "enhancement milestone work must be listed as roadmap-tracked"
     assert strong and strong[0]["number"] == 1, "WebGPU issue must be a strong fit"
+    # OBS candidate threads share the `feature` label; triaging them as wishes
+    # listed one upstream change twice in the report and the checklist.
+    assert 5 not in {row["number"] for row in review + covered + strong + roadmap}, (
+        "an obs-upstream candidate thread must not be triaged as a community wish"
+    )
     issue_output = issues_report(issues, fixture=True)
     assert "## Rivulet open issues — vision triage" in issue_output
     assert "Crash when streaming to Twitch" not in issue_output, "bug reports are not wishes"
+    assert "hardware encoder preset" not in issue_output, "OBS candidate threads are not community wishes"
     assert "Already represented" in issue_output and "Scene collections" in issue_output
     assert "Roadmap-tracked" in issue_output and "Multi-platform restream" in issue_output
     tmp_dir = tempfile.mkdtemp(prefix="community-doc-test-")
@@ -634,6 +654,7 @@ def self_test() -> None:
     assert "- [ ] Wish: [#1 Add a deterministic headless WebGPU scene API]" in checklist
     assert "Scene collections" not in checklist, "covered wishes are not checklist rows"
     assert "Crash when streaming" not in checklist, "bug reports are not checklist rows"
+    assert "Wish: [#5" not in checklist, "OBS candidate threads get no second `Wish:` box"
     # Candidate-issue dedupe: an existing open issue for the same upstream
     # title is updated in place, only unseen titles create an issue, and a
     # second sweep over the same release notes must not file anything again.
