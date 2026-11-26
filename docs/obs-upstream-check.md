@@ -1,7 +1,8 @@
 # OBS upstream feature and vision check
 
 `check-obs-upstream.py` checks the latest OBS Studio GitHub release and extracts
-release-note lines that look like feature additions. Candidates are compared
+release-note lines that look like feature additions, plus the lines that remove
+or deprecate behaviour. Candidates are compared
 with the versioned catalog in `scripts/obs-features.json` and classified against
 Rivulet's product vision in `scripts/vision-criteria.json`.
 
@@ -19,6 +20,23 @@ The current pillars are deterministic/automatable workflows, an embeddable Rust
 engine, modern efficient rendering, cross-platform parity, privacy and user
 control, and direct streamer value. Keyword matching is deliberately a first
 triage only; maintainers make the final product decision.
+
+## Removals and deprecations
+
+The feature filter ("add", "new", "support", "introduce", "implemented" …)
+silently dropped every line that takes behaviour away — `Removed …`,
+`Deprecated …`, `Dropped support for …`, `… is no longer available` — although
+a removal is the upstream change most likely to break Rivulet: the OBS import,
+a documented workflow or a plugin-facing surface can depend on exactly what
+disappeared. The report therefore extracts those lines with a separate
+`REMOVAL_WORDS` filter and lists them under **Removals and deprecations**,
+with their own `Removal/deprecation notes:` count next to
+`Feature-note candidates:`.
+
+They are informational, not candidates: a removal has nothing to adopt, so it
+files no issue, gets no `- [ ] OBS:` checklist row and never enters the
+vision scoring. A note that both removes and adds (for example a
+replaced API) matches both filters and appears in both places.
 
 ## Automation
 

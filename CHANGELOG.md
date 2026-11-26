@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+- ci(obs): **the weekly OBS sweep now reports upstream removals and
+  deprecations.** The feature-note filter matches only addition wording
+  (`add`, `new`, `support`, `introduce`, `implemented`), so every line that
+  takes behaviour away — `Removed …`, `Deprecated …`, `Dropped support for …`,
+  `… is no longer available` — was dropped before the report saw it, although
+  a removal is the upstream change most likely to break the OBS import or a
+  documented workflow. A separate `REMOVAL_WORDS` filter now extracts those
+  lines into a **Removals and deprecations** section with its own
+  `Removal/deprecation notes:` count. The notes stay informational: no
+  candidate issue, no checklist row, no vision scoring. The self-test feeds a
+  release with two removal notes through the report (and asserts the sync
+  files nothing for them), and
+  `obs_upstream_report_flags_removals_and_deprecations` pins the extractor,
+  the section and the candidate path; `docs/obs-upstream-check.md` records the
+  rule.
+
 - fix(deps): **`cookie` moves to 0.18.3, clearing `RUSTSEC-2026-0594`** — a
   medium (6.5) advisory published on 2026-11-23: private cookies took their
   AES-256-GCM nonce from `rand::thread_rng()`, whose buffered bytes survive a
