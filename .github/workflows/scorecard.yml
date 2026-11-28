@@ -94,31 +94,35 @@ jobs:
         with:
           sarif_file: scorecard-results.sarif
           category: openssf-scorecard
-
-  # Publication to the OpenSSF API is the one thing the CLI cannot do: only
-  # `ossf/scorecard-action` signs the JSON results with the workflow's OIDC
-  # token, and the Scorecard API only accepts results from a job shaped like
-  # this one (no `run:` steps, no job-level env, no containers, Ubuntu
-  # runner). The job is deliberately not a required check and never runs on
-  # pull requests, so the Docker image it pulls can cost badge/API freshness
-  # but never mergeability. Publishing supports `push` and `schedule` on the
-  # default branch only.
-  publish:
-    name: OpenSSF Scorecard (publish)
-    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/develop'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Publish the signed Scorecard result
-        uses: ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5 # v2.6.0
-        with:
-          results_file: scorecard-publish.sarif
-          results_format: sarif
-          publish_results: true
+
+  # Publication to the OpenSSF API is the one thing the CLI cannot do: only
+  # `ossf/scorecard-action` signs the results with the workflow's OIDC token,
+  # and the Scorecard API only accepts them from a job shaped like this one (no
+  # `run:` steps, no job-level env, no containers, Ubuntu runner). That puts the
+  # action's Docker image back into CI, so the job is kept out of the required
+  # path *and* off ordinary pushes: the API stores one record per project (last
+  # write wins), so publishing on every develop push would only re-pull the image
+  # to overwrite that record with a near-identical score. The weekly scheduled run
+  # keeps the badge fresh enough, and it is the trigger the action supports —
+  # `push` and `schedule` on the default branch; `workflow_dispatch` is
+  # experimental upstream. A broken image now costs at most a week of API
+  # freshness, never mergeability.
+  publish:
+    name: OpenSSF Scorecard (publish)
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Publish the signed Scorecard result
+        uses: ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5 # v2.6.0
+        with:
+          results_file: scorecard-publish.sarif
+          results_format: sarif
+          publish_results: true

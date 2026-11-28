@@ -1,11 +1,12 @@
 ## [Unreleased]
 
-- ci(deps): **`cargo-deny-action` moves to v2.1.4.** Upstream published
-  v2.1.4 after the v2.1.3 pin, and the blocking `Stale Action Pins (gate)`
-  check fails an open PR on any same-major release it has not taken, so the
-  gate would redden this PR for a reason its change has no part in. The pin
-  moves `17aeb3c` -> `81891ab`; `docs/ci-action-pins.md` is regenerated and
-  the `PINNED_ACTIONS` table in `rivulet-core/tests/ci_pinning.rs` matches.
+- ci(deps): **`cargo-deny-action` moves to v2.1.5.** Upstream published
+  v2.1.4 and then v2.1.5 after the v2.1.3 pin, and the blocking
+  `Stale Action Pins (gate)` check fails an open PR on any same-major release
+  it has not taken, so the gate would redden this PR for a reason its change
+  has no part in. The pin moves `17aeb3c` -> `bb119f7`;
+  `docs/ci-action-pins.md` is regenerated and the `PINNED_ACTIONS` table in
+  `rivulet-core/tests/ci_pinning.rs` matches.
 
 - ci(scorecard): **the required `OpenSSF Scorecard` check no longer runs from a
   Docker image.** The workflow used `ossf/scorecard-action`, so every run pulled
@@ -25,9 +26,11 @@
   **not-required** `OpenSSF Scorecard (publish)` job in the same workflow: only
   `ossf/scorecard-action` can publish (it signs the results with the OIDC token and
   the CLI has no publish mode), so the action stays pinned there with
-  `id-token: write`, but the job runs only on `develop` pushes and the weekly
-  schedule — a broken action image costs badge/API freshness, never the required
-  check.
+  `id-token: write`, but the weekly scheduled run is its only trigger: the API
+  keeps one record per project (last write wins), so publishing on every
+  `develop` push would only overwrite it while re-pulling the image. A broken
+  action image now costs at most a week of badge/API freshness, never the
+  required check.
   Version and checksum are pinned in the workflow and bumped by hand, because
   Dependabot only updates `uses:` pins;
   `scorecard_workflow_runs_the_pinned_cli_without_a_docker_image` pins the setup

@@ -69,9 +69,11 @@ these settings.
   with the workflow's OIDC token, the CLI has no publish mode, and the Scorecard
   API only accepts a job with no `run:` steps, no job-level env and no containers.
   That job therefore keeps the action pinned, requests `id-token: write`, and runs
-  only on `develop` pushes and the weekly schedule — the supported triggers for
-  publishing. If the action's image breaks, the badge and API data go stale; the
-  required check is unaffected.
+  only on the weekly schedule: the action supports `push` and `schedule` on the
+  default branch, and because the API keeps one record per project (last write
+  wins) a publish on every `develop` push would only overwrite it while
+  re-pulling the image. If the action's image breaks, the badge and API data go
+  stale for at most a week; the required check is unaffected.
 - **Cargo Audit** checks the committed lockfile against the RustSec Advisory
   Database and fails on vulnerabilities; informational warnings remain visible
   in the step summary.

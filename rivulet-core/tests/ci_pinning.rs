@@ -109,8 +109,8 @@ const PINNED_ACTIONS: &[(&str, &str)] = &[
         "v1.2.7",
     ),
     (
-        "EmbarkStudios/cargo-deny-action@81891abc19297b21343b15ef67dc61e4aea74fda",
-        "v2.1.4",
+        "EmbarkStudios/cargo-deny-action@bb119f768ea239e765aeaef5769558d4f21213aa",
+        "v2.1.5",
     ),
     (
         "ossf/scorecard-action@23f22cd43608bae7a1f1fa2603d7314dee9538a5",
@@ -5505,6 +5505,15 @@ fn security_workflow_enables_codeql_and_dependency_review() {
     );
 }
 
+/// The value of a `key: "value"` line in a workflow file.
+fn quoted_value<'a>(text: &'a str, key: &str) -> &'a str {
+    let prefix = format!("{key}: \"");
+    text.split(&prefix)
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .unwrap_or_else(|| panic!("{key} must be pinned as a double-quoted value"))
+}
+
 #[test]
 fn scorecard_workflow_runs_the_pinned_cli_without_a_docker_image() {
     // The required check must not depend on the `ossf/scorecard-action` Docker
@@ -5525,11 +5534,7 @@ fn scorecard_workflow_runs_the_pinned_cli_without_a_docker_image() {
         "the Docker action may only appear in the publication job"
     );
 
-    let version = workflow
-        .split("SCORECARD_VERSION: \"")
-        .nth(1)
-        .and_then(|rest| rest.split('"').next())
-        .expect("scorecard.yml must pin SCORECARD_VERSION");
+    let version = quoted_value(&workflow, "SCORECARD_VERSION");
     assert!(
         version.split('.').count() == 3
             && version
@@ -5538,11 +5543,7 @@ fn scorecard_workflow_runs_the_pinned_cli_without_a_docker_image() {
         "SCORECARD_VERSION must be a plain release version (got {version:?})"
     );
 
-    let checksum = workflow
-        .split("SCORECARD_SHA256: \"")
-        .nth(1)
-        .and_then(|rest| rest.split('"').next())
-        .expect("scorecard.yml must pin the CLI tarball checksum");
+    let checksum = quoted_value(&workflow, "SCORECARD_SHA256");
     assert!(
         checksum.len() == 64 && checksum.bytes().all(|b| b.is_ascii_hexdigit()),
         "SCORECARD_SHA256 must be the full checksum from the release (got {checksum:?})"
@@ -5630,8 +5631,8 @@ fn scorecard_workflow_runs_the_pinned_cli_without_a_docker_image() {
         .collect();
     assert!(
         defaults.iter().all(|line| !line.contains(": write")),
-        "scorecard.yml workflow-level permissions must stay read-only: a top-level write \r
-         scope rates the workflow 0 in Scorecard's Token-Permissions check and \r
+        "scorecard.yml workflow-level permissions must stay read-only: a top-level write \
+         scope rates the workflow 0 in Scorecard's Token-Permissions check and \
          re-opens alert #92 (got {defaults:?})"
     );
     assert!(
@@ -5643,13 +5644,18 @@ fn scorecard_workflow_runs_the_pinned_cli_without_a_docker_image() {
         .nth(1)
         .expect("scorecard.yml must declare its jobs");
     // The required scan job must stay Docker-free; only the publication job
-    // may run `ossf/scorecard-action`, and that job is gated to the default
-    // branch so a broken action image can never redden a pull request.
+    // may run `ossf/scorecard-action`, and that job is gated to the weekly
+    // schedule so a broken action image can never redden a pull request or a
+    // `develop` push.
     let publish_at = jobs
         .find("\n  publish:")
         .expect("scorecard.yml must declare the publication job");
     let scan_job = &jobs[..publish_at];
-    let publish_job = &jobs[publish_at..];
+    let publish_job = jobs[publish_at..]
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
         scan_job.contains("security-events: write") && !scan_job.contains("id-token: write"),
         "the required scorecard job must keep `security-events: write` for the \
@@ -5659,16 +5665,30 @@ fn scorecard_workflow_runs_the_pinned_cli_without_a_docker_image() {
         !scan_job.contains("ossf/scorecard-action@") && !scan_job.contains("uses: docker://"),
         "the required scorecard job must not depend on a Docker image"
     );
+    // The image may only run where a broken pull cannot block a merge, and only
+    // weekly: the API keeps one record per project (last write wins), so a
+    // publish on every develop push would re-pull the image to overwrite that
+    // record. `push` and `schedule` on the default branch are the triggers the
+    // action supports; only the scheduled one is worth the pull.
+    let publish_if = publish_job
+        .lines()
+        .find_map(|line| line.trim_start().strip_prefix("if:"))
+        .expect("the publication job must gate its trigger");
+    assert!(
+        publish_if.contains("github.event_name == 'schedule'")
+            && publish_if.contains("refs/heads/develop")
+            && !publish_if.contains("'push'")
+            && !publish_if.contains("'pull_request'"),
+        "the publication job must run on the weekly schedule on the default \
+         branch only (got {publish_if:?})"
+    );
     assert!(
         publish_job.contains("ossf/scorecard-action@")
             && publish_job.contains("publish_results: true")
             && publish_job.contains("id-token: write")
-            && publish_job.contains("refs/heads/develop")
-            && publish_job.contains("github.event_name == 'schedule'")
-            && !publish_job.contains("run:"),
-        "the publication job must publish with the action on the default branch \
-         only and must contain no `run:` step (the Scorecard API rejects such \
-         a workflow)"
+            && !publish_job.contains("\n        run:"),
+        "the publication job must publish with the action and contain no `run:` \
+         step (the Scorecard API rejects such a workflow)"
     );
 }
 
