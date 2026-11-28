@@ -1,0 +1,75 @@
+# Copyright 2021 Security Scorecard Authors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Policy for the SARIF report in `.github/workflows/scorecard.yml`.
+#
+# The `--format=sarif` writer emits a result for a check only when the policy
+# enforces that check and the score is below the policy's minimum, so a policy
+# file is required (without one the CLI fails with "missing policy for check").
+# The scorecard-action image ships exactly this file as `/policy.yml`
+# (`policies/template.yml` in ossf/scorecard-action v2.6.0); it is copied here
+# because the workflow runs the pinned Scorecard CLI instead of the action,
+# which needs a Docker image. Re-check it against the upstream template when
+# the workflow moves to a newer Scorecard release.
+version: 1
+policies:
+  Token-Permissions:
+      score: 10
+      mode: enforced
+  Branch-Protection:
+      score: 10
+      mode: enforced
+  Code-Review:
+      score: 10
+      mode: enforced
+  Dangerous-Workflow:
+      score: 10
+      mode: enforced
+  License:
+      score: 9
+      mode: enforced
+  Pinned-Dependencies:
+      score: 10
+      mode: enforced
+  Security-Policy:
+      score: 10
+      mode: enforced
+  SAST:
+      score: 10
+      mode: enforced
+  Contributors:
+      score: 10
+      mode: disabled
+  Packaging:
+      score: 10
+      mode: enforced
+  Binary-Artifacts:
+      score: 10
+      mode: enforced
+  Signed-Releases:
+      score: 10
+      mode: disabled
+  Dependency-Update-Tool:
+      score: 10
+      mode: enforced
+  Fuzzing:
+      score: 10
+      mode: enforced
+  CII-Best-Practices:
+      # passing score
+      score: 5
+      mode: enforced
+  Vulnerabilities:
+      score: 10
+      mode: enforced
+  CI-Tests:
+      score: 10
+      mode: enforced
+  Maintained:
+      score: 1
+      mode: enforced

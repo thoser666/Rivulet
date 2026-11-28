@@ -1,5 +1,50 @@
 ## [Unreleased]
 
+- ci(deps): **`cargo-deny-action` moves to v2.1.5.** Upstream published
+  v2.1.4 and then v2.1.5 after the v2.1.3 pin, and the blocking
+  `Stale Action Pins (gate)` check fails an open PR on any same-major release
+  it has not taken, so the gate would redden this PR for a reason its change
+  has no part in. The pin moves `17aeb3c` -> `bb119f7`;
+  `docs/ci-action-pins.md` is regenerated and the `PINNED_ACTIONS` table in
+  `rivulet-core/tests/ci_pinning.rs` matches.
+
+- ci(scorecard): **the required `OpenSSF Scorecard` check no longer runs from a
+  Docker image.** The workflow used `ossf/scorecard-action`, so every run pulled
+  `ghcr.io/ossf/scorecard-action:v2.6.0`; on 2026-11-26 that image's multi-arch
+  index pointed at two platform manifests that both returned 404, `docker pull`
+  failed, and the required check reddened every branch — including PRs that never
+  touched the workflow — before a line of repository code ran. `scorecard.yml` now
+  downloads the pinned `scorecard` CLI release, verifies the tarball against the
+  SHA-256 published with that release, and runs it with `--format=sarif
+  --show-details` (the action always rendered finding details; without the flag
+  each alert would fall back to a placeholder location instead of the workflow
+  line). The SARIF
+  writer needs a per-check policy, which the image used to ship as `/policy.yml`,
+  so the same policy now lives in `.github/scorecard-policy.yml`. The SARIF
+  artifact, the `openssf-scorecard` Code Scanning category and the read-only
+  workflow token are unchanged. Publishing to the OpenSSF API moves to a separate,
+  **not-required** `OpenSSF Scorecard (publish)` job in the same workflow: only
+  `ossf/scorecard-action` can publish (it signs the results with the OIDC token and
+  the CLI has no publish mode), so the action stays pinned there with
+  `id-token: write`, but the weekly scheduled run is its only trigger: the API
+  keeps one record per project (last write wins), so publishing on every
+  `develop` push would only overwrite it while re-pulling the image. A broken
+  action image now costs at most a week of badge/API freshness, never the
+  required check.
+  Version and checksum are pinned in the workflow and bumped by hand, because
+  Dependabot only updates `uses:` pins;
+  `scorecard_workflow_runs_the_pinned_cli_without_a_docker_image` pins the setup
+  and `docs/security.md` records the bump rule.
+
+- ci(deps): **`github/codeql-action` moves to v4.39.5.** Upstream published
+  v4.39.5 after the previous bump to v4.39.4, and the blocking
+  `Stale Action Pins (gate)` check fails an open PR on any same-major release
+  it has not taken, so every PR stayed red until the pin moved. The four
+  sub-actions (`init`, `autobuild`, `analyze`, `upload-sarif`) share one SHA,
+  `1bd86f2` -> `915412f`; `security.yml` and `scorecard.yml` both point at the
+  released commit, `docs/ci-action-pins.md` is regenerated and the
+  `PINNED_ACTIONS` table in `rivulet-core/tests/ci_pinning.rs` matches.
+
 - fix(deps): **`cookie` moves to 0.18.3, clearing `RUSTSEC-2026-0594`** — a
   medium (6.5) advisory published on 2026-11-23: private cookies took their
   AES-256-GCM nonce from `rand::thread_rng()`, whose buffered bytes survive a
